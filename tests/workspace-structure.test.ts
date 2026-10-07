@@ -694,6 +694,9 @@ describe('desktop workspace app ownership', () => {
       'open_external_url',
       'announcements_get_cached',
       'announcements_refresh',
+      'desktop_config_read',
+      'desktop_config_write',
+      'desktop_config_open_directory',
     ]);
 
     // renderer 可用的 secret 能力只有写入与存在性；任何读取形态都会让

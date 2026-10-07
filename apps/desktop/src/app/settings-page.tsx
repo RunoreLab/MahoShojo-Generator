@@ -13,6 +13,7 @@ import {
 import { DESKTOP_PAGE_PREFERENCE_SOURCES } from './settings-page-preferences';
 import { AccountPanel } from '../features/account/AccountPanel';
 import { AiConnectionsPanel } from '../features/ai-config/AiConnectionsPanel';
+import { OnlineSettingsSection } from '../features/config/OnlineSettingsSection';
 import { WebPackageDiagnosticsPanel } from '../features/webpkg/WebPackageDiagnosticsPanel';
 import { loadDesktopRuntimeInfo, type DesktopRuntimeInfo } from '../platform';
 import { navigateByProductHref, resolveInternalHrefForHashHistory } from './hash-history-fragment';
@@ -158,6 +159,10 @@ export const DesktopSettings = () => {
               <PagePreferencesSection />
             </>
           ),
+        },
+        {
+          id: 'online',
+          content: <OnlineSettingsSection />,
         },
         {
           id: 'data',

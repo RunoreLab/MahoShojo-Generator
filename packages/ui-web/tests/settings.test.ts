@@ -303,10 +303,17 @@ describe('settings field registry', () => {
     for (const record of SETTINGS_FIELD_REGISTRY) {
       expect(SETTINGS_GROUP_IDS).toContain(record.group);
       if (record.status === 'wired') {
-        expect(record.owner.kind).not.toBe('config-json');
+        // wired 必须落到具体 owner 形态；config-json（S2 起是真实 owner）
+        // 的 key 必须是点路径，device-storage 必须有真键。
+        if (record.owner.kind === 'config-json') {
+          expect(record.owner.key).toMatch(/^[a-zA-Z][a-zA-Z0-9]*(\.[a-zA-Z0-9]+)+$/u);
+        }
+        if (record.owner.kind === 'device-storage') {
+          expect(record.owner.storageKey).toMatch(/^mahoshojo\./u);
+        }
       }
     }
-    // 登记表必须覆盖本切片三个真值源。
+    // 登记表必须覆盖本切片三个真值源 + S2 已交付的 config-json 字段。
     const wiredIds = SETTINGS_FIELD_REGISTRY.filter((r) => r.status === 'wired').map((r) => r.id);
     expect(wiredIds).toEqual(
       expect.arrayContaining([
@@ -315,7 +322,16 @@ describe('settings field registry', () => {
         'appearance.resultAutoScroll',
         'generation.detailsPreferences',
         'generation.canshouPreferences',
+        'announcements.checkPolicy',
+        'externalLinks.confirmContentLinks',
       ]),
+    );
+    // 尚未交付消费者的 config-json 字段仍是 planned——不提前 wired。
+    const plannedConfigKeys = SETTINGS_FIELD_REGISTRY.filter(
+      (r) => r.status === 'planned' && r.owner.kind === 'config-json',
+    ).map((r) => r.id);
+    expect(plannedConfigKeys).toEqual(
+      expect.arrayContaining(['desktop.escapeMenu.enabled', 'publicLibraryCache']),
     );
   });
 

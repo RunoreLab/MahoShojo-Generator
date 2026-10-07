@@ -19,6 +19,7 @@ mod audit;
 mod backup;
 mod blob;
 mod cloud;
+mod config;
 mod export;
 mod external_link;
 mod gc;
@@ -1111,6 +1112,45 @@ async fn announcements_refresh(
     announcements::refresh(&app, &state).await
 }
 
+/// 人工配置读（DESK-SET-004/005）：固定 `config.json` 的有界读取 +
+/// 内容级 revision；字段域语义由 renderer 的 contracts/desktop-config 判定。
+#[tauri::command]
+fn desktop_config_read(
+    app: tauri::AppHandle,
+    state: State<'_, config::ConfigState>,
+) -> Result<config::ConfigReadResult, config::ConfigError> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| config::ConfigError::storage_dir_resolution_failure(error))?;
+    config::read_config(&dir, &state)
+}
+
+/// 人工配置写：携带读取时的内容 revision，native 串行复核后原子替换；
+/// 外部改动返回 `config-conflict`，不静默覆盖（DESK-SET-005）。
+#[tauri::command]
+fn desktop_config_write(
+    app: tauri::AppHandle,
+    state: State<'_, config::ConfigState>,
+    request: config::ConfigWriteRequest,
+) -> Result<config::ConfigWriteResult, config::ConfigError> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| config::ConfigError::storage_dir_resolution_failure(error))?;
+    config::write_config(&dir, &state, request)
+}
+
+/// 打开固定的配置目录（设置页「显示路径」的配套入口）；不开放任意路径。
+#[tauri::command]
+fn desktop_config_open_directory(app: tauri::AppHandle) -> Result<(), config::ConfigError> {
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| config::ConfigError::storage_dir_resolution_failure(error))?;
+    config::open_directory(&dir)
+}
+
 /// 仅在 native 已写恢复 intent 后允许退出，不向 renderer 开放通用进程控制。
 #[tauri::command]
 fn exit_after_local_restore(app: tauri::AppHandle) -> Result<(), restore::RestoreError> {
@@ -1147,6 +1187,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(default_secret_store())
         .manage(ai::RequestRegistry::default())
+        .manage(config::ConfigState::default())
         .manage(PendingRestore::default())
         .manage(webpkg_instance::WebPackageInstances::default())
         // D4b / DESK-013：受限 Web Package 的只读资源空间。resolver 按"请求方
@@ -1292,7 +1333,10 @@ pub fn run() {
             cancel_hosted_ai,
             open_external_url,
             announcements_get_cached,
-            announcements_refresh
+            announcements_refresh,
+            desktop_config_read,
+            desktop_config_write,
+            desktop_config_open_directory
         ])
         .run(tauri::generate_context!())
         .expect("error while running MahoShojo Generator desktop app");

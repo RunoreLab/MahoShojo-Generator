@@ -16,8 +16,8 @@ import {
  * - `openFixed`：**固定产品链接**（页脚赞助/群号/仓库、顶栏站外入口）。它们是产品内容
  *   的一部分，直接经 native 校验打开，不弹确认；
  * - `openContent`：**内容链接**（公告/百科/卡片 Markdown 里的站外地址）。默认先展示
- *   完整目标域名请用户确认——`externalLinks.confirmContentLinks` 的可配置项在
- *   S2 阶段经 `config.json` 接入，P1 固定为 `true`（默认确认）。
+ *   完整目标域名请用户确认——`externalLinks.confirmContentLinks`（S2 起经
+ *   `config.json` 由宿主注入）可改为直接打开；非法值按 `true`（更保守）降级。
  *
  * native `open_external_url` 的协议/凭据校验是最终边界，两种形态共用。
  */
@@ -51,7 +51,7 @@ export function ExternalLinksProvider({
   readonly children: ReactNode;
   /** 测试注入的 invoke 替身；生产默认走 Tauri 通道。 */
   readonly invoke?: InvokeFn;
-  /** `externalLinks.confirmContentLinks` 的 P1 固定默认值（S2 接 config.json）。 */
+  /** `externalLinks.confirmContentLinks`（默认 `true`，S2 起由 config snapshot 注入）。 */
   readonly confirmContentLinks?: boolean;
 }) {
   const [pending, setPending] = useState<PendingConfirm | null>(null);

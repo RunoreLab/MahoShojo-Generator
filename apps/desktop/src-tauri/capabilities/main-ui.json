@@ -57,6 +57,9 @@
     "allow-cancel-hosted-ai",
     "allow-open-external-url",
     "allow-announcements-get-cached",
-    "allow-announcements-refresh"
+    "allow-announcements-refresh",
+    "allow-desktop-config-read",
+    "allow-desktop-config-write",
+    "allow-desktop-config-open-directory"
   ]
 }

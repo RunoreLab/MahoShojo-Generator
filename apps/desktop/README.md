@@ -375,6 +375,49 @@ Rust 侧在编译期 `include_str!` 同一份 fixture，两侧测试同时消费
   pnpm --filter @mahoshojo/desktop run check:rust -- --ignored
   ```
 
+## 人工配置（config.json）
+
+Desktop 的人工配置文件位于应用配置目录下的 `config.json`（`DESK-SET-004`/`005`，
+D5.1-S2）。它是**给人看的**：UTF-8 JSON、顶层 `version: 1`、两空格缩进，设置页
+显示真实路径并可手工编辑后「重新加载」生效。
+
+分工刻意不对称：
+
+- **域语义在 TypeScript**（`@mahoshojo/contracts/desktop-config`）：字段登记、
+  默认值、非法值降级与诊断定位——设置页与手工修改经同一个
+  `parseDesktopConfigText` 解析；
+- **native 只做窄面**：固定路径、64 KiB 有界读、信封级检查（JSON 对象 +
+  `version: 1`）、内容级 `sha256:` revision 复核、临时文件 + sync + 原子替换，
+  替换前把上一份挪为 `config.json.bak`。
+
+renderer 可用的命令只有三条，没有任何路径参数：
+
+```text
+desktop_config_read()
+desktop_config_write(request)        # expectedRevision 复核，冲突返回 config-conflict
+desktop_config_open_directory()
+```
+
+行为口径：
+
+- 文件缺失按默认值生效，不写空壳文件；`version != 1`（含未来版本）与 JSON
+  语法错误是 fatal——默认值生效、原文不丢，只能显式「恢复默认」覆盖（真实
+  revision 仍要复核）；
+- 非法字段值按字段规则降级（外链确认→`true`、公告策略→`on-launch`）并进入
+  诊断列表；未登记键原样保留、写回时不丢，但同样列诊断；
+- 应用内写入与磁盘内容复核：外部修改返回 `config-conflict`，store 自动重载
+  磁盘真相，不静默覆盖任何一方；
+- 文件里**不存 secret**——凭据只走操作系统 secret store，Provider Profile 与
+  SQLite 不迁入、不双写（DESK-SET-003/006）。
+
+当前已登记字段（其余如 `desktop.escapeMenu.enabled`、`publicLibraryCache.*`
+归各自消费切片，落地前不出现在设置页）：
+
+| 键 | 值域 | 默认 | 消费者 |
+| --- | --- | --- | --- |
+| `announcements.checkPolicy` | `on-launch` / `manual` | `on-launch` | 启动公告刷新 |
+| `externalLinks.confirmContentLinks` | boolean | `true` | 内容外链确认弹窗 |
+
 ## 已知边界
 
 - GUI 交互行为无法在无头 CI 中验证，涉及"实际运行结果"的检查在文档中记为未验证并附复现步骤。

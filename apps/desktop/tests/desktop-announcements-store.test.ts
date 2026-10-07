@@ -198,4 +198,35 @@ describe('desktop announcements store', () => {
       manualInvoke.mock.calls.filter((call) => call[0] === 'announcements_refresh'),
     ).toHaveLength(0);
   });
+
+  it('evaluates a checkPolicy getter at launchCheck time, not at construction', async () => {
+    // S2 的形状：config.json 在 bootstrap 之后才读完；getter 形态让
+    // launchCheck 判定那一刻才取策略，而不是在构造时钉死。
+    let policy: 'on-launch' | 'manual' = 'manual';
+    const invoke = makeInvoke(async (command) => {
+      if (command === 'announcements_refresh') {
+        return {
+          status: 'not-modified',
+          snapshot: remoteSnapshot([], '2026-10-11T08:00:00Z'),
+        };
+      }
+      return null;
+    });
+    const store = new DesktopAnnouncementsStore({
+      invoke,
+      loadBundled: async () => [],
+      checkPolicy: () => policy,
+    });
+    await store.bootstrap();
+
+    // 构造时是 manual，launchCheck 前 config 读出了 on-launch → 按后者判定。
+    policy = 'on-launch';
+    store.launchCheck();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(
+      invoke.mock.calls.filter((call) => call[0] === 'announcements_refresh'),
+    ).toHaveLength(1);
+  });
 });

@@ -27,6 +27,17 @@ const { invokeMock, defaultInvokeImpl } = vi.hoisted(() => {
         snapshot: { fetchedAt: '2026-10-10T00:00:00Z', announcements: [] },
       };
     }
+    if (command === 'desktop_config_read') {
+      return {
+        path: 'C:\\cfg\\config.json',
+        directory: 'C:\\cfg',
+        backupPresent: false,
+        file: { status: 'missing' as const },
+      };
+    }
+    if (command === 'desktop_config_write') {
+      return { revision: 'sha256:'.padEnd(7 + 64, '0') };
+    }
     if (command === 'list_provider_profile_ids') return [];
     if (command === 'desktop_runtime_info') {
       return {
@@ -53,6 +64,7 @@ import { resetDesktopCloudSessionStoreForTests } from '../src/features/account/u
 import { resetDesktopAiConfigStoreForTests } from '../src/features/ai-config/use-desktop-ai-config';
 import { resetTopbarAvatarForTests } from '../src/features/account/use-topbar-avatar';
 import { resetDesktopAnnouncementsStoreForTests } from '../src/features/announcements/use-desktop-announcements';
+import { resetDesktopConfigStoreForTests } from '../src/features/config/use-desktop-config';
 
 let container: HTMLDivElement;
 let root: Root;
@@ -72,6 +84,7 @@ beforeEach(() => {
   resetDesktopAiConfigStoreForTests();
   resetTopbarAvatarForTests();
   resetDesktopAnnouncementsStoreForTests();
+  resetDesktopConfigStoreForTests();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -127,8 +140,43 @@ describe('desktop settings shell', () => {
     // 设备级字段直接可读：主题/减少动态效果/结果自动定位。
     expect(container.textContent).toContain('减少动态效果');
     expect(container.textContent).toContain('结果自动定位');
-    // 未交付的「在线与通知」组不落空节。
-    expect(container.querySelector('#settings-online')).toBeNull();
+    // S2 交付的「在线与通知」组：公告策略与外链确认都接 config.json。
+    expect(container.querySelector('#settings-online')).not.toBeNull();
+  });
+
+  it('online group reads and writes config.json through the narrow commands only', async () => {
+    await mountAt('/settings?section=online');
+
+    // 文件缺失 → 默认值生效（公告 on-launch、内容外链确认开），不写空壳文件。
+    expect(container.textContent).toContain('公告检查');
+    expect(container.textContent).toContain('内容外链确认');
+    expect(container.textContent).toContain('C:\\cfg\\config.json');
+    expect(
+      invokeMock.mock.calls.filter((call) => call[0] === 'desktop_config_read'),
+    ).toHaveLength(1);
+    expect(
+      invokeMock.mock.calls.filter((call) => call[0] === 'desktop_config_write'),
+    ).toHaveLength(0);
+
+    // 关掉「内容外链确认」→ 整份文档写回，expectedRevision=null（缺失文件的首次创建）。
+    const toggle = [...container.querySelectorAll('[role="switch"]')].find(
+      (el) => el.getAttribute('aria-label') === '内容外链确认',
+    );
+    await click(toggle ?? null);
+
+    const writeCalls = invokeMock.mock.calls.filter(
+      (call) => call[0] === 'desktop_config_write',
+    );
+    expect(writeCalls).toHaveLength(1);
+    const request = (writeCalls[0]?.[1] as { request?: { expectedRevision: string | null; content: string } })
+      ?.request;
+    expect(request?.expectedRevision).toBeNull();
+    const doc = JSON.parse(request?.content ?? '{}') as {
+      version?: number;
+      externalLinks?: { confirmContentLinks?: boolean };
+    };
+    expect(doc.version).toBe(1);
+    expect(doc.externalLinks?.confirmContentLinks).toBe(false);
   });
 
   it('device controls write only localStorage — no account or network IPC', async () => {

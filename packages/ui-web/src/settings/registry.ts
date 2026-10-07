@@ -143,8 +143,8 @@ export const SETTINGS_FIELD_REGISTRY: readonly SettingsFieldRecord[] = [
     scope: 'host-file',
     owner: { kind: 'config-json', key: 'announcements.checkPolicy' },
     defaultValue: 'on-launch',
-    status: 'planned',
-    notes: 'P1；非法值按默认处理并诊断。',
+    status: 'wired',
+    notes: 'S2 接入 config.json；非法值按默认处理并诊断。',
   },
   {
     id: 'externalLinks.confirmContentLinks',
@@ -154,8 +154,8 @@ export const SETTINGS_FIELD_REGISTRY: readonly SettingsFieldRecord[] = [
     scope: 'host-file',
     owner: { kind: 'config-json', key: 'externalLinks.confirmContentLinks' },
     defaultValue: 'true',
-    status: 'planned',
-    notes: 'P1；非法值按 true（更保守）处理并诊断。',
+    status: 'wired',
+    notes: 'S2 接入 config.json；非法值按 true（更保守）处理并诊断。',
   },
   {
     id: 'publicLibraryCache',

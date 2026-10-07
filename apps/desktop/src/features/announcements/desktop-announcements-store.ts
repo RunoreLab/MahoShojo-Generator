@@ -1,4 +1,5 @@
 import type { Announcement } from '@mahoshojo/contracts/announcements';
+import type { AnnouncementsCheckPolicy } from '@mahoshojo/contracts/desktop-config';
 import { sortAnnouncements } from '@mahoshojo/ui-web/announcement';
 
 import type { DesktopAnnouncementsRefreshResult } from '@mahoshojo/contracts/desktop-ipc';
@@ -43,14 +44,18 @@ const INITIAL_STATE: DesktopAnnouncementsState = {
   lastError: null,
 };
 
-export type AnnouncementsCheckPolicy = 'on-launch' | 'manual';
+export type { AnnouncementsCheckPolicy };
 
 export interface DesktopAnnouncementsDeps {
   readonly invoke: InvokeFn;
   /** 读取内置快照：生产是 `fetch('/announcements.json')`，测试注入假实现。 */
   readonly loadBundled: () => Promise<Announcement[] | null>;
-  /** `announcements.checkPolicy` 的 P1 固定默认（S2 经 config.json 接入）。 */
-  readonly checkPolicy?: AnnouncementsCheckPolicy;
+  /**
+   * `announcements.checkPolicy`（S2 起经 config.json）。传 getter 时
+   * `launchCheck` 在调用时刻取值——启动检查要等配置读完才判定，但
+   * store 本体不感知 config store 的存在。
+   */
+  readonly checkPolicy?: AnnouncementsCheckPolicy | (() => AnnouncementsCheckPolicy);
 }
 
 const newestDate = (list: readonly Announcement[]): string =>
@@ -143,7 +148,11 @@ export class DesktopAnnouncementsStore {
   launchCheck(): void {
     if (this.launchCheckDone) return;
     this.launchCheckDone = true;
-    if ((this.deps.checkPolicy ?? 'on-launch') !== 'on-launch') return;
+    const policy =
+      typeof this.deps.checkPolicy === 'function'
+        ? this.deps.checkPolicy()
+        : (this.deps.checkPolicy ?? 'on-launch');
+    if (policy !== 'on-launch') return;
     void this.refresh();
   }
 

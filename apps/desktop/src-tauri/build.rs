@@ -63,6 +63,9 @@ fn main() {
             "open_external_url",
             "announcements_get_cached",
             "announcements_refresh",
+            "desktop_config_read",
+            "desktop_config_write",
+            "desktop_config_open_directory",
         ]),
     ))
     .expect("failed to run tauri build script");

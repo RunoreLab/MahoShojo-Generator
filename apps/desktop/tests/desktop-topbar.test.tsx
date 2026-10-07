@@ -39,9 +39,18 @@ const { invokeMock, defaultInvokeImpl } = vi.hoisted(() => {
         sessionExpiresAt: '2026-10-12T00:00:00.000Z',
       };
     }
-    // 壳挂载会触发公告窄通道（读缓存 + on-launch 刷新）：给合法空响应，
-    // 让「公告通道存在」与「壳不发起其他探测」两个断言互不干扰。
+    // 壳挂载会触发公告窄通道（读缓存 + on-launch 刷新）与一次 config 读
+    // （公告策略的判定依据）：给合法空响应，让「通道存在」与「壳不发起
+    // 其他探测」两个断言互不干扰。
     if (command === 'announcements_get_cached') return null;
+    if (command === 'desktop_config_read') {
+      return {
+        path: 'C:\\cfg\\config.json',
+        directory: 'C:\\cfg',
+        backupPresent: false,
+        file: { status: 'missing' as const },
+      };
+    }
     if (command === 'announcements_refresh') {
       return {
         status: 'not-modified',
@@ -67,6 +76,7 @@ import { createDesktopRouter } from '../src/app/router';
 import { resetDesktopCloudSessionStoreForTests } from '../src/features/account/use-desktop-cloud-session';
 import { resetTopbarAvatarForTests } from '../src/features/account/use-topbar-avatar';
 import { resetDesktopAnnouncementsStoreForTests } from '../src/features/announcements/use-desktop-announcements';
+import { resetDesktopConfigStoreForTests } from '../src/features/config/use-desktop-config';
 
 let container: HTMLDivElement;
 let root: Root;
@@ -83,6 +93,7 @@ beforeEach(() => {
   resetDesktopCloudSessionStoreForTests();
   resetTopbarAvatarForTests();
   resetDesktopAnnouncementsStoreForTests();
+  resetDesktopConfigStoreForTests();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -145,7 +156,12 @@ describe('desktop shared topbar', () => {
     const commands = invokeMock.mock.calls.map((call) => call[0]);
     expect(commands).not.toContain('cloud_auth_status');
     for (const command of commands) {
-      expect(['announcements_get_cached', 'announcements_refresh', 'cloud_cached_account']).toContain(command);
+      expect([
+        'announcements_get_cached',
+        'announcements_refresh',
+        'cloud_cached_account',
+        'desktop_config_read',
+      ]).toContain(command);
     }
     expect(container.querySelector('header.global-topbar')).not.toBeNull();
     // 本机无已保存账号 = 已确认未登录：直接渲染登录入口，没有「账号」占位过渡。

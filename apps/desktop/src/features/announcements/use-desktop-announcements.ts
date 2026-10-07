@@ -2,6 +2,8 @@ import { useEffect, useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { parseAnnouncementList, type Announcement } from '@mahoshojo/contracts/announcements';
 
+import { getDesktopConfigStore, type DesktopConfigStore } from '../config/use-desktop-config';
+
 import {
   DesktopAnnouncementsStore,
   type DesktopAnnouncementsState,
@@ -31,7 +33,13 @@ const loadBundledAnnouncements = async (): Promise<Announcement[] | null> => {
 let sharedStore: DesktopAnnouncementsStore | null = null;
 
 export const getDesktopAnnouncementsStore = (): DesktopAnnouncementsStore => {
-  sharedStore ??= new DesktopAnnouncementsStore({ invoke, loadBundled: loadBundledAnnouncements });
+  sharedStore ??= new DesktopAnnouncementsStore({
+    invoke,
+    loadBundled: loadBundledAnnouncements,
+    // `announcements.checkPolicy`（DESK-SET-004）：在 launchCheck 判定的
+    // 那一刻读 config 快照——不复制状态、不产生第二份默认值。
+    checkPolicy: () => getDesktopConfigStore().getSnapshot().values.announcementsCheckPolicy,
+  });
   return sharedStore;
 };
 
@@ -48,14 +56,19 @@ export interface UseDesktopAnnouncementsResult {
 
 export const useDesktopAnnouncements = (
   store: DesktopAnnouncementsStore = getDesktopAnnouncementsStore(),
+  configStore: DesktopConfigStore = getDesktopConfigStore(),
 ): UseDesktopAnnouncementsResult => {
   const state = useSyncExternalStore(store.subscribe, store.getSnapshot);
 
-  // 挂载即装载本地快照；on-launch 策略下随后触发一次后台刷新。
+  // 挂载即装载本地快照；启动检查等 config.json 读完再判定策略——
+  // 「manual 不自动请求」不能以「配置还没读完所以先按默认发一次」绕过。
   // 两者都不阻塞首屏——公告是装饰内容，不进入交互关键路径。
   useEffect(() => {
-    void store.bootstrap().then(() => store.launchCheck());
-  }, [store]);
+    void store
+      .bootstrap()
+      .then(() => configStore.ready())
+      .then(() => store.launchCheck());
+  }, [store, configStore]);
 
   return { state, store, refresh: () => store.refresh() };
 };

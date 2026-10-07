@@ -16,6 +16,7 @@ import { useDesktopCloudSession } from '../features/account/use-desktop-cloud-se
 import { useTopbarAvatar } from '../features/account/use-topbar-avatar';
 import { DesktopAnnouncementCenter } from '../features/announcements/desktop-announcement-center';
 import { useTopbarMessages } from '../features/messages/topbar-messages';
+import { useDesktopConfig } from '../features/config/use-desktop-config';
 import { ExternalLinksProvider, useExternalLinks } from '../features/external-links/external-links-provider';
 import { buildCapabilitySnapshot } from './capabilities';
 import { navigateByProductHref, resolveInternalHrefForHashHistory } from './hash-history-fragment';
@@ -177,12 +178,17 @@ const DesktopShellInner = () => {
 /**
  * 受控外链是壳级能力：顶栏、公告、百科与页脚共用同一个确认弹窗与同一个
  * `open_external_url` 通道，因此 provider 包在最外层。
+ * `externalLinks.confirmContentLinks`（DESK-SET-004）与设置页读同一份
+ * config snapshot；URL 安全校验始终在 native，关闭确认不放宽校验。
  */
-const DesktopShell = () => (
-  <ExternalLinksProvider>
-    <DesktopShellInner />
-  </ExternalLinksProvider>
-);
+const DesktopShell = () => {
+  const { state: config } = useDesktopConfig();
+  return (
+    <ExternalLinksProvider confirmContentLinks={config.values.confirmContentLinks}>
+      <DesktopShellInner />
+    </ExternalLinksProvider>
+  );
+};
 
 const rootRoute = createRootRoute({
   component: DesktopShell,
