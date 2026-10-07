@@ -257,55 +257,68 @@ export const listLatestPendingPublicCardUpdatesByUserId = async (
 };
 
 /**
- * 快照守卫的更新落基，单语句判定两组快照：
+ * 快照守卫的更新落基：apply + consume 是一笔原子状态转换。
+ * 两条语句走同一 D1 batch（事务，任一条失败整体回滚），不会出现
+ * "主卡已落基但待审行残留"的中间态。
+ * UPDATE 单语句判定两组快照：
  * - 卡片行仍是审核时观测的线上版本；
  * - 待审更新行仍是同一行同一内容（EXISTS 子查询，挡住 U1 审核期间被 U2 顶掉）。
- * 命中后删除待审行——删除走同一快照守卫，失败（更新已被替换）时 U2 存活继续等审。
+ * DELETE 复用同一快照守卫，并以 changes() > 0 衔接前一条 UPDATE——守卫未命中时
+ * UPDATE 改 0 行、本 DELETE 随之落空（同 admin expectedChanges 的 changes() 衔接语义）；
+ * 命中时同事务内待审行必然仍匹配，恰好消费一行。
  */
 export const applyPendingCardUpdateIfUnchanged = async (
   db: AppDrizzleDb,
   userId: number,
   upd: PendingDataCardUpdateReviewRow,
 ): Promise<boolean> => {
-  const updated = await db
-    .update(dataCards)
-    .set({
-      name: upd.name,
-      description: upd.description ?? '',
-      data: upd.data,
-      updatedAt: sql`CURRENT_TIMESTAMP`,
-    })
-    .where(
-      and(
-        eq(dataCards.id, upd.dataCardId),
-        eq(dataCards.userId, userId),
-        eq(dataCards.isPublic, true),
-        eq(dataCards.reviewStatus, 'approved'),
-        isNull(dataCards.deletedAt),
-        cardContentGuard({
-          name: upd.cardName,
-          description: upd.cardDescription,
-          data: upd.cardData,
-          type: upd.type,
-          updatedAt: upd.cardUpdatedAt,
-        }),
-        sql`EXISTS (
-          SELECT 1 FROM data_card_updates u
-          WHERE u.id = ${upd.updateId}
-            AND u.data_card_id = ${upd.dataCardId}
-            AND u.user_id = ${userId}
-            AND u.name IS ${upd.name}
-            AND u.description IS ${upd.description}
-            AND u.data IS ${upd.data}
-            AND u.updated_at IS ${upd.updatedAt}
-        )`,
+  const [applied] = await db.batch([
+    db
+      .update(dataCards)
+      .set({
+        name: upd.name,
+        description: upd.description ?? '',
+        data: upd.data,
+        updatedAt: sql`CURRENT_TIMESTAMP`,
+      })
+      .where(
+        and(
+          eq(dataCards.id, upd.dataCardId),
+          eq(dataCards.userId, userId),
+          eq(dataCards.isPublic, true),
+          eq(dataCards.reviewStatus, 'approved'),
+          isNull(dataCards.deletedAt),
+          cardContentGuard({
+            name: upd.cardName,
+            description: upd.cardDescription,
+            data: upd.cardData,
+            type: upd.type,
+            updatedAt: upd.cardUpdatedAt,
+          }),
+          sql`EXISTS (
+            SELECT 1 FROM data_card_updates u
+            WHERE u.id = ${upd.updateId}
+              AND u.data_card_id = ${upd.dataCardId}
+              AND u.user_id = ${userId}
+              AND u.name IS ${upd.name}
+              AND u.description IS ${upd.description}
+              AND u.data IS ${upd.data}
+              AND u.updated_at IS ${upd.updatedAt}
+          )`,
+        ),
+      )
+      .returning({ id: dataCards.id }),
+    db
+      .delete(dataCardUpdates)
+      .where(
+        and(
+          eq(dataCardUpdates.userId, userId),
+          updateRowGuard(upd),
+          sql`changes() > 0`,
+        ),
       ),
-    )
-    .returning({ id: dataCards.id });
-
-  if (updated.length === 0) return false;
-  await deletePendingCardUpdateIfUnchanged(db, userId, upd);
-  return true;
+  ]);
+  return applied.length > 0;
 };
 
 /** 快照守卫的待审更新删除：U1 的裁决不会误删顶替它的 U2。 */
@@ -331,7 +344,7 @@ export type AutoReviewDecisionInsert = {
   targetKind: 'card' | 'update';
   dataCardId: string;
   updateId?: string | null;
-  /** 审核时观测的 (name, description, data) SHA-256 */
+  /** 审核时观测的 (name, description, data, type) SHA-256 */
   contentHash: string;
   reviewedUpdatedAt?: string | null;
   backendId: string;

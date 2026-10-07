@@ -1137,7 +1137,7 @@ CREATE TABLE IF NOT EXISTS auto_review_decisions (
   target_kind TEXT NOT NULL CHECK(target_kind IN ('card', 'update')),  -- 审核对象：卡本体 / 待审更新
   data_card_id TEXT NOT NULL,
   update_id TEXT,                          -- target_kind='update' 时的待审更新行 id
-  content_hash TEXT NOT NULL,              -- 审核时观测的 (name,description,data) SHA-256
+  content_hash TEXT NOT NULL,              -- 审核时观测的 (name,description,data,type) SHA-256
   reviewed_updated_at TEXT,                -- 审核时观测的行 updated_at
   backend_id TEXT NOT NULL,                -- 配置条目 id
   backend_kind TEXT NOT NULL,              -- jev-decisions / omni-moderation / nemotron / llm

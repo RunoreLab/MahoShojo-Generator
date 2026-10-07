@@ -814,7 +814,7 @@ export const autoReviewDecisions = sqliteTable(
     targetKind: text('target_kind').notNull(), // 'card' | 'update'
     dataCardId: text('data_card_id').notNull(),
     updateId: text('update_id'),
-    contentHash: text('content_hash').notNull(), // 审核时观测内容的 SHA-256
+    contentHash: text('content_hash').notNull(), // 审核时观测输入 (name,description,data,type) 的 SHA-256
     reviewedUpdatedAt: text('reviewed_updated_at'), // 审核时观测的行 updated_at
     backendId: text('backend_id').notNull(),
     backendKind: text('backend_kind').notNull(),

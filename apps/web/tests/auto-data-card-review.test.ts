@@ -33,9 +33,25 @@ const setup = () => {
       "(1,'u1','u1@example.test','k1',0)," +
       "(2,'u2','u2@example.test','k2',1)",
   );
+  // 返回行的语句：SELECT/PRAGMA/WITH/VALUES 或带 RETURNING 的写语句
+  const returnsRows = (sql: string) => /^\s*(?:SELECT|WITH|VALUES|PRAGMA)\b|\bRETURNING\b/i.test(sql);
   const native = {
     exec(sql: string) { sqlite.exec(sql); },
-    async batch() { throw new Error('batch not used by these tests'); },
+    // 复刻 D1 batch 语义：一组语句在同一事务中顺序执行，任一条失败整体回滚。
+    async batch(statements: Array<{ step(): Promise<unknown> }>) {
+      sqlite.exec('BEGIN IMMEDIATE');
+      const results: unknown[] = [];
+      try {
+        for (const statement of statements) {
+          results.push(await statement.step());
+        }
+        sqlite.exec('COMMIT');
+        return results;
+      } catch (error) {
+        try { sqlite.exec('ROLLBACK'); } catch {}
+        throw error;
+      }
+    },
     prepare(sql: string) {
       let args: unknown[] = [];
       const statement = {
@@ -43,11 +59,16 @@ const setup = () => {
         async all() { return { success: true, results: sqlite.prepare(sql).all(...args) }; },
         async raw() { return sqlite.prepare(sql).all(...args).map((row) => Object.values(row)); },
         async run() { return { success: true, results: [], meta: sqlite.prepare(sql).run(...args) }; },
+        async step() {
+          return returnsRows(sql)
+            ? { success: true, results: sqlite.prepare(sql).all(...args), meta: {} }
+            : { success: true, results: [], meta: sqlite.prepare(sql).run(...args) };
+        },
       };
       return statement;
     },
   };
-  return { sqlite, db: createDrizzleDb(native) };
+  return { sqlite, db: createDrizzleDb(native), native };
 };
 
 const seedCard = (sqlite: SQLite, id: string, userId: number, reviewStatus = 'pending', isPublic = 1) =>
@@ -301,6 +322,36 @@ describe('auto-data-card-review（引擎通路）', () => {
     const audit = sqlite.prepare("SELECT * FROM auto_review_decisions WHERE data_card_id='card-ok'").all();
     expect(audit).toHaveLength(1);
     expect(audit[0]).toMatchObject({ verdict: 'approve', action: 'approve', applied: 1 });
+  });
+
+  it('落基批中途失败：整体回滚，卡与待审行保持原状', async () => {
+    const { sqlite, native } = setup();
+    seedCard(sqlite, 'card-tx', 1, 'approved', 1);
+    seedUpdate(sqlite, 'upd-tx', 'card-tx', 1, '合规新名', '{"text":"合规"}');
+    // 模拟 D1 batch 内后续语句失败：apply 已写入的 UPDATE 必须随事务一起回滚。
+    const flaky = {
+      ...native,
+      batch: async (stmts: Array<{ step(): Promise<unknown> }>) => {
+        sqlite.exec('BEGIN IMMEDIATE');
+        try {
+          await stmts[0].step();
+          throw new Error('simulated D1 batch failure');
+        } catch (error) {
+          try { sqlite.exec('ROLLBACK'); } catch {}
+          throw error;
+        }
+      },
+    };
+    const flakyDb = createDrizzleDb(flaky);
+    await expect(
+      autoReviewLatestPendingPublicDataCardUpdatesForUser(1, {
+        db: flakyDb as never,
+        engine: stubEngine({ 'card-tx': { verdict: 'approve', score: 0.02 } }),
+        policy: basePolicy,
+      }),
+    ).rejects.toThrow('simulated D1 batch failure');
+    expect(sqlite.prepare("SELECT name v FROM data_cards WHERE id='card-tx'").get()!.v).toBe('卡card-tx');
+    expect(sqlite.prepare('SELECT COUNT(*) c FROM data_card_updates').get()!.c).toBe(1);
   });
 
   it('更新 approve 但卡片被改：守卫未命中、更新行保留待复审', async () => {

@@ -156,9 +156,9 @@ const sha256Hex = async (text: string): Promise<string> => {
   return Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
 };
 
-/** 裁决证据用内容指纹：审核观测的 (name, description, data) 三元组。 */
-const contentHashOf = (snap: { name: string; description: string | null; data: string }) =>
-  sha256Hex(JSON.stringify([snap.name, snap.description, snap.data]));
+/** 裁决证据用内容指纹：审核观测的 (name, description, data, type)——与模型实际输入字段一致。 */
+const contentHashOf = (snap: { name: string; description: string | null; data: string; type: ReviewTarget['type'] }) =>
+  sha256Hex(JSON.stringify([snap.name, snap.description, snap.data, snap.type]));
 
 const modelOf = (run: AutoReviewRunResult): string | null => {
   const m = run.outcome.details?.model;
