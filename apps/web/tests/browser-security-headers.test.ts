@@ -5,10 +5,19 @@ import {
   buildPermissionsPolicy,
   buildStaticBrowserSecurityHeaders,
   getRequestProtocol,
+  PASSWORD_RECOVERY_ROUTE_HEADERS,
   shouldRedirectToHttps,
 } from '@/lib/security/browser-headers';
 
 describe('browser security headers', () => {
+  test('密码恢复路由收紧 Referrer-Policy，防止 URL token 经 Referer 泄漏', () => {
+    // OWASP 密码重置指引：恢复页自身的同源子请求与外链不得携带 token。
+    expect(PASSWORD_RECOVERY_ROUTE_HEADERS).toContainEqual({
+      key: 'Referrer-Policy',
+      value: 'no-referrer',
+    });
+  });
+
   test('静态安全头包含基础浏览器硬化项与 CSP', () => {
     const headers = buildStaticBrowserSecurityHeaders({
       allowCloudflareInsights: true,

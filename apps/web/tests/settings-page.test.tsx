@@ -8,15 +8,20 @@
  *    查询），账号区按登录态如实分层。
  * 2. `?section=` 深链定位到对应分组锚点——与 Desktop hash-history 下同一语义。
  * 3. `/me?tab=settings` → `/settings?section=account`；`/me?token=<t>` →
- *    `/password-recovery?token=<t>`——恢复令牌只交给既有 handler。
+ *    `/password-recovery?token=<t>`——服务端在 `/me` 渲染前早截获，
+ *    恢复令牌只交给既有 handler（D5.1-S1-r1：不进客户端生命周期）。
  */
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { routerMock, authState } = vi.hoisted(() => ({
+const { routerMock, redirectMock, authState } = vi.hoisted(() => ({
   routerMock: { push: vi.fn(), replace: vi.fn(), refresh: vi.fn(), back: vi.fn() },
+  // 与真实 next/navigation `redirect()` 同语义：抛错终止当前渲染。
+  redirectMock: vi.fn((url: string): never => {
+    throw new Error(`NEXT_REDIRECT:${url}`);
+  }),
   authState: {
     user: null as { id: number; username: string } | null,
     userBadges: [] as unknown[],
@@ -31,6 +36,7 @@ vi.mock('next/navigation', () => ({
   useRouter: () => routerMock,
   usePathname: () => '/settings',
   useSearchParams: () => new URLSearchParams(searchString),
+  redirect: redirectMock,
 }));
 
 vi.mock('@/lib/useAuth', () => ({
@@ -50,6 +56,8 @@ vi.mock('@/lib/use-generation-api-intent-latch', () => ({
 
 vi.mock('@tanstack/react-query', () => ({
   useMutation: () => ({ mutate: vi.fn(), isPending: false, error: null }),
+  QueryClient: class {},
+  QueryClientProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
 vi.mock('@/components/Footer', () => ({
@@ -87,7 +95,6 @@ vi.mock('@/components/settings/SettingsRouteProviders', () => ({
   SettingsRouteProviders: () => <div data-testid="settings-route-providers" />,
 }));
 
-import { MePage } from '@/components/me/MePage';
 import { WebSettingsPage } from '@/components/settings/SettingsPage';
 
 let container: HTMLDivElement;
@@ -106,6 +113,7 @@ beforeEach(() => {
   authState.user = null;
   authState.isAuthenticated = false;
   authState.loading = false;
+  redirectMock.mockClear();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -190,29 +198,46 @@ describe('web /settings page', () => {
   });
 });
 
-describe('web /me legacy deep links', () => {
-  it('redirects /me?tab=settings to /settings?section=account', async () => {
-    window.history.replaceState({}, '', '/me?tab=settings');
-    await render(<MePage />);
+describe('web /me route deep-link interception', () => {
+  // 兼容跳在 Server Component 内、渲染 MeRouteProviders 之前完成——
+  // 敏感 token 不进入 /me 的客户端生命周期与其同源子请求。
+  it('redirects /me?tab=settings to /settings?section=account on the server', async () => {
+    const { default: MeRoute } = await import('@/app/me/page');
 
-    expect(routerMock.replace).toHaveBeenCalledWith('/settings?section=account');
+    await expect(
+      MeRoute({ searchParams: Promise.resolve({ tab: 'settings' }) }),
+    ).rejects.toThrow('NEXT_REDIRECT:/settings?section=account');
+    expect(redirectMock).toHaveBeenCalledTimes(1);
   });
 
   it('hands /me?token=<t> to the existing password-recovery handler, token preserved', async () => {
-    window.history.replaceState({}, '', '/me?token=abc-123.敏感');
-    await render(<MePage />);
+    const { default: MeRoute } = await import('@/app/me/page');
 
-    expect(routerMock.replace).toHaveBeenCalledWith(
-      `/password-recovery?token=${encodeURIComponent('abc-123.敏感')}`,
+    await expect(
+      MeRoute({ searchParams: Promise.resolve({ token: 'abc-123.敏感' }) }),
+    ).rejects.toThrow(
+      `NEXT_REDIRECT:/password-recovery?token=${encodeURIComponent('abc-123.敏感')}`,
     );
   });
 
-  it('plain /me stays put on the reports view', async () => {
-    window.history.replaceState({}, '', '/me');
-    await render(<MePage />);
+  it('prefers the sensitive token handoff over the settings tab compat', async () => {
+    const { default: MeRoute } = await import('@/app/me/page');
 
-    expect(routerMock.replace).not.toHaveBeenCalled();
-    expect(container.querySelector('[data-testid="battle-reports-panel"]')).not.toBeNull();
+    await expect(
+      MeRoute({
+        searchParams: Promise.resolve({ tab: 'settings', token: 'abc' }),
+      }),
+    ).rejects.toThrow('NEXT_REDIRECT:/password-recovery?token=abc');
+    expect(redirectMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('plain /me renders the providers wrapper without redirecting', async () => {
+    const { default: MeRoute } = await import('@/app/me/page');
+
+    const element = await MeRoute({ searchParams: Promise.resolve({}) });
+    expect(redirectMock).not.toHaveBeenCalled();
+    const html = renderToStaticMarkup(element);
+    expect(html).toContain('data-testid="battle-reports-panel"');
   });
 });
 

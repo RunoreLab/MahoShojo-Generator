@@ -4,7 +4,7 @@ import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
 import { fileURLToPath } from "node:url";
 
 import { loadRepositoryRootEnvFallback } from "./config/load-root-env-fallback";
-import { buildStaticBrowserSecurityHeaders } from "./lib/security/browser-headers";
+import { buildStaticBrowserSecurityHeaders, PASSWORD_RECOVERY_ROUTE_HEADERS } from "./lib/security/browser-headers";
 import { WEB_PACKAGE_RUNNER_HEADERS, WEB_PACKAGE_RUNNER_PATH } from "./lib/web-package/runner";
 
 const repositoryRoot = fileURLToPath(new URL('../..', import.meta.url));
@@ -59,6 +59,12 @@ const createNextConfig = (phase: string): NextConfig => {
         {
           source: '/:path*',
           headers: staticSecurityHeaders,
+        },
+        // 同 key 后定义者生效：密码恢复页收紧 Referrer-Policy，防止
+        // URL 中的恢复令牌经 Referer 泄漏（OWASP 密码重置指引）。
+        {
+          source: '/password-recovery',
+          headers: [...PASSWORD_RECOVERY_ROUTE_HEADERS],
         },
         {
           source: WEB_PACKAGE_RUNNER_PATH,

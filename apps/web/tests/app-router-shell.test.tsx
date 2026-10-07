@@ -98,4 +98,14 @@ describe('App Router global shell', () => {
 
     expect(html.match(/data-google-analytics="G-TEST"/g)?.length ?? 0).toBe(1);
   });
+
+  test('password-recovery route does not load GA — URL token must not enter page_location', async () => {
+    pathname = '/password-recovery';
+    process.env.NEXT_PUBLIC_GA_ID = 'G-TEST';
+    const { AppProviders } = await import('@/app/providers');
+    const html = renderToStaticMarkup(<AppProviders><Page /></AppProviders>);
+
+    expect(html).not.toContain('data-google-analytics');
+    expect(html).toContain('App 页面内容');
+  });
 });

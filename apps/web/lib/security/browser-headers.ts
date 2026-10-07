@@ -122,6 +122,19 @@ export function buildStaticBrowserSecurityHeaders(options: BrowserSecurityHeader
   ];
 }
 
+/**
+ * `/password-recovery` 专属响应头（OWASP 密码重置指引）。
+ *
+ * 恢复令牌以 query 传递；`no-referrer` 防止它经 Referer 进入同源子请求、
+ * 外链与日志链路。next.config 在通用 `/:path*` 头之后追加本条目覆盖。
+ */
+export const PASSWORD_RECOVERY_ROUTE_HEADERS: StaticHeader[] = [
+  {
+    key: 'Referrer-Policy',
+    value: 'no-referrer',
+  },
+];
+
 export function isLocalHostname(hostname: string): boolean {
   return LOCAL_HOSTNAMES.has(hostname) || hostname.endsWith('.localhost');
 }

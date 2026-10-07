@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
@@ -15,14 +15,8 @@ import { ProfileCardModal } from '@/components/me/ProfileCardModal';
 import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-latch';
 import { useAuth } from '@/lib/useAuth';
 
-/**
- * `/me` 旧深链兼容（DESK-SET-001）：
- *
- * - `?tab=settings` → `/settings?section=account`（设置已迁往 `/settings`）；
- * - `?token=<t>` → `/password-recovery?token=<t>`——恢复令牌只交给既有的
- *   密码恢复 handler，不经普通 redirect 传播到无关页面；
- * - `?tab=reports` 已是默认内容，留在原地即可。
- */
+// `/me` 旧深链（`?tab=settings` / `?token=`）兼容已上移到
+// `app/me/page.tsx` 的服务端早截获——敏感参数不进客户端生命周期。
 const LEGACY_ME_SETTINGS_TARGET = '/settings?section=account';
 
 export function MePage() {
@@ -42,19 +36,6 @@ export function MePage() {
   const [showCardModal, setShowCardModal] = useState(false);
 
   const [showProfileCardModal, setShowProfileCardModal] = useState(false);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('tab') === 'settings') {
-      router.replace(LEGACY_ME_SETTINGS_TARGET);
-      return;
-    }
-    const token = params.get('token');
-    if (token) {
-      router.replace(`/password-recovery?token=${encodeURIComponent(token)}`);
-    }
-  }, [router]);
 
   const regenerateMutation = useMutation({
     mutationFn: async (generationId: string) => {
