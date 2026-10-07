@@ -59,7 +59,9 @@ describe('character domain App Router pages', () => {
 
   test('me route renders query client providers and migrated metadata', async () => {
     const { default: MeRoute, metadata } = await import('@/app/me/page');
-    const html = renderToStaticMarkup(<MeRoute />);
+    // /me 现在是 async RSC（敏感回跳服务端早截获，5450785b），renderToStaticMarkup
+    // 只能渲染同步元素——先 await 出 JSX 再渲染。
+    const html = renderToStaticMarkup(await MeRoute({}));
 
     expect(metadata).toMatchObject({
       title: '个人页 - MahoShojo Generator',
