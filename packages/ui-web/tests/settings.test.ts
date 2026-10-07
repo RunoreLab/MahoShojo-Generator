@@ -325,15 +325,17 @@ describe('settings field registry', () => {
         'announcements.checkPolicy',
         'externalLinks.confirmContentLinks',
         'desktop.escapeMenu.enabled',
+        'publicLibraryCache.captureEnabled',
+        'publicLibraryCache.maxBytes',
+        'publicLibraryCache.whenFull',
       ]),
     );
-    // 尚未交付消费者的 config-json 字段仍是 planned——不提前 wired。
+    // K1 已交付 publicLibraryCache 三字段的真实消费者——登记表当前没有
+    // 仍停在 planned 的 config-json 字段；新增字段须显式登记再落地。
     const plannedConfigKeys = SETTINGS_FIELD_REGISTRY.filter(
       (r) => r.status === 'planned' && r.owner.kind === 'config-json',
     ).map((r) => r.id);
-    expect(plannedConfigKeys).toEqual(
-      expect.arrayContaining(['publicLibraryCache']),
-    );
+    expect(plannedConfigKeys).toEqual([]);
   });
 
   it('page-preferences owners are machine-readable per host — real key and scope, not placeholders', () => {
