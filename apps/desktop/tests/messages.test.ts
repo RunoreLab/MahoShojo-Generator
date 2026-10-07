@@ -5,7 +5,6 @@ import { MESSAGES_REQUEST_COMMAND, requestMessagesRoute } from '../src/platform/
 import {
   listMessages,
   markMessagesRead,
-  MessagesApiError,
   readMessagesSummary,
 } from '../src/features/messages/messages-api';
 import {
