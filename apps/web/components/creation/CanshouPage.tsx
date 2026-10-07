@@ -1586,7 +1586,6 @@ export const CanshouPage: React.FC = () => {
                 />
 
                 {error && <ErrorMessage message={error} />}
-                {streamNotice ? <div className="mt-3 text-center text-sm text-amber-700">{streamNotice}</div> : null}
                 {isQuestionnaireNativeAllowed && hasOverLimitAnswer && (
                   <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
                     ⚠️ 已有 {overLimitItems.length} 条答案超过字数上限，继续提交将导致生成内容丧失原生性。
@@ -1627,6 +1626,7 @@ export const CanshouPage: React.FC = () => {
                       saveButtonLabel={imageSaveButtonLabel}
                     />
                     <AiReasoningPanel reasoning={streamingReasoning} status={streamingReasoning?.status ?? 'idle'} compact />
+                    {streamNotice ? <div className="mt-3 text-center text-sm text-amber-700">{streamNotice}</div> : null}
 
                     <div className="card" style={{ marginTop: '1rem' }}>
                       <div className="text-center">
