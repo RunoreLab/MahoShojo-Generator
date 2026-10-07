@@ -69,18 +69,46 @@ export interface MessageLinkHandlers {
  * 服务端内容不能盲目渲染成 `<a href>`：`javascript:` 一类 scheme 在 Web 与
  * Desktop WebView 里都是脚本执行面——只放行产品路径与 http(s)，其余一律
  * 不渲染链接（比原 Web `<Link>` 更严，合法消息不受影响）。
+ *
+ * 站内路径口径与服务端 admin action（`hosted-runtime/admin/actions/messages.ts`）
+ * 同源：`/` 开头但次字符非 `/`——`//evil.example` 是 protocol-relative
+ * 外链而不是站内路径；反斜杠会被浏览器折叠成 `/`（`/\evil.example` →
+ * `//evil.example`），控制字符/空白/DEL 一律不放行。
+ *
+ * 站外与 Desktop native `validate_external_url` 同语义：http(s) + 有
+ * host + 无凭据（`https://user:pass@host/` 会把凭据写进浏览器历史）；
+ * 含空白/控制字符的串先拒再解析——WHATWG URL 会静默折叠 tab/换行，
+ * 展示给用户的与最终打开的必须是同一个 URL。
  */
 export type MessageActionTarget =
   | { readonly kind: 'internal'; readonly href: string }
   | { readonly kind: 'external'; readonly href: string }
   | { readonly kind: 'unsafe' };
 
+const INTERNAL_PATH_PATTERN = /^\/(?!\/)/u;
+// 站内：与服务端 admin action 同一 regex——反斜杠会被浏览器折叠成 `/`
+//（`/\evil.example` → `//evil.example`），与控制字符/空白/DEL 一并拒收。
+const FORBIDDEN_INTERNAL_CHARS = /[\\\u0000-\u0020\u007f]/u;
+// 站外：与 native `validate_external_url` 同一口径——先拒空白/控制字符
+//（WHATWG 会静默折叠 tab/换行），再按结构判定。
+const FORBIDDEN_EXTERNAL_CHARS = /[\u0000-\u0020\u007f]/u;
+
 export const classifyMessageActionUrl = (actionUrl: string | null): MessageActionTarget => {
   if (typeof actionUrl !== 'string' || actionUrl === '') return { kind: 'unsafe' };
-  if (actionUrl.startsWith('/')) return { kind: 'internal', href: actionUrl };
+  if (INTERNAL_PATH_PATTERN.test(actionUrl)) {
+    return FORBIDDEN_INTERNAL_CHARS.test(actionUrl)
+      ? { kind: 'unsafe' }
+      : { kind: 'internal', href: actionUrl };
+  }
+  if (FORBIDDEN_EXTERNAL_CHARS.test(actionUrl)) return { kind: 'unsafe' };
   try {
     const url = new URL(actionUrl);
-    if (url.protocol === 'http:' || url.protocol === 'https:') {
+    if (
+      (url.protocol === 'http:' || url.protocol === 'https:') &&
+      url.hostname !== '' &&
+      url.username === '' &&
+      url.password === ''
+    ) {
       return { kind: 'external', href: actionUrl };
     }
   } catch {

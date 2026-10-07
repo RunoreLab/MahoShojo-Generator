@@ -62,11 +62,30 @@ afterEach(() => {
 describe('classifyMessageActionUrl', () => {
   it('产品路径为 internal，http(s) 为 external，其余一律不渲染链接', () => {
     expect(classifyMessageActionUrl('/investigation')).toEqual({ kind: 'internal', href: '/investigation' });
+    expect(classifyMessageActionUrl('/ok/path?x=1#frag')).toEqual({ kind: 'internal', href: '/ok/path?x=1#frag' });
     expect(classifyMessageActionUrl('https://example.com/x')).toEqual({ kind: 'external', href: 'https://example.com/x' });
     expect(classifyMessageActionUrl('javascript:alert(1)').kind).toBe('unsafe');
     expect(classifyMessageActionUrl('data:text/html,<p>').kind).toBe('unsafe');
     expect(classifyMessageActionUrl('not a url').kind).toBe('unsafe');
     expect(classifyMessageActionUrl(null).kind).toBe('unsafe');
+  });
+
+  it('internal 与服务端 admin action 同口径：//、反斜杠、控制字符/空白一律 unsafe', () => {
+    // `//evil.example` 是 protocol-relative 外链，不是站内路径；
+    // `/\evil.example` 会被浏览器折叠成 `//evil.example`。
+    expect(classifyMessageActionUrl('//evil.example').kind).toBe('unsafe');
+    expect(classifyMessageActionUrl('/\\evil.example').kind).toBe('unsafe');
+    expect(classifyMessageActionUrl('/path\nheader').kind).toBe('unsafe');
+    expect(classifyMessageActionUrl('/path tail').kind).toBe('unsafe');
+    expect(classifyMessageActionUrl('/path\x7fedge').kind).toBe('unsafe');
+  });
+
+  it('external 与 native 同口径：带凭据、无 host、含空白/控制字符一律 unsafe', () => {
+    expect(classifyMessageActionUrl('https://user:pass@example.com/').kind).toBe('unsafe');
+    expect(classifyMessageActionUrl('https://user@example.com/').kind).toBe('unsafe');
+    expect(classifyMessageActionUrl('https://example .com/').kind).toBe('unsafe');
+    expect(classifyMessageActionUrl('https://example.com/\nSet-Cookie: x=1').kind).toBe('unsafe');
+    expect(classifyMessageActionUrl('https://example.com/ok').kind).toBe('external');
   });
 });
 
