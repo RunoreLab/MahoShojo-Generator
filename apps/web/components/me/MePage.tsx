@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useMutation } from '@tanstack/react-query';
 
 import type { NewsReport } from '@/components/BattleReportCard';
@@ -9,29 +10,25 @@ import Footer from '@/components/Footer';
 import { BattleReportCardModal } from '@/components/me/BattleReportCardModal';
 import { BattleReportDetailsModal } from '@/components/me/BattleReportDetailsModal';
 import { BattleReportsPanel } from '@/components/me/BattleReportsPanel';
-import { AccountSecurityPanel } from '@/components/me/AccountSecurityPanel';
-import { AuthMigrationPanel } from '@/components/me/AuthMigrationPanel';
-import { MeTabs } from '@/components/me/MeTabs';
 import { ProfileHeader } from '@/components/me/ProfileHeader';
 import { ProfileCardModal } from '@/components/me/ProfileCardModal';
-import { ProfileSettingsPanel } from '@/components/me/ProfileSettingsPanel';
 import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-latch';
 import { useAuth } from '@/lib/useAuth';
 
-type MeTab = 'reports' | 'settings';
-
-const parseMeTabFromSearch = (search: string): MeTab | null => {
-  const params = new URLSearchParams(search);
-  const tab = params.get('tab');
-  if (tab === 'reports' || tab === 'settings') return tab;
-  if (params.get('token')) return 'settings';
-  return null;
-};
+/**
+ * `/me` 旧深链兼容（DESK-SET-001）：
+ *
+ * - `?tab=settings` → `/settings?section=account`（设置已迁往 `/settings`）；
+ * - `?token=<t>` → `/password-recovery?token=<t>`——恢复令牌只交给既有的
+ *   密码恢复 handler，不经普通 redirect 传播到无关页面；
+ * - `?tab=reports` 已是默认内容，留在原地即可。
+ */
+const LEGACY_ME_SETTINGS_TARGET = '/settings?section=account';
 
 export function MePage() {
   const generationApiIntentLatch = useGenerationApiIntentLatch();
+  const router = useRouter();
   const { user, userBadges, isAuthenticated, loading } = useAuth();
-  const [tab, setTab] = useState<MeTab>('reports');
 
   const [activeReportId, setActiveReportId] = useState<string | null>(null);
   const [showReportDetails, setShowReportDetails] = useState(false);
@@ -48,15 +45,16 @@ export function MePage() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const syncTabFromQuery = () => {
-      const nextTab = parseMeTabFromSearch(window.location.search);
-      if (nextTab) setTab(nextTab);
-    };
-
-    syncTabFromQuery();
-    window.addEventListener('popstate', syncTabFromQuery);
-    return () => window.removeEventListener('popstate', syncTabFromQuery);
-  }, []);
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('tab') === 'settings') {
+      router.replace(LEGACY_ME_SETTINGS_TARGET);
+      return;
+    }
+    const token = params.get('token');
+    if (token) {
+      router.replace(`/password-recovery?token=${encodeURIComponent(token)}`);
+    }
+  }, [router]);
 
   const regenerateMutation = useMutation({
     mutationFn: async (generationId: string) => {
@@ -91,6 +89,9 @@ export function MePage() {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h1 className="text-xl font-bold">个人页</h1>
               <div className="flex items-center gap-3">
+                <Link href="/settings" className="text-sm text-blue-600 hover:underline">
+                  设置
+                </Link>
                 <Link href="/" className="text-sm text-blue-600 hover:underline">
                   返回首页
                 </Link>
@@ -109,7 +110,7 @@ export function MePage() {
               <ProfileHeader
                 user={user}
                 badges={userBadges}
-                onOpenSettings={() => setTab('settings')}
+                onOpenSettings={() => router.push(LEGACY_ME_SETTINGS_TARGET)}
                 onOpenProfileCard={() => setShowProfileCardModal(true)}
               />
             ) : null}
@@ -117,29 +118,20 @@ export function MePage() {
             <div className="mt-4">{retentionNotice}</div>
 
             <div className="mt-4">
-              <MeTabs value={tab} onChange={setTab} />
-            </div>
-
-            {tab === 'reports' ? (
-              <BattleReportsPanel
-                isAuthenticated={Boolean(isAuthenticated)}
-                onOpenDetails={(generationId) => {
-                  setActiveReportId(generationId);
-                  setShowReportDetails(true);
-                }}
-                onRegenerate={(generationId) => regenerateMutation.mutate(generationId)}
-                isRegenerating={regenerateMutation.isPending}
-                regenerateError={regenerateMutation.error ? (regenerateMutation.error as Error).message : null}
-              />
-            ) : null}
-
-            {tab === 'settings' ? (
-              <div className="mt-4">
-                <AuthMigrationPanel userId={user?.id ?? null} />
-                <ProfileSettingsPanel userId={user?.id ?? null} />
-                <AccountSecurityPanel userId={user?.id ?? null} username={user?.username ?? null} />
+              <h2 className="text-sm font-semibold text-gray-700">战报记录</h2>
+              <div className="mt-2">
+                <BattleReportsPanel
+                  isAuthenticated={Boolean(isAuthenticated)}
+                  onOpenDetails={(generationId) => {
+                    setActiveReportId(generationId);
+                    setShowReportDetails(true);
+                  }}
+                  onRegenerate={(generationId) => regenerateMutation.mutate(generationId)}
+                  isRegenerating={regenerateMutation.isPending}
+                  regenerateError={regenerateMutation.error ? (regenerateMutation.error as Error).message : null}
+                />
               </div>
-            ) : null}
+            </div>
           </div>
 
           <Footer />

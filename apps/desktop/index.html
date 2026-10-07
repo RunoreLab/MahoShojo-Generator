@@ -22,6 +22,39 @@
 })();
     </script>
     <!--
+      减少动效偏好的首屏前初始化（D5.1-S1）：与 Web `layout.tsx` 注入的是
+      同一份生成产物——`getMotionPreferenceInitScript()`
+      （@mahoshojo/ui-web/device-preferences-init）；tests/motion-init.test.ts
+      断言两者逐字相等。`data-motion` 是解析后的生效状态，共享 CSS 与
+      动画 hook 只认这一个根标记。
+    -->
+    <script>
+(() => {
+  var media;
+  try {
+    media = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+  } catch (e) {
+    media = undefined;
+  }
+  var apply = function () {
+    try {
+      var stored = window.localStorage.getItem("mahoshojo.motion-preference");
+      var preference = stored === 'reduce' || stored === 'system' ? stored : 'system';
+      var resolved = preference === 'reduce' || (preference === 'system' && media && media.matches) ? 'reduce' : 'no-preference';
+      document.documentElement.dataset.motion = resolved;
+    } catch (e) {}
+  };
+  apply();
+  try {
+    if (media && media.addEventListener) {
+      media.addEventListener('change', apply);
+    } else if (media && media.addListener) {
+      media.addListener(apply);
+    }
+  } catch (e) {}
+})();
+    </script>
+    <!--
       品牌首帧（D5.2）：WebView 解析完 HTML 到 React 首次 commit 之间 #root 是空的，
       先内联一份极轻的品牌画面盖住这段窗口——React createRoot 渲染时自然接管并
       清空这些节点，不需要额外状态机/计时器。配色镜像 `--app-magic-bg-white` 的
@@ -73,10 +106,8 @@
           transform: scale(0.97);
         }
       }
-      @media (prefers-reduced-motion: reduce) {
-        .desktop-boot-logo {
-          animation: none;
-        }
+      html[data-motion='reduce'] .desktop-boot-logo {
+        animation: none;
       }
     </style>
   </head>

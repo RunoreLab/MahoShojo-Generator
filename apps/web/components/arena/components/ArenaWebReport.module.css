@@ -158,9 +158,8 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .header,
-  .immersiveButton,
-  .expandButton { transition: none; }
-  .header[aria-hidden='true'] { transform: none; }
-}
+/* 减少动效统一读 `data-motion` 根标记（DESK-SET-007）。 */
+:global(html[data-motion='reduce']) .header,
+:global(html[data-motion='reduce']) .immersiveButton,
+:global(html[data-motion='reduce']) .expandButton { transition: none; }
+:global(html[data-motion='reduce']) .header[aria-hidden='true'] { transform: none; }

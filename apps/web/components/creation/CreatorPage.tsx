@@ -9,6 +9,7 @@ import SaveToCloudButton from '@/components/SaveToCloudButton';
 import QuestionNavigator from '@/components/QuestionNavigator';
 import { SaveJsonButton as SharedSaveJsonButton } from '@mahoshojo/ui-web/details-controls';
 import { useAppRouterAdapter } from '@/lib/app-router-adapter';
+import { DETAILS_PREFERENCES_STORAGE_KEY } from '@/lib/settings/page-preferences';
 import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import {
@@ -228,7 +229,9 @@ const SaveJsonButton: React.FC<SaveJsonButtonProps> = ({ template, data, mode, r
 };
 
 const LOCAL_STORAGE_KEY = 'magicalGirlAnswersDraft'; // 定义本地存储的键
-const DETAILS_PREFERENCE_KEY = 'mahoshojo.details.preferences.v1';
+// 与 DetailsPage 同一个偏好键（创作工作台共享设定页偏好面）；
+// 唯一来源在 `lib/settings/page-preferences`。
+const DETAILS_PREFERENCE_KEY = DETAILS_PREFERENCES_STORAGE_KEY;
 
 export const CreatorPage: React.FC = () => {
   const generationApiIntentLatch = useGenerationApiIntentLatch();

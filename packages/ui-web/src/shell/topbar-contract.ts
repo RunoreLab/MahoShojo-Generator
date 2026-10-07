@@ -72,11 +72,14 @@ export interface TopBarMessagesSummary {
  */
 export const TOPBAR_HOME_HREF = '/';
 export const TOPBAR_MESSAGES_HREF = '/messages';
+/** 设置入口（齿轮）：独立于账号菜单挂载——设备设置不要求登录也可达。 */
+export const TOPBAR_SETTINGS_HREF = '/settings';
 export const TOPBAR_ACCOUNT_LINK_HREFS = ['/me', '/character-manager'] as const;
 
 export const TOPBAR_PRODUCT_HREFS: readonly string[] = [
   TOPBAR_HOME_HREF,
   TOPBAR_MESSAGES_HREF,
+  TOPBAR_SETTINGS_HREF,
   ...TOPBAR_ACCOUNT_LINK_HREFS,
 ];
 

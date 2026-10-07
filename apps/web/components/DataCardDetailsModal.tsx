@@ -14,6 +14,7 @@ import { buildTitleDisplay } from '@/lib/text';
 import Badge from '@/components/badge/Badge';
 import type { BadgeDefinition } from '@/types/badge';
 import type { OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
+import { isReducedMotionActive } from '@mahoshojo/ui-web/device-preferences';
 
 type ApiTag = {
   id: string;
@@ -489,9 +490,9 @@ export default function DataCardDetailsModal({
 
   useEffect(() => {
     if (!isOpen || !isEditingTags) return;
-    const prefersReducedMotion = typeof window !== 'undefined'
-      && window.matchMedia
-      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // 减少动效读共享 `data-motion` 根标记：系统偏好与设置页显式「减少」
+    // 经同一标记表达（DESK-SET-007），不再各自查询 matchMedia。
+    const prefersReducedMotion = isReducedMotionActive();
     if (tagSectionRef.current) {
       tagSectionRef.current.scrollIntoView({
         behavior: prefersReducedMotion ? 'auto' : 'smooth',

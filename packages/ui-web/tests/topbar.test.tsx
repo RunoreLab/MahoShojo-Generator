@@ -91,7 +91,7 @@ describe('ProductTopBar', () => {
     renderTopBar({ pathname: '/arena' });
     const html = container.innerHTML;
 
-    for (const label of ['返回首页', '全站主导航', '外观设置', '消息中心', '打开导航菜单']) {
+    for (const label of ['返回首页', '全站主导航', '外观设置', '消息中心', '设置', '打开导航菜单']) {
       expect(html).toContain(`aria-label="${label}"`);
     }
     expect(html).not.toContain('role="menu"');

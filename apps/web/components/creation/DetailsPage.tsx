@@ -16,6 +16,7 @@ import {
   collectQuestionnaireAnswerExportItems,
 } from '@mahoshojo/domain/questionnaire-answer-export';
 import { useAppRouterAdapter } from '@/lib/app-router-adapter';
+import { DETAILS_PREFERENCES_STORAGE_KEY } from '@/lib/settings/page-preferences';
 import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import {
@@ -149,7 +150,9 @@ const resolveDetailsJsonFileName = (data: MagicalGirlDetails): string =>
   `魔法少女_${data.codename?.replace(/[^a-z0-9一-龥]/gi, '_') || 'data'}.json`;
 
 const LOCAL_STORAGE_KEY = 'magicalGirlAnswersDraft'; // 定义本地存储的键
-const DETAILS_PREFERENCE_KEY = 'mahoshojo.details.preferences.v1';
+// 偏好存储键的唯一来源在 `lib/settings/page-preferences`——设置页与本页
+// 读写同一个键，两处声明同一字面量会漂移。
+const DETAILS_PREFERENCE_KEY = DETAILS_PREFERENCES_STORAGE_KEY;
 
 export const DetailsPage: React.FC = () => {
   const generationApiIntentLatch = useGenerationApiIntentLatch();

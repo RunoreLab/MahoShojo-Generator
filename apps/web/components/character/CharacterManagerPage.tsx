@@ -1633,7 +1633,7 @@ export const CharacterManagerPage: React.FC = () => {
                                                 ) : null}
                                                 <div className="mt-2 flex flex-wrap gap-2">
                                                     <Link
-                                                        href="/me?tab=settings"
+                                                        href="/settings?section=account"
                                                         className="rounded bg-white px-2 py-1 text-[11px] text-yellow-900 hover:bg-yellow-100"
                                                     >
                                                         去个人页完成迁移
@@ -2098,7 +2098,7 @@ export const CharacterManagerPage: React.FC = () => {
                                 </button>
                             ) : null}
                             <Link
-                                href="/me?tab=settings"
+                                href="/settings?section=account"
                                 onClick={() => setShowLegacyMigrationReminderModal(false)}
                                 className="rounded bg-pink-600 px-3 py-1.5 text-sm text-white hover:bg-pink-700"
                             >

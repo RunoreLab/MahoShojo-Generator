@@ -9,6 +9,7 @@ import {
   topBarEntryAvailability,
   TOPBAR_HOME_HREF,
   TOPBAR_MESSAGES_HREF,
+  TOPBAR_SETTINGS_HREF,
   type TopBarAccountState,
   type TopBarMessagesSummary,
   type TopBarNavigate,
@@ -17,6 +18,7 @@ import {
 } from './topbar-contract';
 import { TopBarMessageButton } from './TopBarMessageButton';
 import { TopBarMobileDrawer } from './TopBarMobileDrawer';
+import { TopBarSettingsButton } from './TopBarSettingsButton';
 import { TopBarThemeMenu } from './TopBarThemeMenu';
 import { TopBarUserMenu } from './TopBarUserMenu';
 
@@ -227,6 +229,12 @@ export function ProductTopBar({
 
           <div className="ml-auto flex items-center gap-2">
             <TopBarThemeMenu />
+            <TopBarSettingsButton
+              availability={readCapability(capabilities, TOPBAR_SETTINGS_HREF)}
+              onNavigate={onNavigate}
+              resolveInternalHref={resolveInternalHref}
+              unavailable={unavailable}
+            />
             <TopBarMessageButton
               availability={readCapability(capabilities, TOPBAR_MESSAGES_HREF)}
               summary={messages}

@@ -32,6 +32,7 @@ describe('navigation config', () => {
       '/magic-tavern',
       '/magic-tea-party',
       '/me',
+      '/settings',
       '/badge-manager',
       '/redeem',
       '/password-recovery',

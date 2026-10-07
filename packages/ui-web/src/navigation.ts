@@ -52,6 +52,7 @@ export const TOPBAR_COVERED_ROUTES = [
   '/magic-tavern',
   '/magic-tea-party',
   '/me',
+  '/settings',
   '/badge-manager',
   '/redeem',
   '/password-recovery',

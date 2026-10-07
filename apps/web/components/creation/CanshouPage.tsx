@@ -23,6 +23,7 @@ import {
   QuestionnaireSelectionPanel,
 } from '@/components/questionnaire/QuestionnaireSelectionPanel';
 import { useAppRouterAdapter } from '@/lib/app-router-adapter';
+import { CANSHOU_PREFERENCES_STORAGE_KEY } from '@/lib/settings/page-preferences';
 import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
@@ -117,7 +118,8 @@ const resolveCanshouJsonFileName = (data: CanshouResultPayload): string =>
   `残兽档案_${(data.name || 'data').replace(/[^a-z0-9一-龥]/gi, '_')}.json`;
 
 const LOCAL_STORAGE_KEY = 'canshouAnswersDraft'; // 定义本地存储的键
-const CANSHOU_PREFERENCE_KEY = 'mahoshojo.canshou.preferences.v1';
+// 偏好存储键的唯一来源在 `lib/settings/page-preferences`。
+const CANSHOU_PREFERENCE_KEY = CANSHOU_PREFERENCES_STORAGE_KEY;
 
 export const CanshouPage: React.FC = () => {
   const generationApiIntentLatch = useGenerationApiIntentLatch();

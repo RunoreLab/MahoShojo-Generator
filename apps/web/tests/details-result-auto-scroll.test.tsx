@@ -88,4 +88,26 @@ describe('details 结果自动滚动', () => {
     await render(true);
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'start' });
   });
+
+  it('data-motion 根标记（设置页显式「减少」）同样退化为瞬时滚动', async () => {
+    document.documentElement.dataset.motion = 'reduce';
+    currentTop = window.innerHeight + 400;
+    await render(true);
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'start' });
+    delete document.documentElement.dataset.motion;
+  });
+
+  it('设备偏好关闭「结果自动定位」后不滚动，重新开启对新会话生效', async () => {
+    window.localStorage.setItem('mahoshojo.result-auto-scroll', 'off');
+    currentTop = window.innerHeight + 400;
+    await render(true);
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    // 重开 + 新结果会话（先清空再出现）→ 恢复定位。
+    window.localStorage.setItem('mahoshojo.result-auto-scroll', 'on');
+    await render(false);
+    await render(true);
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+    window.localStorage.removeItem('mahoshojo.result-auto-scroll');
+  });
 });

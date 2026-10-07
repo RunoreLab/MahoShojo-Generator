@@ -333,10 +333,14 @@ const localLibraryRoute = createRoute({
   component: lazyRouteComponent(() => import('./local-library-page'), 'DesktopLocalLibrary'),
 });
 
-/** Provider 与运行时信息只在进入设置时加载。 */
+/** Provider 与运行时信息只在进入设置时加载。`?section=` 是与 Web `/settings` 共用的分组深链。 */
 const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/settings',
+  validateSearch: (search: Record<string, unknown>): { section?: string } => {
+    const section = searchParamText(search.section);
+    return section === undefined ? {} : { section };
+  },
   component: lazyRouteComponent(() => import('./settings-page'), 'DesktopSettings'),
 });
 

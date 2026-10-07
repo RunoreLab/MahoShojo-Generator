@@ -1,0 +1,263 @@
+/**
+ * 设置壳与页偏好 adapter 的纯逻辑断言（D5.1-S1 / DESK-SET-003 / DESK-SET-007）。
+ *
+ * 这里守三条不变量：
+ *
+ * 1. **分组骨架两端一致**——`SETTINGS_GROUPS` 的 id 集合与顺序是两宿主的公共
+ *    约定，`?section=` 深链只能在登记分组内取锚。
+ * 2. **adapter 是页面存储的唯一门面**——blob 形态整键读写；fields 形态只在
+ *    文档内做字段级手术：重置只删登记的偏好键，草稿/结果/未知字段原样保留；
+ *    损坏文档拒绝手术而不是猜着写。
+ * 3. **字段登记表如实**——wired 项必须指到真实 owner；planned 项不得提前
+ *    出现在设置页（登记表是审查对照面，不是渲染源）。
+ */
+import { describe, expect, it, vi } from 'vitest';
+
+import {
+  SETTINGS_GROUP_IDS,
+  SETTINGS_GROUPS,
+  isSettingsGroupId,
+  settingsGroupAnchorId,
+} from '../src/settings/groups';
+import {
+  createPagePreferencesAdapter,
+  type PagePreferenceSource,
+  type SettingsStorageLike,
+} from '../src/settings/page-preferences';
+import { SETTINGS_FIELD_REGISTRY } from '../src/settings/registry';
+
+const createMemoryStorage = (): SettingsStorageLike & { dump(): Record<string, string> } => {
+  const map = new Map<string, string>();
+  return {
+    getItem: (key) => map.get(key) ?? null,
+    setItem: (key, value) => void map.set(key, value),
+    removeItem: (key) => void map.delete(key),
+    dump: () => Object.fromEntries(map),
+  };
+};
+
+const BLOB_SOURCE: PagePreferenceSource = {
+  pageId: 'details',
+  title: '设定生成（/details）',
+  pagePath: '/details',
+  storageKey: 'test.details.preferences.v1',
+  scope: 'blob',
+  fields: [
+    { key: 'imageSaveMode', label: '设定长图保存方式', kind: 'select', options: [
+      { value: 'download', label: '一键下载' },
+      { value: 'modal', label: '预览弹窗保存' },
+    ] },
+    { key: 'showDetails', label: '默认展开「设定说明」', kind: 'boolean' },
+  ],
+};
+
+const FIELDS_SOURCE: PagePreferenceSource = {
+  pageId: 'details',
+  title: '设定生成（/details）',
+  pagePath: '/details',
+  storageKey: 'test.desktop.details.draft.v1',
+  scope: 'fields',
+  fields: [
+    { key: 'language', label: '生成语言', kind: 'readonly', notResettable: true },
+    { key: 'imageSaveMode', label: '设定长图保存方式', kind: 'select', options: [
+      { value: 'download', label: '一键下载' },
+      { value: 'modal', label: '预览弹窗保存' },
+    ] },
+    { key: 'showDetails', label: '默认展开「设定说明」', kind: 'boolean' },
+    { key: 'questionnaireSelections', label: '记住的问卷选择', kind: 'count' },
+  ],
+};
+
+describe('settings groups', () => {
+  it('keeps a stable unique group id set shared by both hosts', () => {
+    expect(new Set(SETTINGS_GROUP_IDS).size).toBe(SETTINGS_GROUP_IDS.length);
+    expect(SETTINGS_GROUP_IDS).toEqual([
+      'account',
+      'appearance',
+      'generation',
+      'online',
+      'data',
+      'advanced',
+    ]);
+    expect(SETTINGS_GROUPS.map((group) => group.label)).toHaveLength(SETTINGS_GROUP_IDS.length);
+  });
+
+  it('validates deep-link section values and builds anchors from group ids', () => {
+    expect(isSettingsGroupId('appearance')).toBe(true);
+    expect(isSettingsGroupId('appearance ')).toBe(false);
+    expect(isSettingsGroupId('__proto__')).toBe(false);
+    expect(isSettingsGroupId(undefined)).toBe(false);
+    expect(settingsGroupAnchorId('generation')).toBe('settings-generation');
+  });
+});
+
+describe('page preferences adapter — blob scope', () => {
+  it('reports empty when the page has never written preferences', () => {
+    const adapter = createPagePreferencesAdapter(BLOB_SOURCE, createMemoryStorage());
+    expect(adapter.read()).toEqual({ status: 'empty' });
+  });
+
+  it('writes a single field into the page-owned blob and reads it back', () => {
+    const storage = createMemoryStorage();
+    const adapter = createPagePreferencesAdapter(BLOB_SOURCE, storage);
+
+    expect(adapter.writeField('imageSaveMode', 'modal')).toBe(true);
+
+    const read = adapter.read();
+    expect(read.status).toBe('ready');
+    if (read.status === 'ready') {
+      expect(read.values.imageSaveMode).toBe('modal');
+    }
+    // 写的是页面自己的键——页面读到的必然是同一个值。
+    expect(JSON.parse(storage.dump()[BLOB_SOURCE.storageKey])).toEqual({ imageSaveMode: 'modal' });
+  });
+
+  it('only exposes declared fields — unknown keys stay out of values but survive reset-free writes', () => {
+    const storage = createMemoryStorage();
+    storage.setItem(BLOB_SOURCE.storageKey, JSON.stringify({ imageSaveMode: 'modal', futureField: 42 }));
+    const adapter = createPagePreferencesAdapter(BLOB_SOURCE, storage);
+
+    const read = adapter.read();
+    if (read.status !== 'ready') throw new Error('expected ready');
+    expect(read.values).toEqual({ imageSaveMode: 'modal' });
+
+    // 写另一个字段不得抹掉未登记键（向前兼容：未来版本新增字段不被本切片破坏）。
+    expect(adapter.writeField('showDetails', false)).toBe(true);
+    expect(JSON.parse(storage.dump()[BLOB_SOURCE.storageKey])).toEqual({
+      imageSaveMode: 'modal',
+      futureField: 42,
+      showDetails: false,
+    });
+  });
+
+  it('blob reset removes the whole key — the blob is all preferences, nothing else to spare', () => {
+    const storage = createMemoryStorage();
+    storage.setItem(BLOB_SOURCE.storageKey, JSON.stringify({ imageSaveMode: 'modal', futureField: 1 }));
+    const adapter = createPagePreferencesAdapter(BLOB_SOURCE, storage);
+
+    expect(adapter.reset()).toBe(true);
+    expect(storage.getItem(BLOB_SOURCE.storageKey)).toBeNull();
+  });
+
+  it('rejects unregistered keys and out-of-contract values without touching storage', () => {
+    const storage = createMemoryStorage();
+    const adapter = createPagePreferencesAdapter(BLOB_SOURCE, storage);
+
+    expect(() => adapter.writeField('answers', [])).toThrow(/未登记/);
+    expect(() => adapter.writeField('imageSaveMode', 'teleport')).toThrow(/登记选项/);
+    expect(() => adapter.writeField('showDetails', 'yes')).toThrow(/布尔/);
+    expect(adapter.read()).toEqual({ status: 'empty' });
+  });
+
+  it('corrupted blob: read reports corrupted, writes refuse, reset still safe (whole key is preferences)', () => {
+    const storage = createMemoryStorage();
+    storage.setItem(BLOB_SOURCE.storageKey, '{not json');
+    const adapter = createPagePreferencesAdapter(BLOB_SOURCE, storage);
+
+    expect(adapter.read()).toEqual({ status: 'corrupted' });
+    expect(adapter.writeField('showDetails', true)).toBe(false);
+    expect(adapter.reset()).toBe(true);
+    expect(storage.getItem(BLOB_SOURCE.storageKey)).toBeNull();
+  });
+});
+
+describe('page preferences adapter — fields scope', () => {
+  const seedDraft = () =>
+    JSON.stringify({
+      version: 1,
+      answers: { q1: '答' },
+      output: { some: 'result' },
+      language: 'zh-CN',
+      imageSaveMode: 'download',
+      showDetails: true,
+      allowMultipleQuestionnaires: false,
+      questionnaireSelections: ['a', 'b'],
+      futureUnknown: { keep: 'me' },
+    });
+
+  it('reset removes only declared preference keys — draft, output and unknown fields survive', () => {
+    const storage = createMemoryStorage();
+    storage.setItem(FIELDS_SOURCE.storageKey, seedDraft());
+    const adapter = createPagePreferencesAdapter(FIELDS_SOURCE, storage);
+
+    expect(adapter.reset()).toBe(true);
+    const doc = JSON.parse(storage.dump()[FIELDS_SOURCE.storageKey]);
+    // 草稿字段与未知字段原样保留（DESK-SET-003）。
+    expect(doc.answers).toEqual({ q1: '答' });
+    expect(doc.output).toEqual({ some: 'result' });
+    expect(doc.futureUnknown).toEqual({ keep: 'me' });
+    // `language` 登记为 notResettable——草稿自有字段不属于「页偏好」。
+    expect(doc.language).toBe('zh-CN');
+    // 偏好键被删。
+    for (const key of ['imageSaveMode', 'showDetails', 'questionnaireSelections']) {
+      expect(doc).not.toHaveProperty(key);
+    }
+  });
+
+  it('corrupted draft refuses surgery — protecting content we cannot parse', () => {
+    const storage = createMemoryStorage();
+    storage.setItem(FIELDS_SOURCE.storageKey, 'corrupted!');
+    const adapter = createPagePreferencesAdapter(FIELDS_SOURCE, storage);
+
+    expect(adapter.read()).toEqual({ status: 'corrupted' });
+    expect(adapter.writeField('showDetails', true)).toBe(false);
+    expect(adapter.reset()).toBe(false);
+    // 文档原样还在——设置页不碰看不懂的草稿。
+    expect(storage.getItem(FIELDS_SOURCE.storageKey)).toBe('corrupted!');
+  });
+
+  it('writeField preserves existing document content outside the written key', () => {
+    const storage = createMemoryStorage();
+    storage.setItem(FIELDS_SOURCE.storageKey, seedDraft());
+    const adapter = createPagePreferencesAdapter(FIELDS_SOURCE, storage);
+
+    expect(adapter.writeField('imageSaveMode', 'modal')).toBe(true);
+    const doc = JSON.parse(storage.dump()[FIELDS_SOURCE.storageKey]);
+    expect(doc.imageSaveMode).toBe('modal');
+    expect(doc.answers).toEqual({ q1: '答' });
+    expect(doc.language).toBe('zh-CN');
+  });
+});
+
+describe('page preferences adapter — subscription', () => {
+  it('notifies listeners on same-tab writes and resets', () => {
+    const adapter = createPagePreferencesAdapter(BLOB_SOURCE, createMemoryStorage());
+    const listener = vi.fn();
+    const unsubscribe = adapter.subscribe(listener);
+
+    adapter.writeField('showDetails', true);
+    adapter.reset();
+    expect(listener).toHaveBeenCalledTimes(2);
+
+    unsubscribe();
+    adapter.writeField('showDetails', false);
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('settings field registry', () => {
+  it('keeps unique field ids', () => {
+    const ids = SETTINGS_FIELD_REGISTRY.map((record) => record.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('every wired record points at a real owner and a registered group', () => {
+    for (const record of SETTINGS_FIELD_REGISTRY) {
+      expect(SETTINGS_GROUP_IDS).toContain(record.group);
+      if (record.status === 'wired') {
+        expect(record.owner.kind).not.toBe('config-json');
+      }
+    }
+    // 登记表必须覆盖本切片三个真值源。
+    const wiredIds = SETTINGS_FIELD_REGISTRY.filter((r) => r.status === 'wired').map((r) => r.id);
+    expect(wiredIds).toEqual(
+      expect.arrayContaining([
+        'appearance.colorMode',
+        'appearance.motion',
+        'appearance.resultAutoScroll',
+        'generation.detailsPreferences',
+        'generation.canshouPreferences',
+      ]),
+    );
+  });
+});

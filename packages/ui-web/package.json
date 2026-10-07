@@ -30,6 +30,21 @@
       "import": "./src/color-mode/init.ts",
       "default": "./src/color-mode/init.ts"
     },
+    "./device-preferences": {
+      "types": "./src/device-preferences/index.ts",
+      "import": "./src/device-preferences/index.ts",
+      "default": "./src/device-preferences/index.ts"
+    },
+    "./device-preferences-init": {
+      "types": "./src/device-preferences/init.ts",
+      "import": "./src/device-preferences/init.ts",
+      "default": "./src/device-preferences/init.ts"
+    },
+    "./settings": {
+      "types": "./src/settings/index.ts",
+      "import": "./src/settings/index.ts",
+      "default": "./src/settings/index.ts"
+    },
     "./encyclopedia": {
       "types": "./src/encyclopedia/index.ts",
       "import": "./src/encyclopedia/index.ts",

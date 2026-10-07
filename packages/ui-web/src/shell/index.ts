@@ -6,6 +6,7 @@ export { ProductTopBar } from './ProductTopBar';
 export type { ProductTopBarProps } from './ProductTopBar';
 export { TopBarMessageButton } from './TopBarMessageButton';
 export { TopBarMobileDrawer } from './TopBarMobileDrawer';
+export { TopBarSettingsButton } from './TopBarSettingsButton';
 export { TopBarThemeMenu } from './TopBarThemeMenu';
 export { TopBarUserMenu } from './TopBarUserMenu';
 export {
@@ -14,6 +15,7 @@ export {
   TOPBAR_HOME_HREF,
   TOPBAR_MESSAGES_HREF,
   TOPBAR_PRODUCT_HREFS,
+  TOPBAR_SETTINGS_HREF,
   topBarEntryAvailability,
 } from './topbar-contract';
 export type {
