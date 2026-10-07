@@ -9,6 +9,11 @@
       "import": "./src/admin/audit-text.ts",
       "default": "./src/admin/audit-text.ts"
     },
+    "./auto-review": {
+      "types": "./src/auto-review/index.ts",
+      "import": "./src/auto-review/index.ts",
+      "default": "./src/auto-review/index.ts"
+    },
     "./database-provider": {
       "types": "./src/database-provider.ts",
       "import": "./src/database-provider.ts",
@@ -391,7 +396,8 @@
     "./admin/ai-review-prompt": "./src/admin/ai-review-prompt.ts",
     "./admin/ai-review": "./src/admin/ai-review.ts",
     "./admin/actions/metrics": "./src/admin/actions/metrics.ts",
-    "./admin/actions/moderation": "./src/admin/actions/moderation.ts"
+    "./admin/actions/moderation": "./src/admin/actions/moderation.ts",
+    "./auto-review": "./src/auto-review/index.ts"
   },
   "scripts": {
     "assets:questionnaires": "node scripts/generate-questionnaire-assets.mjs",
