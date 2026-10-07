@@ -40,6 +40,12 @@ export interface DesktopConfigState {
   readonly directory: string | null;
   /** 上次有效文件 `.bak` 是否存在（恢复路径提示）。 */
   readonly backupPresent: boolean;
+  /**
+   * `.invalid` 隔离位是否存在。`fileStatus === 'missing'` 时凭它区分
+   * 「从未创建」与「隔离恢复后落位失败、字节仍在隔离位」——后者提示
+   * 用户去目录手工处置，不按普通 missing 展示。
+   */
+  readonly invalidPresent: boolean;
   readonly fileStatus: 'unknown' | DesktopConfigFileState['status'];
   /** `ok` 文件但域解析 fatal（JSON/顶层形态/version 非 1）。 */
   readonly fileFatal: boolean;
@@ -68,6 +74,7 @@ const INITIAL_STATE: DesktopConfigState = {
   path: null,
   directory: null,
   backupPresent: false,
+  invalidPresent: false,
   fileStatus: 'unknown',
   fileFatal: false,
   publicCacheDegraded: false,
@@ -207,6 +214,7 @@ export class DesktopConfigStore {
         path: null,
         directory: null,
         backupPresent: false,
+        invalidPresent: false,
         fileStatus: 'unknown',
         fileFatal: false,
         // 读不到文件就无法校验缓存策略——按降级口径暂停捕获与淘汰。
@@ -224,6 +232,7 @@ export class DesktopConfigStore {
       path: result.path,
       directory: result.directory,
       backupPresent: result.backupPresent,
+      invalidPresent: result.invalidPresent,
       readError: null,
       // 重载成功即清掉陈旧写入错误——错误描述的是上一次写，不是当前文件。
       saveError: null,
@@ -410,6 +419,14 @@ export class DesktopConfigStore {
         backupPresent:
           this.state.backupPresent
           || (this.state.fileStatus === 'ok' && !this.state.fileFatal),
+        // `.invalid` 对称投影：写入前的文件不可作为有效文件（ok+fatal /
+        // oversized / invalid-utf8）时 native 先把它隔离，写成功后隔离位
+        // 必然存在；其余形态不新增隔离文件，沿用读取时的事实。
+        invalidPresent:
+          this.state.invalidPresent
+          || this.state.fileStatus === 'oversized'
+          || this.state.fileStatus === 'invalid-utf8'
+          || (this.state.fileStatus === 'ok' && this.state.fileFatal),
       });
     } catch (cause) {
       if (cause instanceof DesktopConfigError && cause.code === 'config-conflict') {

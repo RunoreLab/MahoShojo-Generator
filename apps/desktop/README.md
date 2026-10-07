@@ -397,9 +397,13 @@ D5.1-S2）。它是**给人看的**：UTF-8 JSON、顶层 `version: 1`、两空�
 被显式覆盖的不可读文件（fatal/invalid-utf8/oversized）隔离为
 `config.json.invalid` 供手工打捞，不顶替真正的恢复路径——该恢复先把
 原始字节隔离，窗口内主路径可能短暂缺失但字节不丢；落位与缺失首写同为
-no-clobber 创建，隔离期间外部重建的 `config.json` 按 `config-conflict`
-让位而不被覆盖。缺失文件的首次写入走原子 no-clobber 创建，
-`expectedRevision: null` 语义不靠 check-then-create 窗口。
+no-clobber 创建（目标存在即失败，按当前目标平台的底层文件系统语义
+实现，不宣称跨平台原子事务），隔离期间外部重建的 `config.json` 按
+`config-conflict` 让位而不被覆盖；落位发生非冲突型存储失败时不回搬
+`.invalid`——宁可主路径暂缺并报错，也不覆盖隔离窗口里外部可能重建
+的新文件（读取经 `invalidPresent` 如实回显隔离位）。缺失文件的首次
+写入走 no-clobber 创建，`expectedRevision: null` 语义不靠
+check-then-create 窗口。
 
 renderer 可用的命令只有三条，没有任何路径参数（均为 async command +
 `spawn_blocking`，文件 I/O 不占主线程）：

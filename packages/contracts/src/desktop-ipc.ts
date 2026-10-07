@@ -1071,6 +1071,12 @@ export const DesktopConfigReadResultSchema = z
     directory: z.string().min(1),
     /** `.bak` 上次有效文件是否存在（恢复路径，DESK-SET-005）。 */
     backupPresent: z.boolean(),
+    /**
+     * `.invalid` 隔离位是否存在。主文件缺失时凭它区分「从未创建」与
+     * 「隔离恢复后落位失败、字节仍在隔离位」——后者不是普通的 missing
+     * （DESK-SET-005）。
+     */
+    invalidPresent: z.boolean(),
     file: DesktopConfigFileStateSchema,
   })
   .strict();

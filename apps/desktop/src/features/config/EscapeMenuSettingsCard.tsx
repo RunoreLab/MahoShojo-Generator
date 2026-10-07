@@ -9,10 +9,11 @@ import { useDesktopConfig } from './use-desktop-config';
 /**
  * 「Esc 快捷菜单」开关（D5.1-N1，`desktop.escapeMenu.enabled`）。
  *
- * 字段归属外观与交互组、持久化在 `config.json`——与「在线与通知」组共用同一个
+ * 字段归属外观与交互组、持久化在 `config.json`——与其他分组共用同一个
  * `DesktopConfigStore` snapshot，不存在第二份默认值或第二套读写路径。文件不可
- * 编辑（不可作为基底/读取失败）时控件禁用并按默认值生效，诊断展示归「在线与
- * 通知」组的配置文件卡（同一份 diagnostics，不在此处重复渲染）。
+ * 编辑（不可作为基底/读取失败）时控件禁用并按默认值生效；文件诊断归「数据与
+ * 存储」组的 `DesktopConfigFileCard`，写失败/冲突反馈归设置页共同位置的
+ * `DesktopConfigFeedback`（同一份投影，不在此处重复渲染）。
  */
 export const EscapeMenuSettingsCard = () => {
   const { state, editable, setField } = useDesktopConfig();

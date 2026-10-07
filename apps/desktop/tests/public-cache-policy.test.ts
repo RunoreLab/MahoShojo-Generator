@@ -25,6 +25,7 @@ const readResult = (file: Record<string, unknown>) => ({
   path: 'C:\\cfg\\config.json',
   directory: 'C:\\cfg',
   backupPresent: false,
+  invalidPresent: false,
   file,
 });
 
@@ -38,6 +39,7 @@ const stateWith = (overrides: Partial<DesktopConfigState>): DesktopConfigState =
   path: null,
   directory: null,
   backupPresent: false,
+  invalidPresent: false,
   fileStatus: 'ok',
   fileFatal: false,
   publicCacheDegraded: false,

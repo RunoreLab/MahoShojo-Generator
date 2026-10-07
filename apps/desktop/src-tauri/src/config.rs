@@ -9,10 +9,14 @@
 //!   文件 → sync → 原子 replace（正常替换路径目标全程存在旧版或新版之一）。
 //!   `config.json.bak` 只保留**上一个有效文件**；被替换掉的不可读文件先隔离为
 //!   `config.json.invalid` 供手工打捞，不顶替真正的恢复路径——该显式恢复
-//!   先把原始字节挪走，窗口内主路径可能短暂缺失但字节不丢，落位同样
-//!   no-clobber，隔离期间外部重建的 `config.json` 不会被覆盖
-//!   （`DESK-SET-005`）。命令面只有读/写/打开目录三条——renderer 拿不到
-//!   任意文件接口。
+//!   先把原始字节挪走，窗口内主路径可能短暂缺失但字节不丢；落位走
+//!   no-clobber（目标存在即失败，按当前目标平台的底层文件系统语义实现，
+//!   不宣称跨平台原子事务），隔离期间外部重建的 `config.json` 不会被覆盖；
+//!   落位发生非冲突型存储失败时**不回搬** `.invalid`——此刻主路径可能已被
+//!   外部重建，rename 回搬会静默覆盖它。主路径暂缺不是数据丢失：原始字节
+//!   留在隔离位，读取经 `invalid_present` 如实回显供设置页区分「从未创建」
+//!   与「落位失败后仅余隔离文件」（`DESK-SET-005`）。命令面只有读/写/打开
+//!   目录三条——renderer 拿不到任意文件接口。
 //! - **域语义不在此**：字段登记、默认值、非法值降级与诊断定位由
 //!   `contracts/desktop-config` 的 TS schema 承担（UI 与手工修改同一解析）。
 //!   这里只做信封级检查：UTF-8 JSON 对象 + `version == 1`——防止把一份
@@ -115,6 +119,9 @@ pub struct ConfigReadResult {
     pub path: String,
     pub directory: String,
     pub backup_present: bool,
+    /// `.invalid` 隔离位是否存在。主文件缺失时凭它区分「从未创建」与
+    /// 「隔离恢复后落位失败、字节仍在隔离位」——后者不是普通的 missing。
+    pub invalid_present: bool,
     pub file: ConfigFileState,
 }
 
@@ -295,6 +302,7 @@ pub fn read_config(dir: &Path, state: &ConfigState) -> Result<ConfigReadResult, 
         path: target.to_string_lossy().into_owned(),
         directory: dir.to_string_lossy().into_owned(),
         backup_present: backup_path(dir).is_file(),
+        invalid_present: invalid_path(dir).is_file(),
         file: read_file_state(&target)?,
     })
 }
@@ -316,9 +324,10 @@ fn persist_atomically(
     Ok(())
 }
 
-/// 同一条原子落位路径的 no-clobber 变体：目标必须仍不存在。`AlreadyExists`
-/// 说明磁盘在复核之后被外部写者推进——与 revision 复核同一语义，按
-/// `config-conflict` 交还给 UI 重载，而不是静默覆盖外部新版本。
+/// 同一条原子落位路径的 no-clobber 变体：目标必须仍不存在——存在即失败
+/// （按当前目标平台的底层文件系统语义实现，不宣称跨平台原子事务保证）。
+/// `AlreadyExists` 说明磁盘在复核之后被外部写者推进——与 revision 复核同一
+/// 语义，按 `config-conflict` 交还给 UI 重载，而不是静默覆盖外部新版本。
 fn persist_new_atomically(
     temp: tempfile::NamedTempFile,
     target: &Path,
@@ -360,12 +369,11 @@ fn write_file_atomically(target: &Path, bytes: &[u8]) -> Result<(), ConfigError>
 /// 隔离窗口里外部写者可能已重建 `config.json`——落位必须 no-clobber：
 /// `AlreadyExists` 说明磁盘已前进，外部新版本与隔离的原始字节都保留，
 /// 按 `config-conflict` 交还（绝不在此把 `.invalid` 盖回主路径）；其余
-/// 存储失败且 target 仍缺失时，才把 `.invalid` 尽量挪回——字节不丢。
-fn place_after_quarantine(
-    temp: tempfile::NamedTempFile,
-    target: &Path,
-    invalid: &Path,
-) -> Result<(), ConfigError> {
+/// 存储失败同样**不回搬** `.invalid`——此刻 target 可能已被外部重建，
+/// `fs::rename` 在目标存在时可以替换目标，回搬会静默覆盖外部新文件。
+/// 主路径暂缺不是数据丢失：原始字节留在 `.invalid`（读取经
+/// `invalid_present` 如实回显），报存储失败由用户处置。
+fn place_after_quarantine(temp: tempfile::NamedTempFile, target: &Path) -> Result<(), ConfigError> {
     match temp.persist_noclobber(target) {
         Ok(_) => Ok(()),
         Err(persist) if persist.error.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -374,13 +382,13 @@ fn place_after_quarantine(
                 "配置文件已被外部修改；请重新加载后重试",
             ))
         }
-        Err(persist) => {
-            let _ = fs::rename(invalid, target);
-            Err(ConfigError::new(
-                ConfigErrorCode::StorageUnavailable,
-                format!("配置落盘失败：{}", persist.error),
-            ))
-        }
+        Err(persist) => Err(ConfigError::new(
+            ConfigErrorCode::StorageUnavailable,
+            format!(
+                "配置落盘失败：{}；原文件字节保留在 {CONFIG_INVALID_FILE_NAME}",
+                persist.error,
+            ),
+        )),
     }
 }
 
@@ -388,8 +396,9 @@ fn place_after_quarantine(
 ///
 /// 顺序是「临时文件写完 sync → 按当前文件形态分流 → `persist` 原子落位」：
 ///
-/// - 文件缺失 → `persist_noclobber` 原子创建，`expectedRevision: null`
-///   的「必须仍不存在」靠 no-clobber 语义闭合，不靠 check-then-create；
+/// - 文件缺失 → `persist_noclobber` no-clobber 创建（目标平台上按底层
+///   文件系统语义实现），`expectedRevision: null` 的「必须仍不存在」靠
+///   no-clobber 语义闭合，不靠 check-then-create；
 /// - 当前文件过同一信封检查 → 先原子把它写成 `.bak`（last known valid），
 ///   再替换目标；
 /// - 当前文件不可作为有效文件（fatal/invalid-utf8/oversized）→ 挪到
@@ -397,8 +406,10 @@ fn place_after_quarantine(
 ///
 /// 崩溃语义：正常替换是 `persist` 单步 old-or-new——进程崩溃不会留下
 /// 半写的主文件；坏文件显式恢复先把原始字节隔离到 `.invalid`，该窗口
-/// 主路径可能短暂缺失但原始字节不丢。临时文件已 `sync_all`，但未做
-/// 父目录 fsync——不宣称对突然掉电具备完整 durable transaction 保证。
+/// 主路径可能短暂缺失但原始字节不丢；隔离后落位失败不再自动回搬——
+/// 宁可主路径暂缺并报错，也不覆盖隔离窗口里外部可能重建的新文件。
+/// 临时文件已 `sync_all`，但未做父目录 fsync——不宣称对突然掉电具备
+/// 完整 durable transaction 保证。
 pub fn write_config(
     dir: &Path,
     state: &ConfigState,
@@ -437,8 +448,9 @@ pub fn write_config(
 
     match &current {
         ConfigFileState::Missing => {
-            // check-then-create 的窗口由 no-clobber 原子语义闭合：期间被
-            // 外部建出的文件按冲突交还，而不是被静默覆盖。
+            // check-then-create 的窗口由 no-clobber 语义闭合（目标平台上按
+            // 底层文件系统实现）：期间被外部建出的文件按冲突交还，而不是
+            // 被静默覆盖。
             persist_new_atomically(temp, &target, "配置落盘失败")?;
         }
         ConfigFileState::Ok { content, .. } if envelope_satisfied(content) => {
@@ -459,7 +471,7 @@ pub fn write_config(
             }
             fs::rename(&target, &invalid)
                 .map_err(|error| ConfigError::storage("隔离无效配置文件失败", &error))?;
-            place_after_quarantine(temp, &target, &invalid)?;
+            place_after_quarantine(temp, &target)?;
         }
     }
 
@@ -654,9 +666,7 @@ mod tests {
         let mut temp = tempfile::NamedTempFile::new_in(dir.path()).unwrap();
         temp.write_all(b"{\"version\":1,\"ours\":true}").unwrap();
 
-        let error =
-            place_after_quarantine(temp, &config_path(dir.path()), &invalid_path(dir.path()))
-                .unwrap_err();
+        let error = place_after_quarantine(temp, &config_path(dir.path())).unwrap_err();
 
         assert_eq!(error.code, ConfigErrorCode::ConfigConflict);
         assert_eq!(
@@ -676,7 +686,7 @@ mod tests {
         let mut temp = tempfile::NamedTempFile::new_in(dir.path()).unwrap();
         temp.write_all(b"{\"version\":1}").unwrap();
 
-        place_after_quarantine(temp, &config_path(dir.path()), &invalid_path(dir.path())).unwrap();
+        place_after_quarantine(temp, &config_path(dir.path())).unwrap();
 
         assert_eq!(
             fs::read_to_string(config_path(dir.path())).unwrap(),
@@ -687,6 +697,41 @@ mod tests {
             fs::read_to_string(invalid_path(dir.path())).unwrap(),
             "{broken"
         );
+    }
+
+    #[test]
+    fn a_non_conflict_place_failure_keeps_invalid_quarantined_instead_of_renaming_back() {
+        let dir = tempfile::tempdir().unwrap();
+        // 确定性失败点：删掉临时文件的底层路径，`persist_noclobber` 报
+        // NotFound——「目标仍缺失但落位失败」的非 AlreadyExists 分支。
+        // 此刻若外部在主路径重建了文件，rename 回搬会静默覆盖它：新语义
+        // 不冒这个险——`.invalid` 字节留在隔离位，主路径保持缺失并报错。
+        fs::write(invalid_path(dir.path()), "{broken").unwrap();
+        let mut temp = tempfile::NamedTempFile::new_in(dir.path()).unwrap();
+        temp.write_all(b"{\"version\":1}").unwrap();
+        fs::remove_file(temp.path()).unwrap();
+
+        let error = place_after_quarantine(temp, &config_path(dir.path())).unwrap_err();
+
+        assert_eq!(error.code, ConfigErrorCode::StorageUnavailable);
+        assert!(!config_path(dir.path()).exists());
+        assert_eq!(
+            fs::read_to_string(invalid_path(dir.path())).unwrap(),
+            "{broken"
+        );
+    }
+
+    #[test]
+    fn read_reports_invalid_present_so_missing_is_not_confused_with_never_created() {
+        let dir = tempfile::tempdir().unwrap();
+        // 「config.json 缺失 + .invalid 存在」是隔离落位失败后的形态——读取
+        // 如实回显 invalid_present，设置页不把它当成普通「从未创建」。
+        assert!(!read_config(dir.path(), &state()).unwrap().invalid_present);
+
+        fs::write(invalid_path(dir.path()), "{broken").unwrap();
+        let result = read_config(dir.path(), &state()).unwrap();
+        assert!(matches!(result.file, ConfigFileState::Missing));
+        assert!(result.invalid_present);
     }
 
     #[test]

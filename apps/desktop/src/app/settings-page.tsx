@@ -13,6 +13,8 @@ import {
 import { DESKTOP_PAGE_PREFERENCE_SOURCES } from './settings-page-preferences';
 import { AccountPanel } from '../features/account/AccountPanel';
 import { AiConnectionsPanel } from '../features/ai-config/AiConnectionsPanel';
+import { DesktopConfigFeedback } from '../features/config/DesktopConfigFeedback';
+import { DesktopConfigFileCard } from '../features/config/DesktopConfigFileCard';
 import { EscapeMenuSettingsCard } from '../features/config/EscapeMenuSettingsCard';
 import { OnlineSettingsSection } from '../features/config/OnlineSettingsSection';
 import { PublicCacheSettingsCard } from '../features/public-cache/PublicCacheSettingsCard';
@@ -127,6 +129,7 @@ const DataSection = () => (
       actions={<SettingsPageLink href="/local-library">打开本地库</SettingsPageLink>}
     />
     <PublicCacheSettingsCard />
+    <DesktopConfigFileCard />
   </>
 );
 
@@ -137,6 +140,11 @@ const DataSection = () => (
  * 账号/AI 连接/诊断面板 + 各页草稿内偏好字段的 adapter。设备级设置
  * （外观、页偏好）全部落 localStorage/草稿，不触发账号查询，离线可改。
  * `?section=<group>` 是与 Web `/settings` 一致的章节深链。
+ *
+ * config.json 字段已跨分组分布（外观的 Esc 菜单、在线的公告/外链、数据
+ * 的公开缓存）：写失败/冲突反馈是整份文件级状态，归页面共同位置的
+ * `DesktopConfigFeedback` sticky 横幅（无反馈时不渲染、不占位），文件
+ * 诊断归「数据与存储」组的 `DesktopConfigFileCard`（D5.1-N1-r1）。
  */
 export const DesktopSettings = () => {
   const search = useSearch({ strict: false }) as { section?: string };
@@ -144,6 +152,7 @@ export const DesktopSettings = () => {
 
   return (
     <section data-testid="page-settings" className="magic-background-white flex-1">
+      <DesktopConfigFeedback />
       <SettingsPage
       section={section}
       intro="设备级设置即时生效并保存在本机；账号与云端设置需要登录。"

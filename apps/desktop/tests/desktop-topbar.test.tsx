@@ -48,6 +48,7 @@ const { invokeMock, defaultInvokeImpl } = vi.hoisted(() => {
         path: 'C:\\cfg\\config.json',
         directory: 'C:\\cfg',
         backupPresent: false,
+        invalidPresent: false,
         file: { status: 'missing' as const },
       };
     }

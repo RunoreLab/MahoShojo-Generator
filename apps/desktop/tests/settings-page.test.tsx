@@ -32,6 +32,7 @@ const { invokeMock, defaultInvokeImpl } = vi.hoisted(() => {
         path: 'C:\\cfg\\config.json',
         directory: 'C:\\cfg',
         backupPresent: false,
+        invalidPresent: false,
         file: { status: 'missing' as const },
       };
     }
@@ -297,6 +298,7 @@ describe('desktop settings shell', () => {
           path: 'C:\\cfg\\config.json',
           directory: 'C:\\cfg',
           backupPresent: false,
+          invalidPresent: false,
           file:
             reads === 1
               ? {
@@ -349,6 +351,67 @@ describe('desktop settings shell', () => {
     };
     expect(doc.externalLinks?.confirmContentLinks).toBe(false);
     expect(container.querySelector('[data-testid="config-conflicted-draft"]')).toBeNull();
+  });
+
+  it('config-conflict on a non-online field surfaces the page-level draft banner (D5.1-N1-r1)', async () => {
+    // 回归：Esc 开关在「外观与交互」组，但冲突草稿是文件级状态——反馈归
+    // 页面共同位置的横幅，用户在哪个分组都能看到，不再藏进「在线与通知」。
+    let writes = 0;
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'desktop_config_read') {
+        return {
+          path: 'C:\\cfg\\config.json',
+          directory: 'C:\\cfg',
+          backupPresent: false,
+          invalidPresent: false,
+          file: {
+            status: 'ok' as const,
+            revision: `sha256:${'a'.repeat(64)}`,
+            content: '{"version":1}',
+          },
+        };
+      }
+      if (command === 'desktop_config_write') {
+        writes += 1;
+        throw { code: 'config-conflict', message: '配置文件已被外部修改；请重新加载后重试' };
+      }
+      return defaultInvokeImpl(command);
+    });
+    await mountAt('/settings?section=appearance');
+
+    const toggle = [...container.querySelectorAll('[role="switch"]')].find(
+      (el) => el.getAttribute('aria-label') === 'Esc 快捷菜单',
+    );
+    await click(toggle ?? null);
+
+    const banner = container.querySelector('[data-testid="config-conflicted-draft"]');
+    expect(banner).not.toBeNull();
+    expect(banner?.textContent).toContain('Esc 快捷菜单');
+    // 横幅在页面级（不属于任一分组卡内），且保留 reapply/discard 动作。
+    expect(container.querySelector('[data-testid="config-feedback"]')).not.toBeNull();
+    expect(banner?.textContent).toContain('基于最新内容重新应用');
+    expect(writes).toBe(1);
+  });
+
+  it('missing file with an .invalid quarantine leftover is reported, not read as never-created', async () => {
+    // 回归（D5.1-S2-r3）：隔离恢复后落位失败的形态是「config.json 缺失 +
+    // .invalid 存在」——设置页如实说明，不把它混同普通「从未创建」。
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'desktop_config_read') {
+        return {
+          path: 'C:\\cfg\\config.json',
+          directory: 'C:\\cfg',
+          backupPresent: false,
+          invalidPresent: true,
+          file: { status: 'missing' as const },
+        };
+      }
+      return defaultInvokeImpl(command);
+    });
+    await mountAt('/settings?section=data');
+
+    expect(container.querySelector('[data-testid="config-invalid-present"]')).not.toBeNull();
+    expect(container.textContent).toContain('config.json.invalid');
   });
 
   it('device controls write only localStorage — no account or network IPC', async () => {

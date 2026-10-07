@@ -268,6 +268,7 @@ describe('desktop config IPC envelope', () => {
       path: '/cfg/config.json',
       directory: '/cfg',
       backupPresent: false,
+      invalidPresent: true,
       file: { status: 'missing' },
     });
     expect(result.success).toBe(true);

@@ -23,6 +23,7 @@ describe('desktop config bridge', () => {
       path: 'C:\\cfg\\config.json',
       directory: 'C:\\cfg',
       backupPresent: true,
+      invalidPresent: true,
       file: { status: 'ok', revision: REV, content: '{"version":1}' },
     }));
 
@@ -31,6 +32,7 @@ describe('desktop config bridge', () => {
     expect(invoke).toHaveBeenCalledWith('desktop_config_read');
     expect(result.file).toMatchObject({ status: 'ok', revision: REV });
     expect(result.backupPresent).toBe(true);
+    expect(result.invalidPresent).toBe(true);
   });
 
   it('write sends {request} envelope with expectedRevision and returns the new revision', async () => {

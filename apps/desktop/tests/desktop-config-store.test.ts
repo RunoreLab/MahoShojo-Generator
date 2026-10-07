@@ -28,6 +28,7 @@ const readResult = (file: Record<string, unknown>) => ({
   path: 'C:\\cfg\\config.json',
   directory: 'C:\\cfg',
   backupPresent: false,
+  invalidPresent: false,
   file,
 });
 
