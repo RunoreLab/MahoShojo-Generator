@@ -1,10 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { InvokeFn } from '../src/platform/cloud-bridge';
+import { DesktopCloudError, type InvokeFn } from '../src/platform/cloud-bridge';
 import { MESSAGES_REQUEST_COMMAND, requestMessagesRoute } from '../src/platform/messages-bridge';
 import {
+  isMessagesSessionRejected,
   listMessages,
+  markAllMessagesRead,
   markMessagesRead,
+  MessagesApiError,
+  MessagesSessionRejectedError,
   readMessagesSummary,
 } from '../src/features/messages/messages-api';
 import {
@@ -105,6 +109,63 @@ describe('messages api adapters', () => {
       name: 'MessagesApiError',
       status: 0,
     });
+  });
+
+  it('200 + isAuthenticated:false 投影为会话被拒（d-1-r1）', async () => {
+    // 服务端允许匿名访问 summary/list：本机有账号却拿到匿名 DTO = 服务端
+    // 已不认当前凭据——必须把「匿名零未读」挡在缓存外并按会话收束。
+    const anonymousSummary = {
+      ...SUMMARY,
+      unreadTotal: 0,
+      siteUnread: 0,
+      directUnread: 0,
+      isAuthenticated: false,
+      hasCrowdReviewPending: false,
+      crowdReviewPrompt: null,
+    };
+    const invoke = vi.fn(async () => ({ status: 200, body: anonymousSummary }));
+    await expect(readMessagesSummary(invoke)).rejects.toMatchObject({
+      name: 'MessagesSessionRejectedError',
+    });
+
+    const anonymousList = { ...LIST_PAGE, isAuthenticated: false };
+    const listInvoke = vi.fn(async () => ({ status: 200, body: anonymousList }));
+    await expect(
+      listMessages(listInvoke, { filter: 'all', expectAuthenticated: true }),
+    ).rejects.toMatchObject({ name: 'MessagesSessionRejectedError' });
+    // 匿名调用不受 expectAuthenticated 影响：公开全站列表照常返回。
+    await expect(listMessages(listInvoke, { filter: 'all' })).resolves.toMatchObject({
+      isAuthenticated: false,
+    });
+  });
+
+  it('HTTP 401 统一投影为会话被拒（native 已清凭据）', async () => {
+    const invoke = vi.fn(async () => ({ status: 401, body: { error: '未登录' } }));
+    await expect(readMessagesSummary(invoke)).rejects.toMatchObject({
+      name: 'MessagesSessionRejectedError',
+    });
+    await expect(listMessages(invoke, { filter: 'all' })).rejects.toMatchObject({
+      name: 'MessagesSessionRejectedError',
+    });
+    await expect(markMessagesRead(invoke, ['user:1'])).rejects.toMatchObject({
+      name: 'MessagesSessionRejectedError',
+    });
+    await expect(markAllMessagesRead(invoke)).rejects.toMatchObject({
+      name: 'MessagesSessionRejectedError',
+    });
+  });
+
+  it('isMessagesSessionRejected 识别三种拒收来源，普通失败不误判', () => {
+    expect(isMessagesSessionRejected(new MessagesSessionRejectedError('x'))).toBe(true);
+    expect(
+      isMessagesSessionRejected(
+        new DesktopCloudError('cloud_messages_request', 'not-authenticated', 'x'),
+      ),
+    ).toBe(true);
+    expect(isMessagesSessionRejected(new MessagesApiError(401, 'x'))).toBe(true);
+    expect(isMessagesSessionRejected(new MessagesApiError(503, 'x'))).toBe(false);
+    expect(isMessagesSessionRejected(new MessagesApiError(0, 'x'))).toBe(false);
+    expect(isMessagesSessionRejected(new Error('x'))).toBe(false);
   });
 
   it('listMessages 组装 filter/limit/cursor 查询', async () => {
@@ -208,6 +269,37 @@ describe('topbar messages summary cache', () => {
 
     const failing = vi.fn(async () => ({ status: 503, body: {} })) as unknown as InvokeFn;
     await refreshMessagesSummary(7, failing, rejected);
+    expect(rejected).toHaveBeenCalledTimes(1);
+  });
+
+  it('200 + isAuthenticated:false 不写缓存并上报会话收束（d-1-r1）', async () => {
+    // 本机有账号、服务端会话已失效：summary 路由回匿名 DTO 而不是 401——
+    // 摘要不得写成「0 未读」，宿主据此触发一次 refresh 收束身份投影。
+    const rejected = vi.fn();
+    const anonymousSummary = {
+      ...SUMMARY,
+      unreadTotal: 0,
+      siteUnread: 0,
+      directUnread: 0,
+      isAuthenticated: false,
+      hasCrowdReviewPending: false,
+      crowdReviewPrompt: null,
+    };
+    const invoke = vi.fn(async () => ({ status: 200, body: anonymousSummary })) as unknown as InvokeFn;
+
+    await refreshMessagesSummary(7, invoke, rejected);
+
+    expect(getMessagesSummaryEntry(7)).toBeNull();
+    expect(rejected).toHaveBeenCalledTimes(1);
+  });
+
+  it('HTTP 401 同样经 onSessionRejected 收束（native 已清凭据）', async () => {
+    const rejected = vi.fn();
+    const denied = vi.fn(async () => ({ status: 401, body: { error: '未登录' } })) as unknown as InvokeFn;
+
+    await refreshMessagesSummary(7, denied, rejected);
+
+    expect(getMessagesSummaryEntry(7)).toBeNull();
     expect(rejected).toHaveBeenCalledTimes(1);
   });
 

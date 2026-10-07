@@ -7,8 +7,9 @@
 // hash-history，站外走 `openContent` 确认 + native 校验）。
 //
 // 诚实性口径与 Web 一致：加载失败给「请稍后重试」而不是空列表；无身份只
-// 拉公开全站消息；`not-authenticated`（native 401 已清凭据）触发一次
-// `refresh()` 收束会话投影，不假装数据是空。
+// 拉公开全站消息；会话被拒（Required 路由 401 native 已清凭据，或登录态
+// 响应回 `isAuthenticated:false`）触发一次 `refresh()` 收束会话投影，
+// 不假装数据是空。
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
@@ -29,13 +30,13 @@ import type { MessageFilter } from '@mahoshojo/contracts/messages';
 import { useDesktopCloudSession } from '../features/account/use-desktop-cloud-session';
 import { useExternalLinks } from '../features/external-links/external-links-provider';
 import {
+  isMessagesSessionRejected,
   listMessages,
   markAllMessagesRead,
   markMessagesRead,
   readMessagesSummary,
 } from '../features/messages/messages-api';
 import { refreshMessagesSummary } from '../features/messages/topbar-messages';
-import { DesktopCloudError } from '../platform/cloud-bridge';
 import { navigateByProductHref, resolveInternalHrefForHashHistory } from './hash-history-fragment';
 
 const MESSAGES_PAGE_LIMIT = 20;
@@ -73,11 +74,23 @@ export function DesktopMessages() {
       setState((current) => ({ ...current, loading: true, error: null }));
       try {
         const [listResult, summaryResult] = await Promise.allSettled([
-          listMessages(invoke, { filter: requestFilter, limit: MESSAGES_PAGE_LIMIT }),
+          listMessages(invoke, {
+            filter: requestFilter,
+            limit: MESSAGES_PAGE_LIMIT,
+            expectAuthenticated: effectiveIsAuthenticated,
+          }),
           effectiveIsAuthenticated
             ? readMessagesSummary(invoke)
             : Promise.resolve(null),
         ]);
+        // 会话被拒属于页面级失败：summary 的拒收不能被「按无摘要渲染」的
+        // 产品语义吞掉，先于 resolve 抛出、统一走下面的收束分支。
+        if (
+          summaryResult.status === 'rejected' &&
+          isMessagesSessionRejected(summaryResult.reason)
+        ) {
+          throw summaryResult.reason;
+        }
         const { listPayload, summaryPayload } = resolveMessagesPageDataRequests({
           isAuthenticated: effectiveIsAuthenticated,
           listResult,
@@ -110,9 +123,10 @@ export function DesktopMessages() {
         ) {
           return;
         }
-        // native 401 已清凭据：上报一次让 store 收束投影，其余错误按
-        // 「消息加载失败」诚实呈现——绝不把失败伪装成空列表。
-        if (cause instanceof DesktopCloudError && cause.code === 'not-authenticated') {
+        // 会话被拒（401 native 已清凭据，或登录态响应回匿名身份）：上报
+        // 一次让 store 收束投影，其余错误按「消息加载失败」诚实呈现——
+        // 绝不把失败伪装成空列表。
+        if (isMessagesSessionRejected(cause)) {
           void sessionStore.refresh();
         }
         setState((current) => ({
@@ -146,10 +160,10 @@ export function DesktopMessages() {
   const resyncAfterRead = useCallback(async () => {
     const userId = effectiveUserIdRef.current;
     if (userId !== null) {
-      await refreshMessagesSummary(userId, invoke);
+      await refreshMessagesSummary(userId, invoke, () => void sessionStore.refresh());
     }
     await loadPageData(currentFilterRef.current);
-  }, [loadPageData]);
+  }, [loadPageData, sessionStore]);
 
   const handleFilterChange = (filter: MessageFilter) => {
     pageDataRequestIdRef.current += 1;
@@ -166,7 +180,9 @@ export function DesktopMessages() {
     if (!effectiveIsAuthenticated) return;
     try {
       await markAllMessagesRead(invoke);
-    } catch {
+    } catch (cause) {
+      // 已读被拒同样收束会话投影；其余失败保持现状、可重试。
+      if (isMessagesSessionRejected(cause)) void sessionStore.refresh();
       return;
     }
     await resyncAfterRead();
@@ -175,7 +191,8 @@ export function DesktopMessages() {
   const handleMarkRead = async (id: string) => {
     try {
       await markMessagesRead(invoke, [id]);
-    } catch {
+    } catch (cause) {
+      if (isMessagesSessionRejected(cause)) void sessionStore.refresh();
       return;
     }
     await resyncAfterRead();
@@ -193,6 +210,7 @@ export function DesktopMessages() {
         filter: requestFilter,
         limit: MESSAGES_PAGE_LIMIT,
         cursor: requestCursor,
+        expectAuthenticated: effectiveIsAuthenticated,
       });
       setState((current) => {
         if (
@@ -211,8 +229,10 @@ export function DesktopMessages() {
           nextCursor: payload.nextCursor,
         };
       });
-    } catch {
-      // 加载更多失败保持现状（与 Web 同：静默、可再点）。
+    } catch (cause) {
+      // 加载更多失败保持现状（与 Web 同：静默、可再点）；
+      // 只有会话被拒值得额外收束一次投影。
+      if (isMessagesSessionRejected(cause)) void sessionStore.refresh();
     }
   };
 

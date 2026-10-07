@@ -9,8 +9,9 @@
 // - 失效由会话边界驱动（登出/新登录成功 → `invalidateMessagesSummary`）：
 //   世代号前进让迟到响应自然过期；本地已读操作由页面显式
 //   `refreshMessagesSummary` 收口，不另建事件总线；
-// - `not-authenticated`（native 401 已清凭据）经 `onSessionRejected` 上报
-//   一次——宿主触发 `refresh` 统一收束会话投影。
+// - 会话被拒（native 401 已清凭据，或响应回 `isAuthenticated:false` 的
+//   匿名身份）经 `onSessionRejected` 上报一次——宿主触发 `refresh`
+//   统一收束会话投影。
 
 import { useEffect, useSyncExternalStore } from 'react';
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
@@ -18,8 +19,8 @@ import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 import type { DesktopCloudAccountSummary } from '@mahoshojo/contracts/desktop-cloud';
 import type { MessageSummaryDto } from '@mahoshojo/contracts/messages';
 
-import { DesktopCloudError, type InvokeFn } from '../../platform/cloud-bridge';
-import { readMessagesSummary } from './messages-api';
+import type { InvokeFn } from '../../platform/cloud-bridge';
+import { isMessagesSessionRejected, readMessagesSummary } from './messages-api';
 
 /** 与 Web `TOPBAR_MESSAGES_REFRESH_INTERVAL_MS` 同值：90 秒内视为新鲜。 */
 export const MESSAGES_SUMMARY_REFRESH_INTERVAL_MS = 90_000;
@@ -104,9 +105,9 @@ const runSummaryFetch = async (
     });
     notify();
   } catch (cause: unknown) {
-    // 摘要失败保留上一份已知数据；只有 not-authenticated 值得上报收束
+    // 摘要失败保留上一份已知数据；只有会话被拒值得上报收束
     // （单次、有界——refresh 本身 single-flight）。
-    if (cause instanceof DesktopCloudError && cause.code === 'not-authenticated') {
+    if (isMessagesSessionRejected(cause)) {
       onSessionRejected?.();
     }
   } finally {

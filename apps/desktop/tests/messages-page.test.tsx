@@ -226,6 +226,74 @@ describe('desktop messages page', () => {
     ).toBe(false);
   });
 
+  it('服务端会话失效（200 + isAuthenticated:false）触发会话收束', async () => {
+    await mountAt('/messages');
+    const statusCallsBefore = invokeMock.mock.calls.filter(
+      (call) => call[0] === 'cloud_auth_status',
+    ).length;
+
+    // 服务端会话已失效：list/summary 回 200 但匿名身份；auth_status 回
+    // expired——页面应把「匿名 DTO」收束成一次会话复核而不是显示 0 未读。
+    invokeMock.mockImplementation(async (command: string, args?: unknown) => {
+      if (command === 'cloud_auth_status') return { state: 'expired' as const };
+      if (command === 'cloud_messages_request') {
+        const request = (args as { request: { routeId: string } }).request;
+        if (request.routeId === 'messages.list') {
+          return { status: 200, body: { ...LIST, isAuthenticated: false } };
+        }
+        if (request.routeId === 'messages.summary') {
+          return { status: 200, body: { ...SUMMARY, isAuthenticated: false } };
+        }
+      }
+      return signedInImpl(command, args);
+    });
+
+    await click(
+      [...container.querySelectorAll('button')].find((b) => b.textContent === '未读') ?? null,
+    );
+
+    // 收束信号：会话被拒触发一次 auth_status 复核；expired 结论让身份投影清零。
+    const statusCalls = invokeMock.mock.calls.filter(
+      (call) => call[0] === 'cloud_auth_status',
+    ).length;
+    expect(statusCalls).toBeGreaterThan(statusCallsBefore);
+    await settle();
+    expect(
+      [...container.querySelectorAll('button')].some((b) => b.textContent === '登录查看定向消息'),
+    ).toBe(true);
+  });
+
+  it('Required 路由 401（native 已清凭据）同样触发会话收束', async () => {
+    await mountAt('/messages');
+    const statusCallsBefore = invokeMock.mock.calls.filter(
+      (call) => call[0] === 'cloud_auth_status',
+    ).length;
+
+    invokeMock.mockImplementation(async (command: string, args?: unknown) => {
+      if (command === 'cloud_auth_status') return { state: 'expired' as const };
+      if (command === 'cloud_messages_request') {
+        const request = (args as { request: { routeId: string } }).request;
+        if (request.routeId === 'messages.read-all') {
+          return { status: 401, body: { error: '未登录' } };
+        }
+      }
+      return signedInImpl(command, args);
+    });
+
+    await click(
+      [...container.querySelectorAll('button')].find((b) => b.textContent === '全部已读') ?? null,
+    );
+
+    const statusCalls = invokeMock.mock.calls.filter(
+      (call) => call[0] === 'cloud_auth_status',
+    ).length;
+    expect(statusCalls).toBeGreaterThan(statusCallsBefore);
+    await settle();
+    expect(
+      [...container.querySelectorAll('button')].some((b) => b.textContent === '登录查看定向消息'),
+    ).toBe(true);
+  });
+
   it('/me renders the cached identity + session panel without credential exposure', async () => {
     await mountAt('/me');
 
