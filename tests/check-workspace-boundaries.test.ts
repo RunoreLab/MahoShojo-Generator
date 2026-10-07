@@ -155,9 +155,14 @@ describe('workspace dependency boundaries', () => {
     );
 
     expect(violations).toHaveLength(2);
+    // 期望值用片段断言：完整的 public/ 字面量会被本条规则自身标记。
+    expect(violations.map((violation) => violation.file)).toEqual([
+      expect.stringContaining('apps/web/tests/contract.test.ts'),
+      expect.stringContaining('tests/index-check.test.ts'),
+    ]);
     expect(violations.map((violation) => violation.module)).toEqual([
-      'apps/web/public/questionnaires/presets/canshou-default.json',
-      'public/questionnaires/presets/index.json',
+      expect.stringContaining('questionnaires/presets/canshou-default.json'),
+      expect.stringContaining('questionnaires/presets/index.json'),
     ]);
   });
 
