@@ -8,15 +8,15 @@
  *
  * 说明：
  * - 静态侧已由 MONO-006-GENERATED-PUBLIC-IMPORT/READ 拦截；本脚本兜住分段拼装的动态路径。
- * - 屏蔽用 rename 实现，命令结束后在 finally 里恢复；上次中断遗留的 *.generated-masked
- *   会在启动时先恢复再屏蔽。
+ * - 屏蔽用 rename 实现；mask→action→restore 是原子段：屏蔽中途失败也会回滚已完成的项。
+ *   上次被 kill 中断遗留的 *.generated-masked 会在启动时先恢复再屏蔽。
  * - 请先停止 dev server：public 下文件被占用时 rename 会失败。
  * - apps/desktop/dist 等构建产物不在屏蔽范围（dist 有独立的 REQUIRE_DESKTOP_DIST 约定）。
  */
 import { existsSync, readdirSync, renameSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   GENERATED_PUBLIC_DIRECTORIES,
   GENERATED_PUBLIC_ROOT_FILES,
@@ -66,59 +66,94 @@ function restoreMasked(rootDirectory) {
   return restored;
 }
 
-const separatorIndex = process.argv.indexOf('--');
-const command = separatorIndex >= 0
-  ? process.argv.slice(separatorIndex + 1).join(' ')
-  : 'pnpm run test:repo';
-if (!command.trim()) {
-  console.error('用法: pnpm run test:without-generated-public [-- <命令>]');
-  process.exit(1);
-}
-
-const stale = restoreMasked(repositoryRoot);
-if (stale.length > 0) {
-  console.log(`已恢复上次中断遗留的 ${stale.length} 个屏蔽项`);
-}
-
-const targets = collectGeneratedPublicTargets(repositoryRoot)
-  .map((relativePath) => {
-    const absolute = path.join(repositoryRoot, relativePath);
-    return existsSync(absolute) ? { absolute, masked: `${absolute}${MASK_SUFFIX}`, relativePath } : null;
-  })
-  .filter(Boolean);
-
-if (targets.length === 0) {
-  console.log('未发现本地生成物，直接以干净检出形态运行');
-} else {
-  for (const { absolute, masked, relativePath } of targets) {
-    renameSync(absolute, masked);
-    console.log(`masked  ${relativePath}`);
-  }
-}
-
-let status = 1;
-try {
-  const result = spawnSync(command, {
-    cwd: repositoryRoot,
-    stdio: 'inherit',
-    shell: true,
-  });
-  status = result.status ?? 1;
-} finally {
-  const failures = [];
-  for (const { absolute, masked, relativePath } of targets) {
-    try {
-      renameSync(masked, absolute);
-    } catch (error) {
-      failures.push(`${relativePath}: ${error instanceof Error ? error.message : String(error)}`);
+/**
+ * 屏蔽→执行→恢复的原子段：mask 本身也在 try/finally 内——第 N 次 rename 失败时
+ * 只回滚前 N−1 个已屏蔽项，工作区不会停在部分屏蔽的中间态。
+ *
+ * @param {Array<{ absolute: string, masked: string, relativePath: string }>} targets
+ * @param {() => T} action
+ * @param {(from: string, to: string) => void} renameImpl 可注入，供测试模拟中途失败
+ * @returns {{ actionResult: T, masked: typeof targets, restoreFailures: Array<{ target: object, error: unknown }> }}
+ * @template T
+ */
+export function maskThenRestore(targets, action, renameImpl = renameSync) {
+  const masked = [];
+  const restoreFailures = [];
+  let actionResult;
+  try {
+    for (const target of targets) {
+      renameImpl(target.absolute, target.masked);
+      masked.push(target);
+      console.log(`masked  ${target.relativePath}`);
+    }
+    actionResult = action();
+  } finally {
+    // 逆序恢复：先屏蔽的先建后拆，目录与其内文件交错时更稳妥；
+    // slice() 避免原地反转——返回给调用方的 masked 保持屏蔽顺序。
+    for (const target of masked.slice().reverse()) {
+      try {
+        renameImpl(target.masked, target.absolute);
+      } catch (error) {
+        restoreFailures.push({ target, error });
+      }
     }
   }
-  if (failures.length > 0) {
-    console.error(`生成物恢复失败（需手动把 *.generated-masked 改回原名）:\n${failures.join('\n')}`);
-    status = 1;
-  } else if (targets.length > 0) {
-    console.log(`已恢复 ${targets.length} 个生成物路径`);
-  }
+  return { actionResult, masked, restoreFailures };
 }
 
-process.exit(status);
+function main(argv) {
+  const separatorIndex = argv.indexOf('--');
+  const command = separatorIndex >= 0
+    ? argv.slice(separatorIndex + 1).join(' ')
+    : 'pnpm run test:repo';
+  if (!command.trim()) {
+    console.error('用法: pnpm run test:without-generated-public [-- <命令>]');
+    process.exit(1);
+  }
+
+  const stale = restoreMasked(repositoryRoot);
+  if (stale.length > 0) {
+    console.log(`已恢复上次中断遗留的 ${stale.length} 个屏蔽项`);
+  }
+
+  const targets = collectGeneratedPublicTargets(repositoryRoot)
+    .map((relativePath) => {
+      const absolute = path.join(repositoryRoot, relativePath);
+      return existsSync(absolute) ? { absolute, masked: `${absolute}${MASK_SUFFIX}`, relativePath } : null;
+    })
+    .filter(Boolean);
+
+  if (targets.length === 0) {
+    console.log('未发现本地生成物，直接以干净检出形态运行');
+  }
+
+  let status = 1;
+  try {
+    const { actionResult, restoreFailures } = maskThenRestore(targets, () =>
+      spawnSync(command, {
+        cwd: repositoryRoot,
+        stdio: 'inherit',
+        shell: true,
+      }).status ?? 1,
+    );
+    status = actionResult;
+    if (restoreFailures.length > 0) {
+      const lines = restoreFailures.map(({ target, error }) =>
+        `${target.relativePath}: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`生成物恢复失败（需手动把 *.generated-masked 改回原名）:\n${lines.join('\n')}`);
+      status = 1;
+    } else if (targets.length > 0) {
+      console.log(`已恢复 ${targets.length} 个生成物路径`);
+    }
+  } catch (error) {
+    console.error(`屏蔽生成物失败：${error instanceof Error ? error.message : String(error)}`);
+    console.error('失败前完成的屏蔽项已回滚。');
+  }
+  process.exit(status);
+}
+
+const currentFile = fileURLToPath(import.meta.url);
+const invokedFile = process.argv[1] ? path.resolve(process.argv[1]) : null;
+if (invokedFile && pathToFileURL(invokedFile).href === pathToFileURL(currentFile).href) {
+  main(process.argv.slice(2));
+}
