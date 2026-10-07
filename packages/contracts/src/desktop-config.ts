@@ -12,10 +12,12 @@
  *   默认 `'on-launch'`；非法值按默认处理并诊断（DESK-PARITY-003）。
  * - `externalLinks.confirmContentLinks`：内容外链打开前确认，boolean，
  *   默认 `true`；非法值按 `true`（更保守）处理并诊断（DESK-PARITY-003）。
+ * - `desktop.escapeMenu.enabled`：Esc 快捷菜单开关，boolean，默认 `true`；
+ *   非法值按 `true` 处理并诊断（D5.1-N1，DESK-PARITY-007）。
  *
- * 未登记的键（`desktop.escapeMenu.enabled`、`publicLibraryCache.*` 等）属于
- * 各自消费切片的字段，落地前出现在文件里会产生「未登记字段」诊断——文件
- * 仍可使用，未知键原样保留但不是有效配置。
+ * 未登记的键（`publicLibraryCache.*` 等）属于各自消费切片的字段，落地前
+ * 出现在文件里会产生「未登记字段」诊断——文件仍可使用，未知键原样保留
+ * 但不是有效配置。
  *
  * 安全边界（DESK-SET-006）：这里登记的只是无害展示偏好。服务 origin、
  * secret/header、CSP、IPC capability、Strict/多人资格与签名校验永远不进入
@@ -33,11 +35,14 @@ export interface DesktopConfigValues {
   readonly announcementsCheckPolicy: AnnouncementsCheckPolicy;
   /** `externalLinks.confirmContentLinks` */
   readonly confirmContentLinks: boolean;
+  /** `desktop.escapeMenu.enabled` */
+  readonly escapeMenuEnabled: boolean;
 }
 
 export const DESKTOP_CONFIG_DEFAULTS: DesktopConfigValues = {
   announcementsCheckPolicy: 'on-launch',
   confirmContentLinks: true,
+  escapeMenuEnabled: true,
 };
 
 export interface DesktopConfigDiagnostic {
@@ -55,12 +60,18 @@ export interface DesktopConfigDocumentExtras {
   readonly topLevel: Readonly<Record<string, unknown>>;
   readonly announcements: Readonly<Record<string, unknown>>;
   readonly externalLinks: Readonly<Record<string, unknown>>;
+  /** `$.desktop` 下除 `escapeMenu` 外的未登记键。 */
+  readonly desktop: Readonly<Record<string, unknown>>;
+  /** `$.desktop.escapeMenu` 下除 `enabled` 外的未登记键。 */
+  readonly desktopEscapeMenu: Readonly<Record<string, unknown>>;
 }
 
-const EMPTY_EXTRAS: DesktopConfigDocumentExtras = {
+export const DESKTOP_CONFIG_EMPTY_EXTRAS: DesktopConfigDocumentExtras = {
   topLevel: {},
   announcements: {},
   externalLinks: {},
+  desktop: {},
+  desktopEscapeMenu: {},
 };
 
 export interface DesktopConfigParseResult {
@@ -79,7 +90,7 @@ export interface DesktopConfigParseResult {
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const REGISTERED_TOP_LEVEL_KEYS = new Set(['version', 'announcements', 'externalLinks']);
+const REGISTERED_TOP_LEVEL_KEYS = new Set(['version', 'announcements', 'externalLinks', 'desktop']);
 
 const collectExtras = (
   group: unknown,
@@ -106,7 +117,7 @@ export const parseDesktopConfigText = (text: string): DesktopConfigParseResult =
     values: DESKTOP_CONFIG_DEFAULTS,
     diagnostics: [...diagnostics, { path: '$', message }],
     fatal: true,
-    extras: EMPTY_EXTRAS,
+    extras: DESKTOP_CONFIG_EMPTY_EXTRAS,
   });
 
   let doc: unknown;
@@ -130,7 +141,9 @@ export const parseDesktopConfigText = (text: string): DesktopConfigParseResult =
     topLevel: Record<string, unknown>;
     announcements: Record<string, unknown>;
     externalLinks: Record<string, unknown>;
-  } = { topLevel: {}, announcements: {}, externalLinks: {} };
+    desktop: Record<string, unknown>;
+    desktopEscapeMenu: Record<string, unknown>;
+  } = { topLevel: {}, announcements: {}, externalLinks: {}, desktop: {}, desktopEscapeMenu: {} };
   for (const key of Object.keys(doc)) {
     if (REGISTERED_TOP_LEVEL_KEYS.has(key)) continue;
     extras.topLevel[key] = doc[key];
@@ -199,8 +212,48 @@ export const parseDesktopConfigText = (text: string): DesktopConfigParseResult =
     }
   }
 
+  let escapeMenuEnabled = DESKTOP_CONFIG_DEFAULTS.escapeMenuEnabled;
+  if ('desktop' in doc) {
+    if (!isPlainObject(doc.desktop)) {
+      diagnostics.push({
+        path: '$.desktop',
+        message: '必须是对象；该组字段已全部按默认值处理',
+      });
+    } else {
+      Object.assign(
+        extras.desktop,
+        collectExtras(doc.desktop, new Set(['escapeMenu']), '$.desktop', diagnostics),
+      );
+      const escapeMenu = doc.desktop.escapeMenu;
+      if (escapeMenu !== undefined) {
+        if (!isPlainObject(escapeMenu)) {
+          diagnostics.push({
+            path: '$.desktop.escapeMenu',
+            message: '必须是对象；该组字段已全部按默认值处理',
+          });
+        } else {
+          Object.assign(
+            extras.desktopEscapeMenu,
+            collectExtras(escapeMenu, new Set(['enabled']), '$.desktop.escapeMenu', diagnostics),
+          );
+          const enabled = escapeMenu.enabled;
+          if (enabled !== undefined) {
+            if (typeof enabled === 'boolean') {
+              escapeMenuEnabled = enabled;
+            } else {
+              diagnostics.push({
+                path: '$.desktop.escapeMenu.enabled',
+                message: '非法值，按默认 true 处理',
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+
   return {
-    values: { announcementsCheckPolicy, confirmContentLinks },
+    values: { announcementsCheckPolicy, confirmContentLinks, escapeMenuEnabled },
     diagnostics,
     fatal: false,
     extras,
@@ -225,6 +278,13 @@ export const serializeDesktopConfig = (
       externalLinks: {
         ...extras?.externalLinks,
         confirmContentLinks: values.confirmContentLinks,
+      },
+      desktop: {
+        ...extras?.desktop,
+        escapeMenu: {
+          ...extras?.desktopEscapeMenu,
+          enabled: values.escapeMenuEnabled,
+        },
       },
       ...extras?.topLevel,
     },

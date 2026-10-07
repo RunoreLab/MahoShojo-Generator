@@ -1,5 +1,6 @@
 import {
   DESKTOP_CONFIG_DEFAULTS,
+  DESKTOP_CONFIG_EMPTY_EXTRAS,
   parseDesktopConfigText,
   serializeDesktopConfig,
   type DesktopConfigDiagnostic,
@@ -71,11 +72,9 @@ const INITIAL_STATE: DesktopConfigState = {
   saving: false,
 };
 
-const EMPTY_EXTRAS: DesktopConfigDocumentExtras = {
-  topLevel: {},
-  announcements: {},
-  externalLinks: {},
-};
+// 空 extras 与契约同源：`$.desktop`/`$.desktop.escapeMenu` 等组的未登记键
+// 位随契约登记节奏增长，store 不复制一份会漂移的常量。
+const EMPTY_EXTRAS: DesktopConfigDocumentExtras = DESKTOP_CONFIG_EMPTY_EXTRAS;
 
 interface ConfirmedBase {
   /** 最后一次与磁盘一致的内容 revision；`null` = 文件不存在。 */
