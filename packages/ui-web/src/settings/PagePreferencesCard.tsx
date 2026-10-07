@@ -25,6 +25,11 @@ import {
  * 控件照常渲染，显示的是字段登记的页面生效默认（D5.1-S1-r1）；在此
  * 修改即首写：blob 直接建偏好对象，fields 经 owner 领域工厂建合法
  * 文档。损坏的 fields 形态拒绝手术（保护草稿），由用户在对应页面处理。
+ *
+ * 三种可写控件统一走 `commitField`：`writeField` 返回 `false`（存储
+ * 可读但 setItem 失败，如 quota/WebView 故障）或值校验抛错都投影到
+ * 卡片级 notice——控件值回落为存储真值，不静默丢写（DESK-SET-001
+ * 「错误投影」）。
  */
 
 /** 订阅 adapter 的写入/重置/跨标签页变更——触发重渲染后 `read()` 自然取到新值。 */
@@ -40,54 +45,40 @@ const TextPreferenceControl = ({
 }: {
   field: PagePreferenceField;
   value: unknown;
-  onCommit: (value: string) => boolean;
+  onCommit: (value: string) => void;
 }) => {
   const [draft, setDraft] = useState(typeof value === 'string' ? value : '');
-  const [error, setError] = useState<string | null>(null);
   const current = typeof value === 'string' ? value : '';
 
   const commit = () => {
     if (draft === current) return;
-    try {
-      if (!onCommit(draft.trim())) {
-        setError('写入失败，存储不可用');
-        return;
-      }
-      setError(null);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '值不合法');
-    }
+    // 写失败不吞 draft：用户输入保留在输入框里，错误经卡片 notice 投影。
+    onCommit(draft.trim());
   };
 
   return (
-    <div className="flex flex-col items-end gap-1">
-      <input
-        type="text"
-        className="w-36 rounded-md border border-(--app-input-border) bg-(--app-input-bg) px-2 py-1.5 text-xs text-(--app-text)"
-        value={draft}
-        aria-label={field.label}
-        onChange={(event) => {
-          setDraft(event.target.value);
-          setError(null);
-        }}
-        onBlur={commit}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') commit();
-        }}
-      />
-      {error ? <span className="text-xs text-(--app-accent-strong)">{error}</span> : null}
-    </div>
+    <input
+      type="text"
+      className="w-36 rounded-md border border-(--app-input-border) bg-(--app-input-bg) px-2 py-1.5 text-xs text-(--app-text)"
+      value={draft}
+      aria-label={field.label}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') commit();
+      }}
+    />
   );
 };
 
 const FieldControl = ({
   field,
   value,
-  adapter,
+  onCommit,
 }: {
   field: PagePreferenceField;
   value: unknown;
-  adapter: PagePreferencesAdapter;
+  onCommit: (value: unknown) => void;
 }) => {
   switch (field.kind) {
     case 'boolean':
@@ -95,7 +86,7 @@ const FieldControl = ({
         <SettingsToggle
           ariaLabel={field.label}
           checked={value === true}
-          onChange={(next) => adapter.writeField(field.key, next)}
+          onChange={onCommit}
         />
       );
     case 'select':
@@ -104,7 +95,7 @@ const FieldControl = ({
           ariaLabel={field.label}
           value={typeof value === 'string' ? value : ''}
           options={field.options ?? []}
-          onChange={(next) => adapter.writeField(field.key, next)}
+          onChange={onCommit}
         />
       );
     case 'text':
@@ -112,7 +103,7 @@ const FieldControl = ({
         <TextPreferenceControl
           field={field}
           value={value}
-          onCommit={(next) => adapter.writeField(field.key, next)}
+          onCommit={onCommit}
         />
       );
     case 'count':
@@ -141,6 +132,29 @@ export const PagePreferencesCard = ({
   const result = mounted ? adapter.read() : ({ status: 'empty' } as const);
   const [confirming, setConfirming] = useState(false);
   const [notice, setNotice] = useState<{ type: 'ok' | 'error'; text: string } | null>(null);
+
+  /**
+   * 字段写入的唯一入口：成功清掉旧提示；`false`（存储可读但写失败）
+   * 与值校验抛错都投影为卡片级错误——控件随重渲染回落到存储真值，
+   * 不存在「界面改了但没保存」的静默态。
+   */
+  const commitField = (field: PagePreferenceField, value: unknown): void => {
+    try {
+      if (adapter.writeField(field.key, value)) {
+        setNotice(null);
+        return;
+      }
+      setNotice({
+        type: 'error',
+        text: `「${field.label}」写入失败：存储不可用，修改未保存。`,
+      });
+    } catch (cause) {
+      setNotice({
+        type: 'error',
+        text: `「${field.label}」写入被拒绝：${cause instanceof Error ? cause.message : '值不合法'}`,
+      });
+    }
+  };
 
   const handleReset = () => {
     if (!confirming) {
@@ -197,7 +211,7 @@ export const PagePreferencesCard = ({
                         ? result.values[field.key]
                         : resolvePagePreferenceFieldDefault(field)
                     }
-                    adapter={adapter}
+                    onCommit={(next) => commitField(field, next)}
                   />
                 }
               />
