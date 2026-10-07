@@ -1,12 +1,12 @@
 import { z } from 'zod/v3';
 
-import { extractModerationTextFromJsonString } from '../admin/ai-review-prompt';
 import { JEV_CATEGORY_QUESTIONS, AUTO_REVIEW_JEV_QUESTIONS_V2 } from './question-set';
-import { buildAutoReviewStateText } from './state';
+import { buildAutoReviewState, extractAutoReviewContent } from './state';
 import type { AutoReviewProviderEntry, AutoReviewThresholds } from './config';
 import { resolveAutoReviewThresholds, resolveEntryApiKey } from './config';
 import type {
   AutoReviewBackend,
+  AutoReviewBackendKind,
   AutoReviewCategory,
   ReviewTarget,
   ReviewVerdict,
@@ -31,20 +31,19 @@ export type LlmGenerateFn = (
     modelOverride?: string;
     maxOutputTokens?: number;
   },
+  _options?: { abortSignal?: AbortSignal },
 ) => Promise<unknown>;
 
-const DEFAULT_TIMEOUT_MS = 60_000;
-
-const withTimeout = async <T>(p: Promise<T>, ms: number): Promise<T> => {
-  let t: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    t = setTimeout(() => reject(new Error(`auto-review backend timeout after ${ms}ms`)), ms);
-  });
-  try {
-    return await Promise.race([p, timeout]);
-  } finally {
-    if (t) clearTimeout(t);
-  }
+/**
+ * 各 kind 的默认超时（条目 timeoutMs 覆盖优先）。
+ * Clef-flash 官方基准 median≈38.8ms / p95≈122.4ms，决策/判定类端点给 20s 已极宽；
+ * llm 走通用生成通路，保留 60s。
+ */
+export const DEFAULT_BACKEND_TIMEOUT_MS: Record<AutoReviewBackendKind, number> = {
+  'jev-decisions': 20_000,
+  'omni-moderation': 20_000,
+  nemotron: 30_000,
+  llm: 60_000,
 };
 
 const reasonOf = (category: AutoReviewCategory | undefined, extra?: string): string => {
@@ -62,18 +61,36 @@ const categoryFromLabel = (value: unknown): AutoReviewCategory | undefined =>
 
 type JevAnswers = Record<string, number>;
 
-const normalizeJevAnswers = (raw: unknown): JevAnswers => {
+const JEV_REQUIRED_KEYS = Object.keys(AUTO_REVIEW_JEV_QUESTIONS_V2);
+
+const jevAnswerValue = (value: unknown): number | null => {
+  const n =
+    typeof value === 'number'
+      ? value
+      : value && typeof value === 'object' && typeof (value as Record<string, unknown>).noul === 'number'
+        ? (value as { noul: number }).noul
+        : null;
+  // fail-closed：缺题/NaN/越界都视为后端响应不完整
+  if (n === null || !Number.isFinite(n) || n < 0 || n > 1) return null;
+  return n;
+};
+
+/**
+ * 严格解析 Jev answers：本问题集的全部 key 必须存在且为 [0,1] 有限数。
+ * 缺数据≠安全——缺一题即视为该后端响应不完整（抛错交给路由回退）。
+ */
+const parseJevAnswers = (raw: unknown): JevAnswers => {
   const answers =
     raw && typeof raw === 'object'
       ? ((raw as Record<string, unknown>).answers ?? ((raw as Record<string, unknown>).result as Record<string, unknown> | undefined)?.answers)
       : undefined;
+  if (!answers || typeof answers !== 'object') throw new Error('jev-decisions: missing answers object');
+  const record = answers as Record<string, unknown>;
   const out: JevAnswers = {};
-  if (!answers || typeof answers !== 'object') return out;
-  for (const [key, value] of Object.entries(answers as Record<string, unknown>)) {
-    if (typeof value === 'number') out[key] = value;
-    else if (value && typeof value === 'object' && typeof (value as Record<string, unknown>).noul === 'number') {
-      out[key] = (value as { noul: number }).noul;
-    }
+  for (const key of JEV_REQUIRED_KEYS) {
+    const v = jevAnswerValue(record[key]);
+    if (v === null) throw new Error(`jev-decisions: answer "${key}" missing or invalid`);
+    out[key] = v;
   }
   return out;
 };
@@ -118,25 +135,33 @@ const createJevBackend = (
   return {
     id: entry.id,
     kind: 'jev-decisions',
-    review: async (target) => {
+    review: async (target, options) => {
+      const state = buildAutoReviewState(target);
       const res = await fetchImpl(url, {
         method: 'POST',
+        signal: options?.signal ?? null,
         headers: {
           'Content-Type': 'application/json',
           ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
         },
         body: JSON.stringify({
           model: entry.model,
-          state: buildAutoReviewStateText(target),
+          state: state.text,
           questions: AUTO_REVIEW_JEV_QUESTIONS_V2,
         }),
       });
       const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
       if (!res.ok) throw new Error(`jev-decisions ${res.status}: ${JSON.stringify(json ?? {}).slice(0, 200)}`);
-      const p = normalizeJevAnswers(json);
-      if (Object.keys(p).length === 0) throw new Error('jev-decisions: empty answers');
+      const p = parseJevAnswers(json);
       const { verdict, score, category } = deriveJevVerdict(p, thresholds);
-      return { verdict, score, category, reason: verdict === 'reject' ? reasonOf(category) : undefined, details: { model: entry.model, answers: p } };
+      return {
+        verdict,
+        score,
+        category,
+        reason: verdict === 'reject' ? reasonOf(category) : undefined,
+        details: { model: entry.model, answers: p },
+        inputCoverage: state.coverage,
+      };
     },
   };
 };
@@ -158,6 +183,22 @@ const OMNI_CATEGORY_MAP: ReadonlyArray<readonly [string, AutoReviewCategory]> = 
   ['self-harm/instructions', 'illegal'],
 ];
 
+const omniScoreSchema = z.number().min(0).max(1);
+const omniResponseSchema = z.object({
+  results: z
+    .array(
+      z
+        .object({
+          // 官方契约必含 flagged/categories/category_scores；缺关键字段=响应不完整，拒绝放行
+          flagged: z.boolean(),
+          categories: z.record(z.boolean()),
+          category_scores: z.record(omniScoreSchema),
+        })
+        .passthrough(),
+    )
+    .min(1),
+});
+
 const createOmniBackend = (
   entry: Extract<AutoReviewProviderEntry, { kind: 'omni-moderation' }>,
   deps: AutoReviewBackendDeps,
@@ -169,25 +210,28 @@ const createOmniBackend = (
   return {
     id: entry.id,
     kind: 'omni-moderation',
-    review: async (target) => {
+    review: async (target, options) => {
+      const state = buildAutoReviewState(target);
       const res = await fetchImpl(url, {
         method: 'POST',
+        signal: options?.signal ?? null,
         headers: {
           'Content-Type': 'application/json',
           ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
         },
-        body: JSON.stringify({ model: entry.model, input: [buildAutoReviewStateText(target)] }),
+        body: JSON.stringify({ model: entry.model, input: [state.text] }),
       });
       const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
       if (!res.ok) throw new Error(`omni-moderation ${res.status}: ${JSON.stringify(json ?? {}).slice(0, 200)}`);
-      const result = (json?.results as Record<string, unknown>[] | undefined)?.[0];
-      if (!result) throw new Error('omni-moderation: empty results');
-      const flagged = result.flagged === true;
-      const scores = (result.category_scores ?? {}) as Record<string, unknown>;
+      const parsed = omniResponseSchema.safeParse(json);
+      if (!parsed.success) throw new Error(`omni-moderation: invalid response shape`);
+      const result = parsed.data.results[0];
+      const flagged = result.flagged;
+      const scores = result.category_scores;
       let score = 0;
       let category: AutoReviewCategory | undefined;
       for (const [omniCat, cat] of OMNI_CATEGORY_MAP) {
-        const v = typeof scores[omniCat] === 'number' ? (scores[omniCat] as number) : 0;
+        const v = scores[omniCat] ?? 0;
         if (v > score) {
           score = v;
           category = cat;
@@ -207,7 +251,14 @@ const createOmniBackend = (
         score: useFlagged && flagged ? Math.max(score, 1) : score,
         category,
         reason: verdict === 'reject' ? reasonOf(category) : undefined,
-        details: { model: entry.model, flagged, categories: result.categories, categoryScores: scores, appliedInputTypes: result.category_applied_input_types },
+        details: {
+          model: entry.model,
+          flagged,
+          categories: result.categories,
+          categoryScores: scores,
+          appliedInputTypes: (result as Record<string, unknown>).category_applied_input_types,
+        },
+        inputCoverage: state.coverage,
       };
     },
   };
@@ -225,6 +276,53 @@ const NEMOTRON_CATEGORY_MAP: ReadonlyArray<readonly [RegExp, AutoReviewCategory]
   [/inject|jailbreak|bypass|prompt/i, 'inject'],
 ];
 
+type NemotronParsed = { safety: 'safe' | 'unsafe'; categories: string[] };
+
+const nemotronSafetyOf = (value: unknown): 'safe' | 'unsafe' | null => {
+  if (typeof value !== 'string') return null;
+  const v = value.trim().toLowerCase();
+  return v === 'safe' || v === 'unsafe' ? v : null;
+};
+
+const nemotronCategoriesOf = (value: unknown): string[] => {
+  if (Array.isArray(value)) return value.filter((v): v is string => typeof v === 'string');
+  if (typeof value === 'string') return value.split(',').map((s) => s.trim()).filter(Boolean);
+  return [];
+};
+
+/** JSON 严格解析为主：官方结构化输出形如 {"User Safety": "safe|unsafe", "Safety Categories": [...]|csv} */
+const parseNemotronJson = (text: string): NemotronParsed | null => {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith('{')) return null;
+  let obj: unknown;
+  try {
+    obj = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+  if (!obj || typeof obj !== 'object') return null;
+  const record = obj as Record<string, unknown>;
+  const safetyKey = Object.keys(record).find((k) => k.replace(/[_\s]+/g, ' ').toLowerCase() === 'user safety');
+  const categoriesKey = Object.keys(record).find((k) => k.replace(/[_\s]+/g, ' ').toLowerCase() === 'safety categories');
+  const safety = nemotronSafetyOf(safetyKey ? record[safetyKey] : undefined);
+  if (!safety) return null;
+  return { safety, categories: categoriesKey ? nemotronCategoriesOf(record[categoriesKey]) : [] };
+};
+
+/** 兼容旧格式：`User Safety: safe|unsafe` + `Safety Categories: csv` 自由文本。 */
+const parseNemotronLegacyText = (text: string): NemotronParsed | null => {
+  const safety = nemotronSafetyOf(/User Safety:\s*(safe|unsafe)/i.exec(text)?.[1]);
+  if (!safety) return null;
+  const catLine = /Safety Categories:\s*(.+)/i.exec(text)?.[1] ?? '';
+  return { safety, categories: catLine.split(',').map((s) => s.trim()).filter(Boolean) };
+};
+
+const parseNemotronOutput = (text: string): NemotronParsed => {
+  const parsed = parseNemotronJson(text) ?? parseNemotronLegacyText(text);
+  if (!parsed) throw new Error(`nemotron: unparseable output ${text.slice(0, 120)}`);
+  return parsed;
+};
+
 const createNemotronBackend = (
   entry: Extract<AutoReviewProviderEntry, { kind: 'nemotron' }>,
   deps: AutoReviewBackendDeps,
@@ -236,12 +334,14 @@ const createNemotronBackend = (
   return {
     id: entry.id,
     kind: 'nemotron',
-    review: async (target) => {
+    review: async (target, options) => {
+      const state = buildAutoReviewState(target);
       const messages: Array<{ role: string; content: string }> = [];
       if (customPolicy) messages.push({ role: 'system', content: customPolicy });
-      messages.push({ role: 'user', content: buildAutoReviewStateText(target) });
+      messages.push({ role: 'user', content: state.text });
       const res = await fetchImpl(url, {
         method: 'POST',
+        signal: options?.signal ?? null,
         headers: {
           'Content-Type': 'application/json',
           ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
@@ -253,20 +353,19 @@ const createNemotronBackend = (
       const text =
         (((json?.choices as Array<Record<string, unknown>> | undefined)?.[0]?.message as Record<string, unknown> | undefined)
           ?.content as string | undefined) ?? '';
-      const safety = /User Safety:\s*(safe|unsafe)/i.exec(text)?.[1]?.toLowerCase();
-      if (safety !== 'safe' && safety !== 'unsafe') throw new Error(`nemotron: unparseable output ${text.slice(0, 120)}`);
-      const catLine = /Safety Categories:\s*(.+)/i.exec(text)?.[1] ?? '';
-      const rawCategories = catLine.split(',').map((s) => s.trim()).filter(Boolean);
-      const category = rawCategories
-        .map((raw) => NEMOTRON_CATEGORY_MAP.find(([re]) => re.test(raw))?.[1])
-        .find((c): c is AutoReviewCategory => c !== undefined) ?? (safety === 'unsafe' ? 'other' : undefined);
-      const verdict: ReviewVerdict = safety === 'unsafe' ? 'reject' : 'approve';
+      const parsed = parseNemotronOutput(text);
+      const category =
+        parsed.categories
+          .map((raw) => NEMOTRON_CATEGORY_MAP.find(([re]) => re.test(raw))?.[1])
+          .find((c): c is AutoReviewCategory => c !== undefined) ?? (parsed.safety === 'unsafe' ? 'other' : undefined);
+      const verdict: ReviewVerdict = parsed.safety === 'unsafe' ? 'reject' : 'approve';
       return {
         verdict,
         score: verdict === 'reject' ? 1 : 0,
         category,
-        reason: verdict === 'reject' ? reasonOf(category, rawCategories[0]) : undefined,
-        details: { model: entry.model, rawCategories, raw: text.slice(0, 500) },
+        reason: verdict === 'reject' ? reasonOf(category, parsed.categories[0]) : undefined,
+        details: { model: entry.model, rawCategories: parsed.categories, raw: text.slice(0, 500) },
+        inputCoverage: state.coverage,
       };
     },
   };
@@ -327,16 +426,20 @@ const createLlmBackend = (
   return {
     id: entry.id,
     kind: 'llm',
-    review: async (target) => {
-      const content = extractModerationTextFromJsonString(target.data).text;
-      const out = (await generate([{ ...target, content }], {
-        systemPrompt: AUTO_REVIEW_LLM_SYSTEM_PROMPT,
-        promptBuilder: buildAutoReviewLlmPrompt as (_input: unknown) => string,
-        schema: LlmReviewResponseSchema,
-        taskName: '数据卡自动审查',
-        temperature: 0.1,
-        modelOverride: entry.modelOverride,
-      })) as { reviews?: Array<z.infer<typeof LlmReviewSchema> & { id: string }> };
+    review: async (target, options) => {
+      const { text: content, coverage } = extractAutoReviewContent(target);
+      const out = (await generate(
+        [{ ...target, content }],
+        {
+          systemPrompt: AUTO_REVIEW_LLM_SYSTEM_PROMPT,
+          promptBuilder: buildAutoReviewLlmPrompt as (_input: unknown) => string,
+          schema: LlmReviewResponseSchema,
+          taskName: '数据卡自动审查',
+          temperature: 0.1,
+          modelOverride: entry.modelOverride,
+        },
+        { abortSignal: options?.signal },
+      )) as { reviews?: Array<z.infer<typeof LlmReviewSchema> & { id: string }> };
       const review = out.reviews?.find((r) => r.id === target.id);
       if (!review) throw new Error('llm: missing review for target');
       const verdict: ReviewVerdict =
@@ -348,6 +451,7 @@ const createLlmBackend = (
         category,
         reason: verdict === 'reject' ? reasonOf(category, review.reason) : undefined,
         details: { model: entry.modelOverride ?? null, categories: review.categories ?? [], reason: review.reason },
+        inputCoverage: coverage,
       };
     },
   };
@@ -370,6 +474,3 @@ export const createAutoReviewBackend = (
       return createLlmBackend(entry, deps);
   }
 };
-
-export const DEFAULT_BACKEND_TIMEOUT_MS = DEFAULT_TIMEOUT_MS;
-export { withTimeout };

@@ -37,7 +37,7 @@ const baseEntry = z
     thresholds: thresholdsSchema.optional(),
     timeoutMs: z.number().positive().optional(),
   })
-  .passthrough();
+  .strict();
 
 const jevEntrySchema = baseEntry.extend({
   kind: z.literal('jev-decisions'),
@@ -63,7 +63,7 @@ const nemotronEntrySchema = baseEntry.extend({
   apiKey: z.string().min(1).optional(),
   apiKeyEnv: z.string().min(1).optional(),
   model: z.string().min(1).default('nvidia/nemotron-3.5-content-safety'),
-  options: z.object({ customPolicy: z.string().optional() }).passthrough().optional(),
+  options: z.object({ customPolicy: z.string().optional() }).strict().optional(),
 });
 
 const llmEntrySchema = baseEntry.extend({
@@ -120,30 +120,87 @@ export type AutoReviewRouting = { strategy: AutoReviewRoutingStrategy };
 
 const routingSchema = z.object({
   strategy: z.enum(['priority', 'weighted-random']),
-});
+}).strict();
 
 const policySchema = z.object({
   onUncertain: z.enum(['normal', 'hold', 'approve', 'reject']).optional(),
   exemptUserPolicy: z.enum(['skip', 'review']).optional(),
   notifyOnAutoReject: z.boolean().optional(),
-});
+}).strict();
 
 export type ParsedAutoReviewConfig = {
   providers: AutoReviewProviderEntry[];
   routing: AutoReviewRouting;
   policy: AutoReviewPolicy;
+  /**
+   * 配置诊断：显式给出但非法/不完整的配置在此收集（JSON 语法错误、schema
+   * 违规、重复 id、workers-ai 缺凭据等）。合法条目仍进入 providers；
+   * 没有任何可用后端时自动审查不运行（fail-to-pending），绝不回退 legacy 通路。
+   */
+  errors: string[];
 };
 
 const hasText = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
 
-const parseJson = <T>(raw: string | undefined, schema: z.ZodTypeAny, fallback: T): T => {
-  if (!hasText(raw)) return fallback;
+const isHttpUrl = (value: string): boolean => {
   try {
-    const parsed = schema.safeParse(JSON.parse(raw));
-    return parsed.success ? (parsed.data as T) : fallback;
+    const u = new URL(value);
+    return u.protocol === 'http:' || u.protocol === 'https:';
   } catch {
+    return false;
+  }
+};
+
+const zodIssuesSummary = (issues: readonly z.ZodIssue[]): string =>
+  issues
+    .slice(0, 3)
+    .map((i) => `${i.path.join('.') || '<root>'}: ${i.message}`)
+    .join('; ');
+
+/** 解析单个 JSON 字段：未提供→fallback；提供了但非法→记录 error 并 fallback。 */
+const parseJsonField = <T>(
+  raw: string | undefined,
+  name: string,
+  schema: z.ZodTypeAny,
+  fallback: T,
+  errors: string[],
+): T => {
+  if (!hasText(raw)) return fallback;
+  let data: unknown;
+  try {
+    data = JSON.parse(raw);
+  } catch (e) {
+    errors.push(`${name}: invalid JSON (${e instanceof Error ? e.message.slice(0, 120) : 'parse error'})`);
     return fallback;
   }
+  const parsed = schema.safeParse(data);
+  if (!parsed.success) {
+    errors.push(`${name}: schema mismatch (${zodIssuesSummary(parsed.error.issues)})`);
+    return fallback;
+  }
+  return parsed.data as T;
+};
+
+/** 条目级跨字段校验：返回该条目的诊断列表（非空即丢弃该条目）。 */
+const validateEntry = (
+  entry: AutoReviewProviderEntry,
+  index: number,
+  env: Readonly<Record<string, string | undefined>>,
+): string[] => {
+  const at = `AI_REVIEW_PROVIDERS_CONFIG[${index}] (id="${entry.id}")`;
+  const issues: string[] = [];
+  if (entry.kind === 'jev-decisions') {
+    if (entry.endpoint === 'workers-ai') {
+      if (!hasText(entry.accountId)) issues.push(`${at}: workers-ai requires accountId`);
+      if (!resolveEntryApiKey(entry, env)) issues.push(`${at}: workers-ai requires apiKey or resolvable apiKeyEnv`);
+    } else if (!isHttpUrl(entry.endpoint)) {
+      issues.push(`${at}: endpoint must be an http(s) URL or "workers-ai"`);
+    }
+  }
+  if ((entry.kind === 'omni-moderation' || entry.kind === 'nemotron') && !isHttpUrl(entry.baseUrl)) {
+    issues.push(`${at}: baseUrl must be an http(s) URL`);
+  }
+  return issues;
 };
 
 /**
@@ -151,20 +208,62 @@ const parseJson = <T>(raw: string | undefined, schema: z.ZodTypeAny, fallback: T
  * - AI_REVIEW_PROVIDERS_CONFIG: 后端条目 JSON 数组
  * - AI_REVIEW_ROUTING: { strategy: 'priority' | 'weighted-random' }（默认 priority）
  * - AI_REVIEW_POLICY: { onUncertain?, exemptUserPolicy?, notifyOnAutoReject? }
+ *
+ * 语义约定（r1）：未配置或配置无效 ⇒ 无可用自动审查后端（providers=[]），
+ * 上层不再回退旧版审查通路；所有显式配置问题记入 errors 供日志告警。
  */
 export const parseAutoReviewConfig = (
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): ParsedAutoReviewConfig => {
-  const providers = parseJson(env.AI_REVIEW_PROVIDERS_CONFIG, z.array(entrySchema), []);
-  const routing = parseJson(env.AI_REVIEW_ROUTING, routingSchema, { strategy: 'priority' as const });
-  const policyRaw = parseJson<z.infer<typeof policySchema>>(env.AI_REVIEW_POLICY, policySchema, {});
+  const errors: string[] = [];
+
+  const rawProviders = parseJsonField(
+    env.AI_REVIEW_PROVIDERS_CONFIG,
+    'AI_REVIEW_PROVIDERS_CONFIG',
+    z.array(z.unknown()),
+    [] as unknown[],
+    errors,
+  );
+
+  const providers: AutoReviewProviderEntry[] = [];
+  const seenIds = new Set<string>();
+  rawProviders.forEach((raw, index) => {
+    const parsed = entrySchema.safeParse(raw);
+    if (!parsed.success) {
+      errors.push(`AI_REVIEW_PROVIDERS_CONFIG[${index}]: ${zodIssuesSummary(parsed.error.issues)}`);
+      return;
+    }
+    const entry = parsed.data;
+    if (seenIds.has(entry.id)) {
+      errors.push(`AI_REVIEW_PROVIDERS_CONFIG[${index}]: duplicate id "${entry.id}"`);
+      return;
+    }
+    const issues = validateEntry(entry, index, env);
+    if (issues.length > 0) {
+      errors.push(...issues);
+      return;
+    }
+    seenIds.add(entry.id);
+    providers.push(entry);
+  });
+
+  const routing = parseJsonField(env.AI_REVIEW_ROUTING, 'AI_REVIEW_ROUTING', routingSchema, {
+    strategy: 'priority' as const,
+  }, errors);
+  const policyRaw = parseJsonField<z.infer<typeof policySchema>>(
+    env.AI_REVIEW_POLICY,
+    'AI_REVIEW_POLICY',
+    policySchema,
+    {},
+    errors,
+  );
   const policy: AutoReviewPolicy = {
     onUncertain: (policyRaw.onUncertain as AutoReviewUncertainPolicy) ?? DEFAULT_AUTO_REVIEW_POLICY.onUncertain,
     exemptUserPolicy:
       (policyRaw.exemptUserPolicy as AutoReviewExemptPolicy) ?? DEFAULT_AUTO_REVIEW_POLICY.exemptUserPolicy,
     notifyOnAutoReject: policyRaw.notifyOnAutoReject ?? DEFAULT_AUTO_REVIEW_POLICY.notifyOnAutoReject,
   };
-  return { providers, routing, policy };
+  return { providers, routing, policy, errors };
 };
 
 /** 条目内 apiKey 优先，其次 apiKeyEnv 指向的环境变量。 */

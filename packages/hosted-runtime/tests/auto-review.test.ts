@@ -8,6 +8,7 @@ import {
   resolveUncertainAction,
   type AutoReviewProviderEntry,
 } from '../src/auto-review';
+import { AUTO_REVIEW_JEV_QUESTIONS_V2 } from '../src/auto-review/question-set';
 
 const target = { id: 'card-1', name: '测试卡', description: '简介', data: '{"k":"v"}' };
 
@@ -22,15 +23,24 @@ const jevEntry = (over: Record<string, unknown> = {}): AutoReviewProviderEntry =
     ...over,
   }) as AutoReviewProviderEntry;
 
+/** v2 问题集全 key 答案（9 个 noul 题）；校验是严格的，缺一题即后端失败。 */
+const fullAnswers = (over: Record<string, number> = {}): Record<string, number> => {
+  const out: Record<string, number> = {};
+  for (const key of Object.keys(AUTO_REVIEW_JEV_QUESTIONS_V2)) out[key] = 0.05;
+  out.should_pass = 0.95;
+  return { ...out, ...over };
+};
+
 const jevResponse = (answers: Record<string, number>) =>
   new Response(JSON.stringify({ result: { answers } }), { status: 200 });
 
 describe('parseAutoReviewConfig', () => {
-  it('空配置回退默认值', () => {
+  it('空配置回退默认值且无诊断', () => {
     const c = parseAutoReviewConfig({});
     expect(c.providers).toEqual([]);
     expect(c.routing.strategy).toBe('priority');
     expect(c.policy).toEqual({ onUncertain: 'normal', exemptUserPolicy: 'skip', notifyOnAutoReject: true });
+    expect(c.errors).toEqual([]);
   });
 
   it('解析 providers/routing/policy', () => {
@@ -43,15 +53,45 @@ describe('parseAutoReviewConfig', () => {
     expect(c.providers[0].id).toBe('jev-1');
     expect(c.routing.strategy).toBe('weighted-random');
     expect(c.policy).toEqual({ onUncertain: 'hold', exemptUserPolicy: 'review', notifyOnAutoReject: false });
+    expect(c.errors).toEqual([]);
   });
 
-  it('非法 JSON 静默回退', () => {
+  it('非法 JSON：回退默认且记入 errors（不再静默）', () => {
     const c = parseAutoReviewConfig({
       AI_REVIEW_PROVIDERS_CONFIG: '{bad json',
       AI_REVIEW_ROUTING: '{"strategy":"nope"}',
     });
     expect(c.providers).toEqual([]);
     expect(c.routing.strategy).toBe('priority');
+    expect(c.errors.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('非法条目单独剔除并诊断，合法条目保留', () => {
+    const c = parseAutoReviewConfig({
+      AI_REVIEW_PROVIDERS_CONFIG: JSON.stringify([
+        jevEntry(),
+        { id: 'bad', kind: 'omni-moderation' }, // 缺 baseUrl
+      ]),
+    });
+    expect(c.providers).toHaveLength(1);
+    expect(c.errors.some((e) => e.includes('bad') || e.includes('[1]'))).toBe(true);
+  });
+
+  it('重复 id / workers-ai 缺凭据 / 非法 URL / unknown 字段均入 errors', () => {
+    const c = parseAutoReviewConfig({
+      AI_REVIEW_PROVIDERS_CONFIG: JSON.stringify([
+        jevEntry(),
+        jevEntry(), // duplicate id
+        { id: 'w', kind: 'jev-decisions', endpoint: 'workers-ai', model: 'clef-flash' }, // 缺 accountId/apiKey
+        { id: 'u', kind: 'omni-moderation', baseUrl: 'ftp://x', model: 'm' }, // 非 http(s)
+        { id: 'x', kind: 'llm', surpriseField: 1 }, // unknown field
+      ]),
+    });
+    expect(c.providers).toHaveLength(1);
+    expect(c.errors.join('\n')).toMatch(/duplicate id "jev-1"/);
+    expect(c.errors.join('\n')).toMatch(/accountId/);
+    expect(c.errors.join('\n')).toMatch(/baseUrl/);
+    expect(c.errors.join('\n')).toMatch(/surpriseField|Unrecognized/);
   });
 });
 
@@ -85,13 +125,14 @@ describe('resolveUncertainAction', () => {
 
 describe('jev-decisions backend', () => {
   it('分类分超阈值 → reject 并映射类目', async () => {
-    const fetchImpl = vi.fn(async () => jevResponse({ v_sexual: 0.9, v_overall: 0.4, should_pass: 0.2 }));
+    const fetchImpl = vi.fn(async () => jevResponse(fullAnswers({ v_sexual: 0.9, should_pass: 0.1 })));
     const backend = createAutoReviewBackend(jevEntry(), { fetch: fetchImpl });
     const out = await backend.review(target);
     expect(out.verdict).toBe('reject');
     expect(out.category).toBe('sexual');
     expect(out.score).toBeCloseTo(0.9);
     expect(out.reason).toContain('性内容');
+    expect(out.inputCoverage).toEqual({ truncated: false, parseError: false });
     // workers-ai URL 组装
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toContain('/accounts/acct/ai/run/@cf/cloudflare/clef-flash');
@@ -100,23 +141,39 @@ describe('jev-decisions backend', () => {
 
   it('全部低分 → approve', async () => {
     const backend = createAutoReviewBackend(jevEntry(), {
-      fetch: vi.fn(async () => jevResponse({ v_sexual: 0.01, v_overall: 0.05, should_pass: 0.95 })),
+      fetch: vi.fn(async () => jevResponse(fullAnswers())),
     });
     expect((await backend.review(target)).verdict).toBe('approve');
   });
 
   it('中间灰分 → uncertain', async () => {
     const backend = createAutoReviewBackend(jevEntry(), {
-      fetch: vi.fn(async () => jevResponse({ v_sexual: 0.3, v_overall: 0.3, should_pass: 0.6 })),
+      fetch: vi.fn(async () => jevResponse(fullAnswers({ v_sexual: 0.3, v_overall: 0.3, should_pass: 0.6 }))),
     });
     expect((await backend.review(target)).verdict).toBe('uncertain');
   });
 
   it('mercury 登记口径：overall veto 触发 reject', async () => {
     const backend = createAutoReviewBackend(jevEntry({ model: 'inception/mercury-decide' }), {
-      fetch: vi.fn(async () => jevResponse({ v_overall: 0.8, v_sexual: 0.1 })),
+      fetch: vi.fn(async () => jevResponse(fullAnswers({ v_overall: 0.8, v_sexual: 0.1 }))),
     });
     expect((await backend.review(target)).verdict).toBe('reject');
+  });
+
+  it('只回 1/9 题 → 响应不完整抛错（缺数据≠安全）', async () => {
+    const backend = createAutoReviewBackend(jevEntry(), {
+      fetch: vi.fn(async () => jevResponse({ v_sexual: 0.01 })),
+    });
+    await expect(backend.review(target)).rejects.toThrow('missing or invalid');
+  });
+
+  it.each([NaN, -0.1, 1.5, 'high'])('answer=%s 非法 → 抛错', async (bad) => {
+    const backend = createAutoReviewBackend(jevEntry(), {
+      fetch: vi.fn(async () =>
+        new Response(JSON.stringify({ result: { answers: fullAnswers({ v_hate: bad as number }) } })),
+      ),
+    });
+    await expect(backend.review(target)).rejects.toThrow('missing or invalid');
   });
 
   it('HTTP 错误抛出异常（由引擎回退）', async () => {
@@ -124,6 +181,15 @@ describe('jev-decisions backend', () => {
       fetch: vi.fn(async () => new Response('{}', { status: 500 })),
     });
     await expect(backend.review(target)).rejects.toThrow('jev-decisions 500');
+  });
+
+  it('options.signal 透传给 fetch', async () => {
+    const fetchImpl = vi.fn(async () => jevResponse(fullAnswers()));
+    const backend = createAutoReviewBackend(jevEntry(), { fetch: fetchImpl });
+    const controller = new AbortController();
+    await backend.review(target, { signal: controller.signal });
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(init.signal).toBe(controller.signal);
   });
 });
 
@@ -154,6 +220,19 @@ describe('omni-moderation backend', () => {
     });
     expect((await backend.review(target)).verdict).toBe('approve');
   });
+
+  it.each([
+    ['缺 flagged', { categories: {}, category_scores: {} }],
+    ['flagged 非布尔', { flagged: 'yes', categories: {}, category_scores: {} }],
+    ['缺 category_scores', { flagged: false, categories: {} }],
+    ['score 越界', { flagged: false, categories: {}, category_scores: { hate: 2 } }],
+    ['score NaN', { flagged: false, categories: {}, category_scores: { hate: NaN } }],
+  ])('wire shape 非法（%s）→ 抛错', async (_label, result) => {
+    const backend = createAutoReviewBackend(entry, {
+      fetch: vi.fn(async () => new Response(JSON.stringify({ results: [result] }), { status: 200 })),
+    });
+    await expect(backend.review(target)).rejects.toThrow('invalid response shape');
+  });
 });
 
 describe('nemotron backend', () => {
@@ -178,6 +257,17 @@ describe('nemotron backend', () => {
     expect((await backend.review(target)).verdict).toBe('approve');
   });
 
+  it('JSON 结构化输出优先解析', async () => {
+    const backend = createAutoReviewBackend(entry, {
+      fetch: vi.fn(async () =>
+        chat(JSON.stringify({ 'User Safety': 'unsafe', 'Safety Categories': ['Hate Speech'] })),
+      ),
+    });
+    const out = await backend.review(target);
+    expect(out.verdict).toBe('reject');
+    expect(out.category).toBe('hate');
+  });
+
   it('解析失败抛异常', async () => {
     const backend = createAutoReviewBackend(entry, { fetch: vi.fn(async () => chat('???')) });
     await expect(backend.review(target)).rejects.toThrow('unparseable');
@@ -185,7 +275,7 @@ describe('nemotron backend', () => {
 });
 
 describe('llm backend', () => {
-  it('generate 结果映射 verdict/categories', async () => {
+  it('generate 结果映射 verdict/categories，abortSignal 透传', async () => {
     const generate = vi.fn(async () => ({
       reviews: [{ id: 'card-1', verdict: 'rejected', violationScore: 0.9, categories: ['sexual'], reason: '露骨性描写' }],
     }));
@@ -193,10 +283,12 @@ describe('llm backend', () => {
       { id: 'llm', kind: 'llm', modelOverride: 'm1' } as AutoReviewProviderEntry,
       { generate },
     );
-    const out = await backend.review(target);
+    const controller = new AbortController();
+    const out = await backend.review(target, { signal: controller.signal });
     expect(out.verdict).toBe('reject');
     expect(out.category).toBe('sexual');
     expect(generate).toHaveBeenCalledOnce();
+    expect((generate.mock.calls[0] as unknown[])[2]).toMatchObject({ abortSignal: controller.signal });
   });
 
   it('缺目标 review 抛异常', async () => {
@@ -209,7 +301,7 @@ describe('llm backend', () => {
 
 describe('engine routing', () => {
   it('priority：首个后端优先', async () => {
-    const fetchImpl = vi.fn(async () => jevResponse({ v_sexual: 0.01, should_pass: 0.9 }));
+    const fetchImpl = vi.fn(async () => jevResponse(fullAnswers()));
     const engine = createAutoReviewEngine(
       [jevEntry({ id: 'a' }), jevEntry({ id: 'b' })],
       { fetch: fetchImpl, strategy: 'priority' },
@@ -223,7 +315,7 @@ describe('engine routing', () => {
     let calls = 0;
     const fetchImpl = vi.fn(async () => {
       calls += 1;
-      return calls === 1 ? new Response('{}', { status: 503 }) : jevResponse({ v_sexual: 0.9 });
+      return calls === 1 ? new Response('{}', { status: 503 }) : jevResponse(fullAnswers({ v_sexual: 0.9, should_pass: 0.1 }));
     });
     const engine = createAutoReviewEngine([jevEntry({ id: 'a' }), jevEntry({ id: 'b' })], {
       fetch: fetchImpl, strategy: 'priority',
@@ -249,5 +341,50 @@ describe('engine routing', () => {
     expect(rngHigh[0].id).toBe('b');
     const rngLow = orderBackendEntries(entries, 'weighted-random', () => 0.01);
     expect(rngLow[0].id).toBe('a');
+  });
+});
+
+describe('engine 输入覆盖门禁', () => {
+  it('data 非法 JSON → 直接 uncertain，不调用后端', async () => {
+    const fetchImpl = vi.fn();
+    const engine = createAutoReviewEngine([jevEntry()], { fetch: fetchImpl });
+    const r = await engine.review({ ...target, data: '{not json' });
+    expect(r.outcome.verdict).toBe('uncertain');
+    expect(r.inputCoverage.parseError).toBe(true);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('输入被截断 → approve 降级 uncertain；reject 仍可落地', async () => {
+    const bigTarget = { ...target, data: JSON.stringify({ f: 'x'.repeat(500) }) };
+    const approveEngine = createAutoReviewEngine([jevEntry()], {
+      fetch: vi.fn(async () => jevResponse(fullAnswers())),
+    });
+    const r1 = await approveEngine.review(bigTarget);
+    expect(r1.inputCoverage.truncated).toBe(true);
+    expect(r1.outcome.verdict).toBe('uncertain');
+
+    const rejectEngine = createAutoReviewEngine([jevEntry()], {
+      fetch: vi.fn(async () => jevResponse(fullAnswers({ v_gore: 0.95, should_pass: 0.05 }))),
+    });
+    const r2 = await rejectEngine.review(bigTarget);
+    expect(r2.inputCoverage.truncated).toBe(true);
+    expect(r2.outcome.verdict).toBe('reject');
+  });
+
+  it('超时中止底层请求（AbortSignal 传递）', async () => {
+    let observedAbort = false;
+    const fetchImpl = vi.fn(
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            observedAbort = true;
+            reject(new Error('aborted'));
+          });
+        }),
+    );
+    const engine = createAutoReviewEngine([jevEntry({ timeoutMs: 20 })], { fetch: fetchImpl as never });
+    const r = await engine.review(target);
+    expect(r.outcome.verdict).toBe('uncertain');
+    expect(observedAbort).toBe(true);
   });
 });

@@ -40,6 +40,15 @@ export type ReviewTarget = {
 
 export type ReviewVerdict = 'approve' | 'reject' | 'uncertain';
 
+/**
+ * 审核输入覆盖信息：parseError 表示正文不是合法 JSON（抽取完全失败）；
+ * truncated 表示抽取被深度/条数/长度上限截断，模型并未看到全部内容。
+ */
+export type ReviewInputCoverage = {
+  truncated: boolean;
+  parseError: boolean;
+};
+
 export type ReviewOutcome = {
   verdict: ReviewVerdict;
   /** 归一化违规倾向分 0–1（各后端按自身口径折算；无语义分数的后端给 0/1） */
@@ -49,14 +58,21 @@ export type ReviewOutcome = {
   reason?: string;
   /** 后端原生明细（逐题概率、category_scores、原始类目串等），保留供日志/审计/调阈 */
   details?: Record<string, unknown>;
+  /** 该后端实际看到的输入覆盖情况；缺省时引擎按标准抽取口径补算 */
+  inputCoverage?: ReviewInputCoverage;
 };
 
 export type AutoReviewBackendKind = 'jev-decisions' | 'omni-moderation' | 'nemotron' | 'llm';
 
+export type AutoReviewBackendCallOptions = {
+  /** 引擎超时/路由放弃时下发；HTTP 通路必须透传给 fetch，可取消的生成通路必须透传 abortSignal */
+  signal?: AbortSignal;
+};
+
 export interface AutoReviewBackend {
   readonly id: string;
   readonly kind: AutoReviewBackendKind;
-  review(_target: ReviewTarget): Promise<ReviewOutcome>;
+  review(_target: ReviewTarget, _options?: AutoReviewBackendCallOptions): Promise<ReviewOutcome>;
 }
 
 export type AutoReviewRoutingStrategy = 'priority' | 'weighted-random';
