@@ -48,6 +48,9 @@ const SRC = path.join(PACKAGE_ROOT, 'src');
  * - `./color-mode-init` 被 `app/layout.tsx` 读首屏防闪烁脚本——它必须是零 hook 的纯数据模块。
  * - `./card-library-visibility` 被 `lib/data-card-visibility.ts` 经 `app/api/data-cards` 读——
  *   纯数据可见性归一化，不得经由含客户端组件的 `./card-library` 桶出口。
+ * - `./device-preferences-init` 被 `app/layout.tsx` 读首屏 motion 偏好防闪烁脚本——与
+ *   `color-mode-init` 同一先例：RSC 与 Desktop `index.html` 内联消费的只能是零 hook
+ *   纯数据模块，偏好 hook 在同目录的 `./device-preferences`（DESK-SET-007）。
  *
  * `./local-archive` 与 `./local-cards` 的控制器是客户端状态机，`./markdown` 与 `./encyclopedia-views` 与
  * `./shell` 只在 Client Component 里用，因此不在此列。
@@ -63,6 +66,7 @@ const SERVER_SAFE_ENTRYPOINTS: Readonly<Record<string, string>> = {
   './markdown-text': 'markdown/text/index.ts',
   './home': 'home/index.ts',
   './color-mode-init': 'color-mode/init.ts',
+  './device-preferences-init': 'device-preferences/init.ts',
   './card-library-visibility': 'card-library/visibility.ts',
 };
 
@@ -187,23 +191,34 @@ describe('server-safe shared entrypoints stay free of React hooks', () => {
     // 等客户端组件；它本身零 hook，但目前没有 RSC 消费者，按「无 RSC 消费者不登记为
     // server-safe」的规则留在客户端专属列。`./announcement` 同为 D5.1-P1 新增：公告中心是
     // 带轮询的客户端状态机，只在客户端挂载。
+    // `./character-manager`、`./media` 是 D5.1-P2-r5 上移的角色管理页骨架与主题图组件，
+    // `./messages` 是 d-1b 上移的消息呈现层：三者的消费方都隔着 'use client' 边界
+    // （MessagesPage、ThemeImage、CharacterManagerPage），不进入 Server Component 导入链。
+    // `./settings` 与 `./device-preferences` 是 d5.1-s1 的设置页与设备偏好客户端状态机：
+    // `app/settings/page.tsx` 只经 `'use client'` 的 SettingsRouteProviders 挂载它们，
+    // RSC 消费的仅是同目录的 `./device-preferences-init`（已登记在 server-safe 列）。
     expect(unlisted.sort()).toEqual([
       './ai-provider',
       './announcement',
       './card-editor',
       './card-library',
       './character-card',
+      './character-manager',
       './character-result',
       './client',
       './color-mode',
       './community',
       './details-controls',
+      './device-preferences',
       './encyclopedia-views',
       './local-archive',
       './local-cards',
       './markdown',
+      './media',
+      './messages',
       './modal',
       './questionnaire',
+      './settings',
       './shell',
     ]);
   });
