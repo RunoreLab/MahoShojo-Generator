@@ -51,6 +51,8 @@ import {
   JsonSizeIndicator,
   QuestionnaireAnswerExportPanel,
   QuestionNavigator,
+  isMobileFormFactor,
+  recommendedSaveModes,
   SaveJsonButton,
   useResultAutoScroll,
   type GenerationMode,
@@ -67,6 +69,7 @@ import { CardLibraryModal, type BattleSelectionPayload, type CardLibrarySelectio
 import { ProductFooter } from '@mahoshojo/ui-web/shell';
 import type { HomeAssetSource } from '@mahoshojo/ui-web/home';
 import { DetailsSession } from '../features/details/session';
+import { QUESTIONNAIRE_DRAFT_DEFAULT_LANGUAGE } from '../features/questionnaire/session';
 import type { DetailsExecutionMode } from '../features/details/generation';
 import {
   buildDetailsAnswers,
@@ -219,8 +222,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   // 终端形态决定「保存方式」推荐项与缺省值（与 Web 同一 UA 判定）。
   useEffect(() => {
     if (typeof navigator === 'undefined') return;
-    const isMobileDevice = /mobile|android|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(navigator.userAgent.toLowerCase());
-    setDeviceType(isMobileDevice ? 'mobile' : 'desktop');
+    setDeviceType(isMobileFormFactor() ? 'mobile' : 'desktop');
   }, []);
   // 预设问卷索引：只服务「选择预设问卷」下拉；失败不影响内置问卷与本地功能。
   useEffect(() => {
@@ -587,8 +589,8 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   const targetCapabilities = selected
     ? getModelGenerationCapabilities(selected.id, selected.modelId)
     : undefined;
-  const recommendedImageMode = deviceType === 'mobile' ? 'modal' : 'download';
-  const recommendedJsonMode = deviceType === 'mobile' ? 'text' : 'download';
+  const recommendedImageMode = recommendedSaveModes(deviceType === 'mobile').imageSaveMode;
+  const recommendedJsonMode = recommendedSaveModes(deviceType === 'mobile').jsonSaveMode;
   const imageSaveMode = state.draft.imageSaveMode ?? recommendedImageMode;
   const jsonSaveMode = state.draft.jsonSaveMode ?? recommendedJsonMode;
   const showDetails = state.draft.showDetails === true;
@@ -1007,7 +1009,7 @@ export function DesktopDetails() {
   useEffect(() => {
     const owner = new DetailsSession({
       storage: { getItem: (key) => window.localStorage.getItem(key), setItem: (key, value) => window.localStorage.setItem(key, value), removeItem: (key) => window.localStorage.removeItem(key) },
-      repository: new IpcLocalCardRepository(invoke), initialDraft: { answers: {}, language: 'zh-CN' },
+      repository: new IpcLocalCardRepository(invoke), initialDraft: { answers: {}, language: QUESTIONNAIRE_DRAFT_DEFAULT_LANGUAGE },
     });
     setSession(owner);
     const onPageHide = () => owner.cancel();

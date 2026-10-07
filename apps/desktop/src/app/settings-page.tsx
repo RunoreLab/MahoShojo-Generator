@@ -2,76 +2,20 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearch } from '@tanstack/react-router';
 
 import {
-  ALLOW_MULTIPLE_QUESTIONNAIRES_FIELD,
   AppearanceSettingsSection,
   createPagePreferencesAdapter,
-  DRAFT_LANGUAGE_FIELD,
-  IMAGE_SAVE_MODE_FIELD,
   isSettingsGroupId,
-  JSON_SAVE_MODE_FIELD,
   PagePreferencesCard,
-  QUESTIONNAIRE_SELECTIONS_FIELD,
   SettingsCard,
   SettingsPage,
-  SHOW_DETAILS_FIELD,
-  type PagePreferenceSource,
 } from '@mahoshojo/ui-web/settings';
 
-import { CANSHOU_DRAFT_KEY } from '../features/canshou/session';
-import { DETAILS_DRAFT_KEY } from '../features/details/session';
+import { DESKTOP_PAGE_PREFERENCE_SOURCES } from './settings-page-preferences';
 import { AccountPanel } from '../features/account/AccountPanel';
 import { AiConnectionsPanel } from '../features/ai-config/AiConnectionsPanel';
 import { WebPackageDiagnosticsPanel } from '../features/webpkg/WebPackageDiagnosticsPanel';
 import { loadDesktopRuntimeInfo, type DesktopRuntimeInfo } from '../platform';
 import { navigateByProductHref, resolveInternalHrefForHashHistory } from './hash-history-fragment';
-
-/**
- * Desktop 各页记忆偏好的字段归属（DESK-SET-007 / DESK-SET-003）。
- *
- * Desktop 的偏好字段与草稿同存在一个文档里（`mahoshojo.desktop.*.draft.v1`），
- * 因此 scope 是 `fields`：设置页经同一 adapter 读写/重置这些字段，重置只删
- * 登记的偏好键，`version`/`answers`/`language`/`output` 与未知字段原样保留——
- * 草稿与已保存结果不受「重置偏好」影响。
- *
- * `generationMode`（流式/非流式）目前只是页面组件状态、不落盘，所以不登记——
- * 没有持久化值的字段进设置页只会伪造出一个「第二默认值」。
- */
-const DESKTOP_DETAILS_PREFERENCES: PagePreferenceSource = {
-  pageId: 'details',
-  title: '设定生成（/details）',
-  pagePath: '/details',
-  storageKey: DETAILS_DRAFT_KEY,
-  scope: 'fields',
-  fields: [
-    DRAFT_LANGUAGE_FIELD,
-    IMAGE_SAVE_MODE_FIELD,
-    JSON_SAVE_MODE_FIELD,
-    SHOW_DETAILS_FIELD,
-    ALLOW_MULTIPLE_QUESTIONNAIRES_FIELD,
-    QUESTIONNAIRE_SELECTIONS_FIELD,
-  ],
-};
-
-const DESKTOP_CANSHOU_PREFERENCES: PagePreferenceSource = {
-  pageId: 'canshou',
-  title: '残兽生成（/canshou）',
-  pagePath: '/canshou',
-  storageKey: CANSHOU_DRAFT_KEY,
-  scope: 'fields',
-  fields: [
-    DRAFT_LANGUAGE_FIELD,
-    IMAGE_SAVE_MODE_FIELD,
-    JSON_SAVE_MODE_FIELD,
-    SHOW_DETAILS_FIELD,
-    ALLOW_MULTIPLE_QUESTIONNAIRES_FIELD,
-    QUESTIONNAIRE_SELECTIONS_FIELD,
-  ],
-};
-
-const PAGE_PREFERENCE_SOURCES: readonly PagePreferenceSource[] = [
-  DESKTOP_DETAILS_PREFERENCES,
-  DESKTOP_CANSHOU_PREFERENCES,
-];
 
 interface RuntimeState {
   status: 'loading' | 'ready' | 'failed';
@@ -154,7 +98,7 @@ const SettingsPageLink = ({ href, children }: { href: string; children: string }
 
 const PagePreferencesSection = () => {
   const adapters = useMemo(
-    () => PAGE_PREFERENCE_SOURCES.map((source) => createPagePreferencesAdapter(source)),
+    () => DESKTOP_PAGE_PREFERENCE_SOURCES.map((source) => createPagePreferencesAdapter(source)),
     [],
   );
   return (

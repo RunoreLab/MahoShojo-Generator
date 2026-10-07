@@ -1,10 +1,16 @@
 /**
  * 各页记忆偏好的字段登记（DESK-SET-007「AI 与生成」组）。
  *
- * 这里只放**两端共用的字段语义**——标签、选项、说明。存储键与 blob/fields
- * 形态由宿主在装配 adapter 时注入（Web 的偏好键在页面侧定义，Desktop 的
- * 草稿键归 `features/<page>/session.ts`），共享层不抢占持久化所有权。
+ * 这里只放**两端共用的字段语义**——标签、选项、说明与空态默认。存储键
+ * 与 blob/fields 形态由宿主在装配 adapter 时注入（Web 的偏好键在页面侧
+ * 定义，Desktop 的草稿键归 `features/<page>/session.ts`），共享层不抢占
+ * 持久化所有权。
+ *
+ * `defaultValue` 是「页面未显式写入时的生效默认」，用于设置页空态如实
+ * 展示——保存方式与页面同一 UA 推导（`recommendedSaveModes`），不存在
+ * 第二套「设置页默认」。
  */
+import { recommendedSaveModes } from '../details-controls/save-mode-defaults';
 import type { PagePreferenceField } from './page-preferences';
 
 export const GENERATION_MODE_FIELD: PagePreferenceField = {
@@ -16,6 +22,7 @@ export const GENERATION_MODE_FIELD: PagePreferenceField = {
     { value: 'non-stream', label: '非流式' },
     { value: 'stream', label: '流式' },
   ],
+  defaultValue: 'non-stream',
 };
 
 export const SELECTED_LANGUAGE_FIELD: PagePreferenceField = {
@@ -23,6 +30,7 @@ export const SELECTED_LANGUAGE_FIELD: PagePreferenceField = {
   label: '生成语言',
   description: '语言代码（如 zh-CN、en-US）。',
   kind: 'text',
+  defaultValue: 'zh-CN',
 };
 
 export const IMAGE_SAVE_MODE_FIELD: PagePreferenceField = {
@@ -33,6 +41,8 @@ export const IMAGE_SAVE_MODE_FIELD: PagePreferenceField = {
     { value: 'download', label: '一键下载' },
     { value: 'modal', label: '预览弹窗保存' },
   ],
+  // 与生成页同一 UA 推导：移动端推荐弹窗，其余一键下载。
+  defaultValue: () => recommendedSaveModes().imageSaveMode,
 };
 
 export const JSON_SAVE_MODE_FIELD: PagePreferenceField = {
@@ -43,42 +53,50 @@ export const JSON_SAVE_MODE_FIELD: PagePreferenceField = {
     { value: 'download', label: '下载 JSON' },
     { value: 'text', label: '复制原始数据' },
   ],
+  // 与生成页同一 UA 推导：移动端推荐复制，其余下载 JSON。
+  defaultValue: () => recommendedSaveModes().jsonSaveMode,
 };
 
 export const SHOW_LANGUAGE_SECTION_FIELD: PagePreferenceField = {
   key: 'showLanguageSection',
   label: '默认展开「生成语言」',
   kind: 'boolean',
+  defaultValue: false,
 };
 
 export const SHOW_BULK_FILL_FIELD: PagePreferenceField = {
   key: 'showBulkFillSection',
   label: '默认展开「一键填充」',
   kind: 'boolean',
+  defaultValue: false,
 };
 
 export const SHOW_ANSWER_REVIEW_FIELD: PagePreferenceField = {
   key: 'showAnswerReview',
   label: '默认展开「回答回顾」',
   kind: 'boolean',
+  defaultValue: false,
 };
 
 export const SHOW_DETAILS_FIELD: PagePreferenceField = {
   key: 'showDetails',
   label: '默认展开「设定说明」',
   kind: 'boolean',
+  defaultValue: false,
 };
 
 export const ALLOW_MULTIPLE_QUESTIONNAIRES_FIELD: PagePreferenceField = {
   key: 'allowMultipleQuestionnaires',
   label: '允许同时回答多份问卷',
   kind: 'boolean',
+  defaultValue: false,
 };
 
 export const SHOW_QUESTIONNAIRE_SETTINGS_FIELD: PagePreferenceField = {
   key: 'showQuestionnaireSettings',
   label: '默认展开「问卷设置」',
   kind: 'boolean',
+  defaultValue: false,
 };
 
 /** 记住的问卷选择集——只展示计数，修改在页面内进行。 */
@@ -100,6 +118,8 @@ export const DRAFT_LANGUAGE_FIELD: PagePreferenceField = {
   description: '随草稿保存；请在生成页修改。重置偏好不会影响它。',
   kind: 'readonly',
   notResettable: true,
+  // 与问卷草稿领域层默认一致（QUESTIONNAIRE_DRAFT_DEFAULT_LANGUAGE）。
+  defaultValue: 'zh-CN',
 };
 
 export const formatPagePreferenceValue = (

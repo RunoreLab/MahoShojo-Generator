@@ -7,7 +7,7 @@ import { quickCheck } from '@/lib/sensitive-word-filter';
 import Link from 'next/link';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
 import QuestionNavigator from '@/components/QuestionNavigator';
-import { SaveJsonButton as SharedSaveJsonButton } from '@mahoshojo/ui-web/details-controls';
+import { isMobileFormFactor, recommendedSaveModes, SaveJsonButton as SharedSaveJsonButton } from '@mahoshojo/ui-web/details-controls';
 import { useAppRouterAdapter } from '@/lib/app-router-adapter';
 import { DETAILS_PREFERENCES_STORAGE_KEY } from '@/lib/settings/page-preferences';
 import BattleDataModal from '@/components/BattleDataModal';
@@ -381,8 +381,8 @@ export const CreatorPage: React.FC = () => {
   // 多语言支持
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
   const [selectedLanguage, setSelectedLanguage] = useState('zh-CN');
-  const recommendedImageMode: ImageSaveMode = deviceType === 'mobile' ? 'modal' : 'download';
-  const recommendedJsonMode: JsonSaveMode = deviceType === 'mobile' ? 'text' : 'download';
+  const recommendedImageMode: ImageSaveMode = recommendedSaveModes(deviceType === 'mobile').imageSaveMode;
+  const recommendedJsonMode: JsonSaveMode = recommendedSaveModes(deviceType === 'mobile').jsonSaveMode;
   const preferenceButtonClass = (active: boolean) => `flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${active ? 'border-indigo-500 bg-indigo-50 text-indigo-700 shadow-sm' : 'border-slate-200 text-slate-600 hover:border-indigo-300 hover:text-indigo-600'}`;
   const clearTransitionTimers = useCallback(() => {
     if (transitionTimerRef.current) {
@@ -695,12 +695,11 @@ export const CreatorPage: React.FC = () => {
 
   useEffect(() => {
     if (typeof navigator === 'undefined') return;
-    const userAgent = navigator.userAgent.toLowerCase();
-    const isMobileDevice = /mobile|android|iphone|ipad|ipod|blackberry|iemobile|opera mini/.test(userAgent);
+    const isMobileDevice = isMobileFormFactor();
     const detectedType: DeviceType = isMobileDevice ? 'mobile' : 'desktop';
     setDeviceType(detectedType);
-    const defaultImageMode: ImageSaveMode = isMobileDevice ? 'modal' : 'download';
-    const defaultJsonMode: JsonSaveMode = isMobileDevice ? 'text' : 'download';
+    const defaultImageMode: ImageSaveMode = recommendedSaveModes(isMobileDevice).imageSaveMode;
+    const defaultJsonMode: JsonSaveMode = recommendedSaveModes(isMobileDevice).jsonSaveMode;
 
     try {
       const saved = window.localStorage.getItem(DETAILS_PREFERENCE_KEY);

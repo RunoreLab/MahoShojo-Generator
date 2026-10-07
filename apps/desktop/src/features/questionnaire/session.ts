@@ -50,6 +50,22 @@ export interface QuestionnaireDraft {
   showDetails?: boolean;
 }
 
+/** 问卷草稿的默认语言——页面 `initialDraft` 与设置页首写共用同一口径。 */
+export const QUESTIONNAIRE_DRAFT_DEFAULT_LANGUAGE = 'zh-CN';
+
+/**
+ * 「首写合法文档」工厂（D5.1-S1-r1）：设置页对空草稿键做字段级写入前，
+ * 必须先建立一份能过 `parseDraft` 的空壳——`version`/`answers`/`language`
+ * 是草稿协议必填面；只写偏好键的裸对象会被判成损坏草稿并触发数据保护
+ * （`isDraftBlocked`）。产物不含用户内容，`isResidueDraft` 判真——页面
+ * 下次打开静默应用并照常恢复其中残留的偏好字段，不弹「恢复草稿」门禁。
+ */
+export const createEmptyQuestionnaireDraftDocument = (): Record<string, unknown> => ({
+  version: 1,
+  answers: {},
+  language: QUESTIONNAIRE_DRAFT_DEFAULT_LANGUAGE,
+});
+
 /**
  * 问卷会话家族描述符：草稿键、内置问卷身份、结构化卡的归一化与标题映射。
  * 其余语义（草稿闸门、取消、uncertain 投影、保存 provenance）家族间一致。

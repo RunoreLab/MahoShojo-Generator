@@ -8,6 +8,7 @@ export {
 } from './groups';
 export {
   createPagePreferencesAdapter,
+  resolvePagePreferenceFieldDefault,
   type PagePreferenceField,
   type PagePreferenceFieldKind,
   type PagePreferencesAdapter,

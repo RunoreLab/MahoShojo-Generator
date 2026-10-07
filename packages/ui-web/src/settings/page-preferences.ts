@@ -39,6 +39,12 @@ export interface PagePreferenceField {
   options?: ReadonlyArray<{ value: string; label: string }>;
   /** `count`/`readonly` 的展示格式化；缺省原样转字符串。 */
   format?: (value: unknown) => string;
+  /**
+   * 未写入持久值时页面实际生效的默认——空存储态控件如实显示它，而
+   * 不是第二套「设置页默认」。可为惰性函数（如按终端形态推导的值），
+   * 每次渲染控件时解析一次。缺省视为「未设置」。
+   */
+  defaultValue?: unknown | (() => unknown);
   /** `fields` 形态且不可由设置页清除（如草稿自有字段）。缺省视为偏好键。 */
   notResettable?: boolean;
 }
@@ -52,6 +58,14 @@ export interface PagePreferenceSource {
   storageKey: string;
   scope: 'blob' | 'fields';
   fields: readonly PagePreferenceField[];
+  /**
+   * `fields` 形态对空存储做首写时建立合法文档的工厂——必须由字段 owner
+   * 的领域层提供（如问卷草稿的 `version`/`answers`/`language` 必填面），
+   * 设置页自己不复制文档结构。缺省时 `fields` 空态写入返回 `false`
+   * （fail-closed）：宁可在设置页报错，也不伪造看不懂的宿主文档。
+   * `blob` 形态不需要——整 blob 即偏好对象，`{key: value}` 天然合法。
+   */
+  createDocumentForFirstWrite?: () => Record<string, unknown>;
 }
 
 export type PagePreferencesReadResult =
@@ -112,6 +126,12 @@ const validateFieldValue = (field: PagePreferenceField, value: unknown): void =>
 
 const preferenceKeysOf = (source: PagePreferenceSource): string[] =>
   source.fields.filter((field) => field.notResettable !== true).map((field) => field.key);
+
+/** 解析字段的空态展示默认：惰性函数每次调用解析，静态值原样返回。 */
+export const resolvePagePreferenceFieldDefault = (
+  field: PagePreferenceField,
+): unknown =>
+  typeof field.defaultValue === 'function' ? field.defaultValue() : field.defaultValue;
 
 /**
  * 按登记的字段清单裁剪值：读取只暴露声明字段，未声明的 blob 键（如未来版本
@@ -181,7 +201,18 @@ export const createPagePreferencesAdapter = (
       validateFieldValue(field, value);
       const document_ = readDocument();
       if (document_.kind === 'corrupted') return false;
-      const nextDocument = document_.kind === 'ready' ? { ...document_.document } : {};
+      let nextDocument: Record<string, unknown>;
+      if (document_.kind === 'ready') {
+        nextDocument = { ...document_.document };
+      } else if (source.scope === 'blob') {
+        // 整 blob 即偏好对象，首写只含本字段即合法。
+        nextDocument = {};
+      } else {
+        // fields 文档嵌在更大宿主文档里：首写必须经 owner 领域层工厂
+        // 建立合法空壳，缺失工厂时 fail-closed 而不是裸写偏好键。
+        if (!source.createDocumentForFirstWrite) return false;
+        nextDocument = source.createDocumentForFirstWrite();
+      }
       nextDocument[key] = value;
       if (!writeDocument(nextDocument)) return false;
       notify();

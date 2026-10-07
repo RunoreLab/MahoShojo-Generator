@@ -181,6 +181,25 @@ describe('web /settings page', () => {
     expect(stored).toEqual({ imageSaveMode: 'modal', showDetails: true });
   });
 
+  it('empty preference key still renders default-valued controls — first change creates the blob', async () => {
+    // localStorage 在 beforeEach 清空——该页从未写过偏好（D5.1-S1-r1）。
+    await render(<WebSettingsPage />);
+
+    expect(container.textContent).toContain('魔法少女生成（/details）');
+    expect(container.textContent).toContain('尚未写入任何偏好');
+    // 空态不是「没有设置项」：控件照常渲染，值为页面生效默认。
+    const option = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === '预览弹窗保存',
+    );
+    await click(option ?? null);
+
+    // blob 首写只含被修改的偏好字段——整 blob 即偏好对象。
+    const stored = JSON.parse(
+      window.localStorage.getItem('mahoshojo.details.preferences.v1') ?? 'null',
+    );
+    expect(stored).toEqual({ imageSaveMode: 'modal' });
+  });
+
   it('honours ?section= deep links against the shared group anchors', async () => {
     searchString = 'section=generation';
     await render(<WebSettingsPage />);

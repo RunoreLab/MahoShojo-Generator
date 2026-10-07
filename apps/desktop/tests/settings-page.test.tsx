@@ -192,6 +192,28 @@ describe('desktop settings page preferences', () => {
     expect(container.textContent).toContain(DETAILS_DRAFT_KEY);
   });
 
+  it('empty draft key still renders default-valued controls — first change writes a valid draft shell', async () => {
+    // 不预置草稿键：该页从未写入任何偏好（D5.1-S1-r1）。
+    await mountAt('/settings?section=generation');
+
+    expect(container.textContent).toContain('设定生成（/details）');
+    expect(container.textContent).toContain('尚未写入任何偏好');
+    const option = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === '预览弹窗保存',
+    );
+    await click(option ?? null);
+
+    // fields 首写经草稿领域工厂：必填面（version/answers/language）+ 被改字段，
+    // 不是 {imageSaveMode} 裸对象——产物能过 parseDraft 且被判为残余草稿。
+    const draft = readDraft();
+    expect(draft).toEqual({
+      version: 1,
+      answers: {},
+      language: 'zh-CN',
+      imageSaveMode: 'modal',
+    });
+  });
+
   it('writing a field goes to the page-owned draft key, preserving draft content', async () => {
     seedDetailsDraft();
     await mountAt('/settings?section=generation');

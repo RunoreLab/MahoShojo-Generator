@@ -10,7 +10,7 @@ import { generateRandomMagicalGirl } from '@/lib/random-character-generator';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
 import Footer from '@/components/Footer';
 import QuestionNavigator from '@/components/QuestionNavigator';
-import { AnswerReviewList, BulkAnswerTools, SaveJsonButton } from '@mahoshojo/ui-web/details-controls';
+import { AnswerReviewList, BulkAnswerTools, isMobileFormFactor, recommendedSaveModes, SaveJsonButton } from '@mahoshojo/ui-web/details-controls';
 import {
   buildQuestionnaireAnswerExportText,
   collectQuestionnaireAnswerExportItems,
@@ -228,8 +228,8 @@ export const DetailsPage: React.FC = () => {
   // 多语言支持
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
   const [selectedLanguage, setSelectedLanguage] = useState('zh-CN');
-  const recommendedImageMode: ImageSaveMode = deviceType === 'mobile' ? 'modal' : 'download';
-  const recommendedJsonMode: JsonSaveMode = deviceType === 'mobile' ? 'text' : 'download';
+  const recommendedImageMode: ImageSaveMode = recommendedSaveModes(deviceType === 'mobile').imageSaveMode;
+  const recommendedJsonMode: JsonSaveMode = recommendedSaveModes(deviceType === 'mobile').jsonSaveMode;
 
   const clearTransitionTimers = useCallback(() => {
     if (transitionTimerRef.current) {
@@ -409,12 +409,11 @@ export const DetailsPage: React.FC = () => {
 
   useEffect(() => {
     if (typeof navigator === 'undefined') return;
-    const userAgent = navigator.userAgent.toLowerCase();
-    const isMobileDevice = /mobile|android|iphone|ipad|ipod|blackberry|iemobile|opera mini/.test(userAgent);
+    const isMobileDevice = isMobileFormFactor();
     const detectedType: DeviceType = isMobileDevice ? 'mobile' : 'desktop';
     setDeviceType(detectedType);
-    const defaultImageMode: ImageSaveMode = isMobileDevice ? 'modal' : 'download';
-    const defaultJsonMode: JsonSaveMode = isMobileDevice ? 'text' : 'download';
+    const defaultImageMode: ImageSaveMode = recommendedSaveModes(isMobileDevice).imageSaveMode;
+    const defaultJsonMode: JsonSaveMode = recommendedSaveModes(isMobileDevice).jsonSaveMode;
 
     try {
       const saved = window.localStorage.getItem(DETAILS_PREFERENCE_KEY);

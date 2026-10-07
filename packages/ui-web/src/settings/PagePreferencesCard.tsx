@@ -5,6 +5,7 @@ import type {
   PagePreferenceField,
   PagePreferencesAdapter,
 } from './page-preferences';
+import { resolvePagePreferenceFieldDefault } from './page-preferences';
 import { formatPagePreferenceValue } from './page-fields';
 import {
   SettingsCard,
@@ -20,8 +21,10 @@ import {
  * 份存储，不存在「设置页默认值」这种第二权威。重置只清登记的偏好字段：
  * `fields` 形态保留草稿/结果/未知字段；`blob` 形态整个键都是偏好。
  *
- * 空态与损坏态如实区分：从未写过 ≠ 损坏；损坏的 fields 形态拒绝手术
- * （保护草稿），由用户在对应页面处理。
+ * 空态与损坏态如实区分：从未写过 ≠ 损坏。空存储不是「没有设置项」——
+ * 控件照常渲染，显示的是字段登记的页面生效默认（D5.1-S1-r1）；在此
+ * 修改即首写：blob 直接建偏好对象，fields 经 owner 领域工厂建合法
+ * 文档。损坏的 fields 形态拒绝手术（保护草稿），由用户在对应页面处理。
  */
 
 /** 订阅 adapter 的写入/重置/跨标签页变更——触发重渲染后 `read()` 自然取到新值。 */
@@ -163,11 +166,6 @@ export const PagePreferencesCard = ({
       }
       actions={pageLink}
     >
-      {mounted && result.status === 'empty' ? (
-        <p className="text-xs text-(--app-text-subtle)">
-          该页尚未写入任何偏好，页面将使用默认值。
-        </p>
-      ) : null}
       {!mounted ? (
         <p className="text-xs text-(--app-text-subtle)">读取中…</p>
       ) : null}
@@ -178,23 +176,34 @@ export const PagePreferencesCard = ({
             : '存储内容无法解析。'}
         </p>
       ) : null}
-      {result.status === 'ready' ? (
-        <div className="divide-y divide-(--app-border)">
-          {adapter.source.fields.map((field) => (
-            <SettingsFieldRow
-              key={field.key}
-              label={field.label}
-              description={field.description}
-              control={
-                <FieldControl
-                  field={field}
-                  value={result.values[field.key]}
-                  adapter={adapter}
-                />
-              }
-            />
-          ))}
-        </div>
+      {mounted && result.status !== 'corrupted' ? (
+        <>
+          {result.status === 'empty' ? (
+            <p className="text-xs text-(--app-text-subtle)">
+              该页尚未写入任何偏好，以下为页面生效默认；在此修改会立即写入。
+            </p>
+          ) : null}
+          <div className="divide-y divide-(--app-border)">
+            {adapter.source.fields.map((field) => (
+              <SettingsFieldRow
+                key={field.key}
+                label={field.label}
+                description={field.description}
+                control={
+                  <FieldControl
+                    field={field}
+                    value={
+                      result.status === 'ready' && field.key in result.values
+                        ? result.values[field.key]
+                        : resolvePagePreferenceFieldDefault(field)
+                    }
+                    adapter={adapter}
+                  />
+                }
+              />
+            ))}
+          </div>
+        </>
       ) : null}
       <div className="mt-3 flex items-center justify-between gap-3 border-t border-(--app-border) pt-3">
         <p className="text-xs text-(--app-text-subtle)">

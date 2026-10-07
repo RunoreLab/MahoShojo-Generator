@@ -71,6 +71,11 @@ export {
   type DetailsSavePreferencesTheme,
 } from './DetailsSavePreferencesPanel';
 export {
+  isMobileFormFactor,
+  recommendedSaveModes,
+  type RecommendedSaveModes,
+} from './save-mode-defaults';
+export {
   APP_FIELD_GUIDE_THEME,
   DETAILS_FIELD_GUIDE_THEME,
   DetailsFieldGuidePanel,

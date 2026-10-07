@@ -15,6 +15,8 @@ import {
   CANSHOU_SAVE_PREFERENCES_THEME,
   CanshouLorePanel,
   DetailsSavePreferencesPanel,
+  isMobileFormFactor,
+  recommendedSaveModes,
   SaveJsonButton,
 } from '@mahoshojo/ui-web/details-controls';
 import { DetailsIntroSection } from '@/components/shared/DetailsIntroSection';
@@ -190,8 +192,8 @@ export const CanshouPage: React.FC = () => {
   const [streamNotice, setStreamNotice] = useState<string | null>(null);
   const streamAbortControllerRef = useRef<AbortController | null>(null);
   const [autoSaveTimestamp, setAutoSaveTimestamp] = useState<number | null>(null);
-  const recommendedImageMode: ImageSaveMode = deviceType === 'mobile' ? 'modal' : 'download';
-  const recommendedJsonMode: JsonSaveMode = deviceType === 'mobile' ? 'text' : 'download';
+  const recommendedImageMode: ImageSaveMode = recommendedSaveModes(deviceType === 'mobile').imageSaveMode;
+  const recommendedJsonMode: JsonSaveMode = recommendedSaveModes(deviceType === 'mobile').jsonSaveMode;
   const clearTransitionTimers = useCallback(() => {
     if (transitionTimerRef.current) {
       clearTimeout(transitionTimerRef.current);
@@ -360,12 +362,11 @@ export const CanshouPage: React.FC = () => {
 
   useEffect(() => {
     if (typeof navigator === 'undefined') return;
-    const userAgent = navigator.userAgent.toLowerCase();
-    const isMobileDevice = /mobile|android|iphone|ipad|ipod|blackberry|iemobile|opera mini/.test(userAgent);
+    const isMobileDevice = isMobileFormFactor();
     const detectedType: DeviceType = isMobileDevice ? 'mobile' : 'desktop';
     setDeviceType(detectedType);
-    const defaultImageMode: ImageSaveMode = isMobileDevice ? 'modal' : 'download';
-    const defaultJsonMode: JsonSaveMode = isMobileDevice ? 'text' : 'download';
+    const defaultImageMode: ImageSaveMode = recommendedSaveModes(isMobileDevice).imageSaveMode;
+    const defaultJsonMode: JsonSaveMode = recommendedSaveModes(isMobileDevice).jsonSaveMode;
 
     try {
       const saved = window.localStorage.getItem(CANSHOU_PREFERENCE_KEY);

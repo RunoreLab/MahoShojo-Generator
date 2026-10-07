@@ -21,6 +21,8 @@ import {
 } from '../src/settings/groups';
 import {
   createPagePreferencesAdapter,
+  resolvePagePreferenceFieldDefault,
+  type PagePreferenceField,
   type PagePreferenceSource,
   type SettingsStorageLike,
 } from '../src/settings/page-preferences';
@@ -51,6 +53,13 @@ const BLOB_SOURCE: PagePreferenceSource = {
   ],
 };
 
+/** 模拟 Desktop 问卷草稿领域层提供的「首写合法文档」工厂。 */
+const createTestDraftDocument = (): Record<string, unknown> => ({
+  version: 1,
+  answers: {},
+  language: 'zh-CN',
+});
+
 const FIELDS_SOURCE: PagePreferenceSource = {
   pageId: 'details',
   title: '设定生成（/details）',
@@ -66,6 +75,13 @@ const FIELDS_SOURCE: PagePreferenceSource = {
     { key: 'showDetails', label: '默认展开「设定说明」', kind: 'boolean' },
     { key: 'questionnaireSelections', label: '记住的问卷选择', kind: 'count' },
   ],
+  createDocumentForFirstWrite: createTestDraftDocument,
+};
+
+/** 未提供首写工厂的 fields 源——空态写入必须 fail-closed。 */
+const FIELDS_SOURCE_NO_FACTORY: PagePreferenceSource = {
+  ...FIELDS_SOURCE,
+  createDocumentForFirstWrite: undefined,
 };
 
 describe('settings groups', () => {
@@ -161,6 +177,22 @@ describe('page preferences adapter — blob scope', () => {
   });
 });
 
+describe('page preference field defaults', () => {
+  it('resolves static and lazy defaults; missing default stays undefined', () => {
+    const staticField: PagePreferenceField = {
+      key: 'generationMode', label: 'x', kind: 'select', defaultValue: 'non-stream',
+    };
+    const lazyField: PagePreferenceField = {
+      key: 'imageSaveMode', label: 'x', kind: 'select', defaultValue: () => 'modal',
+    };
+    const bareField: PagePreferenceField = { key: 'n', label: 'x', kind: 'count' };
+
+    expect(resolvePagePreferenceFieldDefault(staticField)).toBe('non-stream');
+    expect(resolvePagePreferenceFieldDefault(lazyField)).toBe('modal');
+    expect(resolvePagePreferenceFieldDefault(bareField)).toBeUndefined();
+  });
+});
+
 describe('page preferences adapter — fields scope', () => {
   const seedDraft = () =>
     JSON.stringify({
@@ -204,6 +236,32 @@ describe('page preferences adapter — fields scope', () => {
     expect(adapter.reset()).toBe(false);
     // 文档原样还在——设置页不碰看不懂的草稿。
     expect(storage.getItem(FIELDS_SOURCE.storageKey)).toBe('corrupted!');
+  });
+
+  it('first write on empty storage builds the owner-supplied draft shell — not a bare preference key', () => {
+    const storage = createMemoryStorage();
+    const adapter = createPagePreferencesAdapter(FIELDS_SOURCE, storage);
+
+    expect(adapter.read()).toEqual({ status: 'empty' });
+    expect(adapter.writeField('imageSaveMode', 'modal')).toBe(true);
+
+    const doc = JSON.parse(storage.dump()[FIELDS_SOURCE.storageKey]);
+    // 草稿协议必填面来自领域工厂，偏好键落在其上——不是 {imageSaveMode} 裸对象。
+    expect(doc).toEqual({
+      version: 1,
+      answers: {},
+      language: 'zh-CN',
+      imageSaveMode: 'modal',
+    });
+  });
+
+  it('fields scope without a first-write factory fails closed on empty storage', () => {
+    const storage = createMemoryStorage();
+    const adapter = createPagePreferencesAdapter(FIELDS_SOURCE_NO_FACTORY, storage);
+
+    expect(adapter.writeField('imageSaveMode', 'modal')).toBe(false);
+    // 什么都没写——绝不伪造看不懂的宿主文档。
+    expect(storage.getItem(FIELDS_SOURCE.storageKey)).toBeNull();
   });
 
   it('writeField preserves existing document content outside the written key', () => {
@@ -260,4 +318,5 @@ describe('settings field registry', () => {
       ]),
     );
   });
+
 });
