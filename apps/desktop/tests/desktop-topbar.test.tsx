@@ -27,7 +27,7 @@ const { invokeMock, defaultInvokeImpl } = vi.hoisted(() => {
     if (command === 'cloud_cached_account') return null;
     if (command === 'cloud_auth_status') return { state: 'signed-out' as const };
     if (command === 'cloud_me_profile') {
-      return { signature: '焰', avatarDataUrl: 'data:image/webp;base64,QUJD' };
+      return { userId: 7, signature: '焰', avatarDataUrl: 'data:image/webp;base64,QUJD' };
     }
     if (command === 'cloud_login_begin') {
       return { flowId: 'flow-1', authorizeUrl: 'https://example.test/auth/desktop?state=s' };

@@ -180,7 +180,8 @@ export const readCachedCloudAccount = async (
 /**
  * 读取当前会话账号的资料投影（`/api/me/profile` 固定路由——native 注入会话
  * cookie，renderer 拿不到 URL/method/凭据）。无会话返回 `not-authenticated`
- * 错误；头像只允许 `data:image/*` data URL，其余形状桥层一律拦下。
+ * 错误；头像只允许 `data:image/webp;base64,` data URL（与服务端产出
+ * 一致），其余形状桥层一律拦下；`userId` 供调用方做 stale-response fence。
  */
 export const readMyProfile = async (invoke: InvokeFn): Promise<DesktopCloudMeProfile> => {
   let raw: unknown;

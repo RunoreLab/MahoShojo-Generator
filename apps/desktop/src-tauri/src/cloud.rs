@@ -940,26 +940,24 @@ const ME_PROFILE_SIGNATURE_MAX_CHARS: usize = 1024;
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CloudMeProfile {
+    /// 本次查询所用凭据对应的账号 id——renderer 写缓存前据此核对
+    /// 请求目标，构成 stale-response fence（登出/换号竞态不写错槽）。
+    pub user_id: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar_data_url: Option<String>,
 }
 
-/// `data:image/<subtype>;base64,<payload>` 的形状门禁——只接受图片族 +
-/// base64 字母表，其余（`data:text/html`、`javascript:` 变体等）一律拒绝。
-fn is_image_data_url(url: &str) -> bool {
-    let Some(rest) = url.strip_prefix("data:image/") else {
+/// `data:image/webp;base64,<payload>` 的精确形状门禁——服务端
+/// `/api/me/profile` 明确只产出 webp，窄通道不为不存在的格式留扩展口；
+/// 其余 data URL（`data:text/html`、`data:image/png`、`javascript:` 变体等）
+/// 一律拒绝。
+fn is_webp_data_url(url: &str) -> bool {
+    let Some(payload) = url.strip_prefix("data:image/webp;base64,") else {
         return false;
     };
-    let Some((subtype, payload)) = rest.split_once(";base64,") else {
-        return false;
-    };
-    !subtype.is_empty()
-        && subtype
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
-        && !payload.is_empty()
+    !payload.is_empty()
         && payload
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '='))
@@ -970,7 +968,9 @@ fn is_image_data_url(url: &str) -> bool {
 /// - renderer 拿不到 URL/method/cookie——全部是 native 常量与凭据存储；
 /// - 无本地会话直接 `not-authenticated`，不产生网络请求；服务端 401 与
 ///   `cloud_auth_status` 同一语义（清本地凭据）；
-/// - 响应有界读取 + 形状校验；头像只投影 `data:image/*;base64,*`。
+/// - 响应有界读取 + 形状校验；头像只投影 `data:image/webp;base64,`；
+/// - `userId` 取自本地凭据的账号记录：renderer 据此做 stale-response
+///   fence，登出/换号竞态下达的迟到响应不会写进错误账号的缓存槽。
 pub async fn cloud_me_profile(
     state: &CloudState,
     secrets: &dyn SecretStore,
@@ -1027,7 +1027,7 @@ pub async fn cloud_me_profile(
     let avatar_data_url = match profile.get("avatarDataUrl") {
         None | Some(serde_json::Value::Null) => None,
         Some(serde_json::Value::String(value))
-            if value.len() <= ME_PROFILE_AVATAR_MAX_CHARS && is_image_data_url(value) =>
+            if value.len() <= ME_PROFILE_AVATAR_MAX_CHARS && is_webp_data_url(value) =>
         {
             Some(value.clone())
         }
@@ -1035,6 +1035,7 @@ pub async fn cloud_me_profile(
     };
 
     Ok(CloudMeProfile {
+        user_id: session.account.user_id,
         signature,
         avatar_data_url,
     })
@@ -2659,6 +2660,9 @@ mod tests {
             store_session(&secrets, &stored_test_session()).unwrap();
 
             let profile = cloud_me_profile(&state, &secrets).await.unwrap();
+            // `userId` 取自本地凭据而非响应体：renderer 的 stale-response
+            // fence 依赖它核对请求目标。
+            assert_eq!(profile.user_id, 7);
             assert_eq!(profile.signature.as_deref(), Some("圆焰"));
             assert_eq!(
                 profile.avatar_data_url.as_deref(),
@@ -2694,22 +2698,27 @@ mod tests {
     }
 
     #[test]
-    fn me_profile_rejects_oversize_and_non_image_avatar() {
+    fn me_profile_rejects_oversize_and_non_webp_avatar() {
         rt().block_on(async {
             let server = spawn_mock_server();
             let state = CloudState::with_origin(&server.origin);
             let secrets = MemorySecrets::new();
             store_session(&secrets, &stored_test_session()).unwrap();
 
-            // `data:text/html` 等非图片 data URL 一律 invalid-response——
-            // 顶栏 `<img>` 只消费 `data:image/*`。
-            *server.me_profile_override.lock().unwrap() = Some((
-                200,
-                r#"{"success":true,"profile":{"avatarDataUrl":"data:text/html;base64,PGI+"}}"#
-                    .to_string(),
-            ));
-            let error = cloud_me_profile(&state, &secrets).await.unwrap_err();
-            assert_eq!(error.code, CloudErrorCode::InvalidResponse);
+            // 服务端只产出 `data:image/webp;base64,*`：其余 data URL
+            // （含同为图片族的 png）一律 invalid-response。
+            for avatar in [
+                "data:text/html;base64,PGI+",
+                "data:image/png;base64,iVBORw0KGgo=",
+                "data:image/webp;base64,",
+            ] {
+                *server.me_profile_override.lock().unwrap() = Some((
+                    200,
+                    format!(r#"{{"success":true,"profile":{{"avatarDataUrl":"{avatar}"}}}}"#),
+                ));
+                let error = cloud_me_profile(&state, &secrets).await.unwrap_err();
+                assert_eq!(error.code, CloudErrorCode::InvalidResponse, "{avatar}");
+            }
 
             // 越界正文同上。
             *server.me_profile_override.lock().unwrap() =

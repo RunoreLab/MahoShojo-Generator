@@ -232,17 +232,24 @@ export type DesktopCloudCachedAccount = z.infer<typeof DesktopCloudCachedAccount
 /**
  * `cloud_me_profile` 的字段边界（native 侧另有独立形状校验）。
  * 服务端 `MAX_SIGNATURE_LENGTH` 是 120，这里放宽到 1024 仅作防御性上限；
- * 头像只接受 `data:image/*` 的 data URL，长度有界。
+ * 头像只接受 `data:image/webp;base64,` 的 data URL——服务端
+ * `/api/me/profile` 明确只产出 webp，不为不存在的格式留扩展口。
  */
 export const DESKTOP_ME_PROFILE_SIGNATURE_MAX_CHARS = 1024;
 export const DESKTOP_ME_PROFILE_AVATAR_MAX_CHARS = 512 * 1024;
+export const DESKTOP_ME_PROFILE_AVATAR_DATA_URL_PREFIX = 'data:image/webp;base64,' as const;
 
 /**
  * `cloud_me_profile` 的返回：当前会话账号的资料投影（`/api/me/profile`
  * 固定路由，native 注入会话 cookie）。`avatarDataUrl` 供顶栏直接使用；
  * 无头像/字段缺省为 `undefined`，由 UI 回退首字母。
+ *
+ * `userId` 是 native 持有的当前凭据对应账号：renderer 用它做
+ * stale-response fence——写缓存前核对与请求时的目标 userId 一致，
+ * 登出/换号竞态下达的迟到响应不会写进错误账号的缓存槽。
  */
 export const DesktopCloudMeProfileSchema = z.object({
+  userId: z.number().int().positive(),
   signature: z
     .string()
     .max(DESKTOP_ME_PROFILE_SIGNATURE_MAX_CHARS)
@@ -250,7 +257,7 @@ export const DesktopCloudMeProfileSchema = z.object({
   avatarDataUrl: z
     .string()
     .max(DESKTOP_ME_PROFILE_AVATAR_MAX_CHARS)
-    .startsWith('data:image/')
+    .startsWith(DESKTOP_ME_PROFILE_AVATAR_DATA_URL_PREFIX)
     .optional(),
 }).strict();
 export type DesktopCloudMeProfile = z.infer<typeof DesktopCloudMeProfileSchema>;

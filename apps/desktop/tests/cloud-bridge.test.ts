@@ -96,19 +96,33 @@ describe('cloud bridge', () => {
     });
   });
 
-  it('me profile：资料投影过契约；非图片头像与多余字段一律拦下', async () => {
-    const profile = { signature: '圆焰', avatarDataUrl: 'data:image/webp;base64,QUJD' };
+  it('me profile：资料投影过契约；非 webp 头像、缺 userId 与多余字段一律拦下', async () => {
+    const profile = {
+      userId: 7,
+      signature: '圆焰',
+      avatarDataUrl: 'data:image/webp;base64,QUJD',
+    };
     const invoke = vi.fn(async () => profile);
     await expect(readMyProfile(invoke)).resolves.toEqual(profile);
     expect(invoke).toHaveBeenCalledWith(CLOUD_ME_PROFILE_COMMAND);
 
-    // `data:text/html` 等非图片 data URL 不得进入顶栏 `<img>`。
-    const htmlAvatar = vi.fn(async () => ({
-      avatarDataUrl: 'data:text/html;base64,PGI+',
-    }));
-    await expect(readMyProfile(htmlAvatar)).rejects.toMatchObject({
+    // allowlist 收窄到 `data:image/webp;base64,`：`data:text/html` 与同族
+    // 的 png 都不得进入顶栏 `<img>`。
+    for (const avatarDataUrl of [
+      'data:text/html;base64,PGI+',
+      'data:image/png;base64,iVBORw0KGgo=',
+    ]) {
+      const bad = vi.fn(async () => ({ userId: 7, avatarDataUrl }));
+      await expect(readMyProfile(bad)).rejects.toMatchObject({
+        code: 'bridge-invalid',
+        command: CLOUD_ME_PROFILE_COMMAND,
+      });
+    }
+
+    // `userId` 是 stale-response fence 的核对依据：缺了它投影直接拒收。
+    const noIdentity = vi.fn(async () => ({ avatarDataUrl: 'data:image/webp;base64,QUJD' }));
+    await expect(readMyProfile(noIdentity)).rejects.toMatchObject({
       code: 'bridge-invalid',
-      command: CLOUD_ME_PROFILE_COMMAND,
     });
 
     // strict schema：夹带任何额外字段（凭据/任意键）按违例拦下。

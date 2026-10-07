@@ -1,9 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   CLOUD_CACHED_ACCOUNT_COMMAND,
   CLOUD_LOGIN_AWAIT_COMMAND,
   CLOUD_LOGIN_BEGIN_COMMAND,
+  CLOUD_ME_PROFILE_COMMAND,
   CLOUD_SIGN_OUT_COMMAND,
   CLOUD_AUTH_STATUS_COMMAND,
   type InvokeFn,
@@ -13,6 +14,11 @@ import {
   type DesktopCloudSessionDeps,
 } from '../src/features/account/cloud-session-store';
 import { projectTopBarAccount } from '../src/features/account/topbar-projection';
+import {
+  ensureTopbarAvatar,
+  getTopbarAvatar,
+  resetTopbarAvatarForTests,
+} from '../src/features/account/use-topbar-avatar';
 
 const ACCOUNT = { userId: 7, username: 'homura', displayName: 'homura' };
 const EXPIRES = '2026-10-12T00:00:00.000Z';
@@ -80,6 +86,12 @@ const createNativeStub = (
         return { status: 'signed-in', account: ACCOUNT, sessionExpiresAt: EXPIRES };
       case CLOUD_SIGN_OUT_COMMAND:
         return { revoked: true };
+      case CLOUD_ME_PROFILE_COMMAND:
+        return {
+          userId: 7,
+          signature: '圆焰',
+          avatarDataUrl: 'data:image/webp;base64,QUJD',
+        };
       default:
         throw new Error(`unexpected command ${command}`);
     }
@@ -112,6 +124,11 @@ const createNativeStub = (
 const commands = (stub: NativeStub): string[] => stub.calls.map((call) => call.command);
 
 describe('DesktopCloudSessionStore', () => {
+  // 头像缓存是进程级模块状态：本文件里 populate/invalidate 的用例相互隔离。
+  beforeEach(() => {
+    resetTopbarAvatarForTests();
+  });
+
   it('construction and subscription fire zero IPC — bootstrap is what starts the reads', () => {
     // r2 口径后「冷启动零 IPC」收缩为「渲染前零 IPC」：store 构造与订阅本身仍不
     // 发请求，由首个挂载消费者的 `bootstrap()` 触发 cached-first 装载。
@@ -500,6 +517,58 @@ describe('DesktopCloudSessionStore', () => {
     expect(snapshot.account).toBeNull();
     expect(snapshot.verification).toBe('signed-out');
     expect(native.calls.at(-1)?.command).toBe(CLOUD_SIGN_OUT_COMMAND);
+  });
+
+  it('signOut invalidates the signed-out account avatar — a later mount refetches', async () => {
+    // 登出即会话边界：Web 侧换过头像后重登必须重新拉取，不能把同进程
+    // 旧缓存留到下一次登录（D5.1d-1 r1）。
+    const native = createNativeStub(
+      { state: 'active', account: ACCOUNT, sessionExpiresAt: EXPIRES },
+      { account: ACCOUNT, sessionExpiresAt: EXPIRES },
+    );
+    const store = new DesktopCloudSessionStore({ invoke: native.invoke });
+    await store.bootstrap();
+
+    ensureTopbarAvatar(7, native.invoke);
+    await vi.waitFor(() => {
+      expect(getTopbarAvatar(7)).toBe('data:image/webp;base64,QUJD');
+    });
+
+    await store.signOut();
+    expect(getTopbarAvatar(7)).toBeNull();
+
+    // 失效后下一次挂载重新走 `cloud_me_profile`。
+    ensureTopbarAvatar(7, native.invoke);
+    await vi.waitFor(() => {
+      expect(
+        native.calls.filter((call) => call.command === CLOUD_ME_PROFILE_COMMAND),
+      ).toHaveLength(2);
+    });
+  });
+
+  it('a fresh signed-in login invalidates the avatar so the topbar revalidates once', async () => {
+    // 新登录成功同样是一次会话边界：即使同一 userId，也让缓存失效一次——
+    // 顶栏由下一次挂载重新校验，而不是复用授权前的旧头像。
+    const native = createNativeStub({ state: 'signed-out' });
+    const store = new DesktopCloudSessionStore({ invoke: native.invoke });
+    await store.bootstrap();
+
+    // 模拟授权前已存在的缓存槽（上一轮会话留下的）。
+    ensureTopbarAvatar(7, native.invoke);
+    await vi.waitFor(() => {
+      expect(getTopbarAvatar(7)).toBe('data:image/webp;base64,QUJD');
+    });
+
+    await store.requestAuth();
+    expect(getTopbarAvatar(7)).toBeNull();
+
+    // 失效后下一次挂载重新走 `cloud_me_profile`。
+    ensureTopbarAvatar(7, native.invoke);
+    await vi.waitFor(() => {
+      expect(
+        native.calls.filter((call) => call.command === CLOUD_ME_PROFILE_COMMAND),
+      ).toHaveLength(2);
+    });
   });
 
   it('never puts credentials in the store state — only the public session projection', async () => {

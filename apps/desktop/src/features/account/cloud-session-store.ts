@@ -57,6 +57,7 @@ import {
   signOutCloud,
   type InvokeFn,
 } from '../../platform/cloud-bridge';
+import { invalidateTopbarAvatar } from './use-topbar-avatar';
 
 export type DesktopCloudVerification =
   | 'idle'
@@ -326,6 +327,9 @@ export class DesktopCloudSessionStore {
       const outcome = await awaitCloudLogin(this.deps.invoke, begin.flowId);
       this.identityBeforeLogin = null;
       if (outcome.status === 'signed-in') {
+        // 新登录成功是一次会话边界：头像缓存随新身份失效一次，下一次
+        // 挂载重新拉取（同账号重登也能拿到 Web 侧改过的头像）。
+        invalidateTopbarAvatar(outcome.account.userId);
         this.publish({
           authFlow: IDLE_FLOW,
           account: outcome.account,
@@ -371,8 +375,11 @@ export class DesktopCloudSessionStore {
 
   /** 登出：本地凭据无条件删除；`revoked` 如实回传给面板解释服务端同步结果。 */
   signOut = async (): Promise<DesktopCloudSignOutResult | null> => {
+    const previousUserId = this.state.account?.userId;
     try {
       const result = await signOutCloud(this.deps.invoke);
+      // 登出即会话边界：已注销账号的头像槽失效，重登后重新拉取。
+      if (previousUserId !== undefined) invalidateTopbarAvatar(previousUserId);
       this.publish({
         account: null,
         sessionExpiresAt: null,

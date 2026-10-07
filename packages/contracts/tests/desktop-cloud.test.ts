@@ -24,6 +24,7 @@ import {
   DesktopAuthorizeQuerySchema,
   DesktopCloudErrorCodeSchema,
   DesktopCloudLoginOutcomeSchema,
+  DesktopCloudMeProfileSchema,
   DesktopCloudOnlineStatusSchema,
   DesktopCloudSessionStatusSchema,
   DesktopCloudSignOutResultSchema,
@@ -245,6 +246,40 @@ describe('renderer IPC 投影', () => {
     expect(DesktopCloudSignOutResultSchema.safeParse({ revoked: true }).success).toBe(true);
     expect(DesktopCloudSignOutResultSchema.safeParse({ revoked: false }).success).toBe(true);
     expect(DesktopCloudSignOutResultSchema.safeParse({}).success).toBe(false);
+  });
+
+  it('me profile：userId 必填，头像只放行 data:image/webp;base64,', () => {
+    expect(DesktopCloudMeProfileSchema.safeParse({ userId: 7 }).success).toBe(true);
+    expect(DesktopCloudMeProfileSchema.safeParse({
+      userId: 7,
+      signature: '圆焰',
+      avatarDataUrl: 'data:image/webp;base64,QUJD',
+    }).success).toBe(true);
+
+    // userId 是 renderer stale-response fence 的核对依据：缺失/非正整即违例。
+    expect(DesktopCloudMeProfileSchema.safeParse({}).success).toBe(false);
+    expect(DesktopCloudMeProfileSchema.safeParse({ userId: '7' }).success).toBe(false);
+    expect(DesktopCloudMeProfileSchema.safeParse({ userId: 0 }).success).toBe(false);
+
+    // 服务端只产出 webp：其余 data URL（含图片族的 png）一律拒绝。
+    expect(DesktopCloudMeProfileSchema.safeParse({
+      userId: 7,
+      avatarDataUrl: 'data:image/png;base64,iVBORw0KGgo=',
+    }).success).toBe(false);
+    expect(DesktopCloudMeProfileSchema.safeParse({
+      userId: 7,
+      avatarDataUrl: 'data:text/html;base64,PGI+',
+    }).success).toBe(false);
+    expect(DesktopCloudMeProfileSchema.safeParse({
+      userId: 7,
+      avatarDataUrl: 'https://evil.example.com/a.webp',
+    }).success).toBe(false);
+
+    // strict：多余字段拒收。
+    expect(DesktopCloudMeProfileSchema.safeParse({
+      userId: 7,
+      cookie: 'session=tok',
+    }).success).toBe(false);
   });
 
   it('hosted 生成请求：系统默认通道，BYOK 字段一律拒绝', () => {
