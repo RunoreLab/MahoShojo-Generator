@@ -6,8 +6,9 @@
  * 1. 文件状态如实投影：missing 用默认且不写空壳；oversized/invalid-utf8/域 fatal
  *    按默认值生效且不可编辑，但 revision 保留给显式「恢复默认」；
  * 2. 生效值 = 落盘值：写成功才前进 base；写失败不把内存值冒充已保存；
- * 3. 冲突让位：`config-conflict` 时未落盘编辑收拢为 delta 草稿并自动重载
- *    磁盘真相——effective = persisted，草稿不自动重放，可显式重新应用/放弃；
+ * 3. 冲突让位：`config-conflict` 时未落盘编辑按「触碰字段 → 试图值」收拢
+ *    为草稿并自动重载磁盘真相——effective = persisted，草稿不自动重放，
+ *    可显式重新应用/放弃，且只随写确认核销（reapply 普通失败不丢）；
  * 4. 未登记键写回原样保留——UI 保存不毁损手工编辑过的文件；
  * 5. 连续写不丢更新：IPC 在途期间的编辑基于 `inFlight` 合并，不从旧 base
  *    重建而把在途写悄悄吞掉。
@@ -353,6 +354,8 @@ describe('desktop config store — write semantics', () => {
 
     store.discardConflictedDraft();
     expect(store.getSnapshot().conflictedFields).toBeNull();
+    // 「已保留为草稿」的提示随草稿一并消失——它已经不再是真的。
+    expect(store.getSnapshot().saveError).toBeNull();
     // 放弃草稿不再发写——磁盘真相就是最终值。
     expect(writes).toBe(1);
     expect(store.getSnapshot().values.confirmContentLinks).toBe(false);
@@ -360,6 +363,7 @@ describe('desktop config store — write semantics', () => {
 
   it('edits made while a write is in flight merge over the in-flight target instead of the stale base', async () => {
     let releaseFirst: (() => void) | null = null;
+    let releaseSecond: (() => void) | null = null;
     let writes = 0;
     const contents: string[] = [];
     const invoke = makeInvoke((command, args) => {
@@ -375,7 +379,10 @@ describe('desktop config store — write semantics', () => {
             releaseFirst = () => resolve({ revision: REV_B });
           });
         }
-        return Promise.resolve({ revision: REV_C });
+        // 第二笔同样卡住：钉住在途期间 saving 不提前回落。
+        return new Promise((resolve) => {
+          releaseSecond = () => resolve({ revision: REV_C });
+        });
       }
       return Promise.resolve(undefined);
     });
@@ -394,17 +401,209 @@ describe('desktop config store — write semantics', () => {
     await vi.waitFor(() => {
       expect(writes).toBe(2);
     });
+    // 写 1 的 settle 不把 saving 拨回 false——第二笔 IPC 实际仍在途。
+    expect(store.getSnapshot().saving).toBe(true);
     const second = JSON.parse(contents[1] ?? '{}') as {
       announcements?: { checkPolicy?: string };
       externalLinks?: { confirmContentLinks?: boolean };
     };
     expect(second.announcements?.checkPolicy).toBe('manual');
     expect(second.externalLinks?.confirmContentLinks).toBe(false);
+    releaseSecond?.();
     await vi.waitFor(() => {
       expect(store.getSnapshot().saving).toBe(false);
     });
     expect(store.getSnapshot().values.announcementsCheckPolicy).toBe('manual');
     expect(store.getSnapshot().values.confirmContentLinks).toBe(false);
+  });
+
+  it('conflict on reset-to-defaults over an already-default file still preserves a full draft', async () => {
+    const externalContent =
+      '{"version":1,"announcements":{"checkPolicy":"manual"},"externalLinks":{"confirmContentLinks":false}}';
+    let reads = 0;
+    let writes = 0;
+    const invoke = makeInvoke(async (command) => {
+      if (command === 'desktop_config_read') {
+        reads += 1;
+        // 首读文件已是默认值——「恢复默认」对它不产生任何值 diff。
+        return readResult(reads === 1 ? okFile('{"version":1}') : okFile(externalContent, REV_C));
+      }
+      if (command === 'desktop_config_write') {
+        writes += 1;
+        throw { code: 'config-conflict', message: '配置文件已被外部修改；请重新加载后重试' };
+      }
+      return undefined;
+    });
+    const store = new DesktopConfigStore({ invoke });
+    await store.ready();
+
+    store.resetToDefaults();
+    await vi.waitFor(() => {
+      expect(reads).toBe(2);
+    });
+
+    const state = store.getSnapshot();
+    // 草稿记「触碰字段 → 试图值」：值与旧 base 相同也不得出空草稿——
+    // 否则 saveError 声称「已保留为草稿」而 banner 却空无一物。
+    expect(state.conflictedFields).toEqual(
+      expect.arrayContaining(['announcementsCheckPolicy', 'confirmContentLinks']),
+    );
+    expect(state.saveError).toContain('重新应用');
+    // 磁盘外部版本照常生效。
+    expect(state.values.announcementsCheckPolicy).toBe('manual');
+    expect(state.values.confirmContentLinks).toBe(false);
+    expect(writes).toBe(1);
+  });
+
+  it('a field toggled back to its base value is still recorded as intent on conflict', async () => {
+    let reads = 0;
+    const invoke = makeInvoke(async (command) => {
+      if (command === 'desktop_config_read') {
+        reads += 1;
+        return readResult(
+          reads === 1
+            ? okFile('{"version":1}')
+            : okFile('{"version":1,"externalLinks":{"confirmContentLinks":false}}', REV_C),
+        );
+      }
+      if (command === 'desktop_config_write') {
+        throw { code: 'config-conflict', message: '配置文件已被外部修改；请重新加载后重试' };
+      }
+      return undefined;
+    });
+    const store = new DesktopConfigStore({ invoke });
+    await store.ready();
+
+    // true → false → true：最终值等于旧 base，但字段确实被显式触碰过；
+    // 外部版本此刻变成 false，重新应用仍应能把它拨回 true。
+    store.setField('confirmContentLinks', false);
+    store.setField('confirmContentLinks', true);
+    await vi.waitFor(() => {
+      expect(reads).toBe(2);
+    });
+
+    expect(store.getSnapshot().conflictedFields).toEqual(['confirmContentLinks']);
+  });
+
+  it('a reapply whose write fails with an ordinary error keeps the draft', async () => {
+    let reads = 0;
+    let writes = 0;
+    const invoke = makeInvoke(async (command) => {
+      if (command === 'desktop_config_read') {
+        reads += 1;
+        return readResult(
+          reads === 1
+            ? okFile('{"version":1}')
+            : okFile('{"version":1,"announcements":{"checkPolicy":"manual"}}', REV_C),
+        );
+      }
+      if (command === 'desktop_config_write') {
+        writes += 1;
+        if (writes === 1) {
+          throw { code: 'config-conflict', message: '配置文件已被外部修改；请重新加载后重试' };
+        }
+        throw { code: 'storage-unavailable', message: '磁盘只读' };
+      }
+      return undefined;
+    });
+    const store = new DesktopConfigStore({ invoke });
+    await store.ready();
+
+    store.setField('confirmContentLinks', false);
+    await vi.waitFor(() => {
+      expect(store.getSnapshot().conflictedFields).toEqual(['confirmContentLinks']);
+    });
+
+    store.reapplyConflictedDraft();
+    await vi.waitFor(() => {
+      expect(store.getSnapshot().saveError).toContain('磁盘只读');
+    });
+
+    // 草稿随写确认核销，不随「点击重新应用」销毁——普通失败原样保留。
+    expect(store.getSnapshot().conflictedFields).toEqual(['confirmContentLinks']);
+    expect(store.getSnapshot().saving).toBe(false);
+    expect(writes).toBe(2);
+  });
+
+  it('backupPresent only turns true when an envelope-valid file was replaced', async () => {
+    // 域 fatal（version 非 1）→ native 隔离 .invalid，不产生 .bak。
+    const invokeFatal = makeInvoke(async (command) => {
+      if (command === 'desktop_config_read') return readResult(okFile('{"version":2}'));
+      if (command === 'desktop_config_write') return { revision: REV_B };
+      return undefined;
+    });
+    const fatalStore = new DesktopConfigStore({ invoke: invokeFatal });
+    await fatalStore.ready();
+    expect(fatalStore.getSnapshot().fileFatal).toBe(true);
+
+    fatalStore.resetToDefaults();
+    await vi.waitFor(() => {
+      expect(fatalStore.getSnapshot().saving).toBe(false);
+    });
+    expect(fatalStore.getSnapshot().backupPresent).toBe(false);
+
+    // oversized/invalid-utf8 同口径：隔离位，不是备份。
+    for (const file of [
+      { status: 'oversized' as const, revision: REV_A, bytes: 70 * 1024 },
+      { status: 'invalid-utf8' as const, revision: REV_A },
+    ]) {
+      const invoke = makeInvoke(async (command) => {
+        if (command === 'desktop_config_read') return readResult(file);
+        if (command === 'desktop_config_write') return { revision: REV_B };
+        return undefined;
+      });
+      const store = new DesktopConfigStore({ invoke });
+      await store.ready();
+      store.resetToDefaults();
+      await vi.waitFor(() => {
+        expect(store.getSnapshot().saving).toBe(false);
+      });
+      expect(store.getSnapshot().backupPresent).toBe(false);
+    }
+
+    // missing 首写——没有旧文件可备份。
+    const invokeMissing = makeInvoke(async (command) => {
+      if (command === 'desktop_config_read') return readResult({ status: 'missing' });
+      if (command === 'desktop_config_write') return { revision: REV_B };
+      return undefined;
+    });
+    const missingStore = new DesktopConfigStore({ invoke: invokeMissing });
+    await missingStore.ready();
+    missingStore.setField('confirmContentLinks', false);
+    await vi.waitFor(() => {
+      expect(missingStore.getSnapshot().saving).toBe(false);
+    });
+    expect(missingStore.getSnapshot().backupPresent).toBe(false);
+
+    // 替换一份有效文件——`.bak` 出现。
+    const invokeOk = makeInvoke(async (command) => {
+      if (command === 'desktop_config_read') return readResult(okFile('{"version":1}'));
+      if (command === 'desktop_config_write') return { revision: REV_B };
+      return undefined;
+    });
+    const okStore = new DesktopConfigStore({ invoke: invokeOk });
+    await okStore.ready();
+    okStore.setField('confirmContentLinks', false);
+    await vi.waitFor(() => {
+      expect(okStore.getSnapshot().saving).toBe(false);
+    });
+    expect(okStore.getSnapshot().backupPresent).toBe(true);
+
+    // 既有 `.bak` 在 fatal 恢复后如实保留（native 不动旧备份）。
+    const invokeKeep = makeInvoke(async (command) => {
+      if (command === 'desktop_config_read') {
+        return { ...readResult(okFile('{broken')), backupPresent: true };
+      }
+      if (command === 'desktop_config_write') return { revision: REV_B };
+      return undefined;
+    });
+    const keepStore = new DesktopConfigStore({ invoke: invokeKeep });
+    await keepStore.ready();
+    keepStore.resetToDefaults();
+    await vi.waitFor(() => {
+      expect(keepStore.getSnapshot().saving).toBe(false);
+    });
+    expect(keepStore.getSnapshot().backupPresent).toBe(true);
   });
 
   it('a successful reload clears a stale saveError', async () => {

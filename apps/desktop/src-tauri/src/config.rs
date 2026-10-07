@@ -6,11 +6,13 @@
 //!   （`MAX_CONFIG_FILE_BYTES`，内容只在确认不越界时驻留内存，revision 的
 //!   SHA-256 分块流式计算）；写入串行化，`expectedRevision` 基于内容
 //!   sha256 复核，冲突返回 `config-conflict` 而不是覆盖；落盘走同目录临时
-//!   文件 → sync → 原子 replace（目标路径全程存在，没有「旧文件已挪走、
-//!   新文件未落位」的窗口）。`config.json.bak` 只保留**上一个有效文件**；
-//!   被替换掉的不可读文件隔离为 `config.json.invalid` 供手工打捞，不顶替
-//!   真正的恢复路径（`DESK-SET-005`）。命令面只有读/写/打开目录三条——
-//!   renderer 拿不到任意文件接口。
+//!   文件 → sync → 原子 replace（正常替换路径目标全程存在旧版或新版之一）。
+//!   `config.json.bak` 只保留**上一个有效文件**；被替换掉的不可读文件先隔离为
+//!   `config.json.invalid` 供手工打捞，不顶替真正的恢复路径——该显式恢复
+//!   先把原始字节挪走，窗口内主路径可能短暂缺失但字节不丢，落位同样
+//!   no-clobber，隔离期间外部重建的 `config.json` 不会被覆盖
+//!   （`DESK-SET-005`）。命令面只有读/写/打开目录三条——renderer 拿不到
+//!   任意文件接口。
 //! - **域语义不在此**：字段登记、默认值、非法值降级与诊断定位由
 //!   `contracts/desktop-config` 的 TS schema 承担（UI 与手工修改同一解析）。
 //!   这里只做信封级检查：UTF-8 JSON 对象 + `version == 1`——防止把一份
@@ -314,6 +316,30 @@ fn persist_atomically(
     Ok(())
 }
 
+/// 同一条原子落位路径的 no-clobber 变体：目标必须仍不存在。`AlreadyExists`
+/// 说明磁盘在复核之后被外部写者推进——与 revision 复核同一语义，按
+/// `config-conflict` 交还给 UI 重载，而不是静默覆盖外部新版本。
+fn persist_new_atomically(
+    temp: tempfile::NamedTempFile,
+    target: &Path,
+    context: &str,
+) -> Result<(), ConfigError> {
+    temp.persist_noclobber(target).map_err(|persist| {
+        if persist.error.kind() == std::io::ErrorKind::AlreadyExists {
+            ConfigError::new(
+                ConfigErrorCode::ConfigConflict,
+                "配置文件已被外部修改；请重新加载后重试",
+            )
+        } else {
+            ConfigError::new(
+                ConfigErrorCode::StorageUnavailable,
+                format!("{context}：{}", persist.error),
+            )
+        }
+    })?;
+    Ok(())
+}
+
 /// 把 `bytes` 经同一条 temp+sync+persist 原子路径写到 `target`（`.bak` 用）。
 fn write_file_atomically(target: &Path, bytes: &[u8]) -> Result<(), ConfigError> {
     let dir = target
@@ -329,6 +355,35 @@ fn write_file_atomically(target: &Path, bytes: &[u8]) -> Result<(), ConfigError>
     persist_atomically(temp, target, "备份既有配置失败")
 }
 
+/// 无效文件已隔离到 `invalid` 之后把新内容落位到 `target`。
+///
+/// 隔离窗口里外部写者可能已重建 `config.json`——落位必须 no-clobber：
+/// `AlreadyExists` 说明磁盘已前进，外部新版本与隔离的原始字节都保留，
+/// 按 `config-conflict` 交还（绝不在此把 `.invalid` 盖回主路径）；其余
+/// 存储失败且 target 仍缺失时，才把 `.invalid` 尽量挪回——字节不丢。
+fn place_after_quarantine(
+    temp: tempfile::NamedTempFile,
+    target: &Path,
+    invalid: &Path,
+) -> Result<(), ConfigError> {
+    match temp.persist_noclobber(target) {
+        Ok(_) => Ok(()),
+        Err(persist) if persist.error.kind() == std::io::ErrorKind::AlreadyExists => {
+            Err(ConfigError::new(
+                ConfigErrorCode::ConfigConflict,
+                "配置文件已被外部修改；请重新加载后重试",
+            ))
+        }
+        Err(persist) => {
+            let _ = fs::rename(invalid, target);
+            Err(ConfigError::new(
+                ConfigErrorCode::StorageUnavailable,
+                format!("配置落盘失败：{}", persist.error),
+            ))
+        }
+    }
+}
+
 /// `desktop_config_write`：复核 revision 后的原子替换。
 ///
 /// 顺序是「临时文件写完 sync → 按当前文件形态分流 → `persist` 原子落位」：
@@ -340,7 +395,10 @@ fn write_file_atomically(target: &Path, bytes: &[u8]) -> Result<(), ConfigError>
 /// - 当前文件不可作为有效文件（fatal/invalid-utf8/oversized）→ 挪到
 ///   `.invalid` 隔离位保留用户字节，绝不顶替 `.bak`。
 ///
-/// 崩溃语义严格 old-or-new：`persist` 单步替换，目标路径全程存在。
+/// 崩溃语义：正常替换是 `persist` 单步 old-or-new——进程崩溃不会留下
+/// 半写的主文件；坏文件显式恢复先把原始字节隔离到 `.invalid`，该窗口
+/// 主路径可能短暂缺失但原始字节不丢。临时文件已 `sync_all`，但未做
+/// 父目录 fsync——不宣称对突然掉电具备完整 durable transaction 保证。
 pub fn write_config(
     dir: &Path,
     state: &ConfigState,
@@ -379,21 +437,9 @@ pub fn write_config(
 
     match &current {
         ConfigFileState::Missing => {
-            temp.persist_noclobber(&target).map_err(|persist| {
-                if persist.error.kind() == std::io::ErrorKind::AlreadyExists {
-                    // check-then-create 的窗口被原子语义抓住：仍按冲突处理，
-                    // 让 UI 走同一条重载路径而不是静默覆盖。
-                    ConfigError::new(
-                        ConfigErrorCode::ConfigConflict,
-                        "配置文件已被外部修改；请重新加载后重试",
-                    )
-                } else {
-                    ConfigError::new(
-                        ConfigErrorCode::StorageUnavailable,
-                        format!("配置落盘失败：{}", persist.error),
-                    )
-                }
-            })?;
+            // check-then-create 的窗口由 no-clobber 原子语义闭合：期间被
+            // 外部建出的文件按冲突交还，而不是被静默覆盖。
+            persist_new_atomically(temp, &target, "配置落盘失败")?;
         }
         ConfigFileState::Ok { content, .. } if envelope_satisfied(content) => {
             // `.bak` = last known valid：先原子更新备份再替换目标。persist
@@ -404,7 +450,7 @@ pub fn write_config(
         _ => {
             // 当前文件不可作为「上次有效」：挪去 `.invalid` 隔离位（rename
             // 是 O(1)，超大损坏文件也不复制），保留字节供手工打捞。此刻起
-            // 目标缺失是短暂的——但它本来就不可读，persist 失败尽量挪回。
+            // 目标缺失是短暂的——但它本来就不可读。
             // Windows 的 rename 不覆盖既有目标：先删掉旧隔离文件再挪。
             let invalid = invalid_path(dir);
             if invalid.exists() {
@@ -413,13 +459,7 @@ pub fn write_config(
             }
             fs::rename(&target, &invalid)
                 .map_err(|error| ConfigError::storage("隔离无效配置文件失败", &error))?;
-            if let Err(error) = temp.persist(&target) {
-                let _ = fs::rename(&invalid, &target);
-                return Err(ConfigError::new(
-                    ConfigErrorCode::StorageUnavailable,
-                    format!("配置落盘失败：{}", error.error),
-                ));
-            }
+            place_after_quarantine(temp, &target, &invalid)?;
         }
     }
 
@@ -600,6 +640,52 @@ mod tests {
         assert_eq!(
             fs::read_to_string(backup_path(dir.path())).unwrap(),
             "{\"version\":1}"
+        );
+    }
+
+    #[test]
+    fn placing_after_quarantine_never_clobbers_an_externally_recreated_target() {
+        let dir = tempfile::tempdir().unwrap();
+        // 无效文件已挪去 `.invalid`，隔离窗口里外部写者重建了 config.json：
+        // 落位必须按冲突让位——外部新版本不被覆盖，隔离的原始字节也不丢
+        // （不在这里把 `.invalid` 盖回主路径）。
+        fs::write(config_path(dir.path()), "{\"version\":1,\"external\":true}").unwrap();
+        fs::write(invalid_path(dir.path()), "{broken").unwrap();
+        let mut temp = tempfile::NamedTempFile::new_in(dir.path()).unwrap();
+        temp.write_all(b"{\"version\":1,\"ours\":true}").unwrap();
+
+        let error =
+            place_after_quarantine(temp, &config_path(dir.path()), &invalid_path(dir.path()))
+                .unwrap_err();
+
+        assert_eq!(error.code, ConfigErrorCode::ConfigConflict);
+        assert_eq!(
+            fs::read_to_string(config_path(dir.path())).unwrap(),
+            "{\"version\":1,\"external\":true}"
+        );
+        assert_eq!(
+            fs::read_to_string(invalid_path(dir.path())).unwrap(),
+            "{broken"
+        );
+    }
+
+    #[test]
+    fn placing_after_quarantine_lands_normally_when_target_stays_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(invalid_path(dir.path()), "{broken").unwrap();
+        let mut temp = tempfile::NamedTempFile::new_in(dir.path()).unwrap();
+        temp.write_all(b"{\"version\":1}").unwrap();
+
+        place_after_quarantine(temp, &config_path(dir.path()), &invalid_path(dir.path())).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(config_path(dir.path())).unwrap(),
+            "{\"version\":1}"
+        );
+        // 落位成功后隔离位保留——原始字节由用户手工处置，不被清掉。
+        assert_eq!(
+            fs::read_to_string(invalid_path(dir.path())).unwrap(),
+            "{broken"
         );
     }
 
