@@ -1,5 +1,7 @@
 export { AppShell } from './AppShell';
 export type { AppShellProps } from './AppShell';
+export { ShellEscapeMenu } from './EscapeMenu';
+export type { ShellEscapeMenuEntry, ShellEscapeMenuProps } from './EscapeMenu';
 export { ProductFooter } from './ProductFooter';
 export type { ProductFooterProps } from './ProductFooter';
 export { ProductTopBar } from './ProductTopBar';

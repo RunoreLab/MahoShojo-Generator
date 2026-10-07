@@ -1,6 +1,14 @@
 import { useCallback } from 'react';
 import { Outlet, createRootRoute, createRoute, lazyRouteComponent, useLocation, useRouter } from '@tanstack/react-router';
-import { AppShell, ProductFooter, ProductTopBar } from '@mahoshojo/ui-web/shell';
+import { BookOpen, FolderOpen, Home, Settings } from 'lucide-react';
+import { readCapability } from '@mahoshojo/ui-web/capability';
+import {
+  AppShell,
+  ProductFooter,
+  ProductTopBar,
+  ShellEscapeMenu,
+  type ShellEscapeMenuEntry,
+} from '@mahoshojo/ui-web/shell';
 import {
   HOME_FEATURE_CATEGORIES,
   HOME_RECOMMENDED_ENTRIES,
@@ -79,6 +87,22 @@ const CAPABILITIES = buildCapabilitySnapshot();
  * 裸 section 页面（本地库、设置）继续走受限宽 `main`（D5.1-P2-r4；百科骨架见 D5.1
  * 百科 UI compatibility 收口）。
  */
+/**
+ * Esc 快捷菜单条目（D5.1-N1，DESK-PARITY-007）。
+ *
+ * 只列「已交付且可导航」的产品路径——与顶栏同一能力快照来源，未交付入口
+ * 不会出现在菜单里（也不会出现禁用的死项）。`pathname` 命中的条目在菜单内
+ * 标记为当前项而不是冗余跳转。
+ */
+const ESCAPE_MENU_ENTRIES: readonly ShellEscapeMenuEntry[] = (
+  [
+    { href: '/', label: '首页', icon: <Home className="h-4 w-4" /> },
+    { href: '/local-library', label: '本地库', icon: <FolderOpen className="h-4 w-4" /> },
+    { href: '/encyclopedia', label: '百科', icon: <BookOpen className="h-4 w-4" /> },
+    { href: '/settings', label: '设置', icon: <Settings className="h-4 w-4" /> },
+  ] as const
+).filter((entry) => readCapability(CAPABILITIES, entry.href).kind === 'available');
+
 const FULL_BLEED_PATHS = new Set(['/', '/details', '/canshou', '/character-manager', '/encyclopedia', '/messages']);
 
 /** 条目页是前缀而不是字面路径：`/encyclopedia/<slug>`。 */
@@ -111,6 +135,7 @@ const DesktopShellInner = () => {
   // `useLocation`（TanStack 对「渲染依赖路由状态」的官方入口）。
   const pathname = useLocation({ select: (location) => location.pathname });
   const { state: cloudSession, store: cloudSessionStore } = useDesktopCloudSession();
+  const { state: config } = useDesktopConfig();
   // 头像是有身份后的后台资料刷新（`cloud_me_profile` 固定路由）：不在启动
   // 关键路径，取不到就回退首字母——共享顶栏的 avatarDataUrl 插槽本就如此。
   // `not-authenticated`（native 401 已清凭据）只上报一次会话收束信号，
@@ -132,6 +157,7 @@ const DesktopShellInner = () => {
   const topBarAccount = projectTopBarAccount(cloudSession);
 
   return (
+    <>
     <AppShell
       // DESK-PARITY-002：品牌已由顶栏 favicon 圆形标志承担，壳不再渲染默认文字品牌。
       brand={null}
@@ -172,6 +198,19 @@ const DesktopShellInner = () => {
       <DesktopAnnouncementCenter />
       <Outlet />
     </AppShell>
+    {/*
+      Esc 快捷菜单只装配在 Desktop 壳上（DESK-PARITY-007）：共享组件只管
+      「打开条件/模态语义」，条目与导航都由这里注入；`navigateByProductHref`
+      与顶栏/页内链接走同一条 TanStack 导航路径，离开守卫原样生效，菜单
+      不提供绕过。撤掉这块 JSX 即整体摘除功能，共享层级栈不受影响。
+    */}
+    <ShellEscapeMenu
+      enabled={config.values.escapeMenuEnabled}
+      entries={ESCAPE_MENU_ENTRIES}
+      pathname={pathname}
+      onNavigate={(href) => navigateByProductHref(router, href)}
+    />
+    </>
   );
 };
 

@@ -313,7 +313,7 @@ describe('settings field registry', () => {
         }
       }
     }
-    // 登记表必须覆盖本切片三个真值源 + S2 已交付的 config-json 字段。
+    // 登记表必须覆盖本切片三个真值源 + S2/N1 已交付的 config-json 字段。
     const wiredIds = SETTINGS_FIELD_REGISTRY.filter((r) => r.status === 'wired').map((r) => r.id);
     expect(wiredIds).toEqual(
       expect.arrayContaining([
@@ -324,6 +324,7 @@ describe('settings field registry', () => {
         'generation.canshouPreferences',
         'announcements.checkPolicy',
         'externalLinks.confirmContentLinks',
+        'desktop.escapeMenu.enabled',
       ]),
     );
     // 尚未交付消费者的 config-json 字段仍是 planned——不提前 wired。
@@ -331,7 +332,7 @@ describe('settings field registry', () => {
       (r) => r.status === 'planned' && r.owner.kind === 'config-json',
     ).map((r) => r.id);
     expect(plannedConfigKeys).toEqual(
-      expect.arrayContaining(['desktop.escapeMenu.enabled', 'publicLibraryCache']),
+      expect.arrayContaining(['publicLibraryCache']),
     );
   });
 

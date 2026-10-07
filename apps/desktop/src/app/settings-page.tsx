@@ -13,6 +13,7 @@ import {
 import { DESKTOP_PAGE_PREFERENCE_SOURCES } from './settings-page-preferences';
 import { AccountPanel } from '../features/account/AccountPanel';
 import { AiConnectionsPanel } from '../features/ai-config/AiConnectionsPanel';
+import { EscapeMenuSettingsCard } from '../features/config/EscapeMenuSettingsCard';
 import { OnlineSettingsSection } from '../features/config/OnlineSettingsSection';
 import { WebPackageDiagnosticsPanel } from '../features/webpkg/WebPackageDiagnosticsPanel';
 import { loadDesktopRuntimeInfo, type DesktopRuntimeInfo } from '../platform';
@@ -149,7 +150,12 @@ export const DesktopSettings = () => {
         },
         {
           id: 'appearance',
-          content: <AppearanceSettingsSection />,
+          content: (
+            <>
+              <AppearanceSettingsSection />
+              <EscapeMenuSettingsCard />
+            </>
+          ),
         },
         {
           id: 'generation',

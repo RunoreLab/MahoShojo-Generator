@@ -179,6 +179,52 @@ describe('desktop settings shell', () => {
     expect(doc.externalLinks?.confirmContentLinks).toBe(false);
   });
 
+  it('appearance group carries the Esc 快捷菜单 toggle wired to desktop.escapeMenu.enabled', async () => {
+    // D5.1-N1：开关是 config.json 字段（desktop.escapeMenu.enabled，默认 true），
+    // 挂在外观与交互组——与「在线与通知」共用同一个 DesktopConfigStore 读写路径。
+    await mountAt('/settings?section=appearance');
+
+    const toggle = [...container.querySelectorAll('[role="switch"]')].find(
+      (el) => el.getAttribute('aria-label') === 'Esc 快捷菜单',
+    );
+    expect(toggle).not.toBeUndefined();
+    // 文件缺失 → 默认 true 生效，且不写空壳文件。
+    expect(toggle?.getAttribute('aria-checked')).toBe('true');
+    expect(
+      invokeMock.mock.calls.filter((call) => call[0] === 'desktop_config_write'),
+    ).toHaveLength(0);
+
+    await click(toggle ?? null);
+
+    const writeCalls = invokeMock.mock.calls.filter(
+      (call) => call[0] === 'desktop_config_write',
+    );
+    expect(writeCalls).toHaveLength(1);
+    const request = (writeCalls[0]?.[1] as { request?: { content?: string } })?.request;
+    const doc = JSON.parse(request?.content ?? '{}') as {
+      desktop?: { escapeMenu?: { enabled?: boolean } };
+    };
+    expect(doc.desktop?.escapeMenu?.enabled).toBe(false);
+  });
+
+  it('disables the Esc 快捷菜单 toggle while config.json is unavailable', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'desktop_config_read') {
+        throw { code: 'io-error', message: '读取配置文件失败' };
+      }
+      return defaultInvokeImpl(command);
+    });
+    await mountAt('/settings?section=appearance');
+
+    // 读失败 → 开关整卡降级为「暂不可用」说明，不渲染可操作控件。
+    expect(container.textContent).toContain('配置暂不可用');
+    expect(
+      [...container.querySelectorAll('[role="switch"]')].find(
+        (el) => el.getAttribute('aria-label') === 'Esc 快捷菜单',
+      ),
+    ).toBeUndefined();
+  });
+
   it('config-conflict surfaces a draft banner — reapply lands the edit over the new base', async () => {
     let reads = 0;
     let writes = 0;

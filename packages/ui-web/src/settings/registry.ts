@@ -132,8 +132,8 @@ export const SETTINGS_FIELD_REGISTRY: readonly SettingsFieldRecord[] = [
     scope: 'host-file',
     owner: { kind: 'config-json', key: 'desktop.escapeMenu.enabled' },
     defaultValue: 'true',
-    status: 'planned',
-    notes: 'N1 切片随首个真实消费者落地（DESK-PARITY-007），S1 不显示。',
+    status: 'wired',
+    notes: 'N1 落地（DESK-PARITY-007）：Desktop 外观组控件直写 config.json；非法值回默认并诊断；Web 不渲染。',
   },
   {
     id: 'announcements.checkPolicy',
