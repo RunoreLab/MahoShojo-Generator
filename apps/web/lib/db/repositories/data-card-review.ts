@@ -117,6 +117,39 @@ export const approvePendingPublicCardsByIds = async (
   return updatedRows.length;
 };
 
+// 自动审查拒绝：只动 review_status，不动 is_public（与人工拒绝同语义）。
+export const rejectPendingPublicCardsByIds = async (
+  db: AppDrizzleDb,
+  userId: number,
+  cardIds: string[],
+): Promise<number> => {
+  const uniqueIds = Array.from(
+    new Set(cardIds.map((id) => (typeof id === 'string' ? id.trim() : '')).filter(Boolean)),
+  );
+  if (uniqueIds.length === 0) return 0;
+
+  const updatedRows = await db
+    .update(dataCards)
+    .set({
+      reviewStatus: 'rejected',
+      updatedAt: sql`CURRENT_TIMESTAMP`,
+    })
+    .where(
+      and(
+        eq(dataCards.userId, userId),
+        inArray(dataCards.id, uniqueIds),
+        eq(dataCards.isPublic, true),
+        eq(dataCards.reviewStatus, 'pending'),
+        isNull(dataCards.deletedAt),
+      ),
+    )
+    .returning({
+      id: dataCards.id,
+    });
+
+  return updatedRows.length;
+};
+
 export const countPendingPublicCardUpdatesByUserId = async (
   db: AppDrizzleDb,
   userId: number,

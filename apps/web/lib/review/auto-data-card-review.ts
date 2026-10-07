@@ -9,8 +9,11 @@ import {
   deletePendingCardUpdateByDataCardId,
   listLatestPendingPublicCardsByUserId,
   listLatestPendingPublicCardUpdatesByUserId,
+  rejectPendingPublicCardsByIds,
   type PendingDataCardUpdateReviewRow,
 } from '@/lib/db/repositories/data-card-review';
+import { getBusinessUserById } from '@/lib/db/repositories/business-users';
+import { createUserMessage } from '@/lib/db/repositories/messages';
 import { getDataCardUpdatedAtById } from '@/lib/db/repositories/data-cards-write';
 import { getLogger } from '@/lib/logger';
 import { resetStrictArenaRatingForDataCard } from '@/lib/database/arena-ratings';
@@ -18,12 +21,20 @@ import { computeTechIndex } from '@/lib/metrics/techIndex';
 import { upsertDataCardMetrics } from '@/lib/database/data-card-metrics';
 import { verifySignature } from '@/lib/signature';
 import {
+  resolveUncertainAction,
+  type AutoReviewEngine,
+  type AutoReviewPolicy,
+  type AutoReviewUncertainPolicy,
+  type ReviewTarget,
+  type ReviewVerdict,
+} from '@mahoshojo/hosted-runtime/auto-review';
+import {
   buildDataCardAiReviewPrompt,
   DATA_CARD_AI_REVIEW_SYSTEM_PROMPT,
   DataCardAiReviewResponseSchema,
   type DataCardAiReviewResponse,
-  type DataCardAiReviewTarget,
 } from '@/lib/review/data-card-ai-review';
+import { getAutoReviewEngine } from '@/lib/review/auto-review-engine';
 
 const log = getLogger('auto-data-card-review');
 
@@ -101,7 +112,9 @@ async function applyApprovedPublicCardUpdates(
   return appliedIds;
 }
 
-async function generateAiReviewWithModelFallbacks(targets: DataCardAiReviewTarget[]): Promise<{
+/* ── legacy 通路（AI_REVIEW_PROVIDERS_CONFIG 未配置时的兼容兜底） ─────────── */
+
+async function generateAiReviewWithModelFallbacks(targets: ReviewTarget[]): Promise<{
   result: DataCardAiReviewResponse;
   usedModel: string | null;
 }> {
@@ -136,39 +149,145 @@ async function generateAiReviewWithModelFallbacks(targets: DataCardAiReviewTarge
   throw lastError ?? new Error('所有自动审查模型均失败');
 }
 
+/** legacy：只产出 approve 集合（reject 的旧语义=留 pending）。 */
+const legacyReviewTargets = async (
+  targets: ReviewTarget[],
+): Promise<{ approvedIds: Set<string>; usedModel: string | null }> => {
+  const ai = await generateAiReviewWithModelFallbacks(targets);
+  const suggestionById = new Map(ai.result.reviews.map((review) => [review.id, review]));
+  return {
+    approvedIds: new Set(
+      targets.filter((t) => suggestionById.get(t.id)?.suggestion === 'approved').map((t) => t.id),
+    ),
+    usedModel: ai.usedModel,
+  };
+};
+
+/* ── 引擎通路 ────────────────────────────────────────────────────────────── */
+
+type CardAction = 'approve' | 'reject' | 'pending';
+
+const actionForOutcome = (
+  verdict: ReviewVerdict,
+  onUncertain: AutoReviewUncertainPolicy,
+  isReviewExempt: boolean,
+): CardAction =>
+  verdict === 'approve'
+    ? 'approve'
+    : verdict === 'reject'
+      ? 'reject'
+      : resolveUncertainAction(onUncertain, isReviewExempt);
+
+const notifyAutoReject = async (
+  db: AppDrizzleDb,
+  input: { userId: number; cardId: string; cardName: string; reason?: string },
+): Promise<void> => {
+  try {
+    await createUserMessage(db, {
+      recipientUserId: input.userId,
+      actorUserId: null,
+      channel: 'system',
+      messageType: 'moderation',
+      templateKey: 'user.moderation.data_card_rejected',
+      payloadJson: JSON.stringify({
+        dataCardId: input.cardId,
+        dataCardName: input.cardName,
+        reason: input.reason ?? '自动安全审查检测到疑似违规内容。如属误判，请修改后重新公开或联系管理员。',
+        autoReview: true,
+      }),
+      titleText: null,
+      bodyText: null,
+      actionUrl: `/character-manager?dataCardId=${encodeURIComponent(input.cardId)}`,
+      sourceEntityType: 'data_card',
+      sourceEntityId: input.cardId,
+      priority: 'high',
+      expiresAt: null,
+      now: new Date().toISOString(),
+    });
+  } catch (error) {
+    log.warn('自动拒绝通知发送失败（非阻塞）', { cardId: input.cardId, error });
+  }
+};
+
+const readIsReviewExempt = async (db: AppDrizzleDb, userId: number): Promise<boolean> => {
+  try {
+    const user = await getBusinessUserById(db, userId);
+    return user?.isReviewExempt === true;
+  } catch {
+    return false;
+  }
+};
+
 export type AutoReviewResult = {
   ok: boolean;
   reviewedCount: number;
   approvedCount: number;
+  rejectedCount: number;
+  heldCount: number;
   approvedIds: string[];
-  usedModel: string | null;
+  rejectedIds: string[];
+  usedBackend: string | null;
   reason?: string;
 };
 
-export async function autoReviewLatestPendingPublicDataCardsForUser(userId: number): Promise<AutoReviewResult> {
-  const autoReviewConfig = config.DATA_CARD_AUTO_REVIEW;
-  if (!autoReviewConfig?.enabled) {
-    return { ok: false, reviewedCount: 0, approvedCount: 0, approvedIds: [], usedModel: null, reason: 'disabled' };
-  }
+/** 可注入依赖（测试用）；缺省走生产装配。 */
+export type AutoReviewDeps = {
+  db?: AppDrizzleDb;
+  engine?: AutoReviewEngine | null;
+  policy?: AutoReviewPolicy;
+};
 
-  const db = await readDbOrNull();
-  if (!db) {
-    return { ok: false, reviewedCount: 0, approvedCount: 0, approvedIds: [], usedModel: null, reason: 'db-unavailable' };
+const emptyResult = (reason: string, ok = false): AutoReviewResult => ({
+  ok,
+  reviewedCount: 0,
+  approvedCount: 0,
+  rejectedCount: 0,
+  heldCount: 0,
+  approvedIds: [],
+  rejectedIds: [],
+  usedBackend: null,
+  reason,
+});
+
+const resolveReviewConfig = (deps?: AutoReviewDeps) => {
+  const autoReviewConfig = config.DATA_CARD_AUTO_REVIEW;
+  if (!autoReviewConfig?.enabled && !deps) return null;
+  return autoReviewConfig ?? { lookbackPendingCount: 0, batch: { enabled: false, threshold: 1 } };
+};
+
+const resolveRuntime = async (deps?: AutoReviewDeps) => {
+  const db = deps?.db ?? (await readDbOrNull());
+  if (!db) return null;
+  if (deps?.engine !== undefined || deps?.policy !== undefined) {
+    const fallback = deps?.engine === undefined || deps?.policy === undefined ? getAutoReviewEngine() : null;
+    return { db, engine: deps?.engine ?? fallback?.engine ?? null, policy: deps?.policy ?? fallback?.policy ?? null };
   }
+  const { engine, policy } = getAutoReviewEngine();
+  return { db, engine, policy };
+};
+
+export async function autoReviewLatestPendingPublicDataCardsForUser(
+  userId: number,
+  deps?: AutoReviewDeps,
+): Promise<AutoReviewResult> {
+  const autoReviewConfig = resolveReviewConfig(deps);
+  if (!autoReviewConfig) return emptyResult('disabled');
+
+  const runtime = await resolveRuntime(deps);
+  if (!runtime || !runtime.policy) return emptyResult('db-unavailable');
+  const { db, engine, policy } = runtime;
 
   const pendingCount = await countPendingPublicCardsByUserId(db, userId);
   if (autoReviewConfig.batch?.enabled) {
     const threshold = Math.max(1, Math.trunc(autoReviewConfig.batch.threshold ?? 1));
     if (pendingCount < threshold) {
-      return {
-        ok: false,
-        reviewedCount: 0,
-        approvedCount: 0,
-        approvedIds: [],
-        usedModel: null,
-        reason: `batch-waiting:${pendingCount}/${threshold}`,
-      };
+      return emptyResult(`batch-waiting:${pendingCount}/${threshold}`);
     }
+  }
+
+  const isReviewExempt = await readIsReviewExempt(db, userId);
+  if (isReviewExempt && policy.exemptUserPolicy === 'skip') {
+    return emptyResult('exempt-skip', true);
   }
 
   const lookback = Math.max(0, Math.trunc(autoReviewConfig.lookbackPendingCount ?? 0));
@@ -178,70 +297,116 @@ export async function autoReviewLatestPendingPublicDataCardsForUser(userId: numb
 
   const pendingCards = await listLatestPendingPublicCardsByUserId(db, userId, limit);
   if (pendingCards.length === 0) {
-    return { ok: true, reviewedCount: 0, approvedCount: 0, approvedIds: [], usedModel: null, reason: 'no-pending' };
+    return { ...emptyResult('no-pending', true) };
   }
 
-  const targets: DataCardAiReviewTarget[] = pendingCards.map((row) => ({
+  const targets: ReviewTarget[] = pendingCards.map((row) => ({
     id: row.id,
     name: row.name,
     description: row.description ?? '',
     data: row.data,
   }));
 
-  let ai: { result: DataCardAiReviewResponse; usedModel: string | null };
-  try {
-    ai = await generateAiReviewWithModelFallbacks(targets);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'AI审查失败';
-    log.error('自动审查失败（降级为保持 pending）', { userId, error });
-    return { ok: false, reviewedCount: targets.length, approvedCount: 0, approvedIds: [], usedModel: null, reason: message };
-  }
-
-  const suggestionById = new Map(ai.result.reviews.map((review) => [review.id, review]));
-  const approvedIds = targets
-    .filter((target) => suggestionById.get(target.id)?.suggestion === 'approved')
-    .map((target) => target.id);
-
-  const approvedCount = await approvePendingPublicCardsByIds(db, userId, approvedIds);
-  if (approvedIds.length > 0) {
-    log.info('自动审查通过并已更新状态', { userId, reviewed: targets.length, approvedIds, approvedCount, usedModel: ai.usedModel });
-  } else {
-    log.info('自动审查未通过（保持 pending 等待人工）', { userId, reviewed: targets.length, usedModel: ai.usedModel });
-  }
-
-  return {
+  const result: AutoReviewResult = {
     ok: true,
-    reviewedCount: targets.length,
-    approvedCount,
-    approvedIds,
-    usedModel: ai.usedModel,
+    reviewedCount: 0,
+    approvedCount: 0,
+    rejectedCount: 0,
+    heldCount: 0,
+    approvedIds: [],
+    rejectedIds: [],
+    usedBackend: null,
   };
+
+  if (!engine) {
+    // 未配置新后端：回退 legacy generateWithAI 通路（只判 approve，其余留 pending）。
+    try {
+      const legacy = await legacyReviewTargets(targets);
+      const approvedIds = targets.filter((t) => legacy.approvedIds.has(t.id)).map((t) => t.id);
+      result.approvedCount = await approvePendingPublicCardsByIds(db, userId, approvedIds);
+      result.approvedIds = approvedIds;
+      result.heldCount = targets.length - approvedIds.length;
+      result.reviewedCount = targets.length;
+      result.usedBackend = legacy.usedModel ?? 'legacy-llm';
+      log.info('自动审查（legacy 通路）完成', { userId, reviewed: targets.length, approvedCount: result.approvedCount });
+      return result;
+    } catch (error) {
+      log.error('自动审查失败（降级为保持 pending）', { userId, error });
+      return { ...emptyResult(error instanceof Error ? error.message : 'AI审查失败') };
+    }
+  }
+
+  for (const target of targets) {
+    result.reviewedCount += 1;
+    const run = await engine.review(target);
+    result.usedBackend = run.backendId;
+    const action = actionForOutcome(run.outcome.verdict, policy.onUncertain, isReviewExempt);
+    if (action === 'approve') {
+      const n = await approvePendingPublicCardsByIds(db, userId, [target.id]);
+      if (n > 0) {
+        result.approvedCount += n;
+        result.approvedIds.push(target.id);
+      } else {
+        result.heldCount += 1;
+      }
+    } else if (action === 'reject') {
+      const n = await rejectPendingPublicCardsByIds(db, userId, [target.id]);
+      if (n > 0) {
+        result.rejectedCount += n;
+        result.rejectedIds.push(target.id);
+        if (policy.notifyOnAutoReject) {
+          await notifyAutoReject(db, { userId, cardId: target.id, cardName: target.name, reason: run.outcome.reason });
+        }
+      } else {
+        result.heldCount += 1;
+      }
+    } else {
+      result.heldCount += 1;
+    }
+    log.info('自动审查单卡裁决', {
+      userId,
+      cardId: target.id,
+      verdict: run.outcome.verdict,
+      action,
+      score: run.outcome.score,
+      category: run.outcome.category,
+      backend: run.backendId,
+      latencyMs: run.latencyMs,
+    });
+  }
+
+  log.info('自动审查批次完成', {
+    userId,
+    reviewed: result.reviewedCount,
+    approved: result.approvedCount,
+    rejected: result.rejectedCount,
+    held: result.heldCount,
+  });
+  return result;
 }
 
-export async function autoReviewLatestPendingPublicDataCardUpdatesForUser(userId: number): Promise<AutoReviewResult> {
-  const autoReviewConfig = config.DATA_CARD_AUTO_REVIEW;
-  if (!autoReviewConfig?.enabled) {
-    return { ok: false, reviewedCount: 0, approvedCount: 0, approvedIds: [], usedModel: null, reason: 'disabled' };
-  }
+export async function autoReviewLatestPendingPublicDataCardUpdatesForUser(
+  userId: number,
+  deps?: AutoReviewDeps,
+): Promise<AutoReviewResult> {
+  const autoReviewConfig = resolveReviewConfig(deps);
+  if (!autoReviewConfig) return emptyResult('disabled');
 
-  const db = await readDbOrNull();
-  if (!db) {
-    return { ok: false, reviewedCount: 0, approvedCount: 0, approvedIds: [], usedModel: null, reason: 'db-unavailable' };
-  }
+  const runtime = await resolveRuntime(deps);
+  if (!runtime || !runtime.policy) return emptyResult('db-unavailable');
+  const { db, engine, policy } = runtime;
 
   const pendingCount = await countPendingPublicCardUpdatesByUserId(db, userId);
   if (autoReviewConfig.batch?.enabled) {
     const threshold = Math.max(1, Math.trunc(autoReviewConfig.batch.threshold ?? 1));
     if (pendingCount < threshold) {
-      return {
-        ok: false,
-        reviewedCount: 0,
-        approvedCount: 0,
-        approvedIds: [],
-        usedModel: null,
-        reason: `batch-waiting:${pendingCount}/${threshold}`,
-      };
+      return emptyResult(`batch-waiting:${pendingCount}/${threshold}`);
     }
+  }
+
+  const isReviewExempt = await readIsReviewExempt(db, userId);
+  if (isReviewExempt && policy.exemptUserPolicy === 'skip') {
+    return emptyResult('exempt-skip', true);
   }
 
   const lookback = Math.max(0, Math.trunc(autoReviewConfig.lookbackPendingCount ?? 0));
@@ -251,44 +416,88 @@ export async function autoReviewLatestPendingPublicDataCardUpdatesForUser(userId
 
   const pendingUpdates = await listLatestPendingPublicCardUpdatesByUserId(db, userId, limit);
   if (pendingUpdates.length === 0) {
-    return { ok: true, reviewedCount: 0, approvedCount: 0, approvedIds: [], usedModel: null, reason: 'no-pending' };
+    return emptyResult('no-pending', true);
   }
 
-  const targets: DataCardAiReviewTarget[] = pendingUpdates.map((row) => ({
+  const targets: Array<ReviewTarget & { updateRow: PendingDataCardUpdateReviewRow }> = pendingUpdates.map((row) => ({
     id: row.dataCardId,
     name: row.name,
     description: row.description ?? '',
     data: row.data,
+    updateRow: row,
   }));
 
-  let ai: { result: DataCardAiReviewResponse; usedModel: string | null };
-  try {
-    ai = await generateAiReviewWithModelFallbacks(targets);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'AI审查失败';
-    log.error('更新自动审查失败（降级为保持 pending）', { userId, error });
-    return { ok: false, reviewedCount: targets.length, approvedCount: 0, approvedIds: [], usedModel: null, reason: message };
-  }
-
-  const suggestionById = new Map(ai.result.reviews.map((review) => [review.id, review]));
-  const approvedIds = targets
-    .filter((target) => suggestionById.get(target.id)?.suggestion === 'approved')
-    .map((target) => target.id);
-
-  const approvedUpdates = pendingUpdates.filter((row) => approvedIds.includes(row.dataCardId));
-  const appliedIds = await applyApprovedPublicCardUpdates(db, userId, approvedUpdates);
-  if (appliedIds.length > 0) {
-    log.info('更新自动审查通过并已应用更新', { userId, reviewed: targets.length, approvedIds: appliedIds, usedModel: ai.usedModel });
-  } else {
-    log.info('更新自动审查未通过（保持 pending 等待人工）', { userId, reviewed: targets.length, usedModel: ai.usedModel });
-  }
-
-  return {
+  const result: AutoReviewResult = {
     ok: true,
-    reviewedCount: targets.length,
-    approvedCount: appliedIds.length,
-    approvedIds: appliedIds,
-    usedModel: ai.usedModel,
+    reviewedCount: 0,
+    approvedCount: 0,
+    rejectedCount: 0,
+    heldCount: 0,
+    approvedIds: [],
+    rejectedIds: [],
+    usedBackend: null,
   };
-}
 
+  if (!engine) {
+    try {
+      const legacy = await legacyReviewTargets(targets);
+      const approvedUpdates = pendingUpdates.filter((row) => legacy.approvedIds.has(row.dataCardId));
+      const appliedIds = await applyApprovedPublicCardUpdates(db, userId, approvedUpdates);
+      result.approvedCount = appliedIds.length;
+      result.approvedIds = appliedIds;
+      result.heldCount = targets.length - appliedIds.length;
+      result.reviewedCount = targets.length;
+      result.usedBackend = legacy.usedModel ?? 'legacy-llm';
+      log.info('更新自动审查（legacy 通路）完成', { userId, reviewed: targets.length, approvedCount: appliedIds.length });
+      return result;
+    } catch (error) {
+      log.error('更新自动审查失败（降级为保持 pending）', { userId, error });
+      return { ...emptyResult(error instanceof Error ? error.message : 'AI审查失败') };
+    }
+  }
+
+  for (const target of targets) {
+    result.reviewedCount += 1;
+    const run = await engine.review(target);
+    result.usedBackend = run.backendId;
+    const action = actionForOutcome(run.outcome.verdict, policy.onUncertain, isReviewExempt);
+    if (action === 'approve') {
+      const applied = await applyApprovedPublicCardUpdates(db, userId, [target.updateRow]);
+      if (applied.length > 0) {
+        result.approvedCount += applied.length;
+        result.approvedIds.push(target.id);
+      } else {
+        result.heldCount += 1;
+      }
+    } else if (action === 'reject') {
+      // 更新拒绝 = 丢弃待审行（与人工拒绝一致）+ 通知；线上版本不动。
+      await deletePendingCardUpdateByDataCardId(db, target.id);
+      result.rejectedCount += 1;
+      result.rejectedIds.push(target.id);
+      if (policy.notifyOnAutoReject) {
+        await notifyAutoReject(db, { userId, cardId: target.id, cardName: target.name, reason: run.outcome.reason });
+      }
+    } else {
+      result.heldCount += 1;
+    }
+    log.info('更新自动审查单卡裁决', {
+      userId,
+      cardId: target.id,
+      verdict: run.outcome.verdict,
+      action,
+      score: run.outcome.score,
+      category: run.outcome.category,
+      backend: run.backendId,
+      latencyMs: run.latencyMs,
+    });
+  }
+
+  log.info('更新自动审查批次完成', {
+    userId,
+    reviewed: result.reviewedCount,
+    approved: result.approvedCount,
+    rejected: result.rejectedCount,
+    held: result.heldCount,
+  });
+  return result;
+}

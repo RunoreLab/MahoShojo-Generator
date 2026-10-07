@@ -35,6 +35,7 @@ import {
   autoReviewLatestPendingPublicDataCardsForUser,
   autoReviewLatestPendingPublicDataCardUpdatesForUser
 } from '@/lib/review/auto-data-card-review';
+import { getAutoReviewPolicy } from '@/lib/review/auto-review-engine';
 
 async function getDataCardUpdatedAt(db: AppDrizzleDb | null, dataCardId: string): Promise<string | null> {
   if (!db) return null;
@@ -222,8 +223,10 @@ async function handler(req: Request): Promise<Response> {
           });
         }
 
-        // [v0.4.2 核心逻辑] 根据用户豁免状态决定审查状态
-        const reviewStatus = user.is_review_exempt === 1 ? 'approved' : 'pending';
+        // [v0.4.2 核心逻辑] 根据用户豁免状态决定审查状态；
+        // exemptUserPolicy==='review' 时豁免用户同样进入 pending 由自动审查裁决。
+        const exemptStillReviewed = getAutoReviewPolicy().exemptUserPolicy === 'review';
+        const reviewStatus = user.is_review_exempt === 1 && !exemptStillReviewed ? 'approved' : 'pending';
         const result = await createDataCardWithAuthor(
           userId,
           user.username,
@@ -309,7 +312,8 @@ async function handler(req: Request): Promise<Response> {
           });
         }
 
-        const isExempt = user.is_review_exempt === 1;
+        // exemptUserPolicy==='review' 时豁免用户按普通用户口径走待审更新+自动审查。
+        const isExempt = user.is_review_exempt === 1 && getAutoReviewPolicy().exemptUserPolicy !== 'review';
         const isAdmin = user.is_admin === 1;
         const isPendingOrRejected = currentCard.review_status !== 'approved';
 
