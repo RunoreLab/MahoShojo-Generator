@@ -8,11 +8,11 @@
 // 条件题隐藏后的答案概览行为、保存偏好持久化、服务器生成路径、
 // 生成中锁定/手动停止以及残兽特有锚点。
 
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { canshouQuestionnaire } from '@/lib/questionnaire-presets';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -46,9 +46,9 @@ vi.mock('@/components/SaveToCloudButton', () => ({
 const DRAFT_KEY = 'canshouAnswersDraft';
 const PREF_KEY = 'mahoshojo.canshou.preferences.v1';
 
-const DEFAULT_QUESTIONNAIRE = JSON.parse(
-  readFileSync(resolve(process.cwd(), 'public/questionnaires/presets/canshou-default.json'), 'utf8'),
-) as {
+// 默认问卷 fixture 从仓库根 content/ 权威源导入：public/ 副本是构建期生成物，
+// 测试与 lint 流程里并不存在（MONO-006，见 lib/questionnaire-presets.ts）。
+const DEFAULT_QUESTIONNAIRE = canshouQuestionnaire as {
   id: string;
   title: string;
   description: string;
