@@ -271,6 +271,28 @@ describe('Hosted DR client bundle safety gate', () => {
     expect(result.status).toBe(0);
   });
 
+  it('不把动态模板 host URL 误判为静态 internal endpoint', () => {
+    const result = runCheckerFiles({
+      'routing.js': routingBundle(),
+      'audio.js': [
+        'const i="music.163.com",o="/song/media/outer/url";',
+        'const m=e=>`https://${i}${o}?id=${e}.mp3`',
+      ].join(''),
+    });
+
+    expect(result.status).toBe(0);
+  });
+
+  it('模板 host 豁免要求 `${` 紧跟 `//`，不覆盖 literal internal 前缀', () => {
+    const result = runCheckerFiles({
+      'routing.js': routingBundle(),
+      'leaked.js': 'const u=`https://internal-${region}.svc`',
+    });
+
+    expect(result.status).toBe(1);
+    expect(`${result.stdout}\n${result.stderr}`).toContain('internal endpoint');
+  });
+
   it('缺少完整 client-preflight routing projection 时 fail closed', () => {
     const result = runChecker('https://homura.colanns.me;/api/health/ready');
 

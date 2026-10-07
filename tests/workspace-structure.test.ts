@@ -172,8 +172,10 @@ describe('G25D Web workspace app ownership', () => {
     expect(appManifest.scripts?.['typecheck:build']).toContain(
       'node --max-old-space-size=3072 node_modules/typescript/bin/tsc',
     );
+    // Next 16 默认 Turbopack；生产构建显式 --webpack——DR client bundle 门禁的
+    // fixture 豁免按 webpack chunk 命名设计，切 bundler 属独立评估。
     expect(appManifest.scripts?.['build:next']).toBe(
-      'pnpm run generate:content && pnpm run clean:next && pnpm run typecheck:build && next build '
+      'pnpm run generate:content && pnpm run clean:next && pnpm run typecheck:build && next build --webpack '
       + '&& node scripts/check-hosted-dr-client-bundle.mjs --dir .next/static',
     );
     expect(appManifest.scripts?.['build:sw']).toBeUndefined();

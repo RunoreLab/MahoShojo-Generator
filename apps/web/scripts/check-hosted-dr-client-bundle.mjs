@@ -51,6 +51,10 @@ const absoluteUrlStartPattern = /https?:\/\//giu;
 const absoluteUrlCandidatePattern = /^https?:\/\/(?:\[[^\]\s"'`\\]+\](?::\d+)?|[^/?#\s"'`\\;,)}]+)(?:\/[^\s"'`\\]*|[?#][^\s"'`\\]*)?/iu;
 const protocolRelativeUrlLiteralPattern = /(["'`])(\/\/[^\s"'`\\]+)\1/gu;
 const dynamicIpv6UrlCandidatePattern = /^(?:https?:)?\/\/\[\$\{[A-Za-z_$][A-Za-z0-9_.$]*\}\]$/iu;
+// host 为 `${var}` 模板的候选项是动态构造 URL（如 `https://${host}${path}?id=${id}`），
+// 提取器在 `}` 处截断后仅剩 `scheme://${name`；静态扫描无法对模板 host 求值，
+// 与上方动态 IPv6 模板同类豁免。Next 16 起 webpack/Turbopack 产物均保留模板字面量。
+const dynamicTemplateHostCandidatePattern = /^(?:https?:)?\/\/\$\{[A-Za-z_$]/iu;
 const protocolRelativeBase = 'https://bundle.invalid';
 const frameworkUrlFixtures = new Map([
   ['chunks/main-', new Set(['http://n', 'http://f'])],
@@ -155,6 +159,7 @@ const listStaticUrlCandidates = function* (source) {
 const scanStaticUrls = (relativePath, source) => {
   for (const { candidate, matchIndex } of listStaticUrlCandidates(source)) {
     if (dynamicIpv6UrlCandidatePattern.test(candidate)) continue;
+    if (dynamicTemplateHostCandidatePattern.test(candidate)) continue;
     let parsed;
     try {
       parsed = new URL(candidate, protocolRelativeBase);

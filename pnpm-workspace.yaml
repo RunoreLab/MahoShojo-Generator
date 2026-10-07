@@ -13,8 +13,8 @@ overrides:
   # Patch-level transitive fixes within the parents' supported major lines.
   # GHSA-4x5r-pxfx-6jf8: remain on Babel 7 while taking the arbitrary file read fix.
   '@babel/core@7': 7.29.7
-  # GHSA-f88m-g3jw-g9cj: Next 15.5.x explicitly supports the patched sharp 0.35 line.
-  'next@15.5.27>sharp': 0.35.4
+  # GHSA-f88m-g3jw-g9cj: Next explicitly supports the patched sharp 0.35 line.
+  'next@16.3.8>sharp': 0.35.4
   body-parser@2: 2.3.0
   path-to-regexp@8: 8.4.0
   postcss@8: 8.5.23
@@ -28,4 +28,4 @@ allowBuilds:
   workerd: true
 peerDependencyRules:
   allowedVersions:
-    next: 15.5.27
+    next: 16.3.8

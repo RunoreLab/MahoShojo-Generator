@@ -9,7 +9,7 @@ import {
 } from '@/lib/hosted-dr/activation-candidate';
 import { shouldRedirectToHttps } from '@/lib/security/browser-headers';
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { nextUrl } = request;
   let activationCandidate: boolean;
   try {

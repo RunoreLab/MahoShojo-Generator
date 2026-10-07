@@ -4,7 +4,7 @@
 
 ## Ownership
 
-- source：`app/`、`components/`、`lib/`、`middleware.ts`；
+- source：`app/`、`components/`、`lib/`、`proxy.ts`；
 - static：`public/`、`styles/`；
 - lifecycle：本目录 `package.json`、Next/OpenNext/Wrangler、TypeScript、Vitest、ESLint、PostCSS 配置；
 - environment contract：`env.example` 与 `.dev.vars`；真实 secret 不进入仓库；
@@ -73,9 +73,9 @@ endpoint 必须 absent；只对 framework URL parser 的精确 synthetic fixture
 才可显式同时设置
 `NEXT_PUBLIC_HOSTED_API_ENVIRONMENT=production` 与 `HOSTED_DR_ACTIVATION_CANDIDATE=true` 才允许构建 bootstrap
 artifact；`dr-candidate` 强制 `assets.run_worker_first=true` 并使用独立的
-最外层 Worker entry，在 Cloudflare static assets、OpenNext image handler 与 Next middleware 之前只放行
+最外层 Worker entry，在 Cloudflare static assets、OpenNext image handler 与 Next proxy 之前只放行
 `GET|HEAD /api/hosted/dr-readiness`，其余路径固定 503。Next
-middleware 同时保留防御性限制，非法 candidate 开关同样 fail closed。candidate 使用独立
+proxy 同时保留防御性限制，非法 candidate 开关同样 fail closed。candidate 使用独立
 Worker/service/rate-limit namespace，但复用 production D1 authority，只执行 readiness 的固定 safe-read 查询；不得用
 `dr-candidate` 覆盖 `production` environment，也不得把 bootstrap 探针描述为完整业务 DR readiness。本轮没有部署该
 environment，没有创建 LB/DNS/monitor/Worker route，也没有修改 Access、secret 或生产数据。
