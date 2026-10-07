@@ -1,8 +1,8 @@
-import { useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 
 import { NAV_GROUPS, type NavGroupId } from '../navigation';
 import { readCapability, type CapabilitySnapshot } from '../capability/index';
+import { useBaseModalAccessibility } from '../modal/BaseModal';
 
 import {
   describeUnavailableReason,
@@ -29,7 +29,12 @@ interface TopBarMobileDrawerProps {
 }
 
 /**
- * 顶栏移动端抽屉（自 `apps/web` 上移，`role="dialog"` / Escape / rAF 聚焦逐字保留）。
+ * 顶栏移动端抽屉（自 `apps/web` 上移，`role="dialog"` / Escape / 初始聚焦语义保留）。
+ *
+ * 键盘与焦点口径与 `BaseModal` 同源（`useBaseModalAccessibility`，DESK-PARITY-007
+ * 修复项）：Escape 经共享层级栈只消费抽屉这一层，Tab 被圈在面板内，关闭后焦点
+ * 归还打开它的触发元素。不挂 `initialFocusRef` → 聚焦落到面板自身，与既有
+ * rAF 聚焦面板的行为一致。
  *
  * 导航项按宿主 CapabilitySnapshot 与 `unavailable` 策略过滤/禁用——Desktop 未交付
  * 或需系统浏览器的入口诚实降级，绝不渲染可点击死链。
@@ -47,27 +52,7 @@ export function TopBarMobileDrawer({
   onSignOut,
   unavailable = 'hide',
 }: TopBarMobileDrawerProps) {
-  const panelRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!isOpen) {
-      return;
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onClose();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    const handle = window.requestAnimationFrame(() => panelRef.current?.focus());
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-      window.cancelAnimationFrame(handle);
-    };
-  }, [isOpen, onClose]);
+  const { dialogRef: panelRef } = useBaseModalAccessibility({ isOpen, onClose });
 
   if (!isOpen) {
     return null;

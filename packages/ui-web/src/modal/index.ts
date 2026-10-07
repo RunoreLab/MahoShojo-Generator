@@ -10,5 +10,18 @@ export {
   BASE_MODAL_ROOT_LAYOUT_CLASS_NAME,
 } from './BaseModal';
 export type { BaseModalLayoutClassNameOptions } from './BaseModal';
+// 统一 Escape 层级登记（DESK-PARITY-007）：层与兜底共用一个分发器。
+export {
+  isTopmostFocusTrapLayer,
+  popEscapeLayer,
+  pushEscapeLayer,
+  useEscapeFallback,
+  useEscapeLayer,
+} from './escape-stack';
+export type {
+  EscapeLayerHandler,
+  EscapeLayerRegistration,
+  UseEscapeLayerOptions,
+} from './escape-stack';
 export { ModalTabs, modalTabIds } from './ModalTabs';
 export type { ModalTabItem, ModalTabsProps } from './ModalTabs';

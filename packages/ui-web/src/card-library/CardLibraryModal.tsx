@@ -22,6 +22,7 @@ import { useLocalDataCards } from './use-local-data-cards';
 import { useLocalLibraryAutoSave } from './use-local-library-auto-save';
 import { ChevronDown, Filter } from 'lucide-react';
 import { BaseModal } from '../modal/BaseModal';
+import { isTopmostFocusTrapLayer, useEscapeLayer } from '../modal/escape-stack';
 import { ModalTabs, modalTabIds, type ModalTabItem } from '../modal/ModalTabs';
 import { buttonClassName } from './Button';
 import { DataCardEmptyState } from './DataCardEmptyState';
@@ -239,6 +240,16 @@ export function CardLibraryModal({
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const detailsModalOpenRef = useRef(false);
   detailsModalOpenRef.current = allowCardDetails && Boolean(host.slots.CardDetailsModal) && showDetailsModal && selectedCard !== null;
+  /**
+   * 任何「栈外」子层在前台时，本层对 Escape/Tab 都让位（阻断而不是关闭）：
+   * 详情/卡组弹窗由 host slot 注入、不注册进共享层级栈——没有这道闸，
+   * 一次 Escape 会把背后的卡库模态框一起关掉，留下孤儿子层（DESK-PARITY-007）。
+   * `pendingLocalRemoval` 的删除确认是 BaseModal，自己占栈顶一层，不在此列。
+   */
+  const childOverlayOpenRef = useRef(false);
+  childOverlayOpenRef.current =
+    detailsModalOpenRef.current ||
+    (allowDeckImport && Boolean(host.slots.DecksModal) && showDecksModal);
   const [selectError, setSelectError] = useState<string | null>(null);
   const cardsPerPage = 12;
   const [cardMetaById, setCardMetaById] = useState<Record<string, { techScore: number | null; techLevel: string | null; strictTier: string | null; isNative: boolean | null }>>({});
@@ -288,6 +299,18 @@ export function CardLibraryModal({
   const tagOptionsSettledRef = useRef(false);
   const tagOptionsInFlightRef = useRef(false);
 
+  // Escape 收口进共享层级栈：栈外子层（详情/卡组 slot）在前台时本层
+  // 显式阻断（返回 true 但不关闭），一次按键不会连锁关闭两层；否则关闭自身。
+  const modalLayerId = useEscapeLayer({
+    active: isOpen,
+    trapsFocus: true,
+    onEscape: () => {
+      if (childOverlayOpenRef.current) return true;
+      onCloseRef.current();
+      return true;
+    },
+  });
+
   useEffect(() => {
     if (!isOpen) return;
     const previouslyFocused = document.activeElement instanceof HTMLElement
@@ -306,13 +329,9 @@ export function CardLibraryModal({
       '[tabindex]:not([tabindex="-1"])',
     ].join(',');
     const onKeyDown = (event: KeyboardEvent) => {
-      if (detailsModalOpenRef.current) return;
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onCloseRef.current();
-        return;
-      }
       if (event.key !== 'Tab') return;
+      // 栈外子层在前台，或上方另有模态层（本地删除确认等 BaseModal）时让位。
+      if (childOverlayOpenRef.current || !isTopmostFocusTrapLayer(modalLayerId)) return;
 
       const focusable = [...(modalRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? [])]
         .filter((element) => !element.hidden && element.getAttribute('aria-hidden') !== 'true');
@@ -342,7 +361,7 @@ export function CardLibraryModal({
         previouslyFocused.focus();
       }
     };
-  }, [isOpen]);
+  }, [isOpen, modalLayerId]);
 
   const buildPublicFilters = useCallback((source: Filters, tab: BattleDataTab) => {
     if (tab === 'recommended') {

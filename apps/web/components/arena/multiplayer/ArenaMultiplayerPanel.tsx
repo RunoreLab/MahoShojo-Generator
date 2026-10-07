@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactN
 import { ChevronDown } from 'lucide-react';
 
 import { MAX_ROOM_MEMBERS, type RoomDirectoryVisibility } from '@mahoshojo/contracts/arena-room';
+import { useEscapeLayer } from '@mahoshojo/ui-web/modal';
 
 import type { ArenaRoomControllerState } from '@/lib/arena-room/controller';
 import type { ArenaRoomPanelUi } from './useArenaRoom';
@@ -147,22 +148,25 @@ const RoomMoreMenu = ({
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  // Escape 收口进共享层级栈（DESK-PARITY-007）：只关本层并把焦点还给触发按钮；
+  // 上方另有打开层时它们先消费，本菜单不会被连带关闭。
+  useEscapeLayer({
+    active: open,
+    onEscape: () => {
+      setOpen(false);
+      triggerRef.current?.focus();
+      return true;
+    },
+  });
   useEffect(() => {
     if (!open) return;
     const handlePointerDown = (event: PointerEvent): void => {
       if (rootRef.current?.contains(event.target as Node)) return;
       setOpen(false);
     };
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape') return;
-      setOpen(false);
-      triggerRef.current?.focus();
-    };
     document.addEventListener('pointerdown', handlePointerDown);
-    document.addEventListener('keydown', handleKeyDown);
     return () => {
       document.removeEventListener('pointerdown', handlePointerDown);
-      document.removeEventListener('keydown', handleKeyDown);
     };
   }, [open]);
   const closeWith = (action: () => void): void => {

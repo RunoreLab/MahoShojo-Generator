@@ -1,6 +1,8 @@
+import { useRef, useState } from 'react';
 import { Monitor, Moon, Palette, Sun } from 'lucide-react';
 
 import { COLOR_MODE_OPTIONS, useColorModePreference, type ColorModePreference } from '../color-mode/index';
+import { useEscapeLayer } from '../modal/escape-stack';
 
 const getIcon = (value: ColorModePreference) => {
   const className = 'h-4 w-4';
@@ -20,11 +22,41 @@ const getIcon = (value: ColorModePreference) => {
 export function TopBarThemeMenu() {
   const { preference, setPreference, isHydrated } = useColorModePreference();
   const current = COLOR_MODE_OPTIONS.find((option) => option.value === preference) ?? COLOR_MODE_OPTIONS[0];
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  // 展开态受控化（DESK-PARITY-007）：hover/focus 语义不变，但 Escape 需要
+  // 一个能主动收起的开关——CSS group-hover 形态无法响应键盘层级。
+  const [open, setOpen] = useState(false);
+
+  useEscapeLayer({
+    active: open,
+    onEscape: () => {
+      setOpen(false);
+      if (rootRef.current?.contains(document.activeElement)) {
+        triggerRef.current?.focus();
+      }
+      return true;
+    },
+  });
 
   return (
-    <div className="group relative">
+    <div
+      ref={rootRef}
+      className="relative"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => {
+        // 与旧 group-focus-within 等价：指针移出但焦点仍在菜单内时保持展开。
+        if (!rootRef.current?.contains(document.activeElement)) setOpen(false);
+      }}
+      onFocus={() => setOpen(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+      }}
+    >
       <button
+        ref={triggerRef}
         type="button"
+        aria-expanded={open}
         className="inline-flex h-9 items-center gap-1.5 rounded-full border border-white/50 bg-white/70 px-3 text-sm font-medium text-gray-700 shadow-sm backdrop-blur transition hover:bg-white/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-200 dark:border-slate-600/60 dark:bg-slate-900/70 dark:text-slate-100"
       >
         <Palette className="h-4 w-4" aria-hidden="true" />
@@ -35,7 +67,7 @@ export function TopBarThemeMenu() {
       </button>
       <div
         aria-label="外观设置"
-        className="invisible absolute right-0 top-full z-[45] min-w-40 pt-2 opacity-0 transition group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
+        className={`${open ? 'visible opacity-100' : 'invisible opacity-0'} absolute right-0 top-full z-[45] min-w-40 pt-2 transition`}
       >
         <div className="space-y-2 rounded-2xl border border-white/60 bg-white/95 p-2 shadow-xl backdrop-blur dark:border-slate-600/60 dark:bg-slate-950/95">
           {COLOR_MODE_OPTIONS.map((option) => {

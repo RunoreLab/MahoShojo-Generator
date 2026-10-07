@@ -66,6 +66,7 @@ import { CanshouCard, GeneralCharacterCard, type CanshouDetails, type GeneralCha
 import { ThemeImage } from '@mahoshojo/ui-web/media';
 import { revokeBlobUrl } from '@mahoshojo/ui-web/client';
 import { CardLibraryModal, type BattleSelectionPayload, type CardLibrarySelectionContext } from '@mahoshojo/ui-web/card-library';
+import { useEscapeLayer } from '@mahoshojo/ui-web/modal';
 import { ProductFooter } from '@mahoshojo/ui-web/shell';
 import type { HomeAssetSource } from '@mahoshojo/ui-web/home';
 import { CanshouSession } from '../features/canshou/session';
@@ -193,6 +194,32 @@ function CanshouForm({ session }: { session: CanshouSession }) {
     if (detailsSelection && !dialog?.open) dialog?.showModal();
     else if (!detailsSelection && dialog?.open) dialog.close();
   }, [detailsSelection]);
+  // Escape 层级登记（DESK-PARITY-007）：原生 <dialog> 的 UA cancel 与共享栈
+  // 收同一语义——一次按键只关最上面一层，不穿透到壳上的菜单兜底；两处
+  // setState 幂等，重复收口无害。
+  useEscapeLayer({
+    active: confirmRegenerate !== false,
+    trapsFocus: true,
+    onEscape: () => {
+      if (!session.isBusy()) setConfirmRegenerate(false);
+      return true;
+    },
+  });
+  useEscapeLayer({
+    active: detailsSelection !== null,
+    trapsFocus: true,
+    onEscape: () => {
+      setDetailsSelection(null);
+      return true;
+    },
+  });
+  useEscapeLayer({
+    active: showImageModal && savedImageUrl !== null,
+    onEscape: () => {
+      setShowImageModal(false);
+      return true;
+    },
+  });
   const guard = useLeaveGuard(
     () => session.isBusy() || (!session.getSnapshot().draftSaved && !session.getSnapshot().pendingRestore && !session.isDraftBlocked()),
     '生成或保存尚未完成，或当前草稿未能保存。请等待、取消生成，或重试保存草稿后再离开。也可以确认清除草稿以放弃当前内容。',

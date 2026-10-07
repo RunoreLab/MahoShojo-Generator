@@ -301,4 +301,110 @@ describe('ProductTopBar', () => {
     expect(container.querySelector('[role="dialog"]')?.textContent).toContain('账号');
     expect(container.querySelector('[role="dialog"]')?.textContent).not.toContain('登录 / 注册');
   });
+
+  it('closes the desktop nav dropdown on Escape and returns focus to its trigger', () => {
+    renderTopBar();
+    const trigger = [...container.querySelectorAll<HTMLButtonElement>('header nav button')].find(
+      (button) => button.getAttribute('aria-expanded') !== null,
+    )!;
+
+    act(() => trigger.focus());
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    // Escape 把焦点还给打开它的组触发器（键盘用户不丢位置）。
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('closes the theme and account dropdowns on Escape instead of leaking through', () => {
+    renderTopBar({ account: { kind: 'signed-in', username: 'madoka' } });
+
+    const themeTrigger = [...container.querySelectorAll<HTMLButtonElement>('header button')].find(
+      (button) => button.textContent?.includes('外观'),
+    )!;
+    act(() => themeTrigger.focus());
+    expect(themeTrigger.getAttribute('aria-expanded')).toBe('true');
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(themeTrigger.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(themeTrigger);
+
+    const accountTrigger = [...container.querySelectorAll<HTMLButtonElement>('header button')].find(
+      (button) => button.textContent?.includes('madoka'),
+    )!;
+    act(() => accountTrigger.focus());
+    expect(accountTrigger.getAttribute('aria-expanded')).toBe('true');
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(accountTrigger.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('one Escape consumes only the topmost layer — drawer above nav dropdown', () => {
+    renderTopBar();
+
+    const navTrigger = [...container.querySelectorAll<HTMLButtonElement>('header nav button')].find(
+      (button) => button.getAttribute('aria-expanded') !== null,
+    )!;
+    act(() => navTrigger.focus());
+    expect(navTrigger.getAttribute('aria-expanded')).toBe('true');
+
+    const menuButton = container.querySelector<HTMLButtonElement>('button[aria-label="打开导航菜单"]')!;
+    click(menuButton);
+    const drawer = () => document.body.querySelector('.md\\:hidden [role="dialog"]');
+    expect(drawer()).not.toBeNull();
+
+    // 抽屉在上层：第一次 Escape 只关抽屉，下拉保持展开。
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(drawer()).toBeNull();
+    expect(navTrigger.getAttribute('aria-expanded')).toBe('true');
+
+    // 第二次 Escape 才轮到下拉。
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(navTrigger.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('traps Tab inside the mobile drawer and restores focus to the trigger on close', () => {
+    renderTopBar();
+
+    const menuButton = container.querySelector<HTMLButtonElement>('button[aria-label="打开导航菜单"]')!;
+    act(() => menuButton.focus());
+    click(menuButton);
+
+    const drawer = () => document.body.querySelector<HTMLElement>('[role="dialog"][aria-label="移动端导航"]');
+    expect(drawer()).not.toBeNull();
+
+    const focusables = [...drawer()!.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+    )];
+    expect(focusables.length).toBeGreaterThan(1);
+
+    // 末尾 Tab → 环回首个；首个 Shift+Tab → 环回末尾（焦点不出抽屉）。
+    act(() => focusables.at(-1)!.focus());
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    });
+    expect(document.activeElement).toBe(focusables[0]);
+    act(() => {
+      document.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }),
+      );
+    });
+    expect(document.activeElement).toBe(focusables.at(-1));
+
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(drawer()).toBeNull();
+    // 焦点归还到打开抽屉的触发按钮。
+    expect(document.activeElement).toBe(menuButton);
+  });
 });

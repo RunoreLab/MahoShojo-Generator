@@ -1,6 +1,8 @@
+import { useRef, useState, type ReactNode } from 'react';
 import { IdCard, LogOut, UserRound } from 'lucide-react';
 
 import { readCapability, type CapabilitySnapshot } from '../capability/index';
+import { useEscapeLayer } from '../modal/escape-stack';
 
 import {
   describeUnavailableReason,
@@ -210,22 +212,79 @@ export function TopBarUserMenu({
   }
 
   return (
-    <div className="group relative">
+    <DesktopUserMenuDropdown
+      trigger={
+        <TopBarAvatar avatarDataUrl={signedIn.avatarDataUrl ?? null} username={shownName ?? 'U'} size="desktop" />
+      }
+      shownName={shownName ?? 'U'}
+      title={signedIn.title}
+    >
+      {accountLinks.map((entry) => renderAccountLink(entry))}
+      {renderSignOut()}
+    </DesktopUserMenuDropdown>
+  );
+}
+
+/**
+ * 桌面变体的下拉容器：hover/focus 展开语义与原 CSS `group-hover`/`group-focus-within`
+ * 等价，但展开态收进 state——Escape 需要能主动收起这一层并把焦点还给触发按钮
+ * （DESK-PARITY-007）。
+ */
+function DesktopUserMenuDropdown({
+  trigger,
+  shownName,
+  title,
+  children,
+}: {
+  trigger: ReactNode;
+  shownName: string;
+  title?: ReactNode;
+  children: ReactNode;
+}) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const [open, setOpen] = useState(false);
+
+  useEscapeLayer({
+    active: open,
+    onEscape: () => {
+      setOpen(false);
+      if (rootRef.current?.contains(document.activeElement)) {
+        triggerRef.current?.focus();
+      }
+      return true;
+    },
+  });
+
+  return (
+    <div
+      ref={rootRef}
+      className="relative"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => {
+        if (!rootRef.current?.contains(document.activeElement)) setOpen(false);
+      }}
+      onFocus={() => setOpen(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+      }}
+    >
       <button
+        ref={triggerRef}
         type="button"
+        aria-expanded={open}
         className="inline-flex h-9 items-center gap-2 rounded-full border border-white/50 bg-white/70 px-2.5 pr-3 text-sm font-medium text-gray-800 shadow-sm backdrop-blur transition hover:bg-white/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-pink-200 dark:border-slate-600/60 dark:bg-slate-900/70 dark:text-slate-100"
       >
-        <TopBarAvatar avatarDataUrl={signedIn.avatarDataUrl ?? null} username={shownName ?? 'U'} size="desktop" />
+        {trigger}
         <span className="max-w-24 truncate">{shownName}</span>
-        {signedIn.title}
+        {title}
       </button>
       <div
         aria-label="用户菜单"
-        className="invisible absolute right-0 top-full z-[45] min-w-40 pt-2 opacity-0 transition group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
+        className={`${open ? 'visible opacity-100' : 'invisible opacity-0'} absolute right-0 top-full z-[45] min-w-40 pt-2 transition`}
       >
         <div className="rounded-2xl border border-white/60 bg-white/95 p-2 shadow-xl backdrop-blur dark:border-slate-600/60 dark:bg-slate-950/95">
-          {accountLinks.map((entry) => renderAccountLink(entry))}
-          {renderSignOut()}
+          {children}
         </div>
       </div>
     </div>

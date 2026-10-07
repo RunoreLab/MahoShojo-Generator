@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
+import { useEscapeLayer } from '../modal/escape-stack';
+
 import type { AiChannelAvailabilityEntry, AiProviderSelectOption } from './contract';
 
 export interface AiProviderCustomSelectProps {
@@ -22,6 +24,7 @@ export const AiProviderCustomSelect = ({
 }: AiProviderCustomSelectProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   const selectedOption = options.find((option) => option.value === value) ?? null;
 
@@ -38,16 +41,18 @@ export const AiProviderCustomSelect = ({
     return () => document.removeEventListener('mousedown', handleDocumentClick);
   }, [handleDocumentClick, isOpen]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const handleKeydown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setIsOpen(false);
+  // Escape 经共享层级栈消费（DESK-PARITY-007）：只关本层并把焦点还给触发器；
+  // 上方另有打开层（抽屉/模态）时它们先接，本层不会被连带关闭。
+  useEscapeLayer({
+    active: isOpen,
+    onEscape: () => {
+      setIsOpen(false);
+      if (containerRef.current?.contains(document.activeElement)) {
+        triggerRef.current?.focus();
       }
-    };
-    document.addEventListener('keydown', handleKeydown);
-    return () => document.removeEventListener('keydown', handleKeydown);
-  }, [isOpen]);
+      return true;
+    },
+  });
 
   const renderSelected = () => (
     <div className="flex flex-1 flex-col text-left leading-tight">
@@ -64,6 +69,7 @@ export const AiProviderCustomSelect = ({
   return (
     <div className="relative" ref={containerRef}>
       <button
+        ref={triggerRef}
         type="button"
         className={`input-field flex w-full items-center justify-between gap-2 text-left ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}
         onClick={() => !disabled && setIsOpen((prev) => !prev)}

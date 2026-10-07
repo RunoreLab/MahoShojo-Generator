@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Menu, Sparkles } from 'lucide-react';
 
 import { getTopbarCoverage, NAV_GROUPS } from '../navigation';
 import { readCapability, type CapabilitySnapshot } from '../capability/index';
+import { useEscapeLayer } from '../modal/escape-stack';
 
 import {
   describeUnavailableReason,
@@ -86,6 +87,23 @@ export function ProductTopBar({
   const [logoLoadFailed, setLogoLoadFailed] = useState(false);
   const { activeGroupId } = getTopbarCoverage(pathname);
   const hasExternalHandler = onNavigateExternal !== undefined;
+  const navRef = useRef<HTMLElement | null>(null);
+  const groupTriggerRefs = useRef(new Map<string, HTMLButtonElement>());
+
+  // 桌面下拉是 hover/focus 展开的轻量层：Escape 只关闭当前组并把焦点还给
+  // 它的触发按钮（层在 nav 外按过就别把焦点拽回来）。一次 Escape 不会越过
+  // 它去碰更下层的抽屉/弹窗——共享层级栈自上而下逐层消费（DESK-PARITY-007）。
+  useEscapeLayer({
+    active: openGroupId !== null,
+    onEscape: () => {
+      const closingGroupId = openGroupId;
+      setOpenGroupId(null);
+      if (closingGroupId !== null && navRef.current?.contains(document.activeElement)) {
+        groupTriggerRefs.current.get(closingGroupId)?.focus();
+      }
+      return true;
+    },
+  });
 
   return (
     <>
@@ -126,6 +144,7 @@ export function ProductTopBar({
           </a>
 
           <nav
+            ref={navRef}
             className="hidden items-center gap-1 md:flex"
             aria-label="全站主导航"
             onMouseLeave={() => setOpenGroupId(null)}
@@ -160,6 +179,10 @@ export function ProductTopBar({
                   onFocus={() => setOpenGroupId(group.id)}
                 >
                   <button
+                    ref={(element) => {
+                      if (element) groupTriggerRefs.current.set(group.id, element);
+                      else groupTriggerRefs.current.delete(group.id);
+                    }}
                     type="button"
                     aria-expanded={isOpen}
                     className={
