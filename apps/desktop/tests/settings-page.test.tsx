@@ -179,6 +179,70 @@ describe('desktop settings shell', () => {
     expect(doc.externalLinks?.confirmContentLinks).toBe(false);
   });
 
+  it('config-conflict surfaces a draft banner — reapply lands the edit over the new base', async () => {
+    let reads = 0;
+    let writes = 0;
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'desktop_config_read') {
+        reads += 1;
+        return {
+          path: 'C:\\cfg\\config.json',
+          directory: 'C:\\cfg',
+          backupPresent: false,
+          file:
+            reads === 1
+              ? {
+                  status: 'ok' as const,
+                  revision: `sha256:${'a'.repeat(64)}`,
+                  content: '{"version":1}',
+                }
+              : {
+                  status: 'ok' as const,
+                  revision: `sha256:${'c'.repeat(64)}`,
+                  content: '{"version":1,"announcements":{"checkPolicy":"manual"}}',
+                },
+        };
+      }
+      if (command === 'desktop_config_write') {
+        writes += 1;
+        if (writes === 1) {
+          throw { code: 'config-conflict', message: '配置文件已被外部修改；请重新加载后重试' };
+        }
+        return { revision: `sha256:${'b'.repeat(64)}` };
+      }
+      return defaultInvokeImpl(command);
+    });
+    await mountAt('/settings?section=online');
+
+    const toggle = [...container.querySelectorAll('[role="switch"]')].find(
+      (el) => el.getAttribute('aria-label') === '内容外链确认',
+    );
+    await click(toggle ?? null);
+
+    // 磁盘真相生效 + 草稿横幅出现。
+    const banner = container.querySelector('[data-testid="config-conflicted-draft"]');
+    expect(banner).not.toBeNull();
+    expect(banner?.textContent).toContain('内容外链确认');
+    expect(writes).toBe(1);
+
+    const reapply = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === '基于最新内容重新应用',
+    );
+    await click(reapply ?? null);
+    expect(writes).toBe(2);
+    const lastRequest = (
+      invokeMock.mock.calls.filter((call) => call[0] === 'desktop_config_write').at(-1)?.[1] as {
+        request?: { expectedRevision?: string | null; content?: string };
+      }
+    )?.request;
+    expect(lastRequest?.expectedRevision).toBe(`sha256:${'c'.repeat(64)}`);
+    const doc = JSON.parse(lastRequest?.content ?? '{}') as {
+      externalLinks?: { confirmContentLinks?: boolean };
+    };
+    expect(doc.externalLinks?.confirmContentLinks).toBe(false);
+    expect(container.querySelector('[data-testid="config-conflicted-draft"]')).toBeNull();
+  });
+
   it('device controls write only localStorage — no account or network IPC', async () => {
     await mountAt('/settings');
     invokeMock.mockClear();

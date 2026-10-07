@@ -4,7 +4,10 @@ import {
   SettingsOptionButtons,
   SettingsToggle,
 } from '@mahoshojo/ui-web/settings';
-import type { AnnouncementsCheckPolicy } from '@mahoshojo/contracts/desktop-config';
+import type {
+  AnnouncementsCheckPolicy,
+  DesktopConfigValues,
+} from '@mahoshojo/contracts/desktop-config';
 
 import { useDesktopConfig } from './use-desktop-config';
 
@@ -22,6 +25,12 @@ const CHECK_POLICY_OPTIONS: ReadonlyArray<{ value: AnnouncementsCheckPolicy; lab
   { value: 'manual', label: '仅手动' },
 ];
 
+/** 冲突草稿里的字段名投影——与本卡控件同一组标签。 */
+const FIELD_LABELS: Record<keyof DesktopConfigValues, string> = {
+  announcementsCheckPolicy: '公告检查',
+  confirmContentLinks: '内容外链确认',
+};
+
 const fileStatusText = (status: string, fatal: boolean): string => {
   switch (status) {
     case 'missing':
@@ -38,7 +47,16 @@ const fileStatusText = (status: string, fatal: boolean): string => {
 };
 
 export const OnlineSettingsSection = () => {
-  const { state, editable, setField, reload, resetToDefaults, openDirectory } = useDesktopConfig();
+  const {
+    state,
+    editable,
+    setField,
+    reload,
+    resetToDefaults,
+    reapplyConflictedDraft,
+    discardConflictedDraft,
+    openDirectory,
+  } = useDesktopConfig();
   const busy = state.saving || state.status === 'loading';
 
   return (
@@ -92,6 +110,36 @@ export const OnlineSettingsSection = () => {
           <p role="alert" className="mt-2 text-xs text-(--app-accent-strong)">
             {state.saveError}
           </p>
+        ) : null}
+        {state.conflictedFields && state.conflictedFields.length > 0 ? (
+          <div
+            role="alert"
+            data-testid="config-conflicted-draft"
+            className="mt-2 rounded-md border border-(--app-border) p-3"
+          >
+            <p className="text-xs text-(--app-text)">
+              配置文件已在应用外被修改，以下修改未写入：
+              {state.conflictedFields.map((field) => FIELD_LABELS[field]).join('、')}。
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="ui-web-settings-motion rounded-md border border-(--app-border) px-3 py-1.5 text-xs font-medium text-(--app-text-muted) transition-colors enabled:hover:border-(--app-accent-strong) enabled:hover:text-(--app-accent-strong) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--app-accent-strong) disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={!editable || busy}
+                onClick={reapplyConflictedDraft}
+              >
+                基于最新内容重新应用
+              </button>
+              <button
+                type="button"
+                className="ui-web-settings-motion rounded-md border border-(--app-border) px-3 py-1.5 text-xs font-medium text-(--app-text-muted) transition-colors enabled:hover:border-(--app-accent-strong) enabled:hover:text-(--app-accent-strong) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--app-accent-strong) disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={busy}
+                onClick={discardConflictedDraft}
+              >
+                放弃修改
+              </button>
+            </div>
+          </div>
         ) : null}
       </SettingsCard>
 

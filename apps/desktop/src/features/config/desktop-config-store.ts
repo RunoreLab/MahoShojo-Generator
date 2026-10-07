@@ -25,7 +25,10 @@ import {
  * 读取时的 content revision，冲突时自动重载磁盘真相而不是覆盖。
  *
  * 「生效值」与「落盘值」严格同一：写失败不把内存值冒充已保存——成功后
- * `base` 才前进；冲突时 `pending` 作废并重新读盘。
+ * `base` 才前进。连续编辑合并基于 `pending ?? inFlight ?? base`，IPC 在途
+ * 期间的修改不会被旧 base 吞掉；冲突时未落盘编辑收拢为 delta 草稿
+ * （`conflictedFields`），磁盘版本成为 effective，草稿不自动重放，
+ * 由用户选择重新应用或放弃。
  */
 
 export interface DesktopConfigState {
@@ -44,6 +47,11 @@ export interface DesktopConfigState {
   readonly readError: string | null;
   /** 最近一次写入失败/冲突的用户可读说明。 */
   readonly saveError: string | null;
+  /**
+   * 冲突时未落盘的字段名（草稿存在性投影）。这些字段的磁盘版本已生效；
+   * 草稿可显式重新应用或放弃，不自动重放（DESK-SET-005「保留双方」）。
+   */
+  readonly conflictedFields: readonly (keyof DesktopConfigValues)[] | null;
   readonly saving: boolean;
 }
 
@@ -58,6 +66,7 @@ const INITIAL_STATE: DesktopConfigState = {
   diagnostics: [],
   readError: null,
   saveError: null,
+  conflictedFields: null,
   saving: false,
 };
 
@@ -77,6 +86,20 @@ interface ConfirmedBase {
 const describeCause = (cause: unknown): string =>
   cause instanceof Error ? cause.message : '配置文件操作失败';
 
+/** `to` 相对 `from` 的字段级 delta——冲突草稿只记用户改过的键，
+ * 重新应用时未触碰字段保持磁盘（外部）版本，不回滚。 */
+const diffValues = (
+  from: DesktopConfigValues,
+  to: DesktopConfigValues,
+): Partial<DesktopConfigValues> => {
+  const delta: Partial<DesktopConfigValues> = {};
+  const assign = <K extends keyof DesktopConfigValues>(key: K): void => {
+    if (to[key] !== from[key]) delta[key] = to[key];
+  };
+  for (const key of Object.keys(to) as (keyof DesktopConfigValues)[]) assign(key);
+  return delta;
+};
+
 export class DesktopConfigStore {
   private state: DesktopConfigState = INITIAL_STATE;
   private readonly listeners = new Set<() => void>();
@@ -88,8 +111,19 @@ export class DesktopConfigStore {
     values: DESKTOP_CONFIG_DEFAULTS,
     extras: EMPTY_EXTRAS,
   };
-  /** 已合并但尚未落盘的编辑；冲突时整体作废。 */
+  /** 已合并但尚未落盘的编辑；冲突时收拢为 delta 草稿。 */
   private pending: DesktopConfigValues | null = null;
+  /**
+   * 已取出 `pending`、IPC 在途但尚未确认的目标值。新编辑合并基于
+   * `pending ?? inFlight ?? base`——没有它，写 1 在途时的写 2 会从旧
+   * `base` 重建，把写 1 的改动静默吞掉（lost update）。
+   */
+  private inFlight: DesktopConfigValues | null = null;
+  /**
+   * 冲突时未落盘的字段 delta（相对冲突前 base）。不生效、不自动重放；
+   * 用户可经 `reapplyConflictedDraft`/`discardConflictedDraft` 处置。
+   */
+  private conflictedDelta: Partial<DesktopConfigValues> | null = null;
   /** 读/写串行队列——revision 语义要求「读-改-写」不交错。 */
   private chain: Promise<void> = Promise.resolve();
   private firstLoad: Promise<void> | null = null;
@@ -157,6 +191,7 @@ export class DesktopConfigStore {
         values: DESKTOP_CONFIG_DEFAULTS,
         diagnostics: [],
         readError: describeCause(cause),
+        saveError: null,
       });
       return;
     }
@@ -167,6 +202,8 @@ export class DesktopConfigStore {
       directory: result.directory,
       backupPresent: result.backupPresent,
       readError: null,
+      // 重载成功即清掉陈旧写入错误——错误描述的是上一次写，不是当前文件。
+      saveError: null,
     };
 
     switch (result.file.status) {
@@ -229,35 +266,66 @@ export class DesktopConfigStore {
   /** 设置页字段写：合并到 pending 后排队落盘；不可编辑时静默忽略（UI 已禁用）。 */
   setField<K extends keyof DesktopConfigValues>(key: K, value: DesktopConfigValues[K]): void {
     if (!this.editable()) return;
-    this.pending = { ...(this.pending ?? this.base.values), [key]: value };
+    this.pending = { ...(this.pending ?? this.inFlight ?? this.base.values), [key]: value };
     this.publish({ saving: true, saveError: null });
-    void this.enqueue(async () => {
-      const target = this.pending;
-      if (target === null) {
-        this.publish({ saving: false });
-        return;
-      }
-      this.pending = null;
-      await this.tryWrite(target);
-    });
+    void this.enqueue(() => this.consumePendingWrite());
+  }
+
+  /**
+   * 把 `pending` 取为在途写目标并落盘。取走后 `inFlight` 继续充当后续
+   * 编辑的合并基底，直到 `tryWrite` 收口。
+   */
+  private async consumePendingWrite(): Promise<void> {
+    const target = this.pending;
+    if (target === null) {
+      this.publish({ saving: false });
+      return;
+    }
+    this.pending = null;
+    await this.tryWrite(target);
   }
 
   /**
    * 显式恢复默认：携带当前真实 revision 写 `{version:1, 默认值}`。
    * 这是用户在诊断页明确选择的动作——不是异常路径上的静默覆盖；原文件
-   * 由 native `.bak` 保留。
+   * 由 native `.bak`（有效文件）或 `.invalid`（无效文件隔离位）保留。
    */
   resetToDefaults(): void {
     if (this.state.status !== 'ready' || this.state.fileStatus === 'missing') return;
     this.pending = null;
-    this.publish({ saving: true, saveError: null });
+    this.conflictedDelta = null;
+    this.publish({ saving: true, saveError: null, conflictedFields: null });
     void this.enqueue(() => this.tryWrite(DESKTOP_CONFIG_DEFAULTS, EMPTY_EXTRAS));
+  }
+
+  /**
+   * 冲突草稿：重新应用——delta 合到当前磁盘基底上，未触碰字段保持
+   * 外部版本不回滚；走与 `setField` 相同的 pending→落盘路径。
+   */
+  reapplyConflictedDraft(): void {
+    const delta = this.conflictedDelta;
+    if (delta === null || !this.editable()) return;
+    this.conflictedDelta = null;
+    this.pending = {
+      ...(this.pending ?? this.inFlight ?? this.base.values),
+      ...delta,
+    };
+    this.publish({ saving: true, saveError: null, conflictedFields: null });
+    void this.enqueue(() => this.consumePendingWrite());
+  }
+
+  /** 冲突草稿：放弃——磁盘版本保持生效，草稿销毁。 */
+  discardConflictedDraft(): void {
+    if (this.conflictedDelta === null) return;
+    this.conflictedDelta = null;
+    this.publish({ conflictedFields: null });
   }
 
   private async tryWrite(
     values: DesktopConfigValues,
     extras?: DesktopConfigDocumentExtras,
   ): Promise<void> {
+    this.inFlight = values;
     const effectiveExtras = extras ?? this.base.extras;
     const content = serializeDesktopConfig(values, effectiveExtras);
     try {
@@ -281,20 +349,31 @@ export class DesktopConfigStore {
       });
     } catch (cause) {
       if (cause instanceof DesktopConfigError && cause.code === 'config-conflict') {
-        // 冲突：双方内容都保留（磁盘上是外部版本，未登记键与原文未被覆盖）；
-        // pending 编辑作废并自动重载，UI 显示磁盘真相而不是「已保存」假象。
+        // 磁盘真相优先：未落盘编辑（pending 若已生成则含本次在途修改）
+        // 收拢为相对冲突前 base 的 delta 草稿——不生效、不自动重放。
+        const attempted = this.pending ?? values;
+        this.conflictedDelta = {
+          ...this.conflictedDelta,
+          ...diffValues(this.base.values, attempted),
+        };
         this.pending = null;
+        // doLoad 清陈旧 saveError 并把 base 推进到磁盘真相；冲突提示在
+        // 其后投影，避免被 reload 的清错语义吞掉。
+        await this.doLoad();
         this.publish({
           saving: false,
-          saveError: '配置文件已在应用外被修改，刚才的更改未写入；已重新载入最新内容，请确认后重试',
+          conflictedFields: Object.keys(this.conflictedDelta ?? {}) as (keyof DesktopConfigValues)[],
+          saveError:
+            '配置文件已在应用外被修改，刚才的修改未写入；已保留为草稿，可基于最新内容重新应用或放弃',
         });
-        await this.doLoad();
         return;
       }
       this.publish({
         saving: false,
         saveError: describeCause(cause),
       });
+    } finally {
+      this.inFlight = null;
     }
   }
 

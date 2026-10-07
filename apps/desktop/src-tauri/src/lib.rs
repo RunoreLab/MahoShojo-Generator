@@ -1114,41 +1114,66 @@ async fn announcements_refresh(
 
 /// 人工配置读（DESK-SET-004/005）：固定 `config.json` 的有界读取 +
 /// 内容级 revision；字段域语义由 renderer 的 contracts/desktop-config 判定。
+///
+/// `async fn` + `spawn_blocking`：读含整文件流式 SHA-256（含超大文件的
+/// 扫描），同步 command 会把这段时间算在主线程上。
 #[tauri::command]
-fn desktop_config_read(
+async fn desktop_config_read(
     app: tauri::AppHandle,
-    state: State<'_, config::ConfigState>,
 ) -> Result<config::ConfigReadResult, config::ConfigError> {
     let dir = app
         .path()
         .app_config_dir()
-        .map_err(|error| config::ConfigError::storage_dir_resolution_failure(error))?;
-    config::read_config(&dir, &state)
+        .map_err(config::ConfigError::storage_dir_resolution_failure)?;
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = handle.state::<config::ConfigState>();
+        config::read_config(&dir, &state)
+    })
+    .await
+    .map_err(|_| {
+        config::ConfigError::new(config::ConfigErrorCode::InternalError, "配置读取任务失败")
+    })?
 }
 
 /// 人工配置写：携带读取时的内容 revision，native 串行复核后原子替换；
 /// 外部改动返回 `config-conflict`，不静默覆盖（DESK-SET-005）。
+/// `async fn` + `spawn_blocking`：写含 sync/rename 等磁盘操作，移出主线程。
 #[tauri::command]
-fn desktop_config_write(
+async fn desktop_config_write(
     app: tauri::AppHandle,
-    state: State<'_, config::ConfigState>,
     request: config::ConfigWriteRequest,
 ) -> Result<config::ConfigWriteResult, config::ConfigError> {
     let dir = app
         .path()
         .app_config_dir()
-        .map_err(|error| config::ConfigError::storage_dir_resolution_failure(error))?;
-    config::write_config(&dir, &state, request)
+        .map_err(config::ConfigError::storage_dir_resolution_failure)?;
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = handle.state::<config::ConfigState>();
+        config::write_config(&dir, &state, request)
+    })
+    .await
+    .map_err(|_| {
+        config::ConfigError::new(config::ConfigErrorCode::InternalError, "配置写入任务失败")
+    })?
 }
 
 /// 打开固定的配置目录（设置页「显示路径」的配套入口）；不开放任意路径。
 #[tauri::command]
-fn desktop_config_open_directory(app: tauri::AppHandle) -> Result<(), config::ConfigError> {
+async fn desktop_config_open_directory(app: tauri::AppHandle) -> Result<(), config::ConfigError> {
     let dir = app
         .path()
         .app_config_dir()
-        .map_err(|error| config::ConfigError::storage_dir_resolution_failure(error))?;
-    config::open_directory(&dir)
+        .map_err(config::ConfigError::storage_dir_resolution_failure)?;
+    tauri::async_runtime::spawn_blocking(move || config::open_directory(&dir))
+        .await
+        .map_err(|_| {
+            config::ConfigError::new(
+                config::ConfigErrorCode::InternalError,
+                "打开配置目录任务失败",
+            )
+        })?
 }
 
 /// 仅在 native 已写恢复 intent 后允许退出，不向 renderer 开放通用进程控制。

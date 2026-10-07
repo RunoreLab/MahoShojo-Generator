@@ -386,11 +386,19 @@ D5.1-S2）。它是**给人看的**：UTF-8 JSON、顶层 `version: 1`、两空�
 - **域语义在 TypeScript**（`@mahoshojo/contracts/desktop-config`）：字段登记、
   默认值、非法值降级与诊断定位——设置页与手工修改经同一个
   `parseDesktopConfigText` 解析；
-- **native 只做窄面**：固定路径、64 KiB 有界读、信封级检查（JSON 对象 +
-  `version: 1`）、内容级 `sha256:` revision 复核、临时文件 + sync + 原子替换，
-  替换前把上一份挪为 `config.json.bak`。
+- **native 只做窄面**：固定路径、64 KiB 有界读（内容只在确认不越界时驻留
+  内存，revision 的 SHA-256 分块流式计算）、信封级检查（JSON 对象 +
+  `version: 1`）、内容级 `sha256:` revision 复核、临时文件 + sync + 原子
+  replace（目标路径全程存在）。
 
-renderer 可用的命令只有三条，没有任何路径参数：
+`config.json.bak` 只保留**上一个有效文件**（过同一信封检查的版本）；
+被显式覆盖的不可读文件（fatal/invalid-utf8/oversized）隔离为
+`config.json.invalid` 供手工打捞，不顶替真正的恢复路径。缺失文件的首次
+写入走原子 no-clobber 创建，`expectedRevision: null` 语义不靠
+check-then-create 窗口。
+
+renderer 可用的命令只有三条，没有任何路径参数（均为 async command +
+`spawn_blocking`，文件 I/O 不占主线程）：
 
 ```text
 desktop_config_read()
@@ -405,8 +413,9 @@ desktop_config_open_directory()
   revision 仍要复核）；
 - 非法字段值按字段规则降级（外链确认→`true`、公告策略→`on-launch`）并进入
   诊断列表；未登记键原样保留、写回时不丢，但同样列诊断；
-- 应用内写入与磁盘内容复核：外部修改返回 `config-conflict`，store 自动重载
-  磁盘真相，不静默覆盖任何一方；
+- 应用内写入与磁盘内容复核：外部修改返回 `config-conflict`，磁盘版本立即
+  成为生效值；应用内未落盘的修改收拢为字段级 delta 草稿（`conflictedFields`），
+  不自动重放，可显式「基于最新内容重新应用」或放弃——不静默覆盖任何一方；
 - 文件里**不存 secret**——凭据只走操作系统 secret store，Provider Profile 与
   SQLite 不迁入、不双写（DESK-SET-003/006）。
 

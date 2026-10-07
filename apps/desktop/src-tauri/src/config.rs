@@ -3,11 +3,14 @@
 //! renderer 与手工编辑共享同一份**文件**，但分工刻意不对称：
 //!
 //! - **这里（native）**：路径固定为应用配置目录下的 `config.json`；读取有界
-//!   （`MAX_CONFIG_FILE_BYTES`）；写入串行化，`expectedRevision` 基于内容
+//!   （`MAX_CONFIG_FILE_BYTES`，内容只在确认不越界时驻留内存，revision 的
+//!   SHA-256 分块流式计算）；写入串行化，`expectedRevision` 基于内容
 //!   sha256 复核，冲突返回 `config-conflict` 而不是覆盖；落盘走同目录临时
-//!   文件 → sync → rename，替换前把上一份文件挪为 `config.json.bak` 作为
-//!   恢复路径（`DESK-SET-005`）。命令面只有读/写/打开目录三条——renderer
-//!   拿不到任意文件接口。
+//!   文件 → sync → 原子 replace（目标路径全程存在，没有「旧文件已挪走、
+//!   新文件未落位」的窗口）。`config.json.bak` 只保留**上一个有效文件**；
+//!   被替换掉的不可读文件隔离为 `config.json.invalid` 供手工打捞，不顶替
+//!   真正的恢复路径（`DESK-SET-005`）。命令面只有读/写/打开目录三条——
+//!   renderer 拿不到任意文件接口。
 //! - **域语义不在此**：字段登记、默认值、非法值降级与诊断定位由
 //!   `contracts/desktop-config` 的 TS schema 承担（UI 与手工修改同一解析）。
 //!   这里只做信封级检查：UTF-8 JSON 对象 + `version == 1`——防止把一份
@@ -17,7 +20,7 @@
 //! （`DESK-SET-004` 末段）。
 
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -26,13 +29,18 @@ use sha2::{Digest, Sha256};
 
 /// 配置文件名——位于应用配置目录，路径完全由 native 决定。
 const CONFIG_FILE_NAME: &str = "config.json";
-/// 上次落盘内容的恢复路径（`DESK-SET-005`「上次有效文件的恢复路径」）。
+/// 上一个有效文件的恢复路径（`DESK-SET-005`「上次有效文件的恢复路径」）。
 const CONFIG_BACKUP_FILE_NAME: &str = "config.json.bak";
+/// 被显式覆盖的不可读文件隔离位——保留用户字节供手工打捞，但不占用 `.bak`
+/// 的「last known valid」语义。
+const CONFIG_INVALID_FILE_NAME: &str = "config.json.invalid";
 /// 与 `desktop-ipc` 契约 `MAX_DESKTOP_CONFIG_FILE_BYTES` 一致。
 const MAX_CONFIG_FILE_BYTES: u64 = 64 * 1024;
 /// 与 `desktop-config` 域 `DESKTOP_CONFIG_FILE_VERSION` 一致——信封级检查，
 /// 不是字段语义的复制。
 const CONFIG_FILE_VERSION: u64 = 1;
+/// 流式读/revision 的分块大小——任何大小的文件都不整体进内存。
+const READ_CHUNK_BYTES: usize = 8 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -52,7 +60,7 @@ pub struct ConfigError {
 }
 
 impl ConfigError {
-    fn new(code: ConfigErrorCode, message: impl Into<String>) -> Self {
+    pub(crate) fn new(code: ConfigErrorCode, message: impl Into<String>) -> Self {
         Self {
             code,
             message: message.into(),
@@ -130,6 +138,18 @@ pub struct ConfigState {
     lock: Mutex<()>,
 }
 
+impl ConfigFileState {
+    /// 当前文件的内容 revision；`Missing` 没有 revision。
+    fn revision(&self) -> Option<&str> {
+        match self {
+            ConfigFileState::Missing => None,
+            ConfigFileState::Ok { revision, .. }
+            | ConfigFileState::Oversized { revision, .. }
+            | ConfigFileState::InvalidUtf8 { revision } => Some(revision),
+        }
+    }
+}
+
 fn config_path(dir: &Path) -> PathBuf {
     dir.join(CONFIG_FILE_NAME)
 }
@@ -138,36 +158,101 @@ fn backup_path(dir: &Path) -> PathBuf {
     dir.join(CONFIG_BACKUP_FILE_NAME)
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    let digest = hasher.finalize();
+fn invalid_path(dir: &Path) -> PathBuf {
+    dir.join(CONFIG_INVALID_FILE_NAME)
+}
+
+fn sha256_hex_digest(hasher: Sha256) -> String {
     let mut hex = String::with_capacity(64);
-    for byte in digest {
+    for byte in hasher.finalize() {
         hex.push_str(&format!("{byte:02x}"));
     }
     format!("sha256:{hex}")
 }
 
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    sha256_hex_digest(hasher)
+}
+
+/// 单次遍历的产物：分块流式 SHA-256 + 有界前缀字节。
+/// `prefix` 只在总字节数不越界时等于完整内容——越界后停止累积，
+/// 文件再大也只有一个栈缓冲 + 至多 64 KiB 的前缀驻留内存。
+struct ScannedBytes {
+    total: u64,
+    prefix: Vec<u8>,
+    revision: String,
+}
+
+fn scan_bytes(mut reader: impl Read) -> Result<ScannedBytes, std::io::Error> {
+    let mut hasher = Sha256::new();
+    let mut prefix = Vec::new();
+    let mut total: u64 = 0;
+    let mut buffer = [0u8; READ_CHUNK_BYTES];
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+        total += read as u64;
+        if total <= MAX_CONFIG_FILE_BYTES {
+            prefix.extend_from_slice(&buffer[..read]);
+        }
+    }
+    Ok(ScannedBytes {
+        total,
+        prefix,
+        revision: sha256_hex_digest(hasher),
+    })
+}
+
+/// 真正先验的有界读：`File::open` 后分块扫描——打开失败只有 `NotFound`
+/// 算 `Missing`；文件在打开后被外部拉大也逃不出上限（上限按实际读到的
+/// 字节数收口，不信 `metadata` 的快照）。
 fn read_file_state(target: &Path) -> Result<ConfigFileState, ConfigError> {
-    let bytes = match fs::read(target) {
-        Ok(bytes) => bytes,
+    let file = match fs::File::open(target) {
+        Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(ConfigFileState::Missing);
         }
         Err(error) => return Err(ConfigError::storage("读取配置文件失败", &error)),
     };
-    let revision = sha256_hex(&bytes);
-    if bytes.len() as u64 > MAX_CONFIG_FILE_BYTES {
+    let scanned =
+        scan_bytes(file).map_err(|error| ConfigError::storage("读取配置文件失败", &error))?;
+    if scanned.total > MAX_CONFIG_FILE_BYTES {
         return Ok(ConfigFileState::Oversized {
-            revision,
-            bytes: bytes.len() as u64,
+            revision: scanned.revision,
+            bytes: scanned.total,
         });
     }
-    match String::from_utf8(bytes) {
-        Ok(content) => Ok(ConfigFileState::Ok { revision, content }),
-        Err(_) => Ok(ConfigFileState::InvalidUtf8 { revision }),
+    match String::from_utf8(scanned.prefix) {
+        Ok(content) => Ok(ConfigFileState::Ok {
+            revision: scanned.revision,
+            content,
+        }),
+        Err(_) => Ok(ConfigFileState::InvalidUtf8 {
+            revision: scanned.revision,
+        }),
     }
+}
+
+/// 「这份内容能否作为 `.bak`（last known valid）」的布尔判定——与写入的
+/// 信封口径一致：有界 JSON 对象 + `version == 1`。`Ok` 状态只保证有界
+/// UTF-8，`{broken`、`{"version":2}` 这类文件不满足，不能被备份成
+/// 「上次有效文件」。
+fn envelope_satisfied(content: &str) -> bool {
+    if content.len() as u64 > MAX_CONFIG_FILE_BYTES {
+        return false;
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(content) else {
+        return false;
+    };
+    value
+        .as_object()
+        .map(|object| object.get("version") == Some(&serde_json::json!(CONFIG_FILE_VERSION)))
+        .unwrap_or(false)
 }
 
 /// 信封级检查：有界字节 + UTF-8 JSON 对象 + `version == 1`。
@@ -179,13 +264,13 @@ fn validate_envelope(content: &str) -> Result<(), ConfigError> {
             "配置内容超出大小上限",
         ));
     }
-    let value: serde_json::Value = serde_json::from_str(content)
-        .map_err(|_| ConfigError::new(ConfigErrorCode::InvalidContent, "配置内容不是合法 JSON"))?;
-    let is_valid = value
-        .as_object()
-        .map(|object| object.get("version") == Some(&serde_json::json!(CONFIG_FILE_VERSION)))
-        .unwrap_or(false);
-    if !is_valid {
+    if serde_json::from_str::<serde_json::Value>(content).is_err() {
+        return Err(ConfigError::new(
+            ConfigErrorCode::InvalidContent,
+            "配置内容不是合法 JSON",
+        ));
+    }
+    if !envelope_satisfied(content) {
         return Err(ConfigError::new(
             ConfigErrorCode::InvalidContent,
             format!("配置内容必须是顶层带 version: {CONFIG_FILE_VERSION} 的 JSON 对象"),
@@ -197,7 +282,8 @@ fn validate_envelope(content: &str) -> Result<(), ConfigError> {
 /// `desktop_config_read`：固定路径的有界读取。`Missing` 不是一种错误——
 /// 缺文件用内置默认是正常形态（`DESK-SET-004`）。
 pub fn read_config(dir: &Path, state: &ConfigState) -> Result<ConfigReadResult, ConfigError> {
-    // 与写同一把锁：读不能落在「旧文件已挪走、新文件未落位」的中间态上。
+    // 与写同一把锁：主路径的 persist 是原子替换，但「无效文件挪 .invalid
+    // 再落位」之间目标会短暂缺失——进程内的读不落在那个窗口上。
     let _guard = state
         .lock
         .lock()
@@ -211,11 +297,50 @@ pub fn read_config(dir: &Path, state: &ConfigState) -> Result<ConfigReadResult, 
     })
 }
 
+/// 同目录临时文件 + `sync` + `persist` 的原子替换。`persist` 在 Windows 走
+/// `MoveFileExW|REPLACE_EXISTING`、在 Unix 走 `rename(2)`——目标路径全程
+/// 存在旧版或新版之一，没有「先挪走旧文件」的缺失窗口。
+fn persist_atomically(
+    temp: tempfile::NamedTempFile,
+    target: &Path,
+    context: &str,
+) -> Result<(), ConfigError> {
+    temp.persist(target).map_err(|persist| {
+        ConfigError::new(
+            ConfigErrorCode::StorageUnavailable,
+            format!("{context}：{}", persist.error),
+        )
+    })?;
+    Ok(())
+}
+
+/// 把 `bytes` 经同一条 temp+sync+persist 原子路径写到 `target`（`.bak` 用）。
+fn write_file_atomically(target: &Path, bytes: &[u8]) -> Result<(), ConfigError> {
+    let dir = target
+        .parent()
+        .ok_or_else(|| ConfigError::new(ConfigErrorCode::InternalError, "配置路径没有父目录"))?;
+    let mut temp = tempfile::NamedTempFile::new_in(dir)
+        .map_err(|error| ConfigError::storage("创建配置备份临时文件失败", &error))?;
+    temp.write_all(bytes)
+        .map_err(|error| ConfigError::storage("写入配置备份失败", &error))?;
+    temp.as_file()
+        .sync_all()
+        .map_err(|error| ConfigError::storage("同步配置备份失败", &error))?;
+    persist_atomically(temp, target, "备份既有配置失败")
+}
+
 /// `desktop_config_write`：复核 revision 后的原子替换。
 ///
-/// 顺序是「临时文件写完 sync → 旧文件挪 .bak → rename 落位」：崩溃窗口里
-/// `config.json` 最坏是缺失，`.bak` 仍握着上一份内容——恢复路径永远不依赖
-/// 「写了一半的目标文件」。
+/// 顺序是「临时文件写完 sync → 按当前文件形态分流 → `persist` 原子落位」：
+///
+/// - 文件缺失 → `persist_noclobber` 原子创建，`expectedRevision: null`
+///   的「必须仍不存在」靠 no-clobber 语义闭合，不靠 check-then-create；
+/// - 当前文件过同一信封检查 → 先原子把它写成 `.bak`（last known valid），
+///   再替换目标；
+/// - 当前文件不可作为有效文件（fatal/invalid-utf8/oversized）→ 挪到
+///   `.invalid` 隔离位保留用户字节，绝不顶替 `.bak`。
+///
+/// 崩溃语义严格 old-or-new：`persist` 单步替换，目标路径全程存在。
 pub fn write_config(
     dir: &Path,
     state: &ConfigState,
@@ -231,14 +356,10 @@ pub fn write_config(
     let target = config_path(dir);
     let backup = backup_path(dir);
 
-    // 替换前复核：renderer 声称「我基于这份内容修改」。落盘内容与声明不符
-    // （手工编辑过、另一个写者先落了）→ 冲突，保留双方，由 UI 提示重载。
-    let current_revision = match fs::read(&target) {
-        Ok(bytes) => Some(sha256_hex(&bytes)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-        Err(error) => return Err(ConfigError::storage("读取配置文件失败", &error)),
-    };
-    if current_revision != request.expected_revision {
+    // 替换前复核：renderer 声称「我基于这份内容修改」。复核读同一条有界
+    // 流式路径——超大文件也只是一次流式扫描，不进内存。
+    let current = read_file_state(&target)?;
+    if current.revision() != request.expected_revision.as_deref() {
         return Err(ConfigError::new(
             ConfigErrorCode::ConfigConflict,
             "配置文件已被外部修改；请重新加载后重试",
@@ -247,6 +368,7 @@ pub fn write_config(
 
     fs::create_dir_all(dir).map_err(|error| ConfigError::storage("创建配置目录失败", &error))?;
 
+    // 新内容先完整落到同目录临时文件——这之后的任何失败都还没碰目标文件。
     let mut temp = tempfile::NamedTempFile::new_in(dir)
         .map_err(|error| ConfigError::storage("创建配置临时文件失败", &error))?;
     temp.write_all(request.content.as_bytes())
@@ -255,21 +377,50 @@ pub fn write_config(
         .sync_all()
         .map_err(|error| ConfigError::storage("同步配置临时文件失败", &error))?;
 
-    // 旧文件先让位给 .bak（覆盖旧 bak）。此刻起目标缺失是短暂的，
-    // persist 失败会尽量把它挪回来。
-    if target.exists() {
-        fs::rename(&target, &backup)
-            .map_err(|error| ConfigError::storage("备份既有配置失败", &error))?;
-    }
-    let persist_result = temp.persist(&target);
-    if let Err(error) = persist_result {
-        if backup.exists() {
-            let _ = fs::rename(&backup, &target);
+    match &current {
+        ConfigFileState::Missing => {
+            temp.persist_noclobber(&target).map_err(|persist| {
+                if persist.error.kind() == std::io::ErrorKind::AlreadyExists {
+                    // check-then-create 的窗口被原子语义抓住：仍按冲突处理，
+                    // 让 UI 走同一条重载路径而不是静默覆盖。
+                    ConfigError::new(
+                        ConfigErrorCode::ConfigConflict,
+                        "配置文件已被外部修改；请重新加载后重试",
+                    )
+                } else {
+                    ConfigError::new(
+                        ConfigErrorCode::StorageUnavailable,
+                        format!("配置落盘失败：{}", persist.error),
+                    )
+                }
+            })?;
         }
-        return Err(ConfigError::new(
-            ConfigErrorCode::StorageUnavailable,
-            format!("配置落盘失败：{}", error.error),
-        ));
+        ConfigFileState::Ok { content, .. } if envelope_satisfied(content) => {
+            // `.bak` = last known valid：先原子更新备份再替换目标。persist
+            // 失败时 .bak 与目标同为旧内容，一致可回滚。
+            write_file_atomically(&backup, content.as_bytes())?;
+            persist_atomically(temp, &target, "配置落盘失败")?;
+        }
+        _ => {
+            // 当前文件不可作为「上次有效」：挪去 `.invalid` 隔离位（rename
+            // 是 O(1)，超大损坏文件也不复制），保留字节供手工打捞。此刻起
+            // 目标缺失是短暂的——但它本来就不可读，persist 失败尽量挪回。
+            // Windows 的 rename 不覆盖既有目标：先删掉旧隔离文件再挪。
+            let invalid = invalid_path(dir);
+            if invalid.exists() {
+                fs::remove_file(&invalid)
+                    .map_err(|error| ConfigError::storage("清理既有隔离文件失败", &error))?;
+            }
+            fs::rename(&target, &invalid)
+                .map_err(|error| ConfigError::storage("隔离无效配置文件失败", &error))?;
+            if let Err(error) = temp.persist(&target) {
+                let _ = fs::rename(&invalid, &target);
+                return Err(ConfigError::new(
+                    ConfigErrorCode::StorageUnavailable,
+                    format!("配置落盘失败：{}", error.error),
+                ));
+            }
+        }
     }
 
     Ok(ConfigWriteResult {
@@ -390,6 +541,84 @@ mod tests {
     }
 
     #[test]
+    fn replacing_a_broken_file_quarantines_it_instead_of_clobbering_valid_bak() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = write(dir.path(), None, "{\"version\":1}").unwrap();
+        let second = write(dir.path(), Some(first.revision), "{\"version\":1,\"x\":9}").unwrap();
+        assert_eq!(
+            fs::read_to_string(backup_path(dir.path())).unwrap(),
+            "{\"version\":1}"
+        );
+
+        // 当前文件坏掉（合法 UTF-8 但不是信封）——基于旧 revision 的写先
+        // 冲突；用真实 revision 显式恢复默认后，`.bak` 仍是上一个有效文件，
+        // 坏文件隔离到 `.invalid` 供打捞。
+        fs::write(config_path(dir.path()), "{broken").unwrap();
+        let stale = write(
+            dir.path(),
+            Some(second.revision),
+            "{\"version\":1,\"reset\":true}",
+        )
+        .unwrap_err();
+        assert_eq!(stale.code, ConfigErrorCode::ConfigConflict);
+        let broken_revision = match read_config(dir.path(), &state()).unwrap().file {
+            ConfigFileState::Ok { revision, .. } => revision,
+            other => panic!("expected ok-but-invalid file, got {other:?}"),
+        };
+        write(
+            dir.path(),
+            Some(broken_revision),
+            "{\"version\":1,\"reset\":true}",
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(config_path(dir.path())).unwrap(),
+            "{\"version\":1,\"reset\":true}"
+        );
+        assert_eq!(
+            fs::read_to_string(backup_path(dir.path())).unwrap(),
+            "{\"version\":1}"
+        );
+        assert_eq!(
+            fs::read_to_string(invalid_path(dir.path())).unwrap(),
+            "{broken"
+        );
+
+        // 再次被无效文件顶替时，隔离位也随之更新（Windows 语义：rename
+        // 不覆盖目标，先清再挪——这里钉住的是行为而不是实现）。
+        fs::write(config_path(dir.path()), "{\"version\":2}").unwrap();
+        let future_revision = match read_config(dir.path(), &state()).unwrap().file {
+            ConfigFileState::Ok { revision, .. } => revision,
+            other => panic!("expected ok file, got {other:?}"),
+        };
+        write(dir.path(), Some(future_revision), "{\"version\":1}").unwrap();
+        assert_eq!(
+            fs::read_to_string(invalid_path(dir.path())).unwrap(),
+            "{\"version\":2}"
+        );
+        assert_eq!(
+            fs::read_to_string(backup_path(dir.path())).unwrap(),
+            "{\"version\":1}"
+        );
+    }
+
+    #[test]
+    fn scan_bytes_bounds_prefix_and_hashes_everything() {
+        let payload = vec![b'x'; (MAX_CONFIG_FILE_BYTES * 3) as usize];
+        let scanned = scan_bytes(std::io::Cursor::new(&payload)).unwrap();
+        assert_eq!(scanned.total, MAX_CONFIG_FILE_BYTES * 3);
+        // 前缀至多 64 KiB——文件再大也只驻留有界内容。
+        assert_eq!(scanned.prefix.len() as u64, MAX_CONFIG_FILE_BYTES);
+        assert_eq!(scanned.revision, sha256_hex(&payload));
+
+        let small = b"{\"version\":1}".to_vec();
+        let scanned = scan_bytes(std::io::Cursor::new(&small)).unwrap();
+        assert_eq!(scanned.total, small.len() as u64);
+        assert_eq!(scanned.prefix, small);
+    }
+
+    #[test]
     fn rejects_invalid_envelopes_without_touching_disk() {
         let dir = tempfile::tempdir().unwrap();
         for content in [
@@ -418,8 +647,11 @@ mod tests {
             }
             other => panic!("expected oversized, got {other:?}"),
         }
+        // 无效文件不是「上次有效」：隔离到 .invalid，不产生 .bak。
+        assert_eq!(fs::read(invalid_path(dir.path())).unwrap(), oversized);
+        assert!(!backup_path(dir.path()).exists());
 
-        fs::write(config_path(dir.path()), &[0xff, 0xfe, 0x00]).unwrap();
+        fs::write(config_path(dir.path()), [0xff, 0xfe, 0x00]).unwrap();
         match read_config(dir.path(), &state()).unwrap().file {
             ConfigFileState::InvalidUtf8 { revision } => {
                 assert!(revision.starts_with("sha256:"));

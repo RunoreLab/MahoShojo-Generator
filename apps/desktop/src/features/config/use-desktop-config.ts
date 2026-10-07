@@ -39,8 +39,12 @@ export interface UseDesktopConfigResult {
   ) => void;
   /** 显式重载（手工编辑文件后）。 */
   readonly reload: () => void;
-  /** 显式恢复默认并写盘（原文件由 native .bak 保留）。 */
+  /** 显式恢复默认并写盘（原文件由 native .bak/.invalid 保留）。 */
   readonly resetToDefaults: () => void;
+  /** 冲突草稿：基于最新磁盘内容重新应用刚才的修改。 */
+  readonly reapplyConflictedDraft: () => void;
+  /** 冲突草稿：放弃刚才未落盘的修改。 */
+  readonly discardConflictedDraft: () => void;
   readonly openDirectory: () => void;
 }
 
@@ -57,6 +61,8 @@ export const useDesktopConfig = (
     setField: (key, value) => store.setField(key, value),
     reload: () => void store.reload(),
     resetToDefaults: () => store.resetToDefaults(),
+    reapplyConflictedDraft: () => store.reapplyConflictedDraft(),
+    discardConflictedDraft: () => store.discardConflictedDraft(),
     openDirectory: () => void store.openDirectory(),
   };
 };
