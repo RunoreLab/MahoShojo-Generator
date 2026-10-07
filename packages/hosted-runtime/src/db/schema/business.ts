@@ -805,6 +805,39 @@ export const dataCardMetrics = sqliteTable('data_card_metrics', {
   updatedAt: text('updated_at').notNull(),
 });
 
+// 自动审查裁决审计：不 FK data_cards，卡片删除后审计行仍保留；不存卡面原文，仅存内容哈希。
+export const autoReviewDecisions = sqliteTable(
+  'auto_review_decisions',
+  {
+    id: text('id').primaryKey(),
+    userId: integer('user_id').notNull(),
+    targetKind: text('target_kind').notNull(), // 'card' | 'update'
+    dataCardId: text('data_card_id').notNull(),
+    updateId: text('update_id'),
+    contentHash: text('content_hash').notNull(), // 审核时观测内容的 SHA-256
+    reviewedUpdatedAt: text('reviewed_updated_at'), // 审核时观测的行 updated_at
+    backendId: text('backend_id').notNull(),
+    backendKind: text('backend_kind').notNull(),
+    model: text('model'),
+    verdict: text('verdict').notNull(), // approve / reject / uncertain
+    action: text('action').notNull(), // approve / reject / pending（裁决意图）
+    applied: integer('applied', { mode: 'boolean' }).notNull().default(false), // DB 写入是否实际生效
+    score: real('score'),
+    category: text('category'),
+    reason: text('reason'),
+    inputTruncated: integer('input_truncated', { mode: 'boolean' }).notNull().default(false),
+    inputParseError: integer('input_parse_error', { mode: 'boolean' }).notNull().default(false),
+    latencyMs: integer('latency_ms'),
+    attemptedBackends: text('attempted_backends'), // JSON 数组
+    detailsJson: text('details_json'), // 截断后的后端原生明细
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    cardIdx: index('idx_auto_review_decisions_card').on(table.dataCardId, table.createdAt),
+    userIdx: index('idx_auto_review_decisions_user').on(table.userId, table.createdAt),
+  }),
+);
+
 export const dataCardTags = sqliteTable('data_card_tags', {
   dataCardId: text('data_card_id').notNull(),
   tagId: text('tag_id').notNull(),

@@ -1128,3 +1128,33 @@ CREATE TABLE IF NOT EXISTS user_message_state (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+
+-- 自动审查裁决审计：记录每次模型裁决的证据，不存卡面原文（仅存内容哈希）；
+-- data_card_id 不加外键——卡片删除后审计行仍须保留。
+CREATE TABLE IF NOT EXISTS auto_review_decisions (
+  id TEXT PRIMARY KEY NOT NULL,
+  user_id INTEGER NOT NULL,
+  target_kind TEXT NOT NULL CHECK(target_kind IN ('card', 'update')),  -- 审核对象：卡本体 / 待审更新
+  data_card_id TEXT NOT NULL,
+  update_id TEXT,                          -- target_kind='update' 时的待审更新行 id
+  content_hash TEXT NOT NULL,              -- 审核时观测的 (name,description,data) SHA-256
+  reviewed_updated_at TEXT,                -- 审核时观测的行 updated_at
+  backend_id TEXT NOT NULL,                -- 配置条目 id
+  backend_kind TEXT NOT NULL,              -- jev-decisions / omni-moderation / nemotron / llm
+  model TEXT,
+  verdict TEXT NOT NULL CHECK(verdict IN ('approve', 'reject', 'uncertain')),
+  action TEXT NOT NULL CHECK(action IN ('approve', 'reject', 'pending')),  -- 策略落地动作
+  applied BOOLEAN NOT NULL DEFAULT 0,      -- DB 写入是否实际生效（快照守卫未命中=0）
+  score REAL,
+  category TEXT,
+  reason TEXT,
+  input_truncated BOOLEAN NOT NULL DEFAULT 0,
+  input_parse_error BOOLEAN NOT NULL DEFAULT 0,
+  latency_ms INTEGER,
+  attempted_backends TEXT,                 -- JSON 数组：依次尝试过的后端 id
+  details_json TEXT,                       -- 截断后的后端原生明细
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_auto_review_decisions_card ON auto_review_decisions(data_card_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_auto_review_decisions_user ON auto_review_decisions(user_id, created_at);

@@ -1,6 +1,5 @@
 // lib/config.ts
 
-import { STRICT_RANKED_MODEL_FALLBACKS } from '@/lib/arena/ranked-model-policy';
 import { parseAIProvidersFromEnv } from '@mahoshojo/hosted-runtime/node-runtime/providers';
 import type { AIProvider } from '@mahoshojo/hosted-runtime/node-runtime/types';
 
@@ -176,9 +175,6 @@ export const config = {
       enabled: false,
       threshold: 5,
     },
-
-    // 自动审查优先使用轻量模型
-    modelFallbacks: [...STRICT_RANKED_MODEL_FALLBACKS],
   },
 
 }

@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'vitest';
 
-import { config } from '@/lib/config';
 import { isStrictRankedModelBlacklisted, STRICT_RANKED_MODEL_FALLBACKS } from '@/lib/arena/ranked-model-policy';
 
 describe('ranked-model-policy: strict ranked', () => {
@@ -11,14 +10,10 @@ describe('ranked-model-policy: strict ranked', () => {
    * 会各自腐烂的副本。模型清单本身属于 provider 元数据，会随模型上下架变动，
    * 不该由门禁钉住。
    *
-   * 真正有长期保护需要的只剩两条，都不是「清单里有哪些模型」：
-   * 下面第 17 行的**跨模块接线**（配置里的回退名单必须就是这个名单），以及名单里
-   * 没有黑名单模型。
+   * 原先还有一条「config.DATA_CARD_AUTO_REVIEW.modelFallbacks 必须等于该名单」的接线断言，
+   * 随自动审查 legacy 通路移除（r1：未配置新后端即无 AI 审查）一并删去——该字段已不复存在。
+   * 真正有长期保护需要的只剩名单里没有黑名单模型。
    */
-  test('严格排位默认模型回退名单与数据卡自动预审查一致', () => {
-    expect(config.DATA_CARD_AUTO_REVIEW.modelFallbacks).toEqual(Array.from(STRICT_RANKED_MODEL_FALLBACKS));
-  });
-
   test('严格排位默认模型回退名单不包含黑名单模型', () => {
     for (const modelId of STRICT_RANKED_MODEL_FALLBACKS) {
       expect(isStrictRankedModelBlacklisted(modelId)).toBe(false);

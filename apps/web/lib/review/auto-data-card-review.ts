@@ -1,15 +1,16 @@
-import { generateWithAI } from '@/lib/ai';
 import { config } from '@/lib/config';
 import type { AppDrizzleDb } from '@/lib/db/drizzle';
 import {
-  applyPendingPublicCardUpdateByUserId,
-  approvePendingPublicCardsByIds,
+  applyPendingCardUpdateIfUnchanged,
+  approvePendingPublicCardIfUnchanged,
   countPendingPublicCardsByUserId,
   countPendingPublicCardUpdatesByUserId,
-  deletePendingCardUpdateByDataCardId,
+  deletePendingCardUpdateIfUnchanged,
+  insertAutoReviewDecision,
   listLatestPendingPublicCardsByUserId,
   listLatestPendingPublicCardUpdatesByUserId,
-  rejectPendingPublicCardsByIds,
+  rejectPendingPublicCardIfUnchanged,
+  type AutoReviewDecisionInsert,
   type PendingDataCardUpdateReviewRow,
 } from '@/lib/db/repositories/data-card-review';
 import { getBusinessUserById } from '@/lib/db/repositories/business-users';
@@ -24,16 +25,11 @@ import {
   resolveUncertainAction,
   type AutoReviewEngine,
   type AutoReviewPolicy,
+  type AutoReviewRunResult,
   type AutoReviewUncertainPolicy,
   type ReviewTarget,
   type ReviewVerdict,
 } from '@mahoshojo/hosted-runtime/auto-review';
-import {
-  buildDataCardAiReviewPrompt,
-  DATA_CARD_AI_REVIEW_SYSTEM_PROMPT,
-  DataCardAiReviewResponseSchema,
-  type DataCardAiReviewResponse,
-} from '@/lib/review/data-card-ai-review';
 import { getAutoReviewEngine } from '@/lib/review/auto-review-engine';
 
 const log = getLogger('auto-data-card-review');
@@ -82,88 +78,25 @@ async function computeAndUpsertMetrics(
   }
 }
 
-async function applyApprovedPublicCardUpdates(
+async function applyApprovedPublicCardUpdate(
   db: AppDrizzleDb,
   userId: number,
-  updates: PendingDataCardUpdateReviewRow[],
-): Promise<string[]> {
-  const appliedIds: string[] = [];
+  update: PendingDataCardUpdateReviewRow,
+): Promise<boolean> {
+  if (!update.dataCardId || !update.data) return false;
+  const applied = await applyPendingCardUpdateIfUnchanged(db, userId, update);
+  if (!applied) return false;
 
-  for (const update of updates) {
-    if (!update.dataCardId || !update.data) continue;
-    const updated = await applyPendingPublicCardUpdateByUserId(db, userId, {
-      dataCardId: update.dataCardId,
-      name: update.name,
-      description: update.description,
-      data: update.data,
-    });
-    if (!updated) continue;
-
-    await deletePendingCardUpdateByDataCardId(db, update.dataCardId);
-    const metricsPromise = computeAndUpsertMetrics(db, update.dataCardId, update.data);
-    const resetStrictPromise =
-      update.type === 'character'
-        ? resetStrictArenaRatingForDataCard(update.dataCardId)
-        : Promise.resolve();
-    await Promise.all([metricsPromise, resetStrictPromise]);
-    appliedIds.push(update.dataCardId);
-  }
-
-  return appliedIds;
+  const metricsPromise = computeAndUpsertMetrics(db, update.dataCardId, update.data);
+  const resetStrictPromise =
+    update.type === 'character'
+      ? resetStrictArenaRatingForDataCard(update.dataCardId)
+      : Promise.resolve();
+  await Promise.all([metricsPromise, resetStrictPromise]);
+  return true;
 }
 
-/* ── legacy 通路（AI_REVIEW_PROVIDERS_CONFIG 未配置时的兼容兜底） ─────────── */
-
-async function generateAiReviewWithModelFallbacks(targets: ReviewTarget[]): Promise<{
-  result: DataCardAiReviewResponse;
-  usedModel: string | null;
-}> {
-  const fallbackModels = Array.isArray(config.DATA_CARD_AUTO_REVIEW?.modelFallbacks)
-    ? config.DATA_CARD_AUTO_REVIEW.modelFallbacks.filter((m) => typeof m === 'string' && m.trim())
-    : [];
-
-  const baseConfig = {
-    systemPrompt: DATA_CARD_AI_REVIEW_SYSTEM_PROMPT,
-    temperature: 0.1,
-    promptBuilder: buildDataCardAiReviewPrompt,
-    schema: DataCardAiReviewResponseSchema as any,
-    taskName: '数据卡自动审查',
-  } as const;
-
-  if (fallbackModels.length === 0) {
-    const result = (await generateWithAI(targets, baseConfig as any)) as any;
-    return { result, usedModel: null };
-  }
-
-  let lastError: unknown = null;
-  for (const modelOverride of fallbackModels) {
-    try {
-      const result = (await generateWithAI(targets, { ...(baseConfig as any), modelOverride }, undefined)) as any;
-      return { result, usedModel: modelOverride };
-    } catch (error) {
-      lastError = error;
-      log.warn('自动审查模型调用失败，将尝试下一备选', { modelOverride, error });
-    }
-  }
-
-  throw lastError ?? new Error('所有自动审查模型均失败');
-}
-
-/** legacy：只产出 approve 集合（reject 的旧语义=留 pending）。 */
-const legacyReviewTargets = async (
-  targets: ReviewTarget[],
-): Promise<{ approvedIds: Set<string>; usedModel: string | null }> => {
-  const ai = await generateAiReviewWithModelFallbacks(targets);
-  const suggestionById = new Map(ai.result.reviews.map((review) => [review.id, review]));
-  return {
-    approvedIds: new Set(
-      targets.filter((t) => suggestionById.get(t.id)?.suggestion === 'approved').map((t) => t.id),
-    ),
-    usedModel: ai.usedModel,
-  };
-};
-
-/* ── 引擎通路 ────────────────────────────────────────────────────────────── */
+/* ── 引擎通路（无 legacy 回退：未按新模式配置即视为无可用 AI 审查） ────────── */
 
 type CardAction = 'approve' | 'reject' | 'pending';
 
@@ -218,6 +151,32 @@ const readIsReviewExempt = async (db: AppDrizzleDb, userId: number): Promise<boo
   }
 };
 
+const sha256Hex = async (text: string): Promise<string> => {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
+};
+
+/** 裁决证据用内容指纹：审核观测的 (name, description, data) 三元组。 */
+const contentHashOf = (snap: { name: string; description: string | null; data: string }) =>
+  sha256Hex(JSON.stringify([snap.name, snap.description, snap.data]));
+
+const modelOf = (run: AutoReviewRunResult): string | null => {
+  const m = run.outcome.details?.model;
+  return typeof m === 'string' ? m : null;
+};
+
+/** 裁决审计写入：失败只记日志，不阻塞主流程。 */
+const recordDecision = async (
+  db: AppDrizzleDb,
+  row: Omit<AutoReviewDecisionInsert, 'contentHash'> & { contentHash: Promise<string> },
+): Promise<void> => {
+  try {
+    await insertAutoReviewDecision(db, { ...row, contentHash: await row.contentHash });
+  } catch (error) {
+    log.warn('审查裁决审计写入失败（非阻塞）', { dataCardId: row.dataCardId, error });
+  }
+};
+
 export type AutoReviewResult = {
   ok: boolean;
   reviewedCount: number;
@@ -259,8 +218,11 @@ const resolveRuntime = async (deps?: AutoReviewDeps) => {
   const db = deps?.db ?? (await readDbOrNull());
   if (!db) return null;
   if (deps?.engine !== undefined || deps?.policy !== undefined) {
+    // 显式传入的 null 语义=无引擎，不能用 ?? 吞掉后回退到真实装配。
     const fallback = deps?.engine === undefined || deps?.policy === undefined ? getAutoReviewEngine() : null;
-    return { db, engine: deps?.engine ?? fallback?.engine ?? null, policy: deps?.policy ?? fallback?.policy ?? null };
+    const engine = deps?.engine !== undefined ? deps.engine : fallback?.engine ?? null;
+    const policy = deps?.policy !== undefined ? deps.policy : fallback?.policy ?? null;
+    return { db, engine, policy };
   }
   const { engine, policy } = getAutoReviewEngine();
   return { db, engine, policy };
@@ -300,12 +262,11 @@ export async function autoReviewLatestPendingPublicDataCardsForUser(
     return { ...emptyResult('no-pending', true) };
   }
 
-  const targets: ReviewTarget[] = pendingCards.map((row) => ({
-    id: row.id,
-    name: row.name,
-    description: row.description ?? '',
-    data: row.data,
-  }));
+  // 无可用新引擎：留 pending，不回退旧审查通路。
+  if (!engine) {
+    log.warn('自动审查引擎不可用（未配置有效后端），卡片保持 pending', { userId, pending: pendingCards.length });
+    return { ...emptyResult('engine-unavailable', true), heldCount: pendingCards.length };
+  }
 
   const result: AutoReviewResult = {
     ok: true,
@@ -318,41 +279,47 @@ export async function autoReviewLatestPendingPublicDataCardsForUser(
     usedBackend: null,
   };
 
-  if (!engine) {
-    // 未配置新后端：回退 legacy generateWithAI 通路（只判 approve，其余留 pending）。
-    try {
-      const legacy = await legacyReviewTargets(targets);
-      const approvedIds = targets.filter((t) => legacy.approvedIds.has(t.id)).map((t) => t.id);
-      result.approvedCount = await approvePendingPublicCardsByIds(db, userId, approvedIds);
-      result.approvedIds = approvedIds;
-      result.heldCount = targets.length - approvedIds.length;
-      result.reviewedCount = targets.length;
-      result.usedBackend = legacy.usedModel ?? 'legacy-llm';
-      log.info('自动审查（legacy 通路）完成', { userId, reviewed: targets.length, approvedCount: result.approvedCount });
-      return result;
-    } catch (error) {
-      log.error('自动审查失败（降级为保持 pending）', { userId, error });
-      return { ...emptyResult(error instanceof Error ? error.message : 'AI审查失败') };
-    }
-  }
-
-  for (const target of targets) {
+  for (const row of pendingCards) {
     result.reviewedCount += 1;
-    const run = await engine.review(target);
+    const target: ReviewTarget = {
+      id: row.id,
+      name: row.name,
+      description: row.description ?? '',
+      data: row.data,
+      type: row.type,
+    };
+    const base = {
+      userId,
+      targetKind: 'card' as const,
+      dataCardId: row.id,
+      updateId: null,
+      contentHash: contentHashOf(row),
+      reviewedUpdatedAt: row.updatedAt,
+    };
+    let run: AutoReviewRunResult;
+    try {
+      run = await engine.review(target);
+    } catch (error) {
+      result.heldCount += 1;
+      log.warn('自动审查引擎执行异常（单卡保持 pending）', { userId, cardId: row.id, error });
+      continue;
+    }
     result.usedBackend = run.backendId;
     const action = actionForOutcome(run.outcome.verdict, policy.onUncertain, isReviewExempt);
+    const coverage = run.inputCoverage;
+    let applied = false;
     if (action === 'approve') {
-      const n = await approvePendingPublicCardsByIds(db, userId, [target.id]);
-      if (n > 0) {
-        result.approvedCount += n;
+      applied = await approvePendingPublicCardIfUnchanged(db, userId, row);
+      if (applied) {
+        result.approvedCount += 1;
         result.approvedIds.push(target.id);
       } else {
         result.heldCount += 1;
       }
     } else if (action === 'reject') {
-      const n = await rejectPendingPublicCardsByIds(db, userId, [target.id]);
-      if (n > 0) {
-        result.rejectedCount += n;
+      applied = await rejectPendingPublicCardIfUnchanged(db, userId, row);
+      if (applied) {
+        result.rejectedCount += 1;
         result.rejectedIds.push(target.id);
         if (policy.notifyOnAutoReject) {
           await notifyAutoReject(db, { userId, cardId: target.id, cardName: target.name, reason: run.outcome.reason });
@@ -363,11 +330,29 @@ export async function autoReviewLatestPendingPublicDataCardsForUser(
     } else {
       result.heldCount += 1;
     }
+    await recordDecision(db, {
+      ...base,
+      backendId: run.backendId,
+      backendKind: run.kind,
+      model: modelOf(run),
+      verdict: run.outcome.verdict,
+      action,
+      applied,
+      score: run.outcome.score,
+      category: run.outcome.category ?? null,
+      reason: run.outcome.reason ?? null,
+      inputTruncated: coverage.truncated,
+      inputParseError: coverage.parseError,
+      latencyMs: run.latencyMs,
+      attemptedBackends: run.attempted,
+      details: run.outcome.details ?? null,
+    });
     log.info('自动审查单卡裁决', {
       userId,
       cardId: target.id,
       verdict: run.outcome.verdict,
       action,
+      applied,
       score: run.outcome.score,
       category: run.outcome.category,
       backend: run.backendId,
@@ -419,13 +404,10 @@ export async function autoReviewLatestPendingPublicDataCardUpdatesForUser(
     return emptyResult('no-pending', true);
   }
 
-  const targets: Array<ReviewTarget & { updateRow: PendingDataCardUpdateReviewRow }> = pendingUpdates.map((row) => ({
-    id: row.dataCardId,
-    name: row.name,
-    description: row.description ?? '',
-    data: row.data,
-    updateRow: row,
-  }));
+  if (!engine) {
+    log.warn('自动审查引擎不可用（未配置有效后端），更新保持 pending', { userId, pending: pendingUpdates.length });
+    return { ...emptyResult('engine-unavailable', true), heldCount: pendingUpdates.length };
+  }
 
   const result: AutoReviewResult = {
     ok: true,
@@ -438,53 +420,81 @@ export async function autoReviewLatestPendingPublicDataCardUpdatesForUser(
     usedBackend: null,
   };
 
-  if (!engine) {
-    try {
-      const legacy = await legacyReviewTargets(targets);
-      const approvedUpdates = pendingUpdates.filter((row) => legacy.approvedIds.has(row.dataCardId));
-      const appliedIds = await applyApprovedPublicCardUpdates(db, userId, approvedUpdates);
-      result.approvedCount = appliedIds.length;
-      result.approvedIds = appliedIds;
-      result.heldCount = targets.length - appliedIds.length;
-      result.reviewedCount = targets.length;
-      result.usedBackend = legacy.usedModel ?? 'legacy-llm';
-      log.info('更新自动审查（legacy 通路）完成', { userId, reviewed: targets.length, approvedCount: appliedIds.length });
-      return result;
-    } catch (error) {
-      log.error('更新自动审查失败（降级为保持 pending）', { userId, error });
-      return { ...emptyResult(error instanceof Error ? error.message : 'AI审查失败') };
-    }
-  }
-
-  for (const target of targets) {
+  for (const row of pendingUpdates) {
     result.reviewedCount += 1;
-    const run = await engine.review(target);
+    const target: ReviewTarget = {
+      id: row.dataCardId,
+      name: row.name,
+      description: row.description ?? '',
+      data: row.data,
+      type: row.type,
+    };
+    const base = {
+      userId,
+      targetKind: 'update' as const,
+      dataCardId: row.dataCardId,
+      updateId: row.updateId,
+      contentHash: contentHashOf(row),
+      reviewedUpdatedAt: row.updatedAt,
+    };
+    let run: AutoReviewRunResult;
+    try {
+      run = await engine.review(target);
+    } catch (error) {
+      result.heldCount += 1;
+      log.warn('更新自动审查引擎执行异常（单条更新保持 pending）', { userId, cardId: row.dataCardId, error });
+      continue;
+    }
     result.usedBackend = run.backendId;
     const action = actionForOutcome(run.outcome.verdict, policy.onUncertain, isReviewExempt);
+    const coverage = run.inputCoverage;
+    let applied = false;
     if (action === 'approve') {
-      const applied = await applyApprovedPublicCardUpdates(db, userId, [target.updateRow]);
-      if (applied.length > 0) {
-        result.approvedCount += applied.length;
+      applied = await applyApprovedPublicCardUpdate(db, userId, row);
+      if (applied) {
+        result.approvedCount += 1;
         result.approvedIds.push(target.id);
       } else {
         result.heldCount += 1;
       }
     } else if (action === 'reject') {
-      // 更新拒绝 = 丢弃待审行（与人工拒绝一致）+ 通知；线上版本不动。
-      await deletePendingCardUpdateByDataCardId(db, target.id);
-      result.rejectedCount += 1;
-      result.rejectedIds.push(target.id);
-      if (policy.notifyOnAutoReject) {
-        await notifyAutoReject(db, { userId, cardId: target.id, cardName: target.name, reason: run.outcome.reason });
+      // 更新拒绝 = 丢弃该待审行（与人工拒绝一致）+ 通知；快照守卫确保不误删顶替的 U2，线上版本不动。
+      applied = await deletePendingCardUpdateIfUnchanged(db, userId, row);
+      if (applied) {
+        result.rejectedCount += 1;
+        result.rejectedIds.push(target.id);
+        if (policy.notifyOnAutoReject) {
+          await notifyAutoReject(db, { userId, cardId: target.id, cardName: target.name, reason: run.outcome.reason });
+        }
+      } else {
+        result.heldCount += 1;
       }
     } else {
       result.heldCount += 1;
     }
+    await recordDecision(db, {
+      ...base,
+      backendId: run.backendId,
+      backendKind: run.kind,
+      model: modelOf(run),
+      verdict: run.outcome.verdict,
+      action,
+      applied,
+      score: run.outcome.score,
+      category: run.outcome.category ?? null,
+      reason: run.outcome.reason ?? null,
+      inputTruncated: coverage.truncated,
+      inputParseError: coverage.parseError,
+      latencyMs: run.latencyMs,
+      attemptedBackends: run.attempted,
+      details: run.outcome.details ?? null,
+    });
     log.info('更新自动审查单卡裁决', {
       userId,
       cardId: target.id,
       verdict: run.outcome.verdict,
       action,
+      applied,
       score: run.outcome.score,
       category: run.outcome.category,
       backend: run.backendId,

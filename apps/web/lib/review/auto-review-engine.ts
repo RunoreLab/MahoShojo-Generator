@@ -50,8 +50,13 @@ export const getAutoReviewEngine = (): {
             },
           })
         : null;
+    // 显式配置但非法：诊断落日志，区别于完全未配置。
+    if (parsed.errors.length > 0) {
+      log.warn('AI 审查配置存在无效项（已跳过），请检查环境变量', { errors: parsed.errors });
+    }
     if (!cachedEngine) {
-      log.warn('AI_REVIEW_PROVIDERS_CONFIG 未配置有效后端，自动审查不可用');
+      // r1 起不再回退 legacy 通路：无可用后端即视为无 AI 审查能力，内容保持 pending。
+      log.warn('AI_REVIEW_PROVIDERS_CONFIG 未配置有效后端，自动审查不可用（不会回退旧通路）');
     }
   }
   return {
