@@ -184,7 +184,7 @@ describe('desktop settings shell', () => {
     invokeMock.mockClear();
 
     // 「减少动态效果」选项组里点「减少」档 → 存储键 + data-motion 根标记。
-    const reduceButton = [...container.querySelectorAll('[role="group"] button')].find(
+    const reduceButton = [...container.querySelectorAll('[role="radiogroup"] [role="radio"]')].find(
       (button) => button.textContent === '减少动态效果',
     );
     await click(reduceButton ?? null);

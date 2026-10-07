@@ -66,7 +66,7 @@ export const SettingsPage = ({ section, heading = '设置', intro, groups }: Set
               <button
                 key={meta.id}
                 type="button"
-                className="text-xs text-(--app-text-muted) underline-offset-2 transition hover:text-(--app-accent-strong) hover:underline"
+                className="ui-web-settings-motion rounded-sm text-xs text-(--app-text-muted) underline-offset-2 transition-colors hover:text-(--app-accent-strong) hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--app-accent-strong)"
                 onClick={() => {
                   document
                     .getElementById(settingsGroupAnchorId(meta.id))

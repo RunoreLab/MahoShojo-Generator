@@ -69,6 +69,7 @@ export const OnlineSettingsSection = () => {
                   onChange={(value) => {
                     if (editable && !busy) setField('announcementsCheckPolicy', value);
                   }}
+                  disabled={!editable || busy}
                   ariaLabel="公告检查策略"
                 />
               }
@@ -100,7 +101,7 @@ export const OnlineSettingsSection = () => {
         actions={
           <button
             type="button"
-            className="rounded border border-(--app-border) px-3 py-1.5 text-xs disabled:opacity-50"
+            className="ui-web-settings-motion rounded-md border border-(--app-border) px-3 py-1.5 text-xs font-medium text-(--app-text-muted) transition-colors enabled:hover:border-(--app-accent-strong) enabled:hover:text-(--app-accent-strong) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--app-accent-strong) disabled:cursor-not-allowed disabled:opacity-50"
             disabled={state.status === 'loading' || state.status === 'idle'}
             onClick={reload}
           >
@@ -131,7 +132,7 @@ export const OnlineSettingsSection = () => {
         <div className="mt-3 flex flex-wrap gap-2">
           <button
             type="button"
-            className="rounded border border-(--app-border) px-3 py-1.5 text-xs disabled:opacity-50"
+            className="ui-web-settings-motion rounded-md border border-(--app-border) px-3 py-1.5 text-xs font-medium text-(--app-text-muted) transition-colors enabled:hover:border-(--app-accent-strong) enabled:hover:text-(--app-accent-strong) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--app-accent-strong) disabled:cursor-not-allowed disabled:opacity-50"
             disabled={state.status !== 'ready'}
             onClick={openDirectory}
           >
@@ -140,7 +141,7 @@ export const OnlineSettingsSection = () => {
           {state.fileStatus === 'missing' ? null : (
             <button
               type="button"
-              className="rounded border border-(--app-border) px-3 py-1.5 text-xs disabled:opacity-50"
+              className="ui-web-settings-motion rounded-md border border-(--app-border) px-3 py-1.5 text-xs font-medium text-(--app-text-muted) transition-colors enabled:hover:border-(--app-accent-strong) enabled:hover:text-(--app-accent-strong) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--app-accent-strong) disabled:cursor-not-allowed disabled:opacity-50"
               disabled={state.status !== 'ready' || busy}
               onClick={resetToDefaults}
             >

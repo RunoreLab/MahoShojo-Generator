@@ -118,8 +118,8 @@ describe('page preferences card — write failure projection', () => {
     expect(storage.dump()[SOURCE.storageKey]).toBe(
       JSON.stringify({ imageSaveMode: 'download', showDetails: false }),
     );
-    expect(findButton('一键下载')?.getAttribute('aria-pressed')).toBe('true');
-    expect(findButton('预览弹窗保存')?.getAttribute('aria-pressed')).toBe('false');
+    expect(findButton('一键下载')?.getAttribute('aria-checked')).toBe('true');
+    expect(findButton('预览弹窗保存')?.getAttribute('aria-checked')).toBe('false');
   });
 
   it('toggle write failure surfaces a card notice and the value stays unchanged', async () => {
@@ -203,5 +203,23 @@ describe('page preferences card — external update sync', () => {
     // blur 提交本地草稿——聚焦中到达的外部值被后写胜出覆盖。
     await act(async () => input?.blur());
     expect(JSON.parse(storage.dump()[SOURCE.storageKey]).nickname).toBe('本地草稿');
+  });
+
+  it('Escape reverts the in-progress draft to the stored value without committing', async () => {
+    const storage = createStorage();
+    storage.seed(SOURCE.storageKey, JSON.stringify({ nickname: '甲' }));
+    await render(<PagePreferencesCard adapter={createPagePreferencesAdapter(SOURCE, storage)} />);
+
+    const input = findTextInput('署名');
+    await act(async () => input?.focus());
+    await typeInto(input!, '本地草稿');
+    await act(async () => {
+      input!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+
+    expect(input?.value).toBe('甲');
+    // 后续 blur 的 commit 命中 draft===current 早退——Esc 还原不产生写入。
+    await act(async () => input?.blur());
+    expect(JSON.parse(storage.dump()[SOURCE.storageKey]).nickname).toBe('甲');
   });
 });

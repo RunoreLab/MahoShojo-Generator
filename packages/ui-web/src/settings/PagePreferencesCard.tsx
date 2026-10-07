@@ -72,7 +72,7 @@ const TextPreferenceControl = ({
   return (
     <input
       type="text"
-      className="w-36 rounded-md border border-(--app-input-border) bg-(--app-input-bg) px-2 py-1.5 text-xs text-(--app-text)"
+      className="w-36 rounded-md border border-(--app-input-border) bg-(--app-input-bg) px-2 py-1.5 text-xs text-(--app-text) transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-(--app-accent-strong)"
       value={draft}
       aria-label={field.label}
       onFocus={() => {
@@ -85,6 +85,8 @@ const TextPreferenceControl = ({
       }}
       onKeyDown={(event) => {
         if (event.key === 'Enter') commit();
+        // Esc 放弃未提交草稿回退到存储真值；保持焦点，后续 blur 的 commit 自然无操作。
+        if (event.key === 'Escape') setDraft(current);
       }}
     />
   );
@@ -246,7 +248,7 @@ export const PagePreferencesCard = ({
           {confirming ? (
             <button
               type="button"
-              className="rounded-md px-2 py-1.5 text-xs text-(--app-text-muted) hover:text-(--app-text)"
+              className="ui-web-settings-motion rounded-md px-2 py-1.5 text-xs text-(--app-text-muted) transition-colors hover:text-(--app-text) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--app-accent-strong)"
               onClick={() => setConfirming(false)}
             >
               取消
@@ -254,7 +256,7 @@ export const PagePreferencesCard = ({
           ) : null}
           <button
             type="button"
-            className="rounded-md border border-(--app-border) px-3 py-1.5 text-xs font-medium text-(--app-text-muted) transition hover:border-(--app-accent-strong) hover:text-(--app-accent-strong) disabled:opacity-50"
+            className="ui-web-settings-motion rounded-md border border-(--app-border) px-3 py-1.5 text-xs font-medium text-(--app-text-muted) transition-colors enabled:hover:border-(--app-accent-strong) enabled:hover:text-(--app-accent-strong) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--app-accent-strong) disabled:cursor-not-allowed disabled:opacity-50"
             disabled={result.status === 'empty' || result.status === 'corrupted'}
             onClick={handleReset}
           >

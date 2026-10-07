@@ -78,7 +78,7 @@ export function WebSettingsPage() {
                     pageLink={
                       <Link
                         href={adapter.source.pagePath}
-                        className="shrink-0 rounded-md border border-(--app-border) px-3 py-1.5 text-xs font-medium text-(--app-text-muted) transition hover:border-(--app-accent-strong) hover:text-(--app-accent-strong)"
+                        className="ui-web-settings-motion shrink-0 rounded-md border border-(--app-border) px-3 py-1.5 text-xs font-medium text-(--app-text-muted) transition-colors hover:border-(--app-accent-strong) hover:text-(--app-accent-strong) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--app-accent-strong)"
                       >
                         前往页面
                       </Link>
@@ -97,7 +97,7 @@ export function WebSettingsPage() {
                 actions={
                   <Link
                     href="/local-library"
-                    className="shrink-0 rounded-md border border-(--app-border) px-3 py-1.5 text-xs font-medium text-(--app-text-muted) transition hover:border-(--app-accent-strong) hover:text-(--app-accent-strong)"
+                    className="ui-web-settings-motion shrink-0 rounded-md border border-(--app-border) px-3 py-1.5 text-xs font-medium text-(--app-text-muted) transition-colors hover:border-(--app-accent-strong) hover:text-(--app-accent-strong) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--app-accent-strong)"
                   >
                     打开本地库
                   </Link>

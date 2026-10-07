@@ -90,7 +90,7 @@ const SettingsPageLink = ({ href, children }: { href: string; children: string }
         event.preventDefault();
         navigateByProductHref(router, href);
       }}
-      className="shrink-0 rounded-md border border-(--app-border) px-3 py-1.5 text-xs font-medium text-(--app-text-muted) transition hover:border-(--app-accent-strong) hover:text-(--app-accent-strong)"
+      className="ui-web-settings-motion shrink-0 rounded-md border border-(--app-border) px-3 py-1.5 text-xs font-medium text-(--app-text-muted) transition-colors hover:border-(--app-accent-strong) hover:text-(--app-accent-strong) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--app-accent-strong)"
     >
       {children}
     </a>

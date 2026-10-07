@@ -232,6 +232,19 @@
   transform: none;
 }
 
+/* 设置页控件的过渡动效（开关滑动、选项/按钮变色）统一跟随 `data-motion`
+   根标记（DESK-SET-007）；原生 media query 作 init 脚本缺失时的安全网，
+   与上方问卷控件同一降级口径。 */
+@media (prefers-reduced-motion: reduce) {
+  .ui-web-settings-motion {
+    transition: none;
+  }
+}
+
+:root[data-motion='reduce'] .ui-web-settings-motion {
+  transition: none;
+}
+
 :root[data-color-mode='dark'] .details-questionnaire-settings-panel,
 :root[data-color-mode='dark'] .details-questionnaire-surface,
 :root[data-color-mode='dark'] .details-questionnaire-subcard {
@@ -322,6 +335,8 @@
   --app-border-strong: rgba(229, 231, 235, 0.8);
   --app-input-bg: rgba(255, 255, 255, 0.85);
   --app-input-border: #e0e0e0;
+  --app-switch-track: #94a3b8;
+  --app-switch-thumb: #ffffff;
   --creator-panel-bg: rgba(255, 255, 255, 0.94);
   --creator-panel-border: rgba(203, 213, 225, 0.9);
   --creator-subpanel-bg: rgba(248, 250, 252, 0.92);
@@ -366,6 +381,8 @@
     --app-border-strong: rgba(148, 163, 184, 0.45);
     --app-input-bg: rgba(15, 23, 42, 0.6);
     --app-input-border: rgba(148, 163, 184, 0.35);
+    --app-switch-track: rgba(148, 163, 184, 0.5);
+    --app-switch-thumb: #ffffff;
     --creator-panel-bg: rgba(15, 23, 42, 0.92);
     --creator-panel-border: rgba(148, 163, 184, 0.45);
     --creator-subpanel-bg: rgba(30, 41, 59, 0.86);
@@ -412,6 +429,8 @@
   --app-border-strong: rgba(148, 163, 184, 0.45);
   --app-input-bg: rgba(15, 23, 42, 0.6);
   --app-input-border: rgba(148, 163, 184, 0.35);
+  --app-switch-track: rgba(148, 163, 184, 0.5);
+  --app-switch-thumb: #ffffff;
   --creator-panel-bg: rgba(15, 23, 42, 0.92);
   --creator-panel-border: rgba(148, 163, 184, 0.45);
   --creator-subpanel-bg: rgba(30, 41, 59, 0.86);
