@@ -105,7 +105,9 @@ describe('generated content from a clean output root', () => {
     expect(output).toContain('content/ 源校验通过');
   });
 
-  it('generates both runtimes byte-for-byte, prunes stale content and preserves unrelated files', async () => {
+  // 这条用例做 4 次真实 generate()（每次 2 个 esbuild 转译 + 双端全量写盘）再逐字节比对全部
+  // 正文，是组内唯一的重 IO 用例：与其他测试文件并行抢磁盘时墙钟可超默认 15s，给足 60s。
+  it('generates both runtimes byte-for-byte, prunes stale content and preserves unrelated files', { timeout: 60_000 }, async () => {
     const outputRoot = await freshRoot();
     await generate({ outputRoot });
     for (const { app } of TARGETS) {
