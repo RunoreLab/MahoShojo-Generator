@@ -2973,7 +2973,11 @@ mod tests {
         );
         for route in MESSAGES_ROUTES {
             let entry = &message_routes[route.id];
-            assert!(entry.is_object(), "fixture 缺少消息路由 {id}", id = route.id);
+            assert!(
+                entry.is_object(),
+                "fixture 缺少消息路由 {id}",
+                id = route.id
+            );
             assert_eq!(
                 entry["method"].as_str(),
                 Some(route.method.as_str()),
@@ -3811,10 +3815,9 @@ mod tests {
 
             // 卡库路由 id 在消息通道同样非法：两条命令各自查自己的表。
             for route_id in ["arbitrary-internal-route", "data-cards.query"] {
-                let error =
-                    cloud_messages_request(&state, &secrets, card_request(route_id))
-                        .await
-                        .unwrap_err();
+                let error = cloud_messages_request(&state, &secrets, card_request(route_id))
+                    .await
+                    .unwrap_err();
                 assert_eq!(error.code, CloudErrorCode::InvalidRequest, "{route_id}");
             }
             assert!(server.last_card_request.lock().unwrap().is_none());
@@ -3844,10 +3847,9 @@ mod tests {
 
             // summary/read/read-all 都是 Required：无本地凭据不产生网络请求。
             for route_id in ["messages.summary", "messages.read", "messages.read-all"] {
-                let error =
-                    cloud_messages_request(&state, &secrets, card_request(route_id))
-                        .await
-                        .unwrap_err();
+                let error = cloud_messages_request(&state, &secrets, card_request(route_id))
+                    .await
+                    .unwrap_err();
                 assert_eq!(error.code, CloudErrorCode::NotAuthenticated, "{route_id}");
             }
             assert!(server.last_card_request.lock().unwrap().is_none());
@@ -3894,13 +3896,11 @@ mod tests {
             assert_eq!(response.status, 200);
             let (_, head, body) = server.last_card_request.lock().unwrap().clone().unwrap();
             assert!(
-                head.to_ascii_lowercase().contains("cookie: better-auth.session_token=native.tok"),
+                head.to_ascii_lowercase()
+                    .contains("cookie: better-auth.session_token=native.tok"),
                 "已登录请求必须附带会话 cookie：{head}"
             );
-            assert_eq!(
-                body.unwrap()["ids"],
-                serde_json::json!(["user:12"]),
-            );
+            assert_eq!(body.unwrap()["ids"], serde_json::json!(["user:12"]),);
         });
     }
 
