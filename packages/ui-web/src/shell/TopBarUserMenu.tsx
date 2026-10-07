@@ -264,7 +264,11 @@ function DesktopUserMenuDropdown({
       onMouseLeave={() => {
         if (!rootRef.current?.contains(document.activeElement)) setOpen(false);
       }}
-      onFocus={() => setOpen(true)}
+      onFocus={(event) => {
+        // 只有「焦点从层外迁入」才展开：Escape 把焦点还给 trigger 时
+        // relatedTarget 仍在层内，不能把它重新当成打开信号（DESK-PARITY-007）。
+        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(true);
+      }}
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
       }}

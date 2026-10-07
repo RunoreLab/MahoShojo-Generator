@@ -344,6 +344,73 @@ describe('ProductTopBar', () => {
     expect(accountTrigger.getAttribute('aria-expanded')).toBe('false');
   });
 
+  it('Escape inside a nav dropdown item closes the group without reopening it', () => {
+    // 回归（D5.1-N1-r1）：焦点在真实子链接上时 Escape 关闭并把焦点还给
+    // trigger——程序化 focus restore 不能再触发「获得焦点即展开」。
+    renderTopBar();
+    const trigger = [...container.querySelectorAll<HTMLButtonElement>('header nav button')].find(
+      (button) => button.getAttribute('aria-expanded') !== null,
+    )!;
+
+    act(() => trigger.focus());
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+
+    const item = trigger.parentElement?.querySelector<HTMLElement>('a[href]');
+    expect(item).not.toBeNull();
+    act(() => item!.focus());
+    expect(document.activeElement).toBe(item);
+
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('Escape inside the theme menu keeps it closed while focus returns to the trigger', () => {
+    renderTopBar();
+    const trigger = [...container.querySelectorAll<HTMLButtonElement>('header button')].find(
+      (button) => button.textContent?.includes('外观'),
+    )!;
+
+    act(() => trigger.focus());
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+
+    const option = container.querySelector<HTMLElement>('[aria-label="外观设置"] button');
+    expect(option).not.toBeNull();
+    act(() => option!.focus());
+    expect(document.activeElement).toBe(option);
+
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it('Escape inside the account menu keeps it closed while focus returns to the trigger', () => {
+    renderTopBar({ account: { kind: 'signed-in', username: 'madoka' } });
+    const trigger = [...container.querySelectorAll<HTMLButtonElement>('header button')].find(
+      (button) => button.textContent?.includes('madoka'),
+    )!;
+
+    act(() => trigger.focus());
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+
+    const signOut = [...container.querySelectorAll<HTMLElement>('[aria-label="用户菜单"] button')].find(
+      (button) => button.textContent?.includes('退出登录'),
+    )!;
+    expect(signOut).not.toBeUndefined();
+    act(() => signOut.focus());
+    expect(document.activeElement).toBe(signOut);
+
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(trigger);
+  });
+
   it('one Escape consumes only the topmost layer — drawer above nav dropdown', () => {
     renderTopBar();
 

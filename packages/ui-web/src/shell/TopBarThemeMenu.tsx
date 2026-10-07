@@ -48,7 +48,12 @@ export function TopBarThemeMenu() {
         // 与旧 group-focus-within 等价：指针移出但焦点仍在菜单内时保持展开。
         if (!rootRef.current?.contains(document.activeElement)) setOpen(false);
       }}
-      onFocus={() => setOpen(true)}
+      onFocus={(event) => {
+        // 只有「焦点从层外迁入」才展开：Escape 把焦点还给 trigger 时
+        // relatedTarget 仍在层内，不能把它重新当成打开信号——否则菜单
+        // 项里按 Esc 会关了又开（WCAG 1.4.13 / DESK-PARITY-007）。
+        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(true);
+      }}
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
       }}

@@ -176,7 +176,14 @@ export function ProductTopBar({
                   key={group.id}
                   className="relative"
                   onMouseEnter={() => setOpenGroupId(group.id)}
-                  onFocus={() => setOpenGroupId(group.id)}
+                  onFocus={(event) => {
+                    // 只有「焦点从组外迁入」才展开该组：Escape 把焦点还给本组
+                    // trigger 时 relatedTarget 仍在组内，不能被重新当成打开
+                    // 信号——否则菜单项里按 Esc 会关了又开（DESK-PARITY-007）。
+                    if (!event.currentTarget.contains(event.relatedTarget)) {
+                      setOpenGroupId(group.id);
+                    }
+                  }}
                 >
                   <button
                     ref={(element) => {
