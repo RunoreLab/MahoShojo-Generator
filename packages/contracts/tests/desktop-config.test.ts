@@ -17,6 +17,8 @@ import {
   DESKTOP_CONFIG_DEFAULTS,
   DESKTOP_CONFIG_EXAMPLE,
   DESKTOP_CONFIG_FILE_VERSION,
+  DESKTOP_PUBLIC_CACHE_MIN_BUDGET_BYTES,
+  isDesktopPublicCacheBudget,
   parseDesktopConfigText,
   serializeDesktopConfig,
   type DesktopConfigDocumentExtras,
@@ -50,13 +52,22 @@ describe('desktop config domain', () => {
         announcements: { checkPolicy: 'manual' },
         externalLinks: { confirmContentLinks: false },
         desktop: { escapeMenu: { enabled: false } },
+        publicLibraryCache: {
+          captureEnabled: false,
+          maxBytes: 'unlimited',
+          whenFull: 'evict-least-recently-used',
+        },
       }),
     );
     expect(parsed.fatal).toBe(false);
+    expect(parsed.publicCacheDegraded).toBe(false);
     expect(parsed.values).toEqual({
       announcementsCheckPolicy: 'manual',
       confirmContentLinks: false,
       escapeMenuEnabled: false,
+      publicCacheCaptureEnabled: false,
+      publicCacheMaxBytes: 'unlimited',
+      publicCacheWhenFull: 'evict-least-recently-used',
     });
     expect(parsed.diagnostics).toEqual([]);
   });
@@ -107,29 +118,37 @@ describe('desktop config domain', () => {
     const raw = JSON.stringify({
       version: 1,
       announcements: { checkPolicy: 'manual', futureKey: 1 },
-      publicLibraryCache: { budgetMiB: 512 },
+      publicLibraryCache: { captureEnabled: false, budgetMiB: 512 },
       desktop: { futureDesktopKey: 1, escapeMenu: { enabled: false, futureEscKey: 2 } },
     });
     const parsed = parseDesktopConfigText(raw);
     expect(parsed.fatal).toBe(false);
+    expect(parsed.publicCacheDegraded).toBe(false);
     expect(parsed.values.announcementsCheckPolicy).toBe('manual');
-    // `desktop.escapeMenu.enabled` 自 D5.1-N1 起是已登记字段：被消费而不是被诊断。
+    // `desktop.escapeMenu.enabled` 自 D5.1-N1 起、`publicLibraryCache.*` 自 D5.1-K1 起
+    // 是已登记字段：被消费而不是被诊断；未登记的兄弟键仍按未知字段诊断并保留。
     expect(parsed.values.escapeMenuEnabled).toBe(false);
+    expect(parsed.values.publicCacheCaptureEnabled).toBe(false);
     expect(parsed.diagnostics.map((d) => d.path).sort()).toEqual([
       '$.announcements.futureKey',
       '$.desktop.escapeMenu.futureEscKey',
       '$.desktop.futureDesktopKey',
-      '$.publicLibraryCache',
+      '$.publicLibraryCache.budgetMiB',
     ]);
 
     // 写回：登记的字段更新，未登记键原样保留——UI 保存不得静默删除未知字段。
     const written = serializeDesktopConfig(
-      { announcementsCheckPolicy: 'on-launch', confirmContentLinks: true, escapeMenuEnabled: true },
+      DESKTOP_CONFIG_DEFAULTS,
       parsed.extras,
     );
     const doc = JSON.parse(written) as Record<string, unknown>;
     expect(doc.announcements).toEqual({ checkPolicy: 'on-launch', futureKey: 1 });
-    expect(doc.publicLibraryCache).toEqual({ budgetMiB: 512 });
+    expect(doc.publicLibraryCache).toEqual({
+      budgetMiB: 512,
+      captureEnabled: true,
+      maxBytes: 268435456,
+      whenFull: 'pause',
+    });
     expect(doc.desktop).toEqual({
       futureDesktopKey: 1,
       escapeMenu: { enabled: true, futureEscKey: 2 },
@@ -142,6 +161,58 @@ describe('desktop config domain', () => {
       expect(parsed.fatal, text).toBe(true);
       expect(parsed.values, text).toEqual(DESKTOP_CONFIG_DEFAULTS);
       expect(parsed.diagnostics[0]?.path, text).toBe('$');
+      // 文件不可校验 ⇒ 缓存策略不可校验：消费者必须按暂停运行（DESK-CACHE-008）。
+      expect(parsed.publicCacheDegraded, text).toBe(true);
+    }
+  });
+
+  it('does not degrade the cache group when the group key is absent', () => {
+    const parsed = parseDesktopConfigText('{"version":1}');
+    expect(parsed.publicCacheDegraded).toBe(false);
+    expect(parsed.values.publicCacheCaptureEnabled).toBe(true);
+    expect(parsed.values.publicCacheMaxBytes).toBe(268435456);
+    expect(parsed.values.publicCacheWhenFull).toBe('pause');
+  });
+
+  it('degrades the whole cache policy when any field is invalid', () => {
+    for (const group of [
+      { captureEnabled: 'yes' },
+      { maxBytes: 0 },
+      { maxBytes: -1 },
+      { maxBytes: '512MiB' },
+      { maxBytes: DESKTOP_PUBLIC_CACHE_MIN_BUDGET_BYTES - 1 },
+      { whenFull: 'evict' },
+      'string-not-object',
+      5,
+    ]) {
+      const parsed = parseDesktopConfigText(
+        JSON.stringify({ version: 1, publicLibraryCache: group }),
+      );
+      expect(parsed.publicCacheDegraded, JSON.stringify(group)).toBe(true);
+      // values 仍逐字段归一：暂停语义由 publicCacheDegraded 表达，不篡改字段值。
+      expect(parsed.values).toEqual(DESKTOP_CONFIG_DEFAULTS);
+    }
+  });
+
+  it('keeps valid cache fields but still degrades when a sibling field is invalid', () => {
+    const parsed = parseDesktopConfigText(
+      JSON.stringify({
+        version: 1,
+        publicLibraryCache: { captureEnabled: false, maxBytes: 'unlimited', whenFull: 'maybe' },
+      }),
+    );
+    expect(parsed.publicCacheDegraded).toBe(true);
+    expect(parsed.values.publicCacheCaptureEnabled).toBe(false);
+    expect(parsed.values.publicCacheMaxBytes).toBe('unlimited');
+    expect(parsed.values.publicCacheWhenFull).toBe('pause');
+  });
+
+  it('treats only the exact string "unlimited" as an unbounded budget', () => {
+    for (const value of ['unlimited', 1048576, Number.MAX_SAFE_INTEGER]) {
+      expect(isDesktopPublicCacheBudget(value), JSON.stringify(value)).toBe(true);
+    }
+    for (const value of ['Unlimited', 'unlimted', 'infinite', null, 0, -1, 1.5, 1048575]) {
+      expect(isDesktopPublicCacheBudget(value), JSON.stringify(value)).toBe(false);
     }
   });
 
@@ -150,6 +221,9 @@ describe('desktop config domain', () => {
       announcementsCheckPolicy: 'manual' as const,
       confirmContentLinks: false,
       escapeMenuEnabled: false,
+      publicCacheCaptureEnabled: true,
+      publicCacheMaxBytes: 67108864,
+      publicCacheWhenFull: 'evict-least-recently-used' as const,
     };
     const extras: DesktopConfigDocumentExtras = {
       topLevel: { futureTop: { a: 1 } },
@@ -157,6 +231,7 @@ describe('desktop config domain', () => {
       externalLinks: { futureLink: 'x' },
       desktop: {},
       desktopEscapeMenu: { futureEscKey: 2 },
+      publicLibraryCache: { futureCacheKey: 3 },
     };
     const text = serializeDesktopConfig(values, extras);
     expect(text.endsWith('\n')).toBe(true);
@@ -165,6 +240,12 @@ describe('desktop config domain', () => {
       announcements: { checkPolicy: 'manual' },
       externalLinks: { confirmContentLinks: false, futureLink: 'x' },
       desktop: { escapeMenu: { enabled: false, futureEscKey: 2 } },
+      publicLibraryCache: {
+        futureCacheKey: 3,
+        captureEnabled: true,
+        maxBytes: 67108864,
+        whenFull: 'evict-least-recently-used',
+      },
       futureTop: { a: 1 },
     });
     expect(parseDesktopConfigText(text).values).toEqual(values);

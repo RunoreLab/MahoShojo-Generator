@@ -14,20 +14,50 @@
  *   默认 `true`；非法值按 `true`（更保守）处理并诊断（DESK-PARITY-003）。
  * - `desktop.escapeMenu.enabled`：Esc 快捷菜单开关，boolean，默认 `true`；
  *   非法值按 `true` 处理并诊断（D5.1-N1，DESK-PARITY-007）。
+ * - `publicLibraryCache.captureEnabled` / `maxBytes` / `whenFull`：公开库
+ *   持久缓存策略（D5.1-K1，DESK-CACHE-008）。默认捕获开启、预算 256 MiB、
+ *   满额暂停。该组的降级不是逐字段回默认：任一字段无法校验即整组降级为
+ *   「暂停捕获 + 暂停淘汰」（`publicCacheDegraded`），并留下可定位诊断。
  *
- * 未登记的键（`publicLibraryCache.*` 等）属于各自消费切片的字段，落地前
- * 出现在文件里会产生「未登记字段」诊断——文件仍可使用，未知键原样保留
- * 但不是有效配置。
+ * 未登记的键属于各自消费切片的字段，落地前出现在文件里会产生「未登记
+ * 字段」诊断——文件仍可使用，未知键原样保留但不是有效配置。
  *
- * 安全边界（DESK-SET-006）：这里登记的只是无害展示偏好。服务 origin、
- * secret/header、CSP、IPC capability、Strict/多人资格与签名校验永远不进入
- * 这份文件。
+ * 安全边界（DESK-SET-006）：这里登记的只是无害展示偏好与本地资源策略。
+ * 服务 origin、secret/header、CSP、IPC capability、Strict/多人资格与
+ * 签名校验永远不进入这份文件。
  */
 
 export const DESKTOP_CONFIG_FILE_VERSION = 1;
 
 /** `announcements.checkPolicy` 的合法取值（公告 store 与设置页共用同一字面量）。 */
 export type AnnouncementsCheckPolicy = 'on-launch' | 'manual';
+
+/**
+ * `publicLibraryCache.maxBytes` 的合法域（DESK-CACHE-008）。
+ *
+ * - 有限预算：字节为单位的正整数，最小 1 MiB、上限为 JSON 安全整数；
+ * - `'unlimited'`：显式字符串，表示不设上限——`0`、负数、`null` 与其余
+ *   字符串都是非法值，不是「无限」的别名。
+ */
+export const DESKTOP_PUBLIC_CACHE_MIN_BUDGET_BYTES = 1_048_576;
+export const DESKTOP_PUBLIC_CACHE_DEFAULT_MAX_BYTES = 268_435_456;
+export const DESKTOP_PUBLIC_CACHE_MAX_BUDGET_BYTES = Number.MAX_SAFE_INTEGER;
+export type DesktopPublicCacheBudget = number | 'unlimited';
+
+/** `publicLibraryCache.whenFull` 的合法取值。默认 `pause`；`evict-least-recently-used` 必须用户显式开启。 */
+export type DesktopPublicCacheWhenFull = 'pause' | 'evict-least-recently-used';
+
+export const isDesktopPublicCacheBudget = (value: unknown): value is DesktopPublicCacheBudget =>
+  value === 'unlimited'
+  || (typeof value === 'number'
+    && Number.isInteger(value)
+    && value >= DESKTOP_PUBLIC_CACHE_MIN_BUDGET_BYTES
+    && value <= DESKTOP_PUBLIC_CACHE_MAX_BUDGET_BYTES);
+
+export const isDesktopPublicCacheWhenFull = (
+  value: unknown,
+): value is DesktopPublicCacheWhenFull =>
+  value === 'pause' || value === 'evict-least-recently-used';
 
 /** 设置页可直接使用的取值视图（扁平、与文件键分离）。 */
 export interface DesktopConfigValues {
@@ -37,12 +67,21 @@ export interface DesktopConfigValues {
   readonly confirmContentLinks: boolean;
   /** `desktop.escapeMenu.enabled` */
   readonly escapeMenuEnabled: boolean;
+  /** `publicLibraryCache.captureEnabled` */
+  readonly publicCacheCaptureEnabled: boolean;
+  /** `publicLibraryCache.maxBytes`；`'unlimited'` = 显式不设上限 */
+  readonly publicCacheMaxBytes: DesktopPublicCacheBudget;
+  /** `publicLibraryCache.whenFull` */
+  readonly publicCacheWhenFull: DesktopPublicCacheWhenFull;
 }
 
 export const DESKTOP_CONFIG_DEFAULTS: DesktopConfigValues = {
   announcementsCheckPolicy: 'on-launch',
   confirmContentLinks: true,
   escapeMenuEnabled: true,
+  publicCacheCaptureEnabled: true,
+  publicCacheMaxBytes: DESKTOP_PUBLIC_CACHE_DEFAULT_MAX_BYTES,
+  publicCacheWhenFull: 'pause',
 };
 
 export interface DesktopConfigDiagnostic {
@@ -64,6 +103,8 @@ export interface DesktopConfigDocumentExtras {
   readonly desktop: Readonly<Record<string, unknown>>;
   /** `$.desktop.escapeMenu` 下除 `enabled` 外的未登记键。 */
   readonly desktopEscapeMenu: Readonly<Record<string, unknown>>;
+  /** `$.publicLibraryCache` 下除三个登记字段外的未登记键。 */
+  readonly publicLibraryCache: Readonly<Record<string, unknown>>;
 }
 
 export const DESKTOP_CONFIG_EMPTY_EXTRAS: DesktopConfigDocumentExtras = {
@@ -72,6 +113,7 @@ export const DESKTOP_CONFIG_EMPTY_EXTRAS: DesktopConfigDocumentExtras = {
   externalLinks: {},
   desktop: {},
   desktopEscapeMenu: {},
+  publicLibraryCache: {},
 };
 
 export interface DesktopConfigParseResult {
@@ -84,13 +126,25 @@ export interface DesktopConfigParseResult {
    * 恢复默认），原文靠 native `.bak` 与「不覆盖」规则保留。
    */
   readonly fatal: boolean;
+  /**
+   * `publicLibraryCache` 组存在但任一字段无法校验（或组本身不是对象）：
+   * 生效值已降级为「暂停捕获 + 暂停淘汰」（DESK-CACHE-008）。
+   * 与 `fatal` 分开报告——配置 UI 据此区分「用户关了缓存」与「字段坏了」。
+   */
+  readonly publicCacheDegraded: boolean;
   readonly extras: DesktopConfigDocumentExtras;
 }
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const REGISTERED_TOP_LEVEL_KEYS = new Set(['version', 'announcements', 'externalLinks', 'desktop']);
+const REGISTERED_TOP_LEVEL_KEYS = new Set([
+  'version',
+  'announcements',
+  'externalLinks',
+  'desktop',
+  'publicLibraryCache',
+]);
 
 const collectExtras = (
   group: unknown,
@@ -117,6 +171,8 @@ export const parseDesktopConfigText = (text: string): DesktopConfigParseResult =
     values: DESKTOP_CONFIG_DEFAULTS,
     diagnostics: [...diagnostics, { path: '$', message }],
     fatal: true,
+    // 整份文件不可读 ⇒ 缓存策略同样不可校验——按 DESK-CACHE-008 暂停捕获。
+    publicCacheDegraded: true,
     extras: DESKTOP_CONFIG_EMPTY_EXTRAS,
   });
 
@@ -143,7 +199,15 @@ export const parseDesktopConfigText = (text: string): DesktopConfigParseResult =
     externalLinks: Record<string, unknown>;
     desktop: Record<string, unknown>;
     desktopEscapeMenu: Record<string, unknown>;
-  } = { topLevel: {}, announcements: {}, externalLinks: {}, desktop: {}, desktopEscapeMenu: {} };
+    publicLibraryCache: Record<string, unknown>;
+  } = {
+    topLevel: {},
+    announcements: {},
+    externalLinks: {},
+    desktop: {},
+    desktopEscapeMenu: {},
+    publicLibraryCache: {},
+  };
   for (const key of Object.keys(doc)) {
     if (REGISTERED_TOP_LEVEL_KEYS.has(key)) continue;
     extras.topLevel[key] = doc[key];
@@ -252,10 +316,77 @@ export const parseDesktopConfigText = (text: string): DesktopConfigParseResult =
     }
   }
 
+  // DESK-CACHE-008：该组不是「逐字段回默认」——任一字段无法校验（或组本身
+  // 不是对象）就整组降级为「暂停捕获 + 暂停淘汰」。`values` 仍逐字段如实
+  // 归一（非法值回默认），缓存消费者读到 `publicCacheDegraded` 时必须按
+  // 暂停运行，而不是按这里的字段值运行。
+  let publicCacheCaptureEnabled = DESKTOP_CONFIG_DEFAULTS.publicCacheCaptureEnabled;
+  let publicCacheMaxBytes = DESKTOP_CONFIG_DEFAULTS.publicCacheMaxBytes;
+  let publicCacheWhenFull = DESKTOP_CONFIG_DEFAULTS.publicCacheWhenFull;
+  let publicCacheDegraded = false;
+  if ('publicLibraryCache' in doc) {
+    const markDegraded = (path: string, message: string): void => {
+      diagnostics.push({ path, message });
+      publicCacheDegraded = true;
+    };
+    if (!isPlainObject(doc.publicLibraryCache)) {
+      markDegraded('$.publicLibraryCache', '必须是对象；缓存策略已按「暂停捕获、不淘汰」处理');
+    } else {
+      const group = doc.publicLibraryCache;
+      Object.assign(
+        extras.publicLibraryCache,
+        collectExtras(
+          group,
+          new Set(['captureEnabled', 'maxBytes', 'whenFull']),
+          '$.publicLibraryCache',
+          diagnostics,
+        ),
+      );
+      if (group.captureEnabled !== undefined) {
+        if (typeof group.captureEnabled === 'boolean') {
+          publicCacheCaptureEnabled = group.captureEnabled;
+        } else {
+          markDegraded(
+            '$.publicLibraryCache.captureEnabled',
+            '非法值；缓存策略已按「暂停捕获、不淘汰」处理',
+          );
+        }
+      }
+      if (group.maxBytes !== undefined) {
+        if (isDesktopPublicCacheBudget(group.maxBytes)) {
+          publicCacheMaxBytes = group.maxBytes;
+        } else {
+          markDegraded(
+            '$.publicLibraryCache.maxBytes',
+            `非法值（应为 >= ${DESKTOP_PUBLIC_CACHE_MIN_BUDGET_BYTES} 的整数或 "unlimited"）；缓存策略已按「暂停捕获、不淘汰」处理`,
+          );
+        }
+      }
+      if (group.whenFull !== undefined) {
+        if (isDesktopPublicCacheWhenFull(group.whenFull)) {
+          publicCacheWhenFull = group.whenFull;
+        } else {
+          markDegraded(
+            '$.publicLibraryCache.whenFull',
+            '非法值（"pause" | "evict-least-recently-used"）；缓存策略已按「暂停捕获、不淘汰」处理',
+          );
+        }
+      }
+    }
+  }
+
   return {
-    values: { announcementsCheckPolicy, confirmContentLinks, escapeMenuEnabled },
+    values: {
+      announcementsCheckPolicy,
+      confirmContentLinks,
+      escapeMenuEnabled,
+      publicCacheCaptureEnabled,
+      publicCacheMaxBytes,
+      publicCacheWhenFull,
+    },
     diagnostics,
     fatal: false,
+    publicCacheDegraded,
     extras,
   };
 };
@@ -285,6 +416,12 @@ export const serializeDesktopConfig = (
           ...extras?.desktopEscapeMenu,
           enabled: values.escapeMenuEnabled,
         },
+      },
+      publicLibraryCache: {
+        ...extras?.publicLibraryCache,
+        captureEnabled: values.publicCacheCaptureEnabled,
+        maxBytes: values.publicCacheMaxBytes,
+        whenFull: values.publicCacheWhenFull,
       },
       ...extras?.topLevel,
     },

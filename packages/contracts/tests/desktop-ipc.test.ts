@@ -759,3 +759,88 @@ describe('Desktop Web Package 受限 webview IPC 契约（D4b）', () => {
     expect(DesktopWebPackageInstanceIdSchema.safeParse('wpk-99999999999999999').success).toBe(false);
   });
 });
+
+
+describe('公开库持久缓存命令（D5.1-K1）', () => {
+  it('策略推送只接受三个已登记字段与合法域', () => {
+    const { DesktopPublicCachePolicySchema } = desktopIpc;
+    expect(DesktopPublicCachePolicySchema.safeParse({
+      captureEnabled: true,
+      maxBytes: 268435456,
+      whenFull: 'pause',
+    }).success).toBe(true);
+    expect(DesktopPublicCachePolicySchema.safeParse({
+      captureEnabled: false,
+      maxBytes: 'unlimited',
+      whenFull: 'evict-least-recently-used',
+    }).success).toBe(true);
+
+    // 0 / 负数 / 非整数 / 未知字符串都不是「无限」——按非法推送拒绝。
+    for (const maxBytes of [0, -1, 1.5, '512MiB', 'Infinite', null]) {
+      expect(DesktopPublicCachePolicySchema.safeParse({
+        captureEnabled: true,
+        maxBytes,
+        whenFull: 'pause',
+      }).success, JSON.stringify(maxBytes)).toBe(false);
+    }
+    expect(DesktopPublicCachePolicySchema.safeParse({
+      captureEnabled: true,
+      maxBytes: 268435456,
+      whenFull: 'evict',
+    }).success).toBe(false);
+    expect(DesktopPublicCachePolicySchema.safeParse({
+      captureEnabled: true,
+      maxBytes: 268435456,
+      whenFull: 'pause',
+      origin: 'https://evil.example.com',
+    }).success).toBe(false);
+  });
+
+  it('统计与清理结果的 envelope 形状', () => {
+    const {
+      DesktopPublicCacheStatsSchema,
+      DesktopPublicCacheClearResultSchema,
+      DesktopPublicCacheErrorSchema,
+    } = desktopIpc;
+    const policy = { captureEnabled: true, maxBytes: 268435456, whenFull: 'pause' };
+    for (const status of ['empty', 'ready', 'unavailable', 'unsupported-schema']) {
+      expect(DesktopPublicCacheStatsSchema.safeParse({
+        status,
+        path: '/data/public-read-cache.sqlite',
+        usageBytes: 1024,
+        entryCount: 3,
+        summaryCount: 2,
+        bodyCount: 1,
+        withdrawnCount: 0,
+        appliedPolicy: policy,
+      }).success, status).toBe(true);
+    }
+    expect(DesktopPublicCacheStatsSchema.safeParse({
+      status: 'corrupt',
+      path: '/data/public-read-cache.sqlite',
+      usageBytes: 0,
+      entryCount: 0,
+      summaryCount: 0,
+      bodyCount: 0,
+      withdrawnCount: 0,
+      appliedPolicy: policy,
+    }).success).toBe(false);
+    expect(DesktopPublicCacheClearResultSchema.safeParse({
+      removedEntries: 5,
+      freedBytes: 9999,
+    }).success).toBe(true);
+    expect(DesktopPublicCacheClearResultSchema.safeParse({
+      removedEntries: 5,
+      freedBytes: 9999,
+      path: 'C:/anywhere',
+    }).success).toBe(false);
+    expect(DesktopPublicCacheErrorSchema.safeParse({
+      code: 'storage-unavailable',
+      message: 'cache db open failed',
+    }).success).toBe(true);
+    expect(DesktopPublicCacheErrorSchema.safeParse({
+      code: 'config-conflict',
+      message: 'not a cache error code',
+    }).success).toBe(false);
+  });
+});

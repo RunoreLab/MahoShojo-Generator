@@ -1,6 +1,10 @@
 import { z } from './zod';
 
 import { AnnouncementListSchema } from './announcements';
+import {
+  DESKTOP_PUBLIC_CACHE_MAX_BUDGET_BYTES,
+  DESKTOP_PUBLIC_CACHE_MIN_BUDGET_BYTES,
+} from './desktop-config';
 import { MAX_SECRET_REF_LENGTH, SECRET_REF_PATTERN, SecretRefSchema, isSecretRef } from './secret-ref';
 import { WebPackageMediaTypeSchema, WebPackagePathSchema } from './web-package';
 import { utf8ByteLimitedStringSchema } from './wire-size';
@@ -1108,3 +1112,90 @@ export const DesktopConfigErrorSchema = z
   })
   .strict();
 export type DesktopConfigError = z.infer<typeof DesktopConfigErrorSchema>;
+
+/* ── 公开库持久缓存（D5.1-K1，DESK-CACHE-004/006/008）────────────── */
+
+/**
+ * `public_read_cache_apply_policy` 的策略推送。
+ *
+ * renderer 把 `config.json` 归一后的**生效**策略推给 native——文件级降级
+ * （`publicCacheDegraded`、fatal、读失败）已在这一步收口为「暂停捕获 +
+ * 暂停淘汰」，native 不读配置文件、也不再做第二次域判定。
+ * `maxBytes: 'unlimited'` 只能由显式字符串表达（`0`/负数/未知值在
+ * schema 层就是非法推送，不会被当成「无限」放行）。
+ */
+export const DesktopPublicCachePolicySchema = z
+  .object({
+    captureEnabled: z.boolean(),
+    maxBytes: z.union([
+      z
+        .number()
+        .int()
+        .min(DESKTOP_PUBLIC_CACHE_MIN_BUDGET_BYTES)
+        .max(DESKTOP_PUBLIC_CACHE_MAX_BUDGET_BYTES),
+      z.literal('unlimited'),
+    ]),
+    whenFull: z.enum(['pause', 'evict-least-recently-used']),
+  })
+  .strict();
+export type DesktopPublicCachePolicy = z.infer<typeof DesktopPublicCachePolicySchema>;
+
+/**
+ * `public_read_cache_stats` 的缓存状态。
+ *
+ * - `empty`：缓存文件尚未建立（还没有任何公开读取产生捕获）；
+ * - `ready`：库可读写；
+ * - `unavailable`：打开/读写失败，缓存降级停用但不影响正式本地库；
+ * - `unsupported-schema`：磁盘上是更高 schema 版本（来自更新版本的应用），
+ *   本次进程不写入也不删除，防止降级读写损坏。
+ */
+export const DesktopPublicCacheStatusSchema = z.enum([
+  'empty',
+  'ready',
+  'unavailable',
+  'unsupported-schema',
+]);
+export type DesktopPublicCacheStatus = z.infer<typeof DesktopPublicCacheStatusSchema>;
+
+export const DesktopPublicCacheStatsSchema = z
+  .object({
+    status: DesktopPublicCacheStatusSchema,
+    /** 缓存 SQLite 的绝对路径——只由 native 回显，设置页展示用。 */
+    path: z.string().min(1),
+    usageBytes: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    /** 可见条目（`availability = 'known'`）总数；不含撤回标记。 */
+    entryCount: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    /** 持有公开摘要的条目数。 */
+    summaryCount: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    /** 持有完整正文的条目数（离线可打开正文的数量口径）。 */
+    bodyCount: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    /** 已确认撤回的占位条目数（只保留失效信息，不占用预算口径的正文）。 */
+    withdrawnCount: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    /** native 当前实际运行的策略——推送失败/未推送时与文件值可能不同，如实回显。 */
+    appliedPolicy: DesktopPublicCachePolicySchema,
+  })
+  .strict();
+export type DesktopPublicCacheStats = z.infer<typeof DesktopPublicCacheStatsSchema>;
+
+export const DesktopPublicCacheClearResultSchema = z
+  .object({
+    removedEntries: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    freedBytes: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  })
+  .strict();
+export type DesktopPublicCacheClearResult = z.infer<typeof DesktopPublicCacheClearResultSchema>;
+
+export const DesktopPublicCacheErrorCodeSchema = z.enum([
+  'invalid-request',
+  'storage-unavailable',
+  'internal-error',
+]);
+export type DesktopPublicCacheErrorCode = z.infer<typeof DesktopPublicCacheErrorCodeSchema>;
+
+export const DesktopPublicCacheErrorSchema = z
+  .object({
+    code: DesktopPublicCacheErrorCodeSchema,
+    message: z.string().min(1).max(512),
+  })
+  .strict();
+export type DesktopPublicCacheError = z.infer<typeof DesktopPublicCacheErrorSchema>;

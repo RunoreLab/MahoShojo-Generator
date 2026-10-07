@@ -422,13 +422,112 @@ export const DesktopCardLibraryRequestSchema = z.object({
 export type DesktopCardLibraryRequest = z.infer<typeof DesktopCardLibraryRequestSchema>;
 
 /**
+ * 公开摘要响应允许进入持久缓存的字段白名单（D5.1-K1，DESK-CACHE-004）。
+ *
+ * `favorited_at` 等账号关系字段刻意**不在**名单内——公开摘要接口里它恒为
+ * null，但若服务端哪天开始回传真实收藏关系，白名单会让它进不了缓存，
+ * 而不是跟着响应一起落盘。native 按 fixture `cardLibrary.publicReadCache`
+ * 投影；本常量是该名单的 TS 镜像，fixture 对拍测试保证两侧不漂移。
+ */
+export const DESKTOP_PUBLIC_CACHE_SUMMARY_FIELDS = [
+  'id',
+  'user_id',
+  'type',
+  'name',
+  'description',
+  'is_public',
+  'review_status',
+  'created_at',
+  'updated_at',
+  'usage_count',
+  'like_count',
+  'favorite_count',
+  'is_recommended',
+  'username',
+  'roleType',
+  'nativeAllowed',
+  'has_pending_update',
+  'tag_ids',
+  'isLegacyQuestionnaire',
+] as const;
+
+/**
+ * 单卡完整响应允许进入持久缓存的字段白名单。`deleted_at`、软删内部字段与
+ * 任何身份/凭据字段刻意不在内——缓存只保留「公开卡本体」。
+ */
+export const DESKTOP_PUBLIC_CACHE_CARD_FIELDS = [
+  'id',
+  'user_id',
+  'type',
+  'name',
+  'description',
+  'data',
+  'is_public',
+  'public_since',
+  'review_status',
+  'is_recommended',
+  'usage_count',
+  'like_count',
+  'favorite_count',
+  'created_at',
+  'updated_at',
+  'username',
+  'tag_ids',
+  'tagIds',
+] as const;
+
+/**
+ * `public-data-cards.query` 响应附带的公开缓存捕获结果（D5.1-K1，
+ * DESK-CACHE-004..008）。native 在写盘前按受控投影与并发守卫收口——
+ * 这个枚举是「这次响应与缓存的关系」的如实报告，不代表业务成败：
+ *
+ * - `captured`/`partial`：安全投影已全部/部分写入持久缓存；
+ * - `paused`：预算满且策略为暂停（或缓存策略已降级）——新读取未进缓存；
+ * - `disabled`：`publicLibraryCache.captureEnabled` 关闭；
+ * - `unavailable`：缓存库不可用（打开/schema/IO 失败），在线结果不受影响；
+ * - `withdrawn`：业务级 404 已确认——对应卡已从公开缓存可见集移出；
+ * - `stale`：响应早于一次清理/禁用/撤回，被 epoch/revision 守卫丢弃；
+ * - `ignored`：响应对缓存不可分类（非 200/404、无公开存储许可或形状不符）。
+ */
+export const DesktopCardLibraryCacheOutcomeSchema = z.enum([
+  'captured',
+  'partial',
+  'paused',
+  'disabled',
+  'unavailable',
+  'withdrawn',
+  'stale',
+  'ignored',
+]);
+export type DesktopCardLibraryCacheOutcome = z.infer<
+  typeof DesktopCardLibraryCacheOutcomeSchema
+>;
+
+export const DesktopCardLibraryCacheReportSchema = z
+  .object({
+    outcome: DesktopCardLibraryCacheOutcomeSchema,
+    /** 本次实际写入持久缓存的条目数。 */
+    captured: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    /** 被跳过的条目数（投影不合法、预算不足或并发守卫拒绝）。 */
+    skipped: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  })
+  .strict();
+export type DesktopCardLibraryCacheReport = z.infer<
+  typeof DesktopCardLibraryCacheReportSchema
+>;
+
+/**
  * 数据卡库 IPC 输出。业务响应体的形状因路由而异，契约层只保证
  * 「HTTP 状态 + JSON 正文」；各路由的业务校验在 renderer 适配层完成
  * （失败统一投影为传输/契约错误，不冒充业务失败）。
+ *
+ * `cache` 只出现在可缓存的公开路由（`public-data-cards.query`）上；
+ * 其余路由与不参与捕获的响应没有该字段。
  */
 export const DesktopCardLibraryResponseSchema = z.object({
   status: z.number().int().min(100).max(599),
   body: SafeJsonValueSchema,
+  cache: DesktopCardLibraryCacheReportSchema.optional(),
 }).strict();
 export type DesktopCardLibraryResponse = z.infer<typeof DesktopCardLibraryResponseSchema>;
 

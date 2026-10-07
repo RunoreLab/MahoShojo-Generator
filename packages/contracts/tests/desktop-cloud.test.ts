@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   DESKTOP_AUTH_AUTHORIZE_PATH,
+  DESKTOP_PUBLIC_CACHE_CARD_FIELDS,
+  DESKTOP_PUBLIC_CACHE_SUMMARY_FIELDS,
   DESKTOP_AUTH_CODE_CHALLENGE_LENGTH,
   DESKTOP_AUTH_CODE_LENGTH,
   DESKTOP_AUTH_EXCHANGE_PATH,
@@ -22,6 +24,7 @@ import {
   DesktopAuthGrantResponseSchema,
   DesktopAuthStateSchema,
   DesktopAuthorizeQuerySchema,
+  DesktopCardLibraryResponseSchema,
   DesktopCloudErrorCodeSchema,
   DesktopCloudLoginOutcomeSchema,
   DesktopCloudMeProfileSchema,
@@ -39,6 +42,7 @@ import {
   MIN_DESKTOP_AUTH_CODE_VERIFIER_LENGTH,
   isDesktopLoopbackRedirectUri,
 } from '../src/desktop-cloud';
+import { DataCardSummarySchema } from '../src/data-cards';
 
 /**
  * `desktop-cloud.json` 是 `desktop-auth-v1` 窄协议两侧（TS 与 Rust）共同读取的
@@ -57,6 +61,20 @@ type DesktopCloudFixture = {
   invalidRedirectUris: string[];
   validAuthorizeQuery: Record<string, unknown>;
   invalidAuthorizeQueries: Record<string, unknown>[];
+  cardLibrary: {
+    routes: Record<string, { method: string; path: string; auth: string }>;
+    publicReadCache: {
+      sourceRouteId: string;
+      singleCardQueryKey: string;
+      summaryViewQueryKey: string;
+      summaryViewQueryValue: string;
+      requiredCacheControlToken: string;
+      forbiddenCacheControlTokens: string[];
+      withdrawalStatus: number;
+      summaryFields: string[];
+      cardFields: string[];
+    };
+  };
 };
 
 const fixture: DesktopCloudFixture = JSON.parse(
@@ -370,5 +388,67 @@ describe('renderer IPC 投影', () => {
       reachable: false,
       compatible: null,
     }).success).toBe(true);
+  });
+});
+
+describe('公开库持久缓存投影（D5.1-K1）', () => {
+  const cache = fixture.cardLibrary.publicReadCache;
+
+  it('缓存来源固定在 public-data-cards.query，且该路由是 optional 公开读', () => {
+    expect(cache.sourceRouteId).toBe('public-data-cards.query');
+    const route = fixture.cardLibrary.routes[cache.sourceRouteId];
+    expect(route.method).toBe('GET');
+    expect(route.auth).toBe('optional');
+  });
+
+  it('投影白名单与 fixture 同步，且摘要不越出共享 schema 字段集', () => {
+    expect(cache.summaryFields).toEqual([...DESKTOP_PUBLIC_CACHE_SUMMARY_FIELDS]);
+    expect(cache.cardFields).toEqual([...DESKTOP_PUBLIC_CACHE_CARD_FIELDS]);
+
+    // 白名单必须落在共享摘要 schema 已声明的字段内——服务端 schema 收窄时
+    // 缓存投影不能继续读已不存在的键。
+    const summaryKeys = new Set(Object.keys(DataCardSummarySchema.shape));
+    for (const field of cache.summaryFields) {
+      expect(summaryKeys.has(field), `${field} 必须在 DataCardSummarySchema 中`).toBe(true);
+    }
+    // 账号关系字段不属于公开持久投影。
+    expect(cache.summaryFields).not.toContain('favorited_at');
+    expect(cache.cardFields).not.toContain('deleted_at');
+  });
+
+  it('缓存存储许可与撤回信号在 fixture 中被钉住', () => {
+    expect(cache.requiredCacheControlToken).toBe('public');
+    for (const token of cache.forbiddenCacheControlTokens) {
+      expect(['no-store', 'private', 'no-cache']).toContain(token);
+    }
+    expect(cache.withdrawalStatus).toBe(404);
+  });
+
+  it('卡库响应的 cache 报告字段是可选且 strict 的', () => {
+    expect(DesktopCardLibraryResponseSchema.safeParse({
+      status: 200,
+      body: { success: true, cards: [] },
+    }).success).toBe(true);
+    expect(DesktopCardLibraryResponseSchema.safeParse({
+      status: 200,
+      body: { success: true, cards: [] },
+      cache: { outcome: 'captured', captured: 2, skipped: 0 },
+    }).success).toBe(true);
+    expect(DesktopCardLibraryResponseSchema.safeParse({
+      status: 404,
+      body: { success: false },
+      cache: { outcome: 'withdrawn', captured: 0, skipped: 0 },
+    }).success).toBe(true);
+    // 未知 outcome / 未知字段一律拒绝。
+    expect(DesktopCardLibraryResponseSchema.safeParse({
+      status: 200,
+      body: {},
+      cache: { outcome: 'cached', captured: 0, skipped: 0 },
+    }).success).toBe(false);
+    expect(DesktopCardLibraryResponseSchema.safeParse({
+      status: 200,
+      body: {},
+      cache: { outcome: 'captured', captured: 0, skipped: 0, extra: 1 },
+    }).success).toBe(false);
   });
 });
