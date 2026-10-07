@@ -181,11 +181,38 @@ describe('messages api adapters', () => {
     expect(page.nextCursor).toBe('c1');
   });
 
-  it('markMessagesRead 发送 ids 数组', async () => {
+  it('markMessagesRead 发送 ids 数组并按契约校验响应', async () => {
     const invoke = vi.fn(async () => ({ status: 200, body: { markedCount: 1, ignoredCount: 0 } }));
-    await markMessagesRead(invoke, ['user:12']);
+    await expect(markMessagesRead(invoke, ['user:12'])).resolves.toEqual({
+      markedCount: 1,
+      ignoredCount: 0,
+    });
     expect(invoke).toHaveBeenCalledWith(MESSAGES_REQUEST_COMMAND, {
       request: { routeId: 'messages.read', body: { ids: ['user:12'] } },
+    });
+  });
+
+  it('markAllMessagesRead 按契约校验响应', async () => {
+    const invoke = vi.fn(async () => ({
+      status: 200,
+      body: { markedUserMessageCount: 2, advancedSiteCursorTo: 40 },
+    }));
+    await expect(markAllMessagesRead(invoke)).resolves.toEqual({
+      markedUserMessageCount: 2,
+      advancedSiteCursorTo: 40,
+    });
+  });
+
+  it('已读路由对不满足契约的正文拒收', async () => {
+    const badRead = vi.fn(async () => ({ status: 200, body: { ok: true } }));
+    await expect(markMessagesRead(badRead, ['user:12'])).rejects.toMatchObject({
+      name: 'MessagesApiError',
+      status: 0,
+    });
+    const badAll = vi.fn(async () => ({ status: 200, body: null }));
+    await expect(markAllMessagesRead(badAll)).rejects.toMatchObject({
+      name: 'MessagesApiError',
+      status: 0,
     });
   });
 });

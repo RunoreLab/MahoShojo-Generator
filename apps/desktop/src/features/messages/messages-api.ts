@@ -1,5 +1,16 @@
-import { MessageListSchema, MessageSummarySchema } from '@mahoshojo/contracts/messages';
-import type { MessageFilter, MessageListDto, MessageSummaryDto } from '@mahoshojo/contracts/messages';
+import {
+  MessageListSchema,
+  MessageMarkAllReadResultSchema,
+  MessageMarkReadResultSchema,
+  MessageSummarySchema,
+} from '@mahoshojo/contracts/messages';
+import type {
+  MessageFilter,
+  MessageListDto,
+  MessageMarkAllReadResult,
+  MessageMarkReadResult,
+  MessageSummaryDto,
+} from '@mahoshojo/contracts/messages';
 
 import { requestMessagesRoute } from '../../platform/messages-bridge';
 import { DesktopCloudError, type InvokeFn } from '../../platform/cloud-bridge';
@@ -118,16 +129,26 @@ export const listMessages = async (
 export const markMessagesRead = async (
   invoke: InvokeFn,
   ids: readonly string[],
-): Promise<void> => {
+): Promise<MessageMarkReadResult> => {
   const response = await requestMessagesRoute(invoke, {
     routeId: 'messages.read',
     body: { ids: [...ids] },
   });
   requireOk(response.status, '标记已读失败');
+  const parsed = MessageMarkReadResultSchema.safeParse(response.body);
+  if (!parsed.success) {
+    throw new MessagesApiError(0, '标记已读响应不符合契约');
+  }
+  return parsed.data;
 };
 
 /** 全部标记已读（Required 路由——同时推进全站游标）。 */
-export const markAllMessagesRead = async (invoke: InvokeFn): Promise<void> => {
+export const markAllMessagesRead = async (invoke: InvokeFn): Promise<MessageMarkAllReadResult> => {
   const response = await requestMessagesRoute(invoke, { routeId: 'messages.read-all' });
   requireOk(response.status, '全部已读失败');
+  const parsed = MessageMarkAllReadResultSchema.safeParse(response.body);
+  if (!parsed.success) {
+    throw new MessagesApiError(0, '全部已读响应不符合契约');
+  }
+  return parsed.data;
 };
