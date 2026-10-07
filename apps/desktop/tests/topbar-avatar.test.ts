@@ -226,4 +226,37 @@ describe('topbar avatar cache', () => {
     expect(refetch).toHaveBeenCalledTimes(1);
     expect(getTopbarAvatar(7)).toBe(WEBP_AVATAR);
   });
+
+  it('旧世代在途请求不挡新世代拉取（d-1-r1 快速重登竞态）', async () => {
+    // 与消息摘要同一竞态：旧请求在途时推进世代，新世代 ensure 必须立刻
+    // 发起新请求——否则旧响应被世代闸丢弃后无人补拉，头像空白到下一次
+    // 挂载/可见性刷新。
+    let releaseOld = (): void => {
+      throw new Error('release not captured');
+    };
+    const slowInvoke = vi.fn(
+      async () =>
+        new Promise<{ userId: number; avatarDataUrl: string }>((resolve) => {
+          releaseOld = () => resolve({ userId: 7, avatarDataUrl: WEBP_AVATAR });
+        }),
+    ) as unknown as InvokeFn;
+
+    ensureTopbarAvatar(7, slowInvoke);
+    invalidateTopbarAvatar(7);
+
+    const freshInvoke = vi.fn(async () => ({
+      userId: 7,
+      avatarDataUrl: WEBP_AVATAR,
+    })) as unknown as InvokeFn;
+    ensureTopbarAvatar(7, freshInvoke);
+    await flush();
+
+    expect(freshInvoke).toHaveBeenCalledTimes(1);
+    expect(getTopbarAvatar(7)).toBe(WEBP_AVATAR);
+
+    // 旧响应迟到结算：世代闸丢弃，且不得误删新请求的登记。
+    releaseOld();
+    await flush();
+    expect(getTopbarAvatar(7)).toBe(WEBP_AVATAR);
+  });
 });

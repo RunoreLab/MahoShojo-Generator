@@ -258,6 +258,68 @@ describe('topbar messages summary cache', () => {
     expect(getMessagesSummaryEntry(7)).toBeNull();
   });
 
+  it('旧世代在途请求不挡新世代拉取（d-1-r1 快速重登竞态）', async () => {
+    // 旧请求仍在途时登出/换号推进世代：新世代 ensure 必须立刻发起新请求，
+    // 而不是被旧 inflight 挡住——否则旧响应被世代闸丢弃后无人补取，
+    // 摘要一直空白到下一次挂载/可见性刷新。
+    let releaseOld = (): void => {
+      throw new Error('release not captured');
+    };
+    const slowInvoke = vi.fn(
+      async () =>
+        new Promise<{ status: number; body: unknown }>((resolve) => {
+          releaseOld = () => resolve({ status: 200, body: SUMMARY });
+        }),
+    ) as unknown as InvokeFn;
+
+    ensureMessagesSummary(7, slowInvoke);
+    invalidateMessagesSummary(7);
+
+    const freshInvoke = vi.fn(async () => ({
+      status: 200,
+      body: { ...SUMMARY, unreadTotal: 5 },
+    })) as unknown as InvokeFn;
+    ensureMessagesSummary(7, freshInvoke);
+    await flush();
+
+    expect(freshInvoke).toHaveBeenCalledTimes(1);
+    expect(getTopbarMessagesProjection(7).unreadTotal).toBe(5);
+
+    // 旧响应迟到结算：世代闸丢弃，且不得误删新请求的登记。
+    releaseOld();
+    await flush();
+    expect(getTopbarMessagesProjection(7).unreadTotal).toBe(5);
+  });
+
+  it('refresh 在 pre-mutation 请求在途时保证一次写后读取（d-1-r1）', async () => {
+    // 已读操作要求「写后读取」：在途请求读的是 pre-mutation 状态，refresh
+    // 只等它结算不算刷新——必须在其后再取一次拿到真实未读数。
+    let releaseFirst = (): void => {
+      throw new Error('release not captured');
+    };
+    let calls = 0;
+    const invoke = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) {
+        return new Promise<{ status: number; body: unknown }>((resolve) => {
+          releaseFirst = () => resolve({ status: 200, body: SUMMARY });
+        });
+      }
+      return {
+        status: 200,
+        body: { ...SUMMARY, unreadTotal: 0, siteUnread: 0, directUnread: 0 },
+      };
+    }) as unknown as InvokeFn;
+
+    ensureMessagesSummary(7, invoke);
+    const refreshPromise = refreshMessagesSummary(7, invoke);
+    releaseFirst();
+    await refreshPromise;
+
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(getTopbarMessagesProjection(7).unreadTotal).toBe(0);
+  });
+
   it('reports not-authenticated once via onSessionRejected; api failures stay silent', async () => {
     const rejected = vi.fn();
     const notAuth = vi.fn(async () => {

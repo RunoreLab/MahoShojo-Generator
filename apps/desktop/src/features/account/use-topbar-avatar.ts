@@ -21,7 +21,11 @@ import { DesktopCloudError, readMyProfile, type InvokeFn } from '../../platform/
 
 const avatars = new Map<number, string>();
 const checked = new Set<number>();
-const inflight = new Set<number>();
+// 在途请求按世代登记（d-1-r1）：裸 `Set<userId>` 会让旧世代在途请求挡住
+// 新世代——快速重登后旧响应被世代闸丢弃、新请求又从未发出，头像会空白到
+// 下一次挂载。登记世代 + token 后：同世代幂等、跨世代放行，旧请求结算只
+// 清自己的槽。
+const inflight = new Map<number, { generation: number; token: object }>();
 // 每 userId 的世代号：invalidate 时 +1；在途请求带回发起时的世代，
 // 结算时世代不一致即丢弃，防止旧响应复活刚被失效的缓存槽。
 const generations = new Map<number, number>();
@@ -58,9 +62,13 @@ export const ensureTopbarAvatar = (
   invoke: InvokeFn = tauriInvoke,
   onSessionRejected?: () => void,
 ): void => {
-  if (checked.has(userId) || inflight.has(userId)) return;
+  if (checked.has(userId)) return;
   const generation = generations.get(userId) ?? 0;
-  inflight.add(userId);
+  const current = inflight.get(userId);
+  // 同世代在途即幂等；旧世代请求不挡路——等它等于无人补拉。
+  if (current !== undefined && current.generation === generation) return;
+  const token = {};
+  inflight.set(userId, { generation, token });
   void readMyProfile(invoke)
     .then((profile) => {
       // stale-response fence 两道闸：响应携带的账号 id（native 按当前
@@ -84,7 +92,10 @@ export const ensureTopbarAvatar = (
       }
     })
     .finally(() => {
-      inflight.delete(userId);
+      // token 闸：只清自己的槽——旧世代请求不得误删新请求的登记。
+      if (inflight.get(userId)?.token === token) {
+        inflight.delete(userId);
+      }
       notify();
     });
 };
