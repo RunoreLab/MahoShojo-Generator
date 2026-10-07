@@ -29,3 +29,5 @@ allowBuilds:
 peerDependencyRules:
   allowedVersions:
     next: 16.3.8
+minimumReleaseAgeExclude:
+  - '@opennextjs/cloudflare@1.20.9'
