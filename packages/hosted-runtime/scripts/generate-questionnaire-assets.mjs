@@ -4,8 +4,10 @@ import { fileURLToPath } from 'node:url';
 
 const packageDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const repositoryRoot = path.resolve(packageDirectory, '..', '..');
-const publicDirectory = path.join(repositoryRoot, 'apps', 'web', 'public');
-const indexPath = path.join(publicDirectory, 'questionnaires', 'presets', 'index.json');
+// 问卷预设的权威源是仓库根 content/；apps/web/public/ 副本由内容生成器在 dev/build 时产出，
+// 在干净检出上不存在（MONO-006）。本脚本会在 workspace:build 的 --check 里跑，一律读权威源。
+const contentDirectory = path.join(repositoryRoot, 'content');
+const indexPath = path.join(contentDirectory, 'questionnaires', 'presets', 'index.json');
 const outputPath = path.join(packageDirectory, 'src', 'generated', 'questionnaire-presets.ts');
 
 const index = JSON.parse(readFileSync(indexPath, 'utf8'));
@@ -41,11 +43,7 @@ if (new Set(publicPaths).size !== publicPaths.length) {
 }
 const assets = Object.fromEntries(entries.map((entry, entryIndex) => {
   const publicPath = publicPaths[entryIndex];
-  // 已共源的问卷直接读取权威，不能依赖 Web dev/build 才存在的 public 副本。
-  const sourceDirectory = publicPath === '/questionnaires/presets/magical-girl-default.json'
-    ? path.join(repositoryRoot, 'content')
-    : publicDirectory;
-  return [publicPath, JSON.parse(readFileSync(path.join(sourceDirectory, publicPath), 'utf8'))];
+  return [publicPath, JSON.parse(readFileSync(path.join(contentDirectory, publicPath), 'utf8'))];
 }));
 if (JSON.stringify(Object.keys(assets)) !== JSON.stringify(publicPaths)) {
   throw new Error('questionnaire preset index 与生成资产 path 不一致');

@@ -106,17 +106,21 @@ describe('apps/web 与 hosted-runtime compatibility 边界', () => {
     }
   });
 
-  test('Web public 与服务器运行时使用逐字一致的受审静态资产镜像', () => {
+  test('受审静态资产在运行时镜像与各自权威源间逐字一致', () => {
+    // 两类资产的权威源不同：build-rules 的权威源就是 apps/web/public/（随库提交的静态资产），
+    // 问卷预设的权威源是仓库根 content/——apps/*/public/ 副本是内容生成器的构建期产物，
+    // 在干净检出（CI）上不存在（MONO-006）。「content/ ↔ public/ 逐字节一致」已由
+    // tests/encyclopedia-content.test.ts 的生成门禁覆盖，这里比对到权威源即可传递等价性。
     for (const [publicAsset, packageAsset] of assetMirrors) {
       expect(existsSync(path.join(ROOT_DIRECTORY, packageAsset))).toBe(true);
       expect(read(packageAsset)).toBe(read(publicAsset));
     }
     expect(QUESTIONNAIRE_PRESET_INDEX).toEqual(
-      JSON.parse(read('apps/web/public/questionnaires/presets/index.json')),
+      JSON.parse(read('content/questionnaires/presets/index.json')),
     );
     for (const preset of QUESTIONNAIRE_PRESET_INDEX.presets) {
       expect(loadQuestionnairePresetAsset(preset.path)).toEqual(
-        JSON.parse(read(`${preset.path === '/questionnaires/presets/magical-girl-default.json' ? 'content' : 'apps/web/public'}${preset.path}`)),
+        JSON.parse(read(`content${preset.path}`)),
       );
     }
   });
