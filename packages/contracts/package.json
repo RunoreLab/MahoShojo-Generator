@@ -39,6 +39,11 @@
       "import": "./src/desktop-cloud.ts",
       "default": "./src/desktop-cloud.ts"
     },
+    "./desktop-config": {
+      "types": "./src/desktop-config.ts",
+      "import": "./src/desktop-config.ts",
+      "default": "./src/desktop-config.ts"
+    },
     "./announcements": {
       "types": "./src/announcements.ts",
       "import": "./src/announcements.ts",

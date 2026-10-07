@@ -1005,3 +1005,106 @@ export const DesktopAnnouncementsErrorSchema = z
 export type DesktopAnnouncementsError = z.infer<
   typeof DesktopAnnouncementsErrorSchema
 >;
+
+/* ── 人工配置 config.json（D5.1-S2，DESK-SET-004..006）─────────────── */
+
+/**
+ * `config.json` 读写的 IPC 信封。域语义（字段登记、默认值、非法值降级与
+ * 诊断）在 `./desktop-config`——native 只管字节有界、路径固定、revision
+ * 复核与原子替换，不复制那份领域实现。
+ */
+
+/**
+ * 内容级变更标识：native 对落盘字节计算 `sha256:<hex>`。UI 保存携带读取时
+ * 的 revision，native 串行写入并在替换前复核——外部改动返回
+ * `config-conflict`，不静默覆盖（DESK-SET-005）。
+ */
+export const DesktopConfigRevisionSchema = z
+  .string()
+  .regex(/^sha256:[0-9a-f]{64}$/u);
+export type DesktopConfigRevision = z.infer<typeof DesktopConfigRevisionSchema>;
+
+/** 读取上限：文件只有少量展示偏好，超过即按异常文件处理。 */
+export const MAX_DESKTOP_CONFIG_FILE_BYTES = 64 * 1024;
+
+/**
+ * `desktop_config_read` 的文件状态。
+ *
+ * - `missing`：没有文件，用内置默认，不强制落盘；
+ * - `ok`：合法 UTF-8 JSON 文本，附 revision 与原文；
+ * - `oversized`/`invalid-utf8`：文件存在但不是可用基底——revision 仍给出，
+ *   让显式「恢复默认」能携带真实 expectedRevision 而不凭空覆盖原文。
+ */
+export const DesktopConfigFileStateSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('missing') }).strict(),
+  z
+    .object({
+      status: z.literal('ok'),
+      revision: DesktopConfigRevisionSchema,
+      content: utf8ByteLimitedStringSchema(MAX_DESKTOP_CONFIG_FILE_BYTES),
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal('oversized'),
+      revision: DesktopConfigRevisionSchema,
+      bytes: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    })
+    .strict(),
+  z
+    .object({
+      status: z.literal('invalid-utf8'),
+      revision: DesktopConfigRevisionSchema,
+    })
+    .strict(),
+]);
+export type DesktopConfigFileState = z.infer<typeof DesktopConfigFileStateSchema>;
+
+export const DesktopConfigReadResultSchema = z
+  .object({
+    /** `config.json` 与所在目录的绝对路径——只由 native 回显，设置页展示用。 */
+    path: z.string().min(1),
+    directory: z.string().min(1),
+    /** `.bak` 上次有效文件是否存在（恢复路径，DESK-SET-005）。 */
+    backupPresent: z.boolean(),
+    file: DesktopConfigFileStateSchema,
+  })
+  .strict();
+export type DesktopConfigReadResult = z.infer<typeof DesktopConfigReadResultSchema>;
+
+/**
+ * `desktop_config_write` 的请求。`expectedRevision: null` 表示「文件必须
+ * 仍不存在」——读到 missing 后的首次写入只允许创建，期间手工建出的文件
+ * 会触发冲突而不是被覆盖。
+ */
+export const DesktopConfigWriteRequestSchema = z
+  .object({
+    expectedRevision: DesktopConfigRevisionSchema.nullable(),
+    content: utf8ByteLimitedStringSchema(MAX_DESKTOP_CONFIG_FILE_BYTES),
+  })
+  .strict();
+export type DesktopConfigWriteRequest = z.infer<typeof DesktopConfigWriteRequestSchema>;
+
+export const DesktopConfigWriteResultSchema = z
+  .object({
+    revision: DesktopConfigRevisionSchema,
+  })
+  .strict();
+export type DesktopConfigWriteResult = z.infer<typeof DesktopConfigWriteResultSchema>;
+
+export const DesktopConfigErrorCodeSchema = z.enum([
+  'storage-unavailable',
+  'config-conflict',
+  'invalid-content',
+  'open-failed',
+  'internal-error',
+]);
+export type DesktopConfigErrorCode = z.infer<typeof DesktopConfigErrorCodeSchema>;
+
+export const DesktopConfigErrorSchema = z
+  .object({
+    code: DesktopConfigErrorCodeSchema,
+    message: z.string().min(1).max(512),
+  })
+  .strict();
+export type DesktopConfigError = z.infer<typeof DesktopConfigErrorSchema>;
