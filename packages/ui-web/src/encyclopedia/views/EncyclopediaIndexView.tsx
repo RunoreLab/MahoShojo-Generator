@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { encyclopediaCategories, getEncyclopediaCategory, type EncyclopediaEntry } from '../catalog';
 import { ALL_CATEGORY, type EncyclopediaCategoryFilter } from '../filter';
 import { EncyclopediaPageFrame } from './EncyclopediaPageFrame';
-import { shouldInterceptInternalLinkClick } from './internal-link-click';
+import { shouldInterceptInternalLinkClick } from '../../link-click';
 import {
   useEncyclopediaFilter,
   useFilteredEncyclopediaEntries,

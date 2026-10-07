@@ -140,6 +140,11 @@
       "import": "./src/announcement/index.ts",
       "default": "./src/announcement/index.ts"
     },
+    "./messages": {
+      "types": "./src/messages/index.ts",
+      "import": "./src/messages/index.ts",
+      "default": "./src/messages/index.ts"
+    },
     "./markdown.css": "./src/markdown/markdown.css",
     "./product-shell.css": "./src/product-shell.css"
   },

@@ -2,124 +2,37 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
+import {
+  createMessagesPageState,
+  getMessagesPageEmptyStateCopy,
+  getMessagesPageRequestFilter,
+  isMessagesPageStateForViewer,
+  reconcileMessagesPageStateForAuth,
+  resolveMessagesPageDataRequests,
+  shouldApplyMessagesLoadMore,
+  type MessagesPageState,
+} from '@mahoshojo/ui-web/messages';
 import { MessageCard } from '@/components/messages/MessageCard';
 import { CrowdReviewPromptCard } from '@/components/messages/CrowdReviewPromptCard';
 import { MessageFilters } from '@/components/messages/MessageFilters';
 import { authStorage } from '@/lib/auth';
 import { dispatchMessagesUpdatedEvent } from '@/lib/messages/events';
 import { useAuth } from '@/lib/useAuth';
-import type { MessageFilter, MessageListDto, MessagePreviewDto, MessageSummaryDto } from '@/lib/messages/types';
+import type { MessageFilter, MessageListDto, MessageSummaryDto } from '@/lib/messages/types';
 
-export type MessagesPageState = {
-  isAuthenticated: boolean;
-  filter: MessageFilter;
-  appliedFilter: MessageFilter;
-  messages: MessagePreviewDto[];
-  nextCursor: string | null;
-  loading: boolean;
-  summary: MessageSummaryDto | null;
-  error?: string | null;
+// 纯状态函数已上移至 `@mahoshojo/ui-web/messages`（D5.1d-1）；保留同名
+// 再导出是为了既有测试与消费方的 import 路径不变。
+export {
+  getMessagesPageEmptyStateCopy,
+  getMessagesPageRequestFilter,
+  isMessagesPageStateForViewer,
+  reconcileMessagesPageStateForAuth,
+  resolveMessagesPageDataRequests,
+  shouldApplyMessagesLoadMore,
 };
-
-const createDefaultState = (isAuthenticated: boolean): MessagesPageState => ({
-  isAuthenticated,
-  filter: 'all',
-  appliedFilter: isAuthenticated ? 'all' : 'site',
-  messages: [],
-  nextCursor: null,
-  loading: true,
-  summary: null,
-  error: null,
-});
-
-export const getMessagesPageRequestFilter = (filter: MessageFilter, isAuthenticated: boolean): MessageFilter => {
-  if (isAuthenticated) {
-    return filter;
-  }
-  return filter === 'direct' || filter === 'unread' ? 'site' : filter;
-};
-
-export const reconcileMessagesPageStateForAuth = (
-  current: MessagesPageState,
-  isAuthenticated: boolean,
-  forceViewStateReset = false,
-): MessagesPageState => {
-  if (isAuthenticated) {
-    return {
-      ...current,
-      isAuthenticated: true,
-      messages: forceViewStateReset ? [] : current.messages,
-      nextCursor: forceViewStateReset ? null : current.nextCursor,
-      summary: forceViewStateReset ? null : current.summary,
-      error: forceViewStateReset ? null : current.error,
-    };
-  }
-
-  const filter = getMessagesPageRequestFilter(current.filter, false);
-  return {
-    ...current,
-    isAuthenticated: false,
-    filter,
-    appliedFilter: filter === 'all' ? 'site' : filter,
-    messages: current.isAuthenticated ? [] : current.messages,
-    nextCursor: current.isAuthenticated ? null : current.nextCursor,
-    summary: null,
-    error: null,
-  };
-};
-
-export const shouldApplyMessagesLoadMore = (
-  current: MessagesPageState,
-  request: { filter: MessageFilter; cursor: string },
-): boolean => current.filter === request.filter && current.nextCursor === request.cursor;
-
-export const isMessagesPageStateForViewer = (
-  stateOwnerUserId: number | null,
-  effectiveUserId: number | null,
-): boolean => stateOwnerUserId === effectiveUserId;
-
-export const resolveMessagesPageDataRequests = ({
-  isAuthenticated,
-  listResult,
-  summaryResult,
-}: {
-  isAuthenticated: boolean;
-  listResult: PromiseSettledResult<MessageListDto>;
-  summaryResult: PromiseSettledResult<MessageSummaryDto | null>;
-}): { listPayload: MessageListDto; summaryPayload: MessageSummaryDto | null } => {
-  if (listResult.status !== 'fulfilled') {
-    throw listResult.reason;
-  }
-
-  if (!isAuthenticated || summaryResult.status !== 'fulfilled') {
-    return {
-      listPayload: listResult.value,
-      summaryPayload: null,
-    };
-  }
-
-  return {
-    listPayload: listResult.value,
-    summaryPayload: summaryResult.value,
-  };
-};
-
-export const getMessagesPageEmptyStateCopy = (filter: MessageFilter, isAuthenticated: boolean): string => {
-  if (!isAuthenticated) {
-    return '暂无全站通知';
-  }
-  if (filter === 'unread') {
-    return '没有未读消息';
-  }
-  if (filter === 'site') {
-    return '暂无全站通知';
-  }
-  if (filter === 'direct') {
-    return '暂无定向消息';
-  }
-  return '暂无消息';
-};
+export type { MessagesPageState };
 
 export function MessagesPage({
   initialStateOverride,
@@ -127,11 +40,12 @@ export function MessagesPage({
   initialStateOverride?: Partial<MessagesPageState>;
 }) {
   const auth = useAuth();
+  const router = useRouter();
   const isStaticOverride = initialStateOverride != null;
   const effectiveIsAuthenticated = initialStateOverride?.isAuthenticated ?? auth.isAuthenticated;
   const effectiveUserId = isStaticOverride ? null : auth.user?.id ?? null;
   const [state, setState] = useState<MessagesPageState>(() => ({
-    ...createDefaultState(effectiveIsAuthenticated),
+    ...createMessagesPageState(effectiveIsAuthenticated),
     ...initialStateOverride,
   }));
   const pageDataRequestIdRef = useRef(0);
@@ -376,7 +290,10 @@ export function MessagesPage({
         ) : null}
 
         {visibleSummary?.crowdReviewPrompt ? (
-          <CrowdReviewPromptCard prompt={visibleSummary.crowdReviewPrompt} />
+          <CrowdReviewPromptCard
+            prompt={visibleSummary.crowdReviewPrompt}
+            onNavigate={(href) => router.push(href)}
+          />
         ) : null}
 
         <section className="grid gap-4">
@@ -386,6 +303,7 @@ export function MessagesPage({
               message={message}
               canMarkRead={message.scope === 'user' && message.isRead === false}
               onMarkRead={() => void handleMarkRead(message.id)}
+              onNavigate={(href) => router.push(href)}
             />
           ))}
 

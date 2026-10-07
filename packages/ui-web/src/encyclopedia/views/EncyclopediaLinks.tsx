@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
 import { getEncyclopediaEntry, type EncyclopediaEntry } from '../catalog';
-import { shouldInterceptInternalLinkClick } from './internal-link-click';
+import { shouldInterceptInternalLinkClick } from '../../link-click';
 
 export interface EncyclopediaLinkItem {
   readonly slug: string;

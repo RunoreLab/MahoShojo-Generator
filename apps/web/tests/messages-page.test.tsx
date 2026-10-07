@@ -1,6 +1,12 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+
+// MessagesPage 经共享组件注入 router.push；无 App Router 上下文的 SSR
+// 断言只需要一个不会抛错的替身（与 web-encyclopedia 测试同一形态）。
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: () => undefined, replace: () => undefined }),
+}));
 
 import { MessageCard } from '@/components/messages/MessageCard';
 

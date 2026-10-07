@@ -4,7 +4,7 @@ import { encyclopediaCategories, getEncyclopediaCategory } from '../catalog';
 import type { EncyclopediaContentSource } from '../content-source';
 import { ALL_CATEGORY } from '../filter';
 import { EncyclopediaPageFrame } from './EncyclopediaPageFrame';
-import { shouldInterceptInternalLinkClick } from './internal-link-click';
+import { shouldInterceptInternalLinkClick } from '../../link-click';
 import {
   useEncyclopediaFilter,
   useFilteredEncyclopediaEntries,
