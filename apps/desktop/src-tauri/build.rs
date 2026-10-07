@@ -58,6 +58,7 @@ fn main() {
             "stream_hosted_ai",
             "hosted_ai_request",
             "cloud_card_library_request",
+            "cloud_messages_request",
             "cancel_hosted_ai",
             "open_external_url",
             "announcements_get_cached",

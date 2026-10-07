@@ -431,3 +431,44 @@ export const DesktopCardLibraryResponseSchema = z.object({
   body: SafeJsonValueSchema,
 }).strict();
 export type DesktopCardLibraryResponse = z.infer<typeof DesktopCardLibraryResponseSchema>;
+
+/* ── 消息中心固定路由（D5.1d-1，`/messages` 消息面与顶栏未读摘要） ────────── */
+
+/**
+ * 消息中心允许的路由标识白名单。与 `fixtures/desktop-cloud.json` 的
+ * `messages.routes` 同源——任一侧增删路由而另一侧未同步时，Rust 侧的
+ * fixture 对拍测试必须失败。
+ */
+export const DesktopMessagesRouteIdSchema = z.enum([
+  // 需要账号会话（无会话时 native 直接 `not-authenticated` fail-closed；
+  // 服务端对这些路由回 401 时按凭据被拒清本地会话）
+  'messages.summary',
+  'messages.read',
+  'messages.read-all',
+  // 公开可读（未登录仅全站可见）；有会话时 native 附带会话
+  'messages.list',
+]);
+export type DesktopMessagesRouteId = z.infer<typeof DesktopMessagesRouteIdSchema>;
+
+/**
+ * 消息中心 IPC 输入：与 `DesktopCardLibraryRequestSchema` 同一窄边界——
+ * renderer 只给 `routeId` + `query` + `body`；method/path/cookie 全是
+ * native 的私有事实。
+ */
+export const DesktopMessagesRequestSchema = z.object({
+  routeId: DesktopMessagesRouteIdSchema,
+  query: z.record(z.string().max(64), z.string().max(1024)).optional(),
+  body: SafeJsonValueSchema.optional(),
+}).strict();
+export type DesktopMessagesRequest = z.infer<typeof DesktopMessagesRequestSchema>;
+
+/**
+ * 消息中心 IPC 输出：「HTTP 状态 + JSON 正文」透传；`MessageListDto` /
+ * `MessageSummaryDto` 等业务校验在 renderer 适配层按 `@mahoshojo/contracts/messages`
+ * 的 schema 完成。
+ */
+export const DesktopMessagesResponseSchema = z.object({
+  status: z.number().int().min(100).max(599),
+  body: SafeJsonValueSchema,
+}).strict();
+export type DesktopMessagesResponse = z.infer<typeof DesktopMessagesResponseSchema>;

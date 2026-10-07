@@ -1700,13 +1700,13 @@ pub async fn hosted_ai_request(
     outcome
 }
 
-/* ── 数据卡库固定路由通路（D5.0e，`DESK-ONLINE-010`） ────────────────────
+/* ── 固定路由窄请求通道（数据卡库 D5.0e、消息中心 D5.1d-1） ────────────────
  *
- * 数据卡列表/详情/收藏/标签/统计/上传副本都是「窄 HTTP + JSON 正文」的服务端
- * API。它们共用同一条边界：renderer 只给 `routeId` + `query` + `body`；
- * method、path、会话 cookie 全部由这里的固定路由表注入。白名单之外的标识
- * 在 IPC 反序列化（枚举拒绝）与查表两处都失败；renderer 没有携带 URL、
- * header 或凭据字段的通道。
+ * 数据卡列表/详情/收藏/标签/统计与消息摘要/列表/已读都是「窄 HTTP + JSON 正文」
+ * 的服务端 API。它们共用同一条边界：renderer 只给 `routeId` + `query` +
+ * `body`；method、path、会话 cookie 全部由这里的固定路由表注入。白名单之外
+ * 的标识在 IPC 反序列化（枚举拒绝）与查表两处都失败；renderer 没有携带
+ * URL、header 或凭据字段的通道。
  */
 
 /// 卡库响应正文上限：列表页与单卡正文都远小于它，超限视为异常流量。
@@ -1716,113 +1716,150 @@ const CARD_LIBRARY_RESPONSE_MAX_BYTES: usize = 4 * 1024 * 1024;
 /// isPublic + 转义开销）叠在 1 MiB 正文之上，取 ~2 MiB 既不放行明显畸形载荷，
 /// 也不会把服务端仍在受理的边界请求拦在 IPC 层（D5.0e-r1）。
 const CARD_LIBRARY_BODY_MAX_BYTES: usize = 2 * 1024 * 1024;
-const CARD_LIBRARY_QUERY_MAX_PAIRS: usize = 32;
-const CARD_LIBRARY_QUERY_KEY_MAX: usize = 64;
-const CARD_LIBRARY_QUERY_VALUE_MAX: usize = 1024;
+/// 消息列表单页 ≤50 条、每条仅标题/正文投影；摘要/已读响应更小——1 MiB 宽余。
+const MESSAGES_RESPONSE_MAX_BYTES: usize = 1024 * 1024;
+/// `messages.read` 只携带少量 `user:*` id；`read-all` 无业务正文。
+const MESSAGES_BODY_MAX_BYTES: usize = 64 * 1024;
+const CLOUD_ROUTE_QUERY_MAX_PAIRS: usize = 32;
+const CLOUD_ROUTE_QUERY_KEY_MAX: usize = 64;
+const CLOUD_ROUTE_QUERY_VALUE_MAX: usize = 1024;
 
 /// 路由的凭据语义：
 /// - `Required`：无已存会话即 `not-authenticated` fail-closed（「我的」「收藏」
-///   「卡组」「创建」入口）；服务端明确回 401 时按会话被拒处理（清本地凭据）；
-/// - `Optional`：有会话附带、没有则匿名（公开列表/标签/统计上报）。
+///   「卡组」「创建」「消息摘要/已读」入口）；服务端明确回 401 时按会话被拒
+///   处理（清本地凭据）；
+/// - `Optional`：有会话附带、没有则匿名（公开列表/标签/统计上报/全站消息）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CardRouteAuth {
+enum CloudRouteAuth {
     Required,
     Optional,
 }
 
-struct CardLibraryRoute {
+struct CloudRoute {
     id: &'static str,
     method: reqwest::Method,
     path: &'static str,
-    auth: CardRouteAuth,
+    auth: CloudRouteAuth,
 }
 
 // 与 `packages/contracts/fixtures/desktop-cloud.json` 的 `cardLibrary.routes`
 // 同源对拍：任一侧改动未同步，fixture 测试必须失败（DESK-033 同款漂移防护）。
-const CARD_LIBRARY_ROUTES: &[CardLibraryRoute] = &[
-    CardLibraryRoute {
+const CARD_LIBRARY_ROUTES: &[CloudRoute] = &[
+    CloudRoute {
         id: "data-cards.query",
         method: reqwest::Method::GET,
         path: "/api/data-cards",
-        auth: CardRouteAuth::Required,
+        auth: CloudRouteAuth::Required,
     },
-    CardLibraryRoute {
+    CloudRoute {
         id: "data-cards.create",
         method: reqwest::Method::POST,
         path: "/api/data-cards",
-        auth: CardRouteAuth::Required,
+        auth: CloudRouteAuth::Required,
     },
-    CardLibraryRoute {
+    CloudRoute {
         id: "favorites.query",
         method: reqwest::Method::GET,
         path: "/api/favorites",
-        auth: CardRouteAuth::Required,
+        auth: CloudRouteAuth::Required,
     },
-    CardLibraryRoute {
+    CloudRoute {
         id: "favorites.add",
         method: reqwest::Method::POST,
         path: "/api/favorites",
-        auth: CardRouteAuth::Required,
+        auth: CloudRouteAuth::Required,
     },
-    CardLibraryRoute {
+    CloudRoute {
         id: "favorites.remove",
         method: reqwest::Method::DELETE,
         path: "/api/favorites",
-        auth: CardRouteAuth::Required,
+        auth: CloudRouteAuth::Required,
     },
-    CardLibraryRoute {
+    CloudRoute {
         id: "decks.query",
         method: reqwest::Method::GET,
         path: "/api/decks",
-        auth: CardRouteAuth::Required,
+        auth: CloudRouteAuth::Required,
     },
-    CardLibraryRoute {
+    CloudRoute {
         id: "deck-cards.query",
         method: reqwest::Method::GET,
         path: "/api/deck-cards",
-        auth: CardRouteAuth::Required,
+        auth: CloudRouteAuth::Required,
     },
-    CardLibraryRoute {
+    CloudRoute {
         id: "public-data-cards.query",
         method: reqwest::Method::GET,
         path: "/api/public-data-cards",
-        auth: CardRouteAuth::Optional,
+        auth: CloudRouteAuth::Optional,
     },
-    CardLibraryRoute {
+    CloudRoute {
         id: "tags.query",
         method: reqwest::Method::GET,
         path: "/api/tags",
-        auth: CardRouteAuth::Optional,
+        auth: CloudRouteAuth::Optional,
     },
-    CardLibraryRoute {
+    CloudRoute {
         id: "data-card-stats.report",
         method: reqwest::Method::POST,
         path: "/api/data-card-stats",
-        auth: CardRouteAuth::Optional,
+        auth: CloudRouteAuth::Optional,
     },
-    CardLibraryRoute {
+    CloudRoute {
         id: "data-card-meta-batch.query",
         method: reqwest::Method::POST,
         path: "/api/data-card-meta-batch",
-        auth: CardRouteAuth::Optional,
+        auth: CloudRouteAuth::Optional,
     },
-    CardLibraryRoute {
+    CloudRoute {
         id: "badges-batch.query",
         method: reqwest::Method::POST,
         path: "/api/badges/batch",
-        auth: CardRouteAuth::Optional,
+        auth: CloudRouteAuth::Optional,
     },
 ];
 
-fn lookup_card_library_route(route_id: &str) -> Option<&'static CardLibraryRoute> {
-    CARD_LIBRARY_ROUTES
-        .iter()
-        .find(|route| route.id == route_id)
+// 与 `packages/contracts/fixtures/desktop-cloud.json` 的 `messages.routes`
+// 同源对拍（D5.1d-1）。
+const MESSAGES_ROUTES: &[CloudRoute] = &[
+    CloudRoute {
+        id: "messages.summary",
+        method: reqwest::Method::GET,
+        path: "/api/messages/summary",
+        auth: CloudRouteAuth::Required,
+    },
+    CloudRoute {
+        id: "messages.list",
+        method: reqwest::Method::GET,
+        path: "/api/messages",
+        auth: CloudRouteAuth::Optional,
+    },
+    CloudRoute {
+        id: "messages.read",
+        method: reqwest::Method::POST,
+        path: "/api/messages/read",
+        auth: CloudRouteAuth::Required,
+    },
+    CloudRoute {
+        id: "messages.read-all",
+        method: reqwest::Method::POST,
+        path: "/api/messages/read-all",
+        auth: CloudRouteAuth::Required,
+    },
+];
+
+fn lookup_cloud_route(
+    routes: &'static [CloudRoute],
+    route_id: &str,
+) -> Option<&'static CloudRoute> {
+    routes.iter().find(|route| route.id == route_id)
 }
 
+/// 窄路由 IPC 输入：`routeId` 枚举 + `query`/`body` 业务参数。
+/// `deny_unknown_fields` 拒绝 renderer 携带 URL/path/header/凭据字段的任何尝试。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CloudCardLibraryRequest {
+pub struct CloudRouteRequest {
     pub route_id: String,
     #[serde(default)]
     pub query: Option<std::collections::BTreeMap<String, String>>,
@@ -1830,9 +1867,10 @@ pub struct CloudCardLibraryRequest {
     pub body: Option<serde_json::Value>,
 }
 
+/// 窄路由 IPC 输出：「HTTP 状态 + JSON 正文」透传；业务校验在 renderer 适配层。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CloudCardLibraryResponse {
+pub struct CloudRouteResponse {
     pub status: u16,
     pub body: serde_json::Value,
 }
@@ -1864,7 +1902,7 @@ async fn read_bounded_json(
     serde_json::from_slice(&buffer).map_err(|_| CloudError::invalid_response(context))
 }
 
-/// `cloud_card_library_request`：数据卡库的固定路由窄请求。
+/// 固定路由窄请求的公共分发：
 ///
 /// - `query`/`body` 只是业务参数——renderer 携带 URL/path/header/凭据字段的
 ///   尝试在 `deny_unknown_fields` 处被拒；
@@ -1873,25 +1911,29 @@ async fn read_bounded_json(
 ///   （与 `cloud_auth_status` 同一语义），响应仍原样回给 renderer；
 /// - 任何传输失败都是 `network-error`/`server-unavailable`，绝不伪装成
 ///   业务成功。
-pub async fn cloud_card_library_request(
+async fn dispatch_cloud_route(
     state: &CloudState,
     secrets: &dyn SecretStore,
-    request: CloudCardLibraryRequest,
-) -> Result<CloudCardLibraryResponse, CloudError> {
-    let route = lookup_card_library_route(&request.route_id)
-        .ok_or_else(|| invalid_request("未知的数据卡路由标识"))?;
+    routes: &'static [CloudRoute],
+    request: CloudRouteRequest,
+    context: &str,
+    response_max_bytes: usize,
+    body_max_bytes: usize,
+) -> Result<CloudRouteResponse, CloudError> {
+    let route = lookup_cloud_route(routes, &request.route_id)
+        .ok_or_else(|| invalid_request("未知的云端路由标识"))?;
 
     if request.body.is_some() && route.method == reqwest::Method::GET {
         return Err(invalid_request("GET 路由不允许携带请求体"));
     }
     if let Some(query) = &request.query {
-        if query.len() > CARD_LIBRARY_QUERY_MAX_PAIRS {
+        if query.len() > CLOUD_ROUTE_QUERY_MAX_PAIRS {
             return Err(invalid_request("查询参数过多"));
         }
         for (key, value) in query {
             if key.is_empty()
-                || key.len() > CARD_LIBRARY_QUERY_KEY_MAX
-                || value.len() > CARD_LIBRARY_QUERY_VALUE_MAX
+                || key.len() > CLOUD_ROUTE_QUERY_KEY_MAX
+                || value.len() > CLOUD_ROUTE_QUERY_VALUE_MAX
             {
                 return Err(invalid_request("查询参数超出大小约束"));
             }
@@ -1902,7 +1944,7 @@ pub async fn cloud_card_library_request(
         Some(body) => {
             let bytes =
                 serde_json::to_vec(body).map_err(|_| invalid_request("请求体不是可序列化 JSON"))?;
-            if bytes.is_empty() || bytes.len() > CARD_LIBRARY_BODY_MAX_BYTES {
+            if bytes.is_empty() || bytes.len() > body_max_bytes {
                 return Err(invalid_request("请求体超出大小约束"));
             }
             Some(bytes)
@@ -1910,7 +1952,7 @@ pub async fn cloud_card_library_request(
     };
 
     let session = load_session(secrets)?;
-    if route.auth == CardRouteAuth::Required && session.is_none() {
+    if route.auth == CloudRouteAuth::Required && session.is_none() {
         return Err(CloudError::new(
             CloudErrorCode::NotAuthenticated,
             "该操作需要登录云端账号",
@@ -1941,17 +1983,56 @@ pub async fn cloud_card_library_request(
         .timeout(SHORT_REQUEST_TIMEOUT)
         .send()
         .await
-        .map_err(|error| CloudError::network("数据卡请求", &error))?;
+        .map_err(|error| CloudError::network(context, &error))?;
 
     let status = response.status().as_u16();
     // 服务端对 Required 路由明确 401 = 本地凭据已被否认：与 `cloud_auth_status`
     // 一致地清除会话，但响应原样透传给 renderer（业务错误不是传输失败）。
-    if route.auth == CardRouteAuth::Required && status == 401 {
+    if route.auth == CloudRouteAuth::Required && status == 401 {
         clear_session(secrets)?;
     }
 
-    let body = read_bounded_json(response, "数据卡请求", CARD_LIBRARY_RESPONSE_MAX_BYTES).await?;
-    Ok(CloudCardLibraryResponse { status, body })
+    let body = read_bounded_json(response, context, response_max_bytes).await?;
+    Ok(CloudRouteResponse { status, body })
+}
+
+/// `cloud_card_library_request`：数据卡库的固定路由窄请求（D5.0e，
+/// `DESK-ONLINE-010`）。边界语义见 `dispatch_cloud_route`。
+pub async fn cloud_card_library_request(
+    state: &CloudState,
+    secrets: &dyn SecretStore,
+    request: CloudRouteRequest,
+) -> Result<CloudRouteResponse, CloudError> {
+    dispatch_cloud_route(
+        state,
+        secrets,
+        CARD_LIBRARY_ROUTES,
+        request,
+        "数据卡请求",
+        CARD_LIBRARY_RESPONSE_MAX_BYTES,
+        CARD_LIBRARY_BODY_MAX_BYTES,
+    )
+    .await
+}
+
+/// `cloud_messages_request`：消息中心的固定路由窄请求（D5.1d-1）。
+/// 边界语义同 `dispatch_cloud_route`；`summary`/`read`/`read-all` 属
+/// Required——无本地凭据不产生请求；`list` 匿名可读全站消息。
+pub async fn cloud_messages_request(
+    state: &CloudState,
+    secrets: &dyn SecretStore,
+    request: CloudRouteRequest,
+) -> Result<CloudRouteResponse, CloudError> {
+    dispatch_cloud_route(
+        state,
+        secrets,
+        MESSAGES_ROUTES,
+        request,
+        "消息请求",
+        MESSAGES_RESPONSE_MAX_BYTES,
+        MESSAGES_BODY_MAX_BYTES,
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -2332,9 +2413,13 @@ mod tests {
                         }
                     }))
                 }
-                // 数据卡路由表里的所有 path：记录请求后回 `{"success": true}`，
+                // 数据卡/消息路由表里的所有 path：记录请求后回 `{"success": true}`，
                 // 覆盖响应优先（测 401 / 错误分支）。
-                path if CARD_LIBRARY_ROUTES.iter().any(|route| route.path == path) => {
+                path if CARD_LIBRARY_ROUTES
+                    .iter()
+                    .chain(MESSAGES_ROUTES.iter())
+                    .any(|route| route.path == path) =>
+                {
                     *self.last_card_request.lock().unwrap() = Some((
                         target.to_string(),
                         head.to_string(),
@@ -2866,13 +2951,49 @@ mod tests {
                 id = route.id
             );
             let expected_auth = match route.auth {
-                CardRouteAuth::Required => "required",
-                CardRouteAuth::Optional => "optional",
+                CloudRouteAuth::Required => "required",
+                CloudRouteAuth::Optional => "optional",
             };
             assert_eq!(
                 entry["auth"].as_str(),
                 Some(expected_auth),
                 "卡库路由 {id} 凭据语义不一致",
+                id = route.id
+            );
+        }
+
+        // 消息路由表与 fixture `messages.routes` 同源对拍（D5.1d-1）。
+        let message_routes = fixture["messages"]["routes"]
+            .as_object()
+            .expect("fixture messages.routes must be an object");
+        assert_eq!(
+            message_routes.len(),
+            MESSAGES_ROUTES.len(),
+            "消息路由表与 fixture 条目数不一致"
+        );
+        for route in MESSAGES_ROUTES {
+            let entry = &message_routes[route.id];
+            assert!(entry.is_object(), "fixture 缺少消息路由 {id}", id = route.id);
+            assert_eq!(
+                entry["method"].as_str(),
+                Some(route.method.as_str()),
+                "消息路由 {id} method 不一致",
+                id = route.id
+            );
+            assert_eq!(
+                entry["path"].as_str(),
+                Some(route.path),
+                "消息路由 {id} path 不一致",
+                id = route.id
+            );
+            let expected_auth = match route.auth {
+                CloudRouteAuth::Required => "required",
+                CloudRouteAuth::Optional => "optional",
+            };
+            assert_eq!(
+                entry["auth"].as_str(),
+                Some(expected_auth),
+                "消息路由 {id} 凭据语义不一致",
                 id = route.id
             );
         }
@@ -3453,8 +3574,8 @@ mod tests {
 
     /* ── 数据卡库固定路由通路（D5.0e） ────────────────────────────────── */
 
-    fn card_request(route_id: &str) -> CloudCardLibraryRequest {
-        CloudCardLibraryRequest {
+    fn card_request(route_id: &str) -> CloudRouteRequest {
+        CloudRouteRequest {
             route_id: route_id.to_string(),
             query: None,
             body: None,
@@ -3495,7 +3616,7 @@ mod tests {
             let error = cloud_card_library_request(
                 &state,
                 &secrets,
-                CloudCardLibraryRequest {
+                CloudRouteRequest {
                     route_id: "public-data-cards.query".to_string(),
                     query: None,
                     body: Some(serde_json::json!({"x": 1})),
@@ -3557,7 +3678,7 @@ mod tests {
             let response = cloud_card_library_request(
                 &state,
                 &secrets,
-                CloudCardLibraryRequest {
+                CloudRouteRequest {
                     route_id: "data-cards.create".to_string(),
                     query: None,
                     body: Some(serde_json::json!({
@@ -3609,7 +3730,7 @@ mod tests {
             let mut request = card_request("data-cards.query");
             request.query = Some(std::collections::BTreeMap::from([(
                 "search".to_string(),
-                "x".repeat(CARD_LIBRARY_QUERY_VALUE_MAX + 1),
+                "x".repeat(CLOUD_ROUTE_QUERY_VALUE_MAX + 1),
             )]));
             let error = cloud_card_library_request(&state, &secrets, request)
                 .await
@@ -3623,7 +3744,7 @@ mod tests {
             let response = cloud_card_library_request(
                 &state,
                 &secrets,
-                CloudCardLibraryRequest {
+                CloudRouteRequest {
                     route_id: "data-cards.create".to_string(),
                     query: None,
                     body: Some(serde_json::json!({
@@ -3643,7 +3764,7 @@ mod tests {
             let error = cloud_card_library_request(
                 &state,
                 &secrets,
-                CloudCardLibraryRequest {
+                CloudRouteRequest {
                     route_id: "data-cards.create".to_string(),
                     query: None,
                     body: Some(serde_json::json!({
@@ -3675,6 +3796,157 @@ mod tests {
             .await
             .unwrap_err();
             assert_eq!(error.code, CloudErrorCode::InvalidResponse);
+        });
+    }
+
+    /* ── 消息中心固定路由通路（D5.1d-1） ───────────────────────────────── */
+
+    #[test]
+    fn messages_rejects_unknown_route_and_get_body() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            store_session(&secrets, &stored_test_session()).unwrap();
+
+            // 卡库路由 id 在消息通道同样非法：两条命令各自查自己的表。
+            for route_id in ["arbitrary-internal-route", "data-cards.query"] {
+                let error =
+                    cloud_messages_request(&state, &secrets, card_request(route_id))
+                        .await
+                        .unwrap_err();
+                assert_eq!(error.code, CloudErrorCode::InvalidRequest, "{route_id}");
+            }
+            assert!(server.last_card_request.lock().unwrap().is_none());
+
+            let error = cloud_messages_request(
+                &state,
+                &secrets,
+                CloudRouteRequest {
+                    route_id: "messages.list".to_string(),
+                    query: None,
+                    body: Some(serde_json::json!({"x": 1})),
+                },
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error.code, CloudErrorCode::InvalidRequest);
+            assert!(server.last_card_request.lock().unwrap().is_none());
+        });
+    }
+
+    #[test]
+    fn messages_required_routes_without_session_fail_closed() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+
+            // summary/read/read-all 都是 Required：无本地凭据不产生网络请求。
+            for route_id in ["messages.summary", "messages.read", "messages.read-all"] {
+                let error =
+                    cloud_messages_request(&state, &secrets, card_request(route_id))
+                        .await
+                        .unwrap_err();
+                assert_eq!(error.code, CloudErrorCode::NotAuthenticated, "{route_id}");
+            }
+            assert!(server.last_card_request.lock().unwrap().is_none());
+        });
+    }
+
+    #[test]
+    fn messages_list_works_anonymously_and_attaches_session() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+
+            // Optional：未登录匿名可读全站消息，不带 Cookie；query 原样透传。
+            let mut request = card_request("messages.list");
+            request.query = Some(std::collections::BTreeMap::from([
+                ("filter".to_string(), "site".to_string()),
+                ("limit".to_string(), "20".to_string()),
+            ]));
+            let response = cloud_messages_request(&state, &secrets, request)
+                .await
+                .expect("anonymous list must succeed");
+            assert_eq!(response.status, 200);
+            let (target, head, _) = server.last_card_request.lock().unwrap().clone().unwrap();
+            assert!(target.contains("filter=site"), "query 必须透传：{target}");
+            assert!(
+                !head.to_ascii_lowercase().contains("\r\ncookie:"),
+                "无会话时不得携带 Cookie：{head}"
+            );
+
+            // 有会话：Required 的已读写操作附带 Cookie + body 原样送达。
+            store_session(&secrets, &stored_test_session()).unwrap();
+            let response = cloud_messages_request(
+                &state,
+                &secrets,
+                CloudRouteRequest {
+                    route_id: "messages.read".to_string(),
+                    query: None,
+                    body: Some(serde_json::json!({"ids": ["user:12"]})),
+                },
+            )
+            .await
+            .unwrap();
+            assert_eq!(response.status, 200);
+            let (_, head, body) = server.last_card_request.lock().unwrap().clone().unwrap();
+            assert!(
+                head.to_ascii_lowercase().contains("cookie: better-auth.session_token=native.tok"),
+                "已登录请求必须附带会话 cookie：{head}"
+            );
+            assert_eq!(
+                body.unwrap()["ids"],
+                serde_json::json!(["user:12"]),
+            );
+        });
+    }
+
+    #[test]
+    fn messages_required_401_clears_stored_session() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            store_session(&secrets, &stored_test_session()).unwrap();
+
+            *server.card_response_override.lock().unwrap() =
+                Some((401, r#"{"error":"未登录"}"#.to_string()));
+            let response =
+                cloud_messages_request(&state, &secrets, card_request("messages.summary"))
+                    .await
+                    .expect("401 是业务响应而不是传输失败");
+            assert_eq!(response.status, 401);
+            assert!(load_session(&secrets).unwrap().is_none());
+        });
+    }
+
+    #[test]
+    fn messages_bounds_body() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            store_session(&secrets, &stored_test_session()).unwrap();
+
+            // `messages.read` 的 ids 数组有传输上限：超限不发出网络请求。
+            let error = cloud_messages_request(
+                &state,
+                &secrets,
+                CloudRouteRequest {
+                    route_id: "messages.read".to_string(),
+                    query: None,
+                    body: Some(serde_json::json!({
+                        "ids": vec!["user:1"; 30000],
+                    })),
+                },
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error.code, CloudErrorCode::InvalidRequest);
+            assert!(server.last_card_request.lock().unwrap().is_none());
         });
     }
 }

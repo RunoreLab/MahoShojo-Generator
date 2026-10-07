@@ -84,6 +84,11 @@
       "types": "./src/zip.ts",
       "import": "./src/zip.ts",
       "default": "./src/zip.ts"
+    },
+    "./messages": {
+      "types": "./src/messages.ts",
+      "import": "./src/messages.ts",
+      "default": "./src/messages.ts"
     }
   },
   "scripts": {

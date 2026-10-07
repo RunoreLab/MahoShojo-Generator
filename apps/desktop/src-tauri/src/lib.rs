@@ -1070,9 +1070,21 @@ fn cancel_hosted_ai(registry: State<'_, ai::RequestRegistry>, request_id: String
 async fn cloud_card_library_request(
     cloud: State<'_, cloud::CloudState>,
     secrets: State<'_, SharedSecretStore>,
-    request: cloud::CloudCardLibraryRequest,
-) -> Result<cloud::CloudCardLibraryResponse, cloud::CloudError> {
+    request: cloud::CloudRouteRequest,
+) -> Result<cloud::CloudRouteResponse, cloud::CloudError> {
     cloud::cloud_card_library_request(&cloud, secrets.inner().as_ref(), request).await
+}
+
+/// 消息中心云端请求：与卡库同一套固定路由窄边界（D5.1d-1）。`summary`/
+/// `read`/`read-all` 是 Required 路由——无本地凭据不产生请求；`list`
+/// 匿名可读全站消息。业务响应经 renderer 适配层按消息 DTO schema 校验。
+#[tauri::command]
+async fn cloud_messages_request(
+    cloud: State<'_, cloud::CloudState>,
+    secrets: State<'_, SharedSecretStore>,
+    request: cloud::CloudRouteRequest,
+) -> Result<cloud::CloudRouteResponse, cloud::CloudError> {
+    cloud::cloud_messages_request(&cloud, secrets.inner().as_ref(), request).await
 }
 
 /// 受控外链打开（DESK-PARITY-003 / DESK-ONLINE-014）。只接受 http/https、
@@ -1276,6 +1288,7 @@ pub fn run() {
             stream_hosted_ai,
             hosted_ai_request,
             cloud_card_library_request,
+            cloud_messages_request,
             cancel_hosted_ai,
             open_external_url,
             announcements_get_cached,

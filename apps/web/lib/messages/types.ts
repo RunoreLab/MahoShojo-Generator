@@ -1,45 +1,12 @@
-export type MessageScope = 'site' | 'user';
-export type MessageFilter = 'all' | 'unread' | 'site' | 'direct';
-export type MessagePriority = 'low' | 'normal' | 'high';
-
-export type MessageSortKey = {
-  createdAt: string;
-  scope: MessageScope;
-  numericId: number;
-};
-
-export type MessagePreviewDto = MessageSortKey & {
-  id: string;
-  messageType: string;
-  templateKey: string;
-  title: string;
-  body: string;
-  actionUrl: string | null;
-  priority: MessagePriority;
-  isRead: boolean | null;
-  readAt: string | null;
-};
-
-export type MessageSummaryDto = {
-  unreadTotal: number;
-  siteUnread: number;
-  directUnread: number;
-  latest: MessagePreviewDto | null;
-  fetchedAt: string;
-  isAuthenticated: boolean;
-  hasCrowdReviewPending: boolean;
-  crowdReviewPrompt: {
-    title: string;
-    body: string;
-    actionUrl: string;
-  } | null;
-};
-
-export type MessageListDto = {
-  messages: MessagePreviewDto[];
-  nextCursor: string | null;
-  filter: MessageFilter;
-  appliedFilter: Exclude<MessageFilter, 'unread'> | 'unread';
-  fetchedAt: string;
-  isAuthenticated: boolean;
-};
+// 消息 DTO 的单一事实源在 `@mahoshojo/contracts/messages`：Web 服务端是
+// producer，Web 页面与 Desktop 消息窄通道是 consumer，三端共读同一 schema。
+// 这里只保留类型别名转发——字段增删改在 contracts 侧一次完成。
+export type {
+  MessageScope,
+  MessageFilter,
+  MessagePriority,
+  MessageSortKey,
+  MessagePreviewDto,
+  MessageSummaryDto,
+  MessageListDto,
+} from '@mahoshojo/contracts/messages';

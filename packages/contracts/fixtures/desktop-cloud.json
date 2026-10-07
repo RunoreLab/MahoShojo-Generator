@@ -7,6 +7,10 @@
     "getSession": "/api/auth/get-session",
     "signOut": "/api/auth/sign-out",
     "meProfile": "/api/me/profile",
+    "messages": "/api/messages",
+    "messagesSummary": "/api/messages/summary",
+    "messagesRead": "/api/messages/read",
+    "messagesReadAll": "/api/messages/read-all",
     "hostedDrReadiness": "/api/hosted/dr-readiness",
     "hostedGenerateDetailsStream": "/api/generate-magical-girl-details-stream",
     "hostedGenerateDetails": "/api/generate-magical-girl-details",
@@ -76,6 +80,14 @@
       "data-card-stats.report": { "method": "POST", "path": "/api/data-card-stats", "auth": "optional" },
       "data-card-meta-batch.query": { "method": "POST", "path": "/api/data-card-meta-batch", "auth": "optional" },
       "badges-batch.query": { "method": "POST", "path": "/api/badges/batch", "auth": "optional" }
+    }
+  },
+  "messages": {
+    "routes": {
+      "messages.summary": { "method": "GET", "path": "/api/messages/summary", "auth": "required" },
+      "messages.list": { "method": "GET", "path": "/api/messages", "auth": "optional" },
+      "messages.read": { "method": "POST", "path": "/api/messages/read", "auth": "required" },
+      "messages.read-all": { "method": "POST", "path": "/api/messages/read-all", "auth": "required" }
     }
   },
   "validRedirectUris": [
