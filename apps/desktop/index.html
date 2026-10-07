@@ -37,10 +37,15 @@
     media = undefined;
   }
   var apply = function () {
+    var preference = 'system';
     try {
       var stored = window.localStorage.getItem("mahoshojo.motion-preference");
-      var preference = stored === 'reduce' || stored === 'system' ? stored : 'system';
-      var resolved = preference === 'reduce' || (preference === 'system' && media && media.matches) ? 'reduce' : 'no-preference';
+      if (stored === 'reduce' || stored === 'system') {
+        preference = stored;
+      }
+    } catch (e) {}
+    var resolved = preference === 'reduce' || (media && media.matches) ? 'reduce' : 'no-preference';
+    try {
       document.documentElement.dataset.motion = resolved;
     } catch (e) {}
   };
@@ -104,6 +109,12 @@
         50% {
           opacity: 0.85;
           transform: scale(0.97);
+        }
+      }
+      /* 系统级减少动效安全网：init 脚本未跑/失败时也要兜住（D5.1-S1-r1）。 */
+      @media (prefers-reduced-motion: reduce) {
+        .desktop-boot-logo {
+          animation: none;
         }
       }
       html[data-motion='reduce'] .desktop-boot-logo {

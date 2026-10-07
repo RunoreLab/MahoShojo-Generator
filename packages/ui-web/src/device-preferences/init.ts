@@ -17,6 +17,13 @@
  *
  * 脚本自身订阅媒体查询变化：`system` 档用户在会话中途切换系统偏好时，标记必须
  * 跟着系统走——设置页不是常驻挂载点，不能依赖 React hook 来维持这份新鲜度。
+ *
+ * `apply` 内把「读 localStorage」与「写 DOM」拆成两段兜底（D5.1-S1-r1）：
+ * 隐私模式/WebView 限制下 `localStorage.getItem` 会抛异常，若读与写同在一个
+ * try 里，系统 `prefers-reduced-motion` 会被静默吞掉——无障碍属性不容许
+ * fail-open。共享 CSS 另保留原生 `@media (prefers-reduced-motion: reduce)`
+ * 规则作为 init 脚本完全失效时的安全网（语义同一：不存在「强制完整动效」档，
+ * 媒体规则永远不会覆盖用户显式选择）。
  */
 export const MOTION_PREFERENCE_STORAGE_KEY = 'mahoshojo.motion-preference';
 
@@ -28,10 +35,15 @@ export const getMotionPreferenceInitScript = (): string => `(() => {
     media = undefined;
   }
   var apply = function () {
+    var preference = 'system';
     try {
       var stored = window.localStorage.getItem(${JSON.stringify(MOTION_PREFERENCE_STORAGE_KEY)});
-      var preference = stored === 'reduce' || stored === 'system' ? stored : 'system';
-      var resolved = preference === 'reduce' || (preference === 'system' && media && media.matches) ? 'reduce' : 'no-preference';
+      if (stored === 'reduce' || stored === 'system') {
+        preference = stored;
+      }
+    } catch (e) {}
+    var resolved = preference === 'reduce' || (media && media.matches) ? 'reduce' : 'no-preference';
+    try {
       document.documentElement.dataset.motion = resolved;
     } catch (e) {}
   };

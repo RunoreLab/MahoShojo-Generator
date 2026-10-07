@@ -158,7 +158,15 @@
   }
 }
 
-/* 减少动效统一读 `data-motion` 根标记（DESK-SET-007）。 */
+/* 减少动效统一读 `data-motion` 根标记（DESK-SET-007）；原生 media query
+   作 init 脚本失效时的系统级安全网（D5.1-S1-r1）。 */
+@media (prefers-reduced-motion: reduce) {
+  .header,
+  .immersiveButton,
+  .expandButton { transition: none; }
+  .header[aria-hidden='true'] { transform: none; }
+}
+
 :global(html[data-motion='reduce']) .header,
 :global(html[data-motion='reduce']) .immersiveButton,
 :global(html[data-motion='reduce']) .expandButton { transition: none; }

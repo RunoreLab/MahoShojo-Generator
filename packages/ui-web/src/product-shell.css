@@ -79,6 +79,12 @@
     animation: fadeInDown 0.18s ease-out;
   }
 
+  @media (prefers-reduced-motion: reduce) {
+    .animate-fade-in-down {
+      animation: none;
+    }
+  }
+
   :root[data-motion='reduce'] .animate-fade-in-down {
     animation: none;
   }
@@ -830,7 +836,27 @@ body.announcement-visible {
 }
 
 /* 减少动效统一读 `data-motion` 根标记（DESK-SET-007）：init 脚本与
-   设置页写入同一标记，系统偏好与显式「减少」都经它表达。 */
+   设置页写入同一标记，系统偏好与显式「减少」都经它表达；原生 media
+   query 作 init 失效时的系统级安全网（D5.1-S1-r1）。 */
+@media (prefers-reduced-motion: reduce) {
+  .feature-button {
+    transition: none;
+  }
+
+  .feature-button:hover {
+    transform: none;
+    animation: none;
+  }
+
+  .feature-button::before {
+    animation: none;
+  }
+
+  .gradient-overlay {
+    animation: none;
+  }
+}
+
 :root[data-motion='reduce'] .feature-button {
   transition: none;
 }
@@ -898,6 +924,14 @@ body.announcement-visible {
 .announcement-pause-on-hover:hover .announcement-scroll,
 .announcement-pause-on-hover .announcement-scroll:hover {
   animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .announcement-scroll,
+  .announcement-fade,
+  .announcement-rise {
+    animation: none;
+  }
 }
 
 :root[data-motion='reduce'] .announcement-scroll,

@@ -7,7 +7,7 @@
  * Web 的 `app/layout.tsx`、Desktop 的 `index.html` 与共享 CSS/hook 消费同一
  * 来源；这里钉死它们，任何一端“自己写一份”都会在测试里立刻偏红。
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   getMotionPreferenceInitScript,
@@ -25,6 +25,22 @@ import {
 } from '../src/device-preferences/index';
 
 describe('motion init script', () => {
+  const mediaQueryStub = (matches: boolean) => ({
+    matches,
+    media: '(prefers-reduced-motion: reduce)',
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  });
+
+  /** 真实执行生成产物：jsdom 的 window/document 即脚本全局环境。 */
+  const runInitScript = () => {
+    new Function(getMotionPreferenceInitScript())();
+  };
+
   it('embeds the canonical storage key and writes the resolved document marker', () => {
     const script = getMotionPreferenceInitScript();
 
@@ -38,6 +54,55 @@ describe('motion init script', () => {
 
   it('exposes the product storage key once for both hosts', () => {
     expect(MOTION_PREFERENCE_STORAGE_KEY).toBe('mahoshojo.motion-preference');
+  });
+
+  it('honors system reduce even when localStorage throws — a11y must not fail-open', () => {
+    // 隐私模式/WebView 限制下 getItem 抛异常：读存储与写 DOM 分开兜底后，
+    // 系统级减少动效仍须落成标记（D5.1-S1-r1 回归钉）。
+    const getItem = vi
+      .spyOn(Storage.prototype, 'getItem')
+      .mockImplementation(() => {
+        throw new Error('denied');
+      });
+    window.matchMedia = vi.fn(
+      () => mediaQueryStub(true),
+    ) as unknown as typeof window.matchMedia;
+
+    try {
+      runInitScript();
+      expect(document.documentElement.dataset.motion).toBe('reduce');
+    } finally {
+      getItem.mockRestore();
+      delete document.documentElement.dataset.motion;
+    }
+  });
+
+  it('keeps an explicit reduce even without media query support', () => {
+    window.localStorage.setItem(MOTION_PREFERENCE_STORAGE_KEY, 'reduce');
+    window.matchMedia = undefined as unknown as typeof window.matchMedia;
+
+    try {
+      runInitScript();
+      expect(document.documentElement.dataset.motion).toBe('reduce');
+    } finally {
+      window.localStorage.removeItem(MOTION_PREFERENCE_STORAGE_KEY);
+      delete document.documentElement.dataset.motion;
+    }
+  });
+
+  it('resolves system to no-preference when the media query does not match', () => {
+    window.localStorage.setItem(MOTION_PREFERENCE_STORAGE_KEY, 'system');
+    window.matchMedia = vi.fn(
+      () => mediaQueryStub(false),
+    ) as unknown as typeof window.matchMedia;
+
+    try {
+      runInitScript();
+      expect(document.documentElement.dataset.motion).toBe('no-preference');
+    } finally {
+      window.localStorage.removeItem(MOTION_PREFERENCE_STORAGE_KEY);
+      delete document.documentElement.dataset.motion;
+    }
   });
 });
 

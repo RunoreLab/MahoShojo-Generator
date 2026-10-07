@@ -209,7 +209,20 @@
   transform: none;
 }
 
-/* 减少动效统一读 `data-motion` 根标记（DESK-SET-007）。 */
+/* 减少动效统一读 `data-motion` 根标记（DESK-SET-007）；原生 media query
+   作安全网——init 脚本未跑/失败时系统减少动效仍生效（D5.1-S1-r1）。
+   偏好只有 system|reduce 两档，媒体规则永远不会覆盖用户显式选择。 */
+@media (prefers-reduced-motion: reduce) {
+  .ui-web-questionnaire-answer-input,
+  .ui-web-questionnaire-step-button {
+    transition: none;
+  }
+
+  .ui-web-questionnaire-step-button:hover:not(:disabled) {
+    transform: none;
+  }
+}
+
 :root[data-motion='reduce'] .ui-web-questionnaire-answer-input,
 :root[data-motion='reduce'] .ui-web-questionnaire-step-button {
   transition: none;
