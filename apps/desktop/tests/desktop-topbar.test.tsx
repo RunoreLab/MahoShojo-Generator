@@ -161,6 +161,9 @@ describe('desktop shared topbar', () => {
         'announcements_refresh',
         'cloud_cached_account',
         'desktop_config_read',
+        // D5.1-K1：壳挂载时推送公开缓存策略——本地 IPC、零网络，且
+        // StrictMode 双挂载允许出现两次幂等推送。
+        'public_read_cache_apply_policy',
       ]).toContain(command);
     }
     expect(container.querySelector('header.global-topbar')).not.toBeNull();

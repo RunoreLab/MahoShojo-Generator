@@ -15,6 +15,7 @@ import { AccountPanel } from '../features/account/AccountPanel';
 import { AiConnectionsPanel } from '../features/ai-config/AiConnectionsPanel';
 import { EscapeMenuSettingsCard } from '../features/config/EscapeMenuSettingsCard';
 import { OnlineSettingsSection } from '../features/config/OnlineSettingsSection';
+import { PublicCacheSettingsCard } from '../features/public-cache/PublicCacheSettingsCard';
 import { WebPackageDiagnosticsPanel } from '../features/webpkg/WebPackageDiagnosticsPanel';
 import { loadDesktopRuntimeInfo, type DesktopRuntimeInfo } from '../platform';
 import { navigateByProductHref, resolveInternalHrefForHashHistory } from './hash-history-fragment';
@@ -119,11 +120,14 @@ const PagePreferencesSection = () => {
 };
 
 const DataSection = () => (
-  <SettingsCard
-    title="本地库"
-    description="本机数据卡与 Web 包的管理、导入导出；本地库不需要登录。"
-    actions={<SettingsPageLink href="/local-library">打开本地库</SettingsPageLink>}
-  />
+  <>
+    <SettingsCard
+      title="本地库"
+      description="本机数据卡与 Web 包的管理、导入导出；本地库不需要登录。"
+      actions={<SettingsPageLink href="/local-library">打开本地库</SettingsPageLink>}
+    />
+    <PublicCacheSettingsCard />
+  </>
 );
 
 /**

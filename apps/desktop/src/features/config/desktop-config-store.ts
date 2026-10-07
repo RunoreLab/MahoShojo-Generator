@@ -43,6 +43,12 @@ export interface DesktopConfigState {
   readonly fileStatus: 'unknown' | DesktopConfigFileState['status'];
   /** `ok` 文件但域解析 fatal（JSON/顶层形态/version 非 1）。 */
   readonly fileFatal: boolean;
+  /**
+   * `publicLibraryCache` 组无法校验出合法策略（组坏/文件不可解析/读取
+   * 失败）——缓存消费者据此按「暂停捕获 + 暂停淘汰」运行，而不是按
+   * `values.publicCache*` 的归一默认值运行（DESK-CACHE-008）。
+   */
+  readonly publicCacheDegraded: boolean;
   readonly values: DesktopConfigValues;
   readonly diagnostics: readonly DesktopConfigDiagnostic[];
   /** IPC 级读取失败（区别于文件状态异常）。 */
@@ -64,6 +70,7 @@ const INITIAL_STATE: DesktopConfigState = {
   backupPresent: false,
   fileStatus: 'unknown',
   fileFatal: false,
+  publicCacheDegraded: false,
   values: DESKTOP_CONFIG_DEFAULTS,
   diagnostics: [],
   readError: null,
@@ -202,6 +209,8 @@ export class DesktopConfigStore {
         backupPresent: false,
         fileStatus: 'unknown',
         fileFatal: false,
+        // 读不到文件就无法校验缓存策略——按降级口径暂停捕获与淘汰。
+        publicCacheDegraded: true,
         values: DESKTOP_CONFIG_DEFAULTS,
         diagnostics: [],
         readError: describeCause(cause),
@@ -227,6 +236,7 @@ export class DesktopConfigStore {
           ...shared,
           fileStatus: 'missing',
           fileFatal: false,
+          publicCacheDegraded: false,
           values: DESKTOP_CONFIG_DEFAULTS,
           diagnostics: [],
         });
@@ -237,6 +247,7 @@ export class DesktopConfigStore {
           ...shared,
           fileStatus: 'oversized',
           fileFatal: true,
+          publicCacheDegraded: true,
           values: DESKTOP_CONFIG_DEFAULTS,
           diagnostics: [
             {
@@ -252,6 +263,7 @@ export class DesktopConfigStore {
           ...shared,
           fileStatus: 'invalid-utf8',
           fileFatal: true,
+          publicCacheDegraded: true,
           values: DESKTOP_CONFIG_DEFAULTS,
           diagnostics: [
             { path: '$', message: '配置文件不是合法的 UTF-8 文本，已按默认值生效' },
@@ -269,6 +281,7 @@ export class DesktopConfigStore {
           ...shared,
           fileStatus: 'ok',
           fileFatal: parsed.fatal,
+          publicCacheDegraded: parsed.publicCacheDegraded,
           values: parsed.values,
           diagnostics: parsed.diagnostics,
         });

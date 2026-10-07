@@ -25,11 +25,14 @@ const CHECK_POLICY_OPTIONS: ReadonlyArray<{ value: AnnouncementsCheckPolicy; lab
   { value: 'manual', label: '仅手动' },
 ];
 
-/** 冲突草稿里的字段名投影——与各设置控件同一组标签（含外观组的 Esc 菜单）。 */
+/** 冲突草稿里的字段名投影——与各设置控件同一组标签（含外观组的 Esc 菜单、数据组的缓存策略）。 */
 const FIELD_LABELS: Record<keyof DesktopConfigValues, string> = {
   announcementsCheckPolicy: '公告检查',
   confirmContentLinks: '内容外链确认',
   escapeMenuEnabled: 'Esc 快捷菜单',
+  publicCacheCaptureEnabled: '缓存公开资料',
+  publicCacheMaxBytes: '缓存大小上限',
+  publicCacheWhenFull: '缓存满额策略',
 };
 
 const fileStatusText = (status: string, fatal: boolean): string => {

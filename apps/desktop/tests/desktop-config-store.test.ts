@@ -155,6 +155,60 @@ describe('desktop config store — read projection', () => {
     expect(store.getSnapshot().values).toEqual(DESKTOP_CONFIG_DEFAULTS);
     expect(store.editable()).toBe(false);
   });
+
+  it('unverifiable publicLibraryCache group marks publicCacheDegraded (D5.1-K1)', async () => {
+    for (const [file, expected] of [
+      // 组非法值 → 整组降级，但逐字段归一值仍投影。
+      [
+        okFile(
+          JSON.stringify({
+            version: 1,
+            publicLibraryCache: { captureEnabled: 'yes', maxBytes: 0, whenFull: 'wipe' },
+          }),
+        ),
+        true,
+      ],
+      // 组不是对象 → 降级。
+      [okFile('{"version":1,"publicLibraryCache":"off"}'), true],
+      // 文件整体 fatal → 组不可校验。
+      [okFile('{"version":2}'), true],
+      [{ status: 'oversized' as const, revision: REV_A, bytes: 70 * 1024 }, true],
+      [{ status: 'invalid-utf8' as const, revision: REV_A }, true],
+      // 合法组 → 不降级。
+      [okFile('{"version":1,"publicLibraryCache":{"maxBytes":"unlimited"}}'), false],
+      // 文件缺失 → 默认值合法，不降级。
+      [{ status: 'missing' as const }, false],
+    ] as const) {
+      const invoke = makeInvoke(async (command) => {
+        if (command === 'desktop_config_read') return readResult(file);
+        return undefined;
+      });
+      const store = new DesktopConfigStore({ invoke });
+      await store.ready();
+      expect(store.getSnapshot().publicCacheDegraded).toBe(expected);
+    }
+
+    // 降级组的逐字段归一值仍投影（供 UI 显示），消费者不得直接采信。
+    const invoke = makeInvoke(async (command) => {
+      if (command === 'desktop_config_read') {
+        return readResult(
+          okFile(
+            JSON.stringify({
+              version: 1,
+              publicLibraryCache: { captureEnabled: 'yes', maxBytes: 'unlimited', whenFull: 'pause' },
+            }),
+          ),
+        );
+      }
+      return undefined;
+    });
+    const store = new DesktopConfigStore({ invoke });
+    await store.ready();
+    const state = store.getSnapshot();
+    expect(state.publicCacheDegraded).toBe(true);
+    expect(state.values.publicCacheCaptureEnabled).toBe(true);
+    expect(state.values.publicCacheMaxBytes).toBe('unlimited');
+  });
 });
 
 describe('desktop config store — write semantics', () => {

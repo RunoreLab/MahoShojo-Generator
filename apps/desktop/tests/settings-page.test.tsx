@@ -179,6 +179,68 @@ describe('desktop settings shell', () => {
     expect(doc.externalLinks?.confirmContentLinks).toBe(false);
   });
 
+  it('data group carries the public cache card — stats read plus captureEnabled write (D5.1-K1)', async () => {
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'public_read_cache_stats') {
+        return {
+          status: 'ready',
+          path: 'C:\\data\\public-read-cache.sqlite',
+          usageBytes: 2 * 1024 * 1024,
+          entryCount: 3,
+          summaryCount: 3,
+          bodyCount: 2,
+          withdrawnCount: 1,
+          appliedPolicy: { captureEnabled: true, maxBytes: 268_435_456, whenFull: 'pause' },
+        };
+      }
+      return defaultInvokeImpl(command);
+    });
+    await mountAt('/settings?section=data');
+
+    // 缓存卡挂在「数据」组：三个策略控件 + 统计读取经窄命令。
+    expect(container.querySelector('#settings-data')).not.toBeNull();
+    expect(container.textContent).toContain('公开资料缓存');
+    expect(container.textContent).toContain('public-read-cache.sqlite');
+    expect(
+      invokeMock.mock.calls.filter((call) => call[0] === 'public_read_cache_stats'),
+    ).toHaveLength(1);
+
+    // 文件缺失 → 默认 captureEnabled=true 生效；关闭后整份文档写回。
+    const toggle = [...container.querySelectorAll('[role="switch"]')].find(
+      (el) => el.getAttribute('aria-label') === '缓存公开资料',
+    );
+    expect(toggle?.getAttribute('aria-checked')).toBe('true');
+    await click(toggle ?? null);
+
+    const writeCalls = invokeMock.mock.calls.filter(
+      (call) => call[0] === 'desktop_config_write',
+    );
+    expect(writeCalls).toHaveLength(1);
+    const request = (writeCalls[0]?.[1] as { request?: { content?: string } })?.request;
+    const doc = JSON.parse(request?.content ?? '{}') as {
+      publicLibraryCache?: { captureEnabled?: boolean; maxBytes?: unknown; whenFull?: string };
+    };
+    expect(doc.publicLibraryCache?.captureEnabled).toBe(false);
+    expect(doc.publicLibraryCache?.maxBytes).toBe(268_435_456);
+    expect(doc.publicLibraryCache?.whenFull).toBe('pause');
+
+    // 两步确认才发 clear——第一步点击不出 IPC。
+    const clearButton = [...container.querySelectorAll('button')].find(
+      (el) => el.textContent === '清除公开缓存',
+    );
+    await click(clearButton ?? null);
+    expect(
+      invokeMock.mock.calls.filter((call) => call[0] === 'public_read_cache_clear'),
+    ).toHaveLength(0);
+    const confirm = [...container.querySelectorAll('button')].find(
+      (el) => el.textContent === '确认清除',
+    );
+    await click(confirm ?? null);
+    expect(
+      invokeMock.mock.calls.filter((call) => call[0] === 'public_read_cache_clear'),
+    ).toHaveLength(1);
+  });
+
   it('appearance group carries the Esc 快捷菜单 toggle wired to desktop.escapeMenu.enabled', async () => {
     // D5.1-N1：开关是 config.json 字段（desktop.escapeMenu.enabled，默认 true），
     // 挂在外观与交互组——与「在线与通知」共用同一个 DesktopConfigStore 读写路径。

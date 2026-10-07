@@ -11,6 +11,7 @@ import {
   PREPARE_LOCAL_RESTORE_COMMAND,
 } from '../src/platform/local-backup-bridge';
 import { LIST_LOCAL_CARDS_COMMAND } from '../src/platform/local-card-bridge';
+import { PUBLIC_READ_CACHE_APPLY_POLICY_COMMAND } from '../src/platform/public-cache-bridge';
 import { createDesktopRouter } from '../src/app/router';
 
 const native = vi.hoisted(() => ({ listen: vi.fn() }));
@@ -163,8 +164,14 @@ describe('local backup page integration', () => {
     expect(bridge.invoke).toHaveBeenCalledWith(PREPARE_LOCAL_RESTORE_COMMAND, {
       request: { backupId: backupFixture.summary.backupId },
     });
-    // 本地数据卡列表的读取与备份流程无关，不计入：list backups, prepare, failed exit。
-    expect(bridge.invoke.mock.calls.filter(([command]) => command !== LIST_LOCAL_CARDS_COMMAND)).toHaveLength(3);
+    // 本地数据卡列表的读取与壳级公开缓存策略推送（D5.1-K1，StrictMode 下
+    // 出现两次幂等 apply）都跟备份流程无关，不计入：list backups, prepare, failed exit。
+    expect(
+      bridge.invoke.mock.calls.filter(
+        ([command]) =>
+          command !== LIST_LOCAL_CARDS_COMMAND && command !== PUBLIC_READ_CACHE_APPLY_POLICY_COMMAND,
+      ),
+    ).toHaveLength(3);
     expect(container.textContent).toContain('恢复前备份为 local-library-20261002T040000Z');
     expect(container.textContent).toContain('无法退出应用');
     expect(button('创建备份').disabled).toBe(true);

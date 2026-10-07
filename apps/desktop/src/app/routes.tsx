@@ -25,6 +25,7 @@ import { useTopbarAvatar } from '../features/account/use-topbar-avatar';
 import { DesktopAnnouncementCenter } from '../features/announcements/desktop-announcement-center';
 import { useTopbarMessages } from '../features/messages/topbar-messages';
 import { useDesktopConfig } from '../features/config/use-desktop-config';
+import { usePublicCachePolicySync } from '../features/public-cache/use-public-cache-policy-sync';
 import { ExternalLinksProvider, useExternalLinks } from '../features/external-links/external-links-provider';
 import { buildCapabilitySnapshot } from './capabilities';
 import { navigateByProductHref, resolveInternalHrefForHashHistory } from './hash-history-fragment';
@@ -136,6 +137,9 @@ const DesktopShellInner = () => {
   const pathname = useLocation({ select: (location) => location.pathname });
   const { state: cloudSession, store: cloudSessionStore } = useDesktopCloudSession();
   const { state: config } = useDesktopConfig();
+  // D5.1-K1：把 publicLibraryCache.* 的生效策略持续推到 native——
+  // 公开库浏览路径上的缓存捕获不依赖设置页是否被打开过。
+  usePublicCachePolicySync();
   // 头像是有身份后的后台资料刷新（`cloud_me_profile` 固定路由）：不在启动
   // 关键路径，取不到就回退首字母——共享顶栏的 avatarDataUrl 插槽本就如此。
   // `not-authenticated`（native 401 已清凭据）只上报一次会话收束信号，
