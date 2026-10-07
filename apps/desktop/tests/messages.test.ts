@@ -1,0 +1,230 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { InvokeFn } from '../src/platform/cloud-bridge';
+import { MESSAGES_REQUEST_COMMAND, requestMessagesRoute } from '../src/platform/messages-bridge';
+import {
+  listMessages,
+  markMessagesRead,
+  MessagesApiError,
+  readMessagesSummary,
+} from '../src/features/messages/messages-api';
+import {
+  ensureMessagesSummary,
+  getMessagesSummaryEntry,
+  getTopbarMessagesProjection,
+  invalidateMessagesSummary,
+  refreshMessagesSummary,
+  resetMessagesSummaryForTests,
+} from '../src/features/messages/topbar-messages';
+
+const SUMMARY = {
+  unreadTotal: 3,
+  siteUnread: 1,
+  directUnread: 2,
+  latest: null,
+  fetchedAt: '2026-10-12T00:00:00.000Z',
+  isAuthenticated: true,
+  hasCrowdReviewPending: true,
+  crowdReviewPrompt: { title: '调查院有新的可处理案件', body: '你有新的众查案件待处理', actionUrl: '/investigation' },
+};
+
+const LIST_PAGE = {
+  messages: [
+    {
+      id: 'user:12',
+      scope: 'user',
+      numericId: 12,
+      messageType: 'card-reviewed',
+      templateKey: 'unknown',
+      title: '审核结果',
+      body: '你的数据卡已通过审核',
+      actionUrl: null,
+      priority: 'normal',
+      isRead: false,
+      readAt: null,
+      createdAt: '2026-10-11T08:00:00.000Z',
+    },
+  ],
+  nextCursor: 'c1',
+  filter: 'all',
+  appliedFilter: 'all',
+  fetchedAt: '2026-10-12T00:00:00.000Z',
+  isAuthenticated: true,
+};
+
+/** 等 microtask 链结算。 */
+const flush = async (): Promise<void> => {
+  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+};
+
+describe('messages bridge', () => {
+  it('透传契约内请求并返回 status+body', async () => {
+    const invoke = vi.fn(async () => ({ status: 200, body: SUMMARY }));
+    const response = await requestMessagesRoute(invoke, { routeId: 'messages.summary' });
+    expect(invoke).toHaveBeenCalledWith(MESSAGES_REQUEST_COMMAND, {
+      request: { routeId: 'messages.summary' },
+    });
+    expect(response.status).toBe(200);
+  });
+
+  it('白名单外 routeId 在发出 IPC 前被拒绝', async () => {
+    const invoke = vi.fn();
+    await expect(
+      requestMessagesRoute(invoke, { routeId: 'data-cards.query' as never }),
+    ).rejects.toMatchObject({ name: 'DesktopCloudError', code: 'invalid-request' });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('strict 契约拒绝 URL/凭据字段注入', async () => {
+    const invoke = vi.fn();
+    await expect(
+      requestMessagesRoute(invoke, {
+        routeId: 'messages.list',
+        path: '/api/admin/users',
+      } as never),
+    ).rejects.toMatchObject({ code: 'invalid-request' });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+});
+
+describe('messages api adapters', () => {
+  it('readMessagesSummary 校验 DTO 并拒绝非 2xx', async () => {
+    const invoke = vi.fn(async () => ({ status: 200, body: SUMMARY }));
+    await expect(readMessagesSummary(invoke)).resolves.toMatchObject({ unreadTotal: 3 });
+
+    const denied = vi.fn(async () => ({ status: 503, body: { error: 'down' } }));
+    await expect(readMessagesSummary(denied)).rejects.toMatchObject({
+      name: 'MessagesApiError',
+      status: 503,
+    });
+  });
+
+  it('readMessagesSummary 拒绝不满足契约的正文', async () => {
+    const invoke = vi.fn(async () => ({ status: 200, body: { unreadTotal: 'many' } }));
+    await expect(readMessagesSummary(invoke)).rejects.toMatchObject({
+      name: 'MessagesApiError',
+      status: 0,
+    });
+  });
+
+  it('listMessages 组装 filter/limit/cursor 查询', async () => {
+    const invoke = vi.fn(async () => ({ status: 200, body: LIST_PAGE }));
+    const page = await listMessages(invoke, { filter: 'unread', cursor: 'c0', limit: 20 });
+    expect(invoke).toHaveBeenCalledWith(MESSAGES_REQUEST_COMMAND, {
+      request: {
+        routeId: 'messages.list',
+        query: { filter: 'unread', limit: '20', cursor: 'c0' },
+      },
+    });
+    expect(page.messages).toHaveLength(1);
+    expect(page.nextCursor).toBe('c1');
+  });
+
+  it('markMessagesRead 发送 ids 数组', async () => {
+    const invoke = vi.fn(async () => ({ status: 200, body: { markedCount: 1, ignoredCount: 0 } }));
+    await markMessagesRead(invoke, ['user:12']);
+    expect(invoke).toHaveBeenCalledWith(MESSAGES_REQUEST_COMMAND, {
+      request: { routeId: 'messages.read', body: { ids: ['user:12'] } },
+    });
+  });
+});
+
+describe('topbar messages summary cache', () => {
+  beforeEach(() => {
+    resetMessagesSummaryForTests();
+    vi.useRealTimers();
+  });
+
+  it('fetches once and serves the fresh projection within 90s', async () => {
+    const invoke = vi.fn(async () => ({ status: 200, body: SUMMARY })) as unknown as InvokeFn;
+
+    ensureMessagesSummary(7, invoke);
+    await flush();
+    expect(getTopbarMessagesProjection(7)).toEqual({
+      unreadTotal: 3,
+      hasCrowdReviewPending: true,
+    });
+    expect(invoke).toHaveBeenCalledTimes(1);
+
+    // 90s 新鲜度内的重复 ensure 零网络。
+    ensureMessagesSummary(7, invoke);
+    await flush();
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('refetches once the entry is stale', async () => {
+    const invoke = vi.fn(async () => ({ status: 200, body: SUMMARY })) as unknown as InvokeFn;
+    const now = vi.spyOn(Date, 'now');
+    now.mockReturnValue(1_000_000);
+
+    ensureMessagesSummary(7, invoke);
+    await flush();
+    now.mockReturnValue(1_000_000 + 91_000);
+    ensureMessagesSummary(7, invoke);
+    await flush();
+    expect(invoke).toHaveBeenCalledTimes(2);
+    now.mockRestore();
+  });
+
+  it('keeps the last known projection when a refresh fails', async () => {
+    const invoke = vi.fn(async () => ({ status: 200, body: SUMMARY })) as unknown as InvokeFn;
+    ensureMessagesSummary(7, invoke);
+    await flush();
+
+    const failing = vi.fn(async () => ({ status: 503, body: {} })) as unknown as InvokeFn;
+    await refreshMessagesSummary(7, failing);
+    // 失败不伪造也不清空——上一份已知摘要仍在。
+    expect(getTopbarMessagesProjection(7).unreadTotal).toBe(3);
+  });
+
+  it('invalidate during an in-flight fetch expires the late response', async () => {
+    let release = (): void => {
+      throw new Error('release not captured');
+    };
+    const invoke = vi.fn(
+      async () =>
+        new Promise<{ status: number; body: unknown }>((resolve) => {
+          release = () => resolve({ status: 200, body: SUMMARY });
+        }),
+    ) as unknown as InvokeFn;
+
+    ensureMessagesSummary(7, invoke);
+    invalidateMessagesSummary(7);
+    release();
+    await flush();
+
+    // 迟到响应被世代闸丢弃：登出/换号竞态不会写入旧摘要。
+    expect(getMessagesSummaryEntry(7)).toBeNull();
+  });
+
+  it('reports not-authenticated once via onSessionRejected; api failures stay silent', async () => {
+    const rejected = vi.fn();
+    const notAuth = vi.fn(async () => {
+      throw { code: 'not-authenticated', message: 'session rejected' };
+    }) as unknown as InvokeFn;
+
+    await refreshMessagesSummary(7, notAuth, rejected);
+    expect(rejected).toHaveBeenCalledTimes(1);
+
+    const failing = vi.fn(async () => ({ status: 503, body: {} })) as unknown as InvokeFn;
+    await refreshMessagesSummary(7, failing, rejected);
+    expect(rejected).toHaveBeenCalledTimes(1);
+  });
+
+  it('scopes the cache by userId — another account never sees a stale summary', async () => {
+    const invoke = vi.fn(async () => ({ status: 200, body: SUMMARY })) as unknown as InvokeFn;
+    ensureMessagesSummary(7, invoke);
+    await flush();
+
+    expect(getTopbarMessagesProjection(7).unreadTotal).toBe(3);
+    expect(getTopbarMessagesProjection(9)).toEqual({
+      unreadTotal: 0,
+      hasCrowdReviewPending: false,
+    });
+    expect(getTopbarMessagesProjection(null)).toEqual({
+      unreadTotal: 0,
+      hasCrowdReviewPending: false,
+    });
+  });
+});

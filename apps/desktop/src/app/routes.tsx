@@ -15,6 +15,7 @@ import { projectTopBarAccount } from '../features/account/topbar-projection';
 import { useDesktopCloudSession } from '../features/account/use-desktop-cloud-session';
 import { useTopbarAvatar } from '../features/account/use-topbar-avatar';
 import { DesktopAnnouncementCenter } from '../features/announcements/desktop-announcement-center';
+import { useTopbarMessages } from '../features/messages/topbar-messages';
 import { ExternalLinksProvider, useExternalLinks } from '../features/external-links/external-links-provider';
 import { buildCapabilitySnapshot } from './capabilities';
 import { navigateByProductHref, resolveInternalHrefForHashHistory } from './hash-history-fragment';
@@ -94,8 +95,9 @@ const isFullBleedPath = (pathname: string) =>
  * - 账号投影来自 `DesktopCloudSessionStore` 的当前快照：cached-first——本机凭据
  *   读到账号就立即渲染用户名（不经过「账号 → 用户 → 用户名」三段式），随后一次
  *   `cloud_auth_status` 后台验证给出服务端结论；不可达时身份保留并标注「离线」；
- * - 消息摘要不注入：Desktop 没有消息中心，`/messages` 在快照里是 not-implemented，
- *   按 `hide` 策略整条入口不出现——也不会有任何未读角标的伪造；
+ * - 消息摘要按 userId 缓存（D5.1d-1）：登录后经 `cloud_messages_request`
+ *   固定路由后台取未读数，90s 新鲜度 + 窗口重新可见时补过期——只渲染服务端
+ *   返回的计数，拉不到即无角标而不是伪造数字；
  * - 公告轮播挂在壳上但数据不轮询：`DesktopAnnouncementsStore` 启动只读内置快照 +
  *   native 落盘缓存，on-launch 策略下随后做一次受控刷新（`DESK-PARITY-003`）；
  * - 站外入口经 `open_external_url` 交给系统浏览器：固定产品链接直接开，内容链接
@@ -118,6 +120,12 @@ const DesktopShellInner = () => {
   const avatarDataUrl = useTopbarAvatar(cloudSession.account, {
     onSessionRejected: convergeSessionProjection,
   });
+  // 消息摘要同属「有身份后的后台刷新」（90s 新鲜度 + 窗口可见时补过期）：
+  // 只把服务端返回的未读数喂给共享顶栏的 messages 槽位，没有数据就按
+  // 「无已知未读」渲染入口——绝不伪造角标。
+  const messagesProjection = useTopbarMessages(cloudSession.account, {
+    onSessionRejected: convergeSessionProjection,
+  });
   const { openFixed } = useExternalLinks();
 
   const topBarAccount = projectTopBarAccount(cloudSession);
@@ -137,6 +145,7 @@ const DesktopShellInner = () => {
               ? { ...topBarAccount, avatarDataUrl }
               : topBarAccount
           }
+          messages={cloudSession.account !== null ? messagesProjection : undefined}
           onNavigate={(href, event) => {
             // 共享顶栏渲染真实 `<a href>`，因此这里必须阻止默认行为，否则会触发一次整页加载。
             // Web 侧同理接 `router.push`——「宿主负责路由」这件事在两端是同一种形状。

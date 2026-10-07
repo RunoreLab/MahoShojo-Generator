@@ -19,6 +19,12 @@ import {
   getTopbarAvatar,
   resetTopbarAvatarForTests,
 } from '../src/features/account/use-topbar-avatar';
+import { MESSAGES_REQUEST_COMMAND } from '../src/platform/messages-bridge';
+import {
+  ensureMessagesSummary,
+  getMessagesSummaryEntry,
+  resetMessagesSummaryForTests,
+} from '../src/features/messages/topbar-messages';
 
 const ACCOUNT = { userId: 7, username: 'homura', displayName: 'homura' };
 const EXPIRES = '2026-10-12T00:00:00.000Z';
@@ -95,6 +101,20 @@ const createNativeStub = (
           signature: '圆焰',
           avatarDataUrl: 'data:image/webp;base64,QUJD',
         };
+      case MESSAGES_REQUEST_COMMAND:
+        return {
+          status: 200,
+          body: {
+            unreadTotal: 3,
+            siteUnread: 1,
+            directUnread: 2,
+            latest: null,
+            fetchedAt: EXPIRES,
+            isAuthenticated: true,
+            hasCrowdReviewPending: false,
+            crowdReviewPrompt: null,
+          },
+        };
       default:
         throw new Error(`unexpected command ${command}`);
     }
@@ -131,9 +151,10 @@ const createNativeStub = (
 const commands = (stub: NativeStub): string[] => stub.calls.map((call) => call.command);
 
 describe('DesktopCloudSessionStore', () => {
-  // 头像缓存是进程级模块状态：本文件里 populate/invalidate 的用例相互隔离。
+  // 头像与消息摘要缓存是进程级模块状态：本文件里 populate/invalidate 的用例相互隔离。
   beforeEach(() => {
     resetTopbarAvatarForTests();
+    resetMessagesSummaryForTests();
   });
 
   it('construction and subscription fire zero IPC — bootstrap is what starts the reads', () => {
@@ -549,6 +570,33 @@ describe('DesktopCloudSessionStore', () => {
     await vi.waitFor(() => {
       expect(
         native.calls.filter((call) => call.command === CLOUD_ME_PROFILE_COMMAND),
+      ).toHaveLength(2);
+    });
+  });
+
+  it('signOut invalidates the messages summary — a stale unread badge never survives logout', async () => {
+    // 会话边界同样清消息摘要：已注销账号的未读角标不能留到下一次登录
+    //（与头像同一策略，D5.1d-1）。
+    const native = createNativeStub(
+      { state: 'active', account: ACCOUNT, sessionExpiresAt: EXPIRES },
+      { account: ACCOUNT, sessionExpiresAt: EXPIRES },
+    );
+    const store = new DesktopCloudSessionStore({ invoke: native.invoke });
+    await store.bootstrap();
+
+    ensureMessagesSummary(7, native.invoke);
+    await vi.waitFor(() => {
+      expect(getMessagesSummaryEntry(7)?.summary.unreadTotal).toBe(3);
+    });
+
+    await store.signOut();
+    expect(getMessagesSummaryEntry(7)).toBeNull();
+
+    // 失效后下一次挂载重新走 `cloud_messages_request`。
+    ensureMessagesSummary(7, native.invoke);
+    await vi.waitFor(() => {
+      expect(
+        native.calls.filter((call) => call.command === MESSAGES_REQUEST_COMMAND),
       ).toHaveLength(2);
     });
   });

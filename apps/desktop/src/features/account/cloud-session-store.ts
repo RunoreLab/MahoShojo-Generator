@@ -57,6 +57,7 @@ import {
   signOutCloud,
   type InvokeFn,
 } from '../../platform/cloud-bridge';
+import { invalidateMessagesSummary } from '../messages/topbar-messages';
 import { invalidateTopbarAvatar } from './use-topbar-avatar';
 
 export type DesktopCloudVerification =
@@ -351,10 +352,11 @@ export class DesktopCloudSessionStore {
       this.identityBeforeLogin = null;
       if (outcome.status === 'signed-in') {
         // 新登录成功是一次会话边界：凭据世代推进，让在途旧 status 自然过期；
-        // 头像缓存随新身份失效一次，下一次挂载重新拉取（同账号重登也能拿到
-        // Web 侧改过的头像）。
+        // 头像与消息摘要缓存随新身份失效一次，下一次挂载重新拉取（同账号
+        // 重登也能拿到 Web 侧改过的头像与新消息）。
         this.credentialEpoch += 1;
         invalidateTopbarAvatar(outcome.account.userId);
+        invalidateMessagesSummary(outcome.account.userId);
         this.publish({
           authFlow: IDLE_FLOW,
           account: outcome.account,
@@ -416,9 +418,12 @@ export class DesktopCloudSessionStore {
     try {
       const result = await signOutCloud(this.deps.invoke);
       // 登出即会话边界：凭据世代推进（在途 status 落地时自然被丢弃）；
-      // 已注销账号的头像槽失效，重登后重新拉取。
+      // 已注销账号的头像与消息摘要槽失效，重登后重新拉取。
       this.credentialEpoch += 1;
-      if (previousUserId !== undefined) invalidateTopbarAvatar(previousUserId);
+      if (previousUserId !== undefined) {
+        invalidateTopbarAvatar(previousUserId);
+        invalidateMessagesSummary(previousUserId);
+      }
       this.publish({
         account: null,
         sessionExpiresAt: null,
