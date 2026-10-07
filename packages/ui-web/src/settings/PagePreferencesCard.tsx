@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useState } from 'react';
+import { useEffect, useReducer, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import type {
@@ -48,7 +48,20 @@ const TextPreferenceControl = ({
   onCommit: (value: string) => void;
 }) => {
   const [draft, setDraft] = useState(typeof value === 'string' ? value : '');
+  const focusedRef = useRef(false);
   const current = typeof value === 'string' ? value : '';
+
+  /**
+   * 外部写入同步（跨标签页 storage 事件经 adapter 订阅让父层重渲染后
+   * `current` 变化）：失焦时跟随存储真值——否则旧 draft 会一直停在
+   * 输入框里，之后 blur 可能把陈旧值写回去；聚焦中保留正在编辑的草稿，
+   * 避免输入被远端更新打断，此时 blur 提交语义为后写胜出。
+   * 用 ref 读焦点：effect 只在 current 变化时跑，失焦本身不触发同步
+   * （写失败的 draft 仍按上方约定保留在输入框里）。
+   */
+  useEffect(() => {
+    if (!focusedRef.current) setDraft(current);
+  }, [current]);
 
   const commit = () => {
     if (draft === current) return;
@@ -62,8 +75,14 @@ const TextPreferenceControl = ({
       className="w-36 rounded-md border border-(--app-input-border) bg-(--app-input-bg) px-2 py-1.5 text-xs text-(--app-text)"
       value={draft}
       aria-label={field.label}
+      onFocus={() => {
+        focusedRef.current = true;
+      }}
       onChange={(event) => setDraft(event.target.value)}
-      onBlur={commit}
+      onBlur={() => {
+        focusedRef.current = false;
+        commit();
+      }}
       onKeyDown={(event) => {
         if (event.key === 'Enter') commit();
       }}

@@ -158,3 +158,50 @@ describe('page preferences card — write failure projection', () => {
     });
   });
 });
+
+describe('page preferences card — external update sync', () => {
+  const findTextInput = (label: string): HTMLInputElement | null =>
+    container.querySelector(`input[aria-label="${label}"]`);
+
+  /** 模拟跨标签页写入：直接改存储，再派发 adapter 订阅监听的 storage 事件。 */
+  const externalWrite = async (storage: ReturnType<typeof createStorage>, patch: Record<string, unknown>): Promise<void> => {
+    const document = JSON.parse(storage.dump()[SOURCE.storageKey] ?? '{}');
+    storage.seed(SOURCE.storageKey, JSON.stringify({ ...document, ...patch }));
+    await act(async () => {
+      window.dispatchEvent(new StorageEvent('storage', { key: SOURCE.storageKey }));
+    });
+  };
+
+  /** React 受控 input 的输入模拟：走原生 setter + input 事件。 */
+  const typeInto = async (input: HTMLInputElement, value: string): Promise<void> => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    await act(async () => {
+      setter?.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  };
+
+  it('text field follows external writes while unfocused but keeps the in-progress draft while focused', async () => {
+    const storage = createStorage();
+    storage.seed(SOURCE.storageKey, JSON.stringify({ nickname: '甲' }));
+    await render(<PagePreferencesCard adapter={createPagePreferencesAdapter(SOURCE, storage)} />);
+
+    const input = findTextInput('署名');
+    expect(input?.value).toBe('甲');
+
+    // 未聚焦：外部 storage 事件后跟随新值。
+    await externalWrite(storage, { nickname: '乙' });
+    expect(input?.value).toBe('乙');
+
+    // 聚焦输入本地草稿期间，外部更新不覆盖正在编辑的内容。
+    await act(async () => input?.focus());
+    await typeInto(input!, '本地草稿');
+    expect(input?.value).toBe('本地草稿');
+    await externalWrite(storage, { nickname: '丙' });
+    expect(input?.value).toBe('本地草稿');
+
+    // blur 提交本地草稿——聚焦中到达的外部值被后写胜出覆盖。
+    await act(async () => input?.blur());
+    expect(JSON.parse(storage.dump()[SOURCE.storageKey]).nickname).toBe('本地草稿');
+  });
+});
