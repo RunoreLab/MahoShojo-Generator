@@ -30,18 +30,19 @@ const completed: CanshouGenerationOutcome = {
 };
 const harness = (initial: string | null = null, execute?: typeof executeCanshouGeneration) => {
   let raw = initial;
-  const storage: CanshouDraftStorage = { getItem: vi.fn(() => raw), setItem: vi.fn((_key, value) => { raw = value; }), removeItem: vi.fn(() => { raw = null; }) };
+  const setItem = vi.fn((_key: string, value: string) => { raw = value; });
+  const storage: CanshouDraftStorage = { getItem: vi.fn(() => raw), setItem, removeItem: vi.fn(() => { raw = null; }) };
   const repository = { putIfAbsent: vi.fn(async () => ({ written: true as const })) } as unknown as CardRepository;
   let id = 0;
   const session = new CanshouSession({ storage, repository, initialDraft: draft, execute: execute ?? vi.fn(async () => completed), requestId: () => `request-${++id}` });
-  return { session, storage, repository, raw: () => raw };
+  return { session, storage, setItem, repository, raw: () => raw };
 };
 
 describe('Canshou session intent ownership', () => {
   it('uses a family-scoped draft key distinct from /details', async () => {
-    const { session, storage } = harness();
+    const { session, setItem } = harness();
     session.updateDraft({ ...session.getSnapshot().draft, language: 'English' });
-    expect(storage.setItem.mock.calls.every(([key]) => key === CANSHOU_DRAFT_KEY)).toBe(true);
+    expect(setItem.mock.calls.every(([key]) => key === CANSHOU_DRAFT_KEY)).toBe(true);
     expect(CANSHOU_DRAFT_KEY).not.toBe('mahoshojo.desktop.details.draft.v1');
     session.dispose();
   });

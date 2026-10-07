@@ -72,7 +72,9 @@ describe('topbar avatar cache', () => {
   });
 
   it('dedupes concurrent ensures for the same user', async () => {
-    let release: (() => void) | null = null;
+    let release = (): void => {
+      throw new Error('release not captured');
+    };
     const invoke = vi.fn(
       async () =>
         new Promise<{ userId: number; avatarDataUrl: string }>((resolve) => {
@@ -84,7 +86,7 @@ describe('topbar avatar cache', () => {
     ensureTopbarAvatar(7, invoke);
     expect(invoke).toHaveBeenCalledTimes(1);
 
-    release?.();
+    release();
     await flush();
     expect(getTopbarAvatar(7)).toBe(WEBP_AVATAR);
   });
@@ -171,7 +173,9 @@ describe('topbar avatar cache', () => {
   it('invalidate during an in-flight fetch expires the late response', async () => {
     // 登出发生在 me_profile 在途窗口：世代号已推进，迟到响应结算时
     // 被丢弃——登出后任何挂载都不会看到「已注销账号」的头像复活。
-    let release: (() => void) | null = null;
+    let release = (): void => {
+      throw new Error('release not captured');
+    };
     const invoke = vi.fn(
       async () =>
         new Promise<{ userId: number; avatarDataUrl: string }>((resolve) => {
@@ -181,7 +185,7 @@ describe('topbar avatar cache', () => {
 
     ensureTopbarAvatar(7, invoke);
     invalidateTopbarAvatar(7);
-    release?.();
+    release();
     await flush();
 
     expect(getTopbarAvatar(7)).toBeNull();
