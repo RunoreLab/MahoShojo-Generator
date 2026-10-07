@@ -28,5 +28,7 @@ export const DELIVERED_ROUTES: readonly string[] = [
   '/encyclopedia',
   '/encyclopedia/[slug]',
   '/local-library',
+  '/me',
+  '/messages',
   '/settings',
 ];

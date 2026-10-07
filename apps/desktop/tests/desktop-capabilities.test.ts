@@ -36,15 +36,9 @@ describe('desktop capability snapshot', () => {
     }
     expect(readCapability(snapshot, '/')).toEqual({ kind: 'available' });
     expect(readCapability(snapshot, '/character-manager')).toEqual({ kind: 'available' });
-    // Desktop 还没有消息中心与个人页：如实标 not-implemented，而不是可点击的死链。
-    expect(readCapability(snapshot, '/messages')).toMatchObject({
-      kind: 'unavailable',
-      reason: 'not-implemented',
-    });
-    expect(readCapability(snapshot, '/me')).toMatchObject({
-      kind: 'unavailable',
-      reason: 'not-implemented',
-    });
+    // d-1 交付后消息中心与个人页都是真实能力，可点击入口指向真实路由。
+    expect(readCapability(snapshot, '/messages')).toEqual({ kind: 'available' });
+    expect(readCapability(snapshot, '/me')).toEqual({ kind: 'available' });
   });
 
   it('marks exactly the delivered routes as available', () => {

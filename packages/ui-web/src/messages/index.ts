@@ -13,6 +13,7 @@ export { MessageCard } from './MessageCard';
 export { MessageFilters } from './MessageFilters';
 export { CrowdReviewPromptCard } from './CrowdReviewPromptCard';
 export { MessageActionLink } from './MessageActionLink';
+export { MessagesPageView } from './MessagesPageView';
 export {
   classifyMessageActionUrl,
   formatMessageTime,

@@ -78,7 +78,7 @@ const CAPABILITIES = buildCapabilitySnapshot();
  * 裸 section 页面（本地库、设置）继续走受限宽 `main`（D5.1-P2-r4；百科骨架见 D5.1
  * 百科 UI compatibility 收口）。
  */
-const FULL_BLEED_PATHS = new Set(['/', '/details', '/canshou', '/character-manager', '/encyclopedia']);
+const FULL_BLEED_PATHS = new Set(['/', '/details', '/canshou', '/character-manager', '/encyclopedia', '/messages']);
 
 /** 条目页是前缀而不是字面路径：`/encyclopedia/<slug>`。 */
 const isFullBleedPath = (pathname: string) =>
@@ -340,6 +340,20 @@ const settingsRoute = createRoute({
   component: lazyRouteComponent(() => import('./settings-page'), 'DesktopSettings'),
 });
 
+/** 消息中心：控制器代码随导航加载（列表取数走 cloud_messages_request 窄通道）。 */
+const messagesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/messages',
+  component: lazyRouteComponent(() => import('./messages-page'), 'DesktopMessages'),
+});
+
+/** 最小个人页：账号投影 + 登录/退出操作面（复用设置页 AccountPanel）。 */
+const meRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/me',
+  component: lazyRouteComponent(() => import('./me-page'), 'DesktopMe'),
+});
+
 /** 本地角色编辑；`?card=<id>` 打开一条本地库记录，其余查询参数一律丢弃。 */
 const characterManagerRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -371,5 +385,7 @@ export const routeTree = rootRoute.addChildren([
   encyclopediaIndexRoute,
   encyclopediaEntryRoute,
   localLibraryRoute,
+  meRoute,
+  messagesRoute,
   settingsRoute,
 ]);

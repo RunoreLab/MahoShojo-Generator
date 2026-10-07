@@ -194,7 +194,7 @@ describe('desktop shared topbar', () => {
     expect(topbar?.textContent).toContain('离线');
   });
 
-  it('renders only delivered entries: /messages and /me are absent, external sites open via the controlled command', async () => {
+  it('renders only delivered entries: /battle stays absent, external sites open via the controlled command', async () => {
     await mount();
     invokeMock.mockClear();
 
@@ -206,9 +206,9 @@ describe('desktop shared topbar', () => {
     expect(hrefs).toContain('#/character-manager');
     expect(hrefs).toContain('#/encyclopedia');
     expect(hrefs).toContain('#/local-library');
-    // hide 策略：未交付入口整条消失——铃铛连同伪造未读的可能一起不存在。
-    expect(hrefs).not.toContain('/messages');
-    expect(hrefs).not.toContain('/me');
+    // d-1 交付后消息中心是真实能力：铃铛指向真实路由（未读数见登录态用例）。
+    expect(hrefs).toContain('#/messages');
+    // hide 策略：未交付入口整条消失。
     expect(hrefs).not.toContain('/battle');
 
     // 站外入口在 `open_external_url` 交付后是真实能力：渲染为真实链接，点击
@@ -317,19 +317,20 @@ describe('desktop shared topbar', () => {
     await click(accountButton());
 
     // 挂载 cached 读 → 点击 → status → begin → await → signed-in → 头像资料
-    // 后台刷新：整条链路都是这一次点按的后果（bootstrap 的凭据读取发生在挂载时，
-    // 不是点击）。公告窄通道的启动检查与登录链路无关，断言只看 cloud_* 顺序。
+    // 与消息摘要的后台刷新：整条链路都是这一次点按的后果（bootstrap 的凭据
+    // 读取发生在挂载时，不是点击）。公告窄通道的启动检查与登录链路无关，
+    // 断言只看 cloud_* 顺序。
     expect(
       invokeMock.mock.calls.map((call) => call[0]).filter((command) => command.startsWith('cloud_')),
-    ).toEqual(['cloud_cached_account', 'cloud_auth_status', 'cloud_login_begin', 'cloud_login_await', 'cloud_me_profile']);
+    ).toEqual(['cloud_cached_account', 'cloud_auth_status', 'cloud_login_begin', 'cloud_login_await', 'cloud_me_profile', 'cloud_messages_request']);
     // 顶栏投影到 active：显示用户名，且出现「退出登录」入口（菜单 DOM 常挂在 hover
     // group 里，不需要先悬停就能断言）。
     expect(container.querySelector('header.global-topbar')?.textContent).toContain('homura');
     expect(container.textContent).toContain('退出登录');
-    // 已登录后账号入口按能力快照渲染：角色管理可点，个人页未交付则不出现。
+    // 已登录后账号入口按能力快照渲染：个人页与角色管理均已交付、可点。
     const menuHrefs = [...container.querySelectorAll('a')].map((a) => a.getAttribute('href'));
     expect(menuHrefs).toContain('#/character-manager');
-    expect(menuHrefs).not.toContain('/me');
+    expect(menuHrefs).toContain('#/me');
   });
 
   it('shows 服务不可用 when the bridge reports unreachable — never signed-out', async () => {
