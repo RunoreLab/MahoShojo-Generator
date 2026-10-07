@@ -165,8 +165,8 @@ const CORE_GENERATED_PUBLIC_PATHS = Object.freeze({
  * 与 `generatedPublicPaths`（import 边界用的文件级清单）不同，这里要覆盖到目录本身——
  * Git 护栏按路径前缀判定。
  */
-const GENERATED_PUBLIC_DIRECTORIES = Object.freeze(['encyclopedia', 'questionnaires/presets']);
-const GENERATED_PUBLIC_ROOT_FILES = Object.freeze(['languages.json', 'announcements.json']);
+export const GENERATED_PUBLIC_DIRECTORIES = Object.freeze(['encyclopedia', 'questionnaires/presets']);
+export const GENERATED_PUBLIC_ROOT_FILES = Object.freeze(['languages.json', 'announcements.json']);
 
 /**
  * @typedef {'apps' | 'packages'} WorkspaceKind
@@ -691,7 +691,7 @@ function isContractsSourceFile(unit, sourceFile) {
   return true;
 }
 
-function generatedPublicPaths(rootDirectory) {
+export function generatedPublicPaths(rootDirectory) {
   const pathsByApp = new Map(Object.entries(CORE_GENERATED_PUBLIC_PATHS).map(([app, paths]) => [app, new Set(paths)]));
   const syncManifest = readManifest(path.join(rootDirectory, 'content', 'sync-manifest.json'));
   const sharedBrand = Array.isArray(syncManifest?.brand?.shared) ? syncManifest.brand.shared : [];
@@ -702,6 +702,59 @@ function generatedPublicPaths(rootDirectory) {
   }
   for (const name of webBrand) pathsByApp.get('web')?.add(name);
   return pathsByApp;
+}
+
+/**
+ * MONO-006 的 fs 侧：生成物在干净检出上不存在，`readFileSync`、`new URL`、`path.join`
+ * 之类的文件读取必须和静态 import 一样改走 `content/` 权威源。
+ *
+ * 规则拦截**字符串字面量**形态、指向生成物清单的 public 路径，覆盖真实写法：
+ * - `apps/<app>/public/<生成物>`（仓库根相对）；
+ * - `public/<生成物>`、`./public/<生成物>`（app 工作目录相对，如 `resolve(process.cwd(), …)`）。
+ *
+ * 刻意不拦截：
+ * - `../public/…`、`@/public/…`：import specifier 形态，由 GENERATED-PUBLIC-IMPORT 管；
+ * - `/questionnaires/…` 等无前缀路径：是运行时 URL 而非 fs 路径；
+ * - `path.join('apps', 'web', 'public', …)` 分段拼装：生成器自身需要这种写法，
+ *   动态逃逸面由 scripts/test-without-generated-public.mjs 的屏蔽运行兜底。
+ */
+const PUBLIC_FS_PATH_PATTERN = /^(?:apps\/(web|desktop)\/)?(?:\.\/)?public\/(.+)$/;
+const QUOTED_LITERAL_PATTERN = /(['"`])((?:(?!\1)[^\\\n]|\\.)*)\1/g;
+
+/**
+ * @param {Map<string, Set<string>>} pathsByApp
+ * @returns {(appName: string | undefined, relativePath: string) => boolean}
+ */
+function generatedFsPathMatcher(pathsByApp) {
+  const scopes = new Map(
+    [...pathsByApp].map(([app, names]) => [app, new Set([...GENERATED_PUBLIC_ROOT_FILES, ...names])]),
+  );
+  return (appName, relativePath) => {
+    const fileSets = appName ? [scopes.get(appName)] : [...scopes.values()];
+    return fileSets.some((set) => set?.has(relativePath))
+      || GENERATED_PUBLIC_DIRECTORIES.some((dir) => relativePath === dir || relativePath.startsWith(`${dir}/`));
+  };
+}
+
+/**
+ * 在剥除注释后的源码里扫字面量形态、命中生成物清单的 public fs 路径。
+ * 块注释替换时保留换行，避免命中行的行号漂移。
+ *
+ * @param {string} source
+ * @param {(appName: string | undefined, relativePath: string) => boolean} matchesGenerated
+ * @returns {Array<{ path: string, line: number }>}
+ */
+function findGeneratedPublicFsReads(source, matchesGenerated) {
+  const uncommented = source
+    .replace(/\/\*[\s\S]*?\*\//g, (block) => block.replace(/[^\n]/g, ' '))
+    .replace(/(^|[^:'"\/])\/\/[^\n]*/g, '$1');
+  const hits = [];
+  for (const match of uncommented.matchAll(QUOTED_LITERAL_PATTERN)) {
+    const fsPath = PUBLIC_FS_PATH_PATTERN.exec(match[2]);
+    if (!fsPath || !matchesGenerated(fsPath[1], fsPath[2])) continue;
+    hits.push({ path: match[2], line: uncommented.slice(0, match.index).split('\n').length });
+  }
+  return hits;
 }
 
 /**
@@ -861,7 +914,8 @@ export function checkWorkspaceBoundaries(rootDirectory = process.cwd()) {
     }
   }
 
-  for (const sourceFile of collectRootToolingSourceFiles(normalizedRoot)) {
+  const rootToolingSourceFiles = collectRootToolingSourceFiles(normalizedRoot);
+  for (const sourceFile of rootToolingSourceFiles) {
     let imports;
     try {
       ({ imports } = collectSourceDependencies(readFileSync(sourceFile, 'utf8'), sourceFile));
@@ -1112,6 +1166,26 @@ export function checkWorkspaceBoundaries(rootDirectory = process.cwd()) {
           );
         }
       }
+    }
+  }
+
+  // fs 侧生成物读取：静态 import 规则管不到 readFileSync 这类调用，对测试/工具里
+  // 的字面量 public 路径做统一扫描（单元源码与根工具文件同一集合）。
+  const matchesGeneratedFsPath = generatedFsPathMatcher(generatedPublicPathMap);
+  const fsScannedFiles = new Set(rootToolingSourceFiles);
+  for (const unit of units) {
+    for (const sourceFile of unit.sourceFiles) fsScannedFiles.add(sourceFile);
+  }
+  for (const sourceFile of fsScannedFiles) {
+    for (const hit of findGeneratedPublicFsReads(readFileSync(sourceFile, 'utf8'), matchesGeneratedFsPath)) {
+      addViolation(
+        violations,
+        'MONO-006-GENERATED-PUBLIC-READ',
+        sourceFile,
+        hit.path,
+        'generator-owned public copies do not exist on a clean checkout; read the authority under content/ instead',
+        hit.line,
+      );
     }
   }
 

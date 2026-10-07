@@ -125,6 +125,42 @@ describe('workspace dependency boundaries', () => {
     ]);
   });
 
+  it('rejects fs reads of generator-owned public paths while allowing app-owned data and runtime URLs', async () => {
+    const rootDir = await createWorkspaceFixture({
+      'apps/web/package.json': manifest('@mahoshojo/web'),
+      // 仓库根相对路径：测试里曾经真实的干净检出失败形态。
+      'apps/web/tests/contract.test.ts': [
+        "import { readFileSync } from 'node:fs';",
+        "const preset = JSON.parse(readFileSync('apps/web/public/questionnaires/presets/canshou-default.json', 'utf8'));",
+        'void preset;',
+      ].join('\n'),
+      // app 工作目录相对路径：resolve(process.cwd(), 'public/…') 形态。
+      'tests/index-check.test.ts': [
+        "import { readFileSync } from 'node:fs';",
+        "const index = readFileSync('public/questionnaires/presets/index.json', 'utf8');",
+        'void index;',
+      ].join('\n'),
+      // 不应被拦截：app 自有（非生成）public 数据、运行时 URL、import specifier 形态。
+      'apps/web/lib/owned-static.ts': [
+        "import { readFileSync } from 'node:fs';",
+        "const seeds = readFileSync('apps/web/public/journalists.json', 'utf8');",
+        "const runtimeUrl = '/questionnaires/presets/index.json';",
+        "import specLike from '../public/presets/C01_egg.json';",
+        'void seeds; void runtimeUrl; void specLike;',
+      ].join('\n'),
+    });
+
+    const violations = checkWorkspaceBoundaries(rootDir).filter(
+      (violation) => violation.rule === 'MONO-006-GENERATED-PUBLIC-READ',
+    );
+
+    expect(violations).toHaveLength(2);
+    expect(violations.map((violation) => violation.module)).toEqual([
+      'apps/web/public/questionnaires/presets/canshou-default.json',
+      'public/questionnaires/presets/index.json',
+    ]);
+  });
+
   it('rejects package imports into apps through relative paths and root aliases', async () => {
     const rootDir = await createWorkspaceFixture({
       'apps/web/src/index.ts': 'export const value = 1;\n',

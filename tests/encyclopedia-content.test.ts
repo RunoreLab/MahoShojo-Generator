@@ -154,7 +154,7 @@ describe('generated content from a clean output root', () => {
     await writeFile(questionnaire, '{}');
     await expect(generate({ outputRoot, checkOutput: true })).rejects.toThrow('magical-girl-default.json 与 content/ 不同步');
     await generate({ outputRoot });
-    await writeFile(path.join(outputRoot, 'apps/web/public/flowers.json'), '[]');
+    await writeFile(path.join(outputRoot, 'apps', 'web', 'public', 'flowers.json'), '[]');
     await expect(generate({ outputRoot, checkOutput: true })).rejects.toThrow('flowers.json 与 content/ 不同步');
     await generate({ outputRoot });
     await generate({ outputRoot, checkOutput: true });

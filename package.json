@@ -57,7 +57,8 @@
     "build:desktop": "pnpm --filter @mahoshojo/desktop run build:tauri",
     "test:desktop": "pnpm --filter @mahoshojo/desktop run test",
     "lint:desktop": "pnpm --filter @mahoshojo/desktop run lint",
-    "check:desktop:rust": "pnpm --filter @mahoshojo/desktop run check:rust"
+    "check:desktop:rust": "pnpm --filter @mahoshojo/desktop run check:rust",
+    "test:without-generated-public": "node scripts/test-without-generated-public.mjs"
   },
   "devDependencies": {
     "@types/node": "^20",
