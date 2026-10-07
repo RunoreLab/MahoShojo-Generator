@@ -11,9 +11,26 @@ import type { SettingsGroupId } from './groups';
  * 注意与 specs/2026-10-06_084200 的字段表保持一致：改 owner/默认值要先改
  * 规格，不是先改这张表。
  */
+/** 单宿主的页偏好 owner 事实：真实存储键 + 文档形态。 */
+export interface PagePreferenceOwnerFacts {
+  storageKey: string;
+  scope: 'blob' | 'fields';
+}
+
+export type SettingsHostId = 'web' | 'desktop';
+
 export type SettingOwner =
   | { kind: 'device-storage'; storageKey: string }
-  | { kind: 'page-preferences'; storageKey: string; scope: 'blob' | 'fields' }
+  | {
+      kind: 'page-preferences';
+      /**
+       * 每宿主真实 owner——同一「页偏好」在两端的持久化形态不同：
+       * Web 是独立偏好 blob，Desktop 是草稿文档内字段。键与 scope 必须
+       * 与各宿主 `PagePreferenceSource` 装配逐字一致（宿主侧测试钉住）。
+       * 只含 `hosts` 声明存在的宿主键。
+       */
+      byHost: Partial<Record<SettingsHostId, PagePreferenceOwnerFacts>>;
+    }
   | { kind: 'config-json'; key: string }
   | { kind: 'existing-store'; description: string }
   | { kind: 'server' };
@@ -76,10 +93,13 @@ export const SETTINGS_FIELD_REGISTRY: readonly SettingsFieldRecord[] = [
     scope: 'device',
     owner: {
       kind: 'page-preferences',
-      // Web blob：mahoshojo.details.preferences.v1
-      // Desktop fields：mahoshojo.desktop.details.draft.v1（草稿文档内偏好键）
-      storageKey: 'per-host，见宿主装配',
-      scope: 'blob',
+      byHost: {
+        web: { storageKey: 'mahoshojo.details.preferences.v1', scope: 'blob' },
+        desktop: {
+          storageKey: 'mahoshojo.desktop.details.draft.v1',
+          scope: 'fields',
+        },
+      },
     },
     defaultValue: '各页现有默认',
     status: 'wired',
@@ -93,8 +113,13 @@ export const SETTINGS_FIELD_REGISTRY: readonly SettingsFieldRecord[] = [
     scope: 'device',
     owner: {
       kind: 'page-preferences',
-      storageKey: 'per-host，见宿主装配',
-      scope: 'blob',
+      byHost: {
+        web: { storageKey: 'mahoshojo.canshou.preferences.v1', scope: 'blob' },
+        desktop: {
+          storageKey: 'mahoshojo.desktop.canshou.draft.v1',
+          scope: 'fields',
+        },
+      },
     },
     defaultValue: '各页现有默认',
     status: 'wired',

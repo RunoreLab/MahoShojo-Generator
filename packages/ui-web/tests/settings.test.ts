@@ -319,4 +319,40 @@ describe('settings field registry', () => {
     );
   });
 
+  it('page-preferences owners are machine-readable per host — real key and scope, not placeholders', () => {
+    const record = (id: string) => {
+      const found = SETTINGS_FIELD_REGISTRY.find((r) => r.id === id);
+      if (!found || found.owner.kind !== 'page-preferences') {
+        throw new Error(`${id} 未登记为 page-preferences owner`);
+      }
+      return found;
+    };
+
+    // Web blob 与 Desktop fields 是两种不同的持久化形态——登记表必须
+    // 如实分宿主记录，宿主侧测试再钉它与真实装配逐字一致。
+    expect(record('generation.detailsPreferences').owner).toEqual({
+      kind: 'page-preferences',
+      byHost: {
+        web: { storageKey: 'mahoshojo.details.preferences.v1', scope: 'blob' },
+        desktop: { storageKey: 'mahoshojo.desktop.details.draft.v1', scope: 'fields' },
+      },
+    });
+    expect(record('generation.canshouPreferences').owner).toEqual({
+      kind: 'page-preferences',
+      byHost: {
+        web: { storageKey: 'mahoshojo.canshou.preferences.v1', scope: 'blob' },
+        desktop: { storageKey: 'mahoshojo.desktop.canshou.draft.v1', scope: 'fields' },
+      },
+    });
+
+    // 结构不变量：byHost 只列出 hosts 声明的宿主，且每条都有非空真键。
+    for (const r of SETTINGS_FIELD_REGISTRY) {
+      if (r.owner.kind !== 'page-preferences') continue;
+      const declared = r.hosts === 'shared' ? ['web', 'desktop'] : [r.hosts];
+      expect(Object.keys(r.owner.byHost).sort()).toEqual([...declared].sort());
+      for (const facts of Object.values(r.owner.byHost)) {
+        expect(facts?.storageKey).toMatch(/^mahoshojo\./);
+      }
+    }
+  });
 });

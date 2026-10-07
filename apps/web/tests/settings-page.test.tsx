@@ -96,6 +96,11 @@ vi.mock('@/components/settings/SettingsRouteProviders', () => ({
 }));
 
 import { WebSettingsPage } from '@/components/settings/SettingsPage';
+import { SETTINGS_FIELD_REGISTRY } from '@mahoshojo/ui-web/settings';
+import {
+  CANSHOU_PREFERENCES_STORAGE_KEY,
+  DETAILS_PREFERENCES_STORAGE_KEY,
+} from '@/lib/settings/page-preferences';
 
 let container: HTMLDivElement;
 let root: Root;
@@ -198,6 +203,25 @@ describe('web /settings page', () => {
       window.localStorage.getItem('mahoshojo.details.preferences.v1') ?? 'null',
     );
     expect(stored).toEqual({ imageSaveMode: 'modal' });
+  });
+
+  it('registry web owner facts match the real page-owned storage keys', () => {
+    // 登记表是审查对照面：byHost.web 必须逐字等于页面真实偏好键，
+    // 否则「机器可读」只是另一份会漂移的文档（D5.1-S1-r1）。
+    const ownerOf = (id: string) => {
+      const record = SETTINGS_FIELD_REGISTRY.find((r) => r.id === id);
+      if (record?.owner.kind !== 'page-preferences') throw new Error(`${id} owner 缺失`);
+      return record.owner.byHost.web;
+    };
+
+    expect(ownerOf('generation.detailsPreferences')).toEqual({
+      storageKey: DETAILS_PREFERENCES_STORAGE_KEY,
+      scope: 'blob',
+    });
+    expect(ownerOf('generation.canshouPreferences')).toEqual({
+      storageKey: CANSHOU_PREFERENCES_STORAGE_KEY,
+      scope: 'blob',
+    });
   });
 
   it('honours ?section= deep links against the shared group anchors', async () => {

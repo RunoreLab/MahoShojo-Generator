@@ -12,7 +12,10 @@
  * 3. 写入的偏好字段随草稿恢复进入会话 draft——设置页修改与页面生效同值。
  */
 import { describe, expect, it, vi } from 'vitest';
-import { createPagePreferencesAdapter } from '@mahoshojo/ui-web/settings';
+import {
+  createPagePreferencesAdapter,
+  SETTINGS_FIELD_REGISTRY,
+} from '@mahoshojo/ui-web/settings';
 import type { CardRepository } from '@mahoshojo/local-library/repository';
 import { DetailsSession } from '../src/features/details/session';
 import { CanshouSession } from '../src/features/canshou/session';
@@ -86,6 +89,25 @@ describe('settings first-write draft document', () => {
       answers: {},
       language: 'zh-CN',
       showDetails: true,
+    });
+  });
+
+  it('registry desktop owner facts match the real host assembly key-for-key', () => {
+    // 登记表是审查对照面：byHost.desktop 必须逐字等于真实装配，
+    // 否则「机器可读」只是另一份会漂移的文档（D5.1-S1-r1）。
+    const ownerOf = (id: string) => {
+      const record = SETTINGS_FIELD_REGISTRY.find((r) => r.id === id);
+      if (record?.owner.kind !== 'page-preferences') throw new Error(`${id} owner 缺失`);
+      return record.owner.byHost.desktop;
+    };
+
+    expect(ownerOf('generation.detailsPreferences')).toEqual({
+      storageKey: DESKTOP_DETAILS_PREFERENCES.storageKey,
+      scope: DESKTOP_DETAILS_PREFERENCES.scope,
+    });
+    expect(ownerOf('generation.canshouPreferences')).toEqual({
+      storageKey: DESKTOP_CANSHOU_PREFERENCES.storageKey,
+      scope: DESKTOP_CANSHOU_PREFERENCES.scope,
     });
   });
 
