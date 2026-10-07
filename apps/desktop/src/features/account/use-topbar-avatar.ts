@@ -17,7 +17,7 @@ import { invoke as tauriInvoke } from '@tauri-apps/api/core';
 
 import type { DesktopCloudAccountSummary } from '@mahoshojo/contracts/desktop-cloud';
 
-import { readMyProfile, type InvokeFn } from '../../platform/cloud-bridge';
+import { DesktopCloudError, readMyProfile, type InvokeFn } from '../../platform/cloud-bridge';
 
 const avatars = new Map<number, string>();
 const checked = new Set<number>();
@@ -56,6 +56,7 @@ export const invalidateTopbarAvatar = (userId: number): void => {
 export const ensureTopbarAvatar = (
   userId: number,
   invoke: InvokeFn = tauriInvoke,
+  onSessionRejected?: () => void,
 ): void => {
   if (checked.has(userId) || inflight.has(userId)) return;
   const generation = generations.get(userId) ?? 0;
@@ -73,9 +74,14 @@ export const ensureTopbarAvatar = (
         avatars.set(userId, url);
       }
     })
-    .catch(() => {
-      // 头像失败不升级：顶栏回退首字母；not-authenticated 的会话结论由
-      // 下一次 refresh/auth_status 统一收口，这里不另建清理路径。
+    .catch((cause: unknown) => {
+      // 头像失败不升级：顶栏回退首字母。只有 `not-authenticated`（native 401
+      // 清凭据）值得上报一次——宿主据此触发 `refresh` 让投影收束；会话结论
+      // 仍由 `DesktopCloudSessionStore` 统一下，这里不另建清理路径。收敛是
+      // 有界的：每次失败至多触发一次，refresh 本身是 single-flight。
+      if (cause instanceof DesktopCloudError && cause.code === 'not-authenticated') {
+        onSessionRejected?.();
+      }
     })
     .finally(() => {
       inflight.delete(userId);
@@ -94,13 +100,15 @@ export const resetTopbarAvatarForTests = (): void => {
 /** 顶栏头像 hook：`account` 存在即后台取一次，返回缓存的 data URL 或 null。 */
 export const useTopbarAvatar = (
   account: DesktopCloudAccountSummary | null,
+  options?: { readonly onSessionRejected?: () => void },
 ): string | null => {
   const userId = account?.userId ?? null;
+  const onSessionRejected = options?.onSessionRejected;
   const avatar = useSyncExternalStore(subscribeTopbarAvatar, () =>
     getTopbarAvatar(userId),
   );
   useEffect(() => {
-    if (userId !== null) ensureTopbarAvatar(userId);
-  }, [userId]);
+    if (userId !== null) ensureTopbarAvatar(userId, tauriInvoke, onSessionRejected);
+  }, [userId, onSessionRejected]);
   return avatar;
 };

@@ -34,7 +34,8 @@ interface NativeStub {
   releaseAwait: (outcome: unknown) => void;
   /** 让 `cloud_auth_status` 保持挂起——用于断言「cached 身份先于验证结论可见」。 */
   holdStatus: () => void;
-  releaseStatus: () => void;
+  /** 以 `session`（默认）或给定负载结算挂起的 status 查询；`Error` 负载表示拒绝。 */
+  releaseStatus: (value?: unknown) => void;
 }
 
 /**
@@ -55,7 +56,8 @@ const createNativeStub = (
   let awaitHeld = false;
   let beginResolve: (() => void) | null = null;
   let beginHeld = false;
-  let statusResolve: (() => void) | null = null;
+  let statusResolve: ((value: unknown) => void) | null = null;
+  let statusReject: ((reason: unknown) => void) | null = null;
   let statusHeld = false;
 
   const invoke = (async (command: string, args?: Record<string, unknown>) => {
@@ -65,8 +67,9 @@ const createNativeStub = (
         return cached;
       case CLOUD_AUTH_STATUS_COMMAND:
         if (statusHeld) {
-          return new Promise((resolve) => {
-            statusResolve = () => resolve(session);
+          return new Promise((resolve, reject) => {
+            statusResolve = resolve;
+            statusReject = reject;
           });
         }
         return session;
@@ -115,8 +118,12 @@ const createNativeStub = (
     holdStatus: () => {
       statusHeld = true;
     },
-    releaseStatus: () => {
-      statusResolve?.();
+    releaseStatus: (value?: unknown) => {
+      if (value instanceof Error) {
+        statusReject?.(value);
+        return;
+      }
+      statusResolve?.(value === undefined ? session : value);
     },
   };
 };
@@ -569,6 +576,80 @@ describe('DesktopCloudSessionStore', () => {
         native.calls.filter((call) => call.command === CLOUD_ME_PROFILE_COMMAND),
       ).toHaveLength(2);
     });
+  });
+
+  it('discards an in-flight status read that resolves after signOut — no identity resurrection', async () => {
+    // D5.2-r2 收口：bootstrap 派发的 `cloud_auth_status` 仍在途时用户登出，
+    // 迟到的 `active`（描述的是已删除凭据）不得把身份投影复活。世代闸让
+    // 落地结果与「凭据是否仍属于发起时那一份」对齐。
+    const native = createNativeStub(
+      { state: 'active', account: ACCOUNT, sessionExpiresAt: EXPIRES },
+      { account: ACCOUNT, sessionExpiresAt: EXPIRES },
+    );
+    native.holdStatus();
+    const store = new DesktopCloudSessionStore({ invoke: native.invoke });
+    const bootstrap = store.bootstrap();
+    await vi.waitFor(() => {
+      expect(store.getSnapshot().account).toEqual(ACCOUNT);
+      expect(store.getSnapshot().verification).toBe('checking');
+    });
+
+    await store.signOut();
+    expect(store.getSnapshot().account).toBeNull();
+    expect(store.getSnapshot().verification).toBe('signed-out');
+
+    // 旧凭据的迟到 `active` 落地：整份丢弃，登出结论不被覆盖。
+    native.releaseStatus();
+    await bootstrap;
+    expect(store.getSnapshot().account).toBeNull();
+    expect(store.getSnapshot().verification).toBe('signed-out');
+  });
+
+  it('a failed in-flight status read after signOut does not rewrite the projection to unreachable', async () => {
+    // 同一窗口的失败路径也不能盖过显式终态：登出后迟到 reject 只描述旧
+    // 凭据的传输失败，把 verification 改写成 unreachable 同样错误。
+    const native = createNativeStub(
+      { state: 'active', account: ACCOUNT, sessionExpiresAt: EXPIRES },
+      { account: ACCOUNT, sessionExpiresAt: EXPIRES },
+    );
+    native.holdStatus();
+    const store = new DesktopCloudSessionStore({ invoke: native.invoke });
+    const bootstrap = store.bootstrap();
+    await vi.waitFor(() => {
+      expect(store.getSnapshot().verification).toBe('checking');
+    });
+
+    await store.signOut();
+    native.releaseStatus(new Error('network down'));
+    await bootstrap;
+    expect(store.getSnapshot().account).toBeNull();
+    expect(store.getSnapshot().verification).toBe('signed-out');
+  });
+
+  it('signOut during an authenticating flow still settles the flow — cancelled outcome keeps signed-out', async () => {
+    // 授权在途期间登出是真实可达的（登出入口不归 authFlow 管）。取消/失败
+    // 终态只结束授权投影，绝不复活任何旧身份；世代闸保证 prior 快照不被
+    // 当成「可恢复的事实」。
+    const native = createNativeStub({ state: 'signed-out' });
+    const store = new DesktopCloudSessionStore({ invoke: native.invoke });
+    await store.bootstrap();
+
+    native.holdAwait();
+    const auth = store.requestAuth();
+    await vi.waitFor(() => {
+      expect(store.getSnapshot().authFlow.kind).toBe('authenticating');
+    });
+
+    await store.signOut();
+    expect(store.getSnapshot().verification).toBe('signed-out');
+
+    native.releaseAwait({ status: 'cancelled' });
+    const outcome = await auth;
+    expect(outcome).toEqual({ status: 'cancelled' });
+    const snapshot = store.getSnapshot();
+    expect(snapshot.account).toBeNull();
+    expect(snapshot.verification).toBe('signed-out');
+    expect(snapshot.authFlow.kind).toBe('idle');
   });
 
   it('never puts credentials in the store state — only the public session projection', async () => {

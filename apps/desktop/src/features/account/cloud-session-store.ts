@@ -144,6 +144,15 @@ export class DesktopCloudSessionStore {
   private loginPromise: Promise<DesktopCloudLoginOutcome | null> | null = null;
   /** `authenticating` 期间记住进入前的身份投影，取消授权时原样恢复而不是猜。 */
   private identityBeforeLogin: IdentityBeforeLogin | null = null;
+  /**
+   * 凭据世代号：登出成功与登录成功各自推进一格。`refresh` 发起时记录世代、
+   * 落地时比对——世代已变说明结果描述的是旧凭据（登出/换号已完成），整份
+   * 结果丢弃、只返回当前投影的转写，不允许迟到的 status 复活身份或覆盖
+   * 新登录（D5.2-r2 迟到 status 收口）。授权在途期间登出后，`runLogin` 的
+   * 取消/失败终态也按同一世代判断：会话已变就不再恢复授权前快照。
+   */
+  private credentialEpoch = 0;
+  private epochBeforeLogin = 0;
 
   constructor(private readonly deps: DesktopCloudSessionDeps) {}
 
@@ -212,18 +221,26 @@ export class DesktopCloudSessionStore {
    */
   refresh = async (): Promise<DesktopCloudSessionStatus> => {
     if (this.loginPromise) {
-      return toSessionStatus(this.identityBeforeLogin ?? {
-        account: null,
-        sessionExpiresAt: null,
-        verification: 'unreachable',
-      });
+      // 授权在途：世代未变读授权前快照（D5.0d-r2）；世代已变（授权期间发生
+      // 登出）读当前投影——授权前快照描述的是已被登出的凭据。
+      const basis =
+        this.credentialEpoch === this.epochBeforeLogin && this.identityBeforeLogin !== null
+          ? this.identityBeforeLogin
+          : this.state;
+      return toSessionStatus(basis);
     }
     if (this.statusPromise) return this.statusPromise;
 
     this.statusPromise = (async () => {
+      const epoch = this.credentialEpoch;
       this.publish({ verification: 'checking' });
       try {
         const session = await readCloudAuthStatus(this.deps.invoke);
+        if (this.credentialEpoch !== epoch) {
+          // 查询期间凭据已更替（登出/新登录完成）：结果无论是什么状态都只
+          // 描述旧凭据，丢弃整份投影——登出后不被复活、新登录不被覆盖。
+          return toSessionStatus(this.state);
+        }
         switch (session.state) {
           case 'active':
             this.publish({
@@ -256,6 +273,11 @@ export class DesktopCloudSessionStore {
         }
         return session;
       } catch (cause) {
+        if (this.credentialEpoch !== epoch) {
+          // 同上：登出/换号已完成的窗口里，传输失败也不许把投影改写成
+          // unreachable 盖住显式终态。
+          return toSessionStatus(this.state);
+        }
         this.publish({
           verification: 'unreachable',
           lastError: `会话状态读取失败：${describeCloudSessionError(cause)}`,
@@ -313,6 +335,7 @@ export class DesktopCloudSessionStore {
       verification: this.state.verification,
     };
     this.identityBeforeLogin = prior;
+    this.epochBeforeLogin = this.credentialEpoch;
     this.publish({ lastError: null });
 
     try {
@@ -327,8 +350,10 @@ export class DesktopCloudSessionStore {
       const outcome = await awaitCloudLogin(this.deps.invoke, begin.flowId);
       this.identityBeforeLogin = null;
       if (outcome.status === 'signed-in') {
-        // 新登录成功是一次会话边界：头像缓存随新身份失效一次，下一次
-        // 挂载重新拉取（同账号重登也能拿到 Web 侧改过的头像）。
+        // 新登录成功是一次会话边界：凭据世代推进，让在途旧 status 自然过期；
+        // 头像缓存随新身份失效一次，下一次挂载重新拉取（同账号重登也能拿到
+        // Web 侧改过的头像）。
+        this.credentialEpoch += 1;
         invalidateTopbarAvatar(outcome.account.userId);
         this.publish({
           authFlow: IDLE_FLOW,
@@ -337,11 +362,18 @@ export class DesktopCloudSessionStore {
           verification: 'verified',
         });
       } else {
+        // 授权期间凭据未变才恢复授权前投影；世代已变（授权中登出）时当前
+        // 投影是更新的事实，恢复 prior 等于复活已登出的身份。
+        const restoreIdentity = this.credentialEpoch === this.epochBeforeLogin;
         this.publish({
           authFlow: IDLE_FLOW,
-          account: prior.account,
-          sessionExpiresAt: prior.sessionExpiresAt,
-          verification: prior.verification,
+          ...(restoreIdentity
+            ? {
+                account: prior.account,
+                sessionExpiresAt: prior.sessionExpiresAt,
+                verification: prior.verification,
+              }
+            : {}),
           ...(outcome.status === 'failed'
             ? { lastError: `登录未完成（${outcome.code}）：${outcome.message}` }
             : {}),
@@ -350,11 +382,16 @@ export class DesktopCloudSessionStore {
       return outcome;
     } catch (cause) {
       this.identityBeforeLogin = null;
+      const restoreIdentity = this.credentialEpoch === this.epochBeforeLogin;
       this.publish({
         authFlow: IDLE_FLOW,
-        account: prior.account,
-        sessionExpiresAt: prior.sessionExpiresAt,
-        verification: prior.verification,
+        ...(restoreIdentity
+          ? {
+              account: prior.account,
+              sessionExpiresAt: prior.sessionExpiresAt,
+              verification: prior.verification,
+            }
+          : {}),
         lastError: describeCloudSessionError(cause),
       });
       return null;
@@ -378,7 +415,9 @@ export class DesktopCloudSessionStore {
     const previousUserId = this.state.account?.userId;
     try {
       const result = await signOutCloud(this.deps.invoke);
-      // 登出即会话边界：已注销账号的头像槽失效，重登后重新拉取。
+      // 登出即会话边界：凭据世代推进（在途 status 落地时自然被丢弃）；
+      // 已注销账号的头像槽失效，重登后重新拉取。
+      this.credentialEpoch += 1;
       if (previousUserId !== undefined) invalidateTopbarAvatar(previousUserId);
       this.publish({
         account: null,

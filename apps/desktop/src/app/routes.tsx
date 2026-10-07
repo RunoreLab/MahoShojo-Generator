@@ -110,7 +110,14 @@ const DesktopShellInner = () => {
   const { state: cloudSession, store: cloudSessionStore } = useDesktopCloudSession();
   // 头像是有身份后的后台资料刷新（`cloud_me_profile` 固定路由）：不在启动
   // 关键路径，取不到就回退首字母——共享顶栏的 avatarDataUrl 插槽本就如此。
-  const avatarDataUrl = useTopbarAvatar(cloudSession.account);
+  // `not-authenticated`（native 401 已清凭据）只上报一次会话收束信号，
+  // 投影结论仍由 store 统一下。
+  const convergeSessionProjection = useCallback(() => {
+    void cloudSessionStore.refresh();
+  }, [cloudSessionStore]);
+  const avatarDataUrl = useTopbarAvatar(cloudSession.account, {
+    onSessionRejected: convergeSessionProjection,
+  });
   const { openFixed } = useExternalLinks();
 
   const topBarAccount = projectTopBarAccount(cloudSession);

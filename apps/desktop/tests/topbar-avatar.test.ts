@@ -170,6 +170,33 @@ describe('topbar avatar cache', () => {
     expect(getTopbarAvatar(7)).toBe(WEBP_AVATAR);
   });
 
+  it('reports not-authenticated once via onSessionRejected so the session projection can converge', async () => {
+    // native 在 401 时已清凭据：头像面不下会话结论，但要把「凭据被拒」上报
+    // 给宿主——宿主触发 `refresh` 统一收束。其他失败（网络抖动等）不上报。
+    const rejected = vi.fn();
+    const invoke = vi.fn(async () => {
+      throw { code: 'not-authenticated', message: 'session rejected' };
+    }) as unknown as InvokeFn;
+
+    ensureTopbarAvatar(7, invoke, rejected);
+    await flush();
+
+    expect(rejected).toHaveBeenCalledTimes(1);
+    expect(getTopbarAvatar(7)).toBeNull();
+  });
+
+  it('does not report transient failures to onSessionRejected', async () => {
+    const rejected = vi.fn();
+    const invoke = vi.fn(async () => {
+      throw { code: 'network-error', message: 'down' };
+    }) as unknown as InvokeFn;
+
+    ensureTopbarAvatar(7, invoke, rejected);
+    await flush();
+
+    expect(rejected).not.toHaveBeenCalled();
+  });
+
   it('invalidate during an in-flight fetch expires the late response', async () => {
     // 登出发生在 me_profile 在途窗口：世代号已推进，迟到响应结算时
     // 被丢弃——登出后任何挂载都不会看到「已注销账号」的头像复活。
