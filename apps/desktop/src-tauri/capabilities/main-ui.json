@@ -60,6 +60,9 @@
     "allow-announcements-refresh",
     "allow-desktop-config-read",
     "allow-desktop-config-write",
-    "allow-desktop-config-open-directory"
+    "allow-desktop-config-open-directory",
+    "allow-public-read-cache-apply-policy",
+    "allow-public-read-cache-stats",
+    "allow-public-read-cache-clear"
   ]
 }

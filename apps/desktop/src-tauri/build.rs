@@ -66,6 +66,9 @@ fn main() {
             "desktop_config_read",
             "desktop_config_write",
             "desktop_config_open_directory",
+            "public_read_cache_apply_policy",
+            "public_read_cache_stats",
+            "public_read_cache_clear",
         ]),
     ))
     .expect("failed to run tauri build script");

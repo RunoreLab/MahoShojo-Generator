@@ -31,6 +31,7 @@ mod maintenance;
 #[cfg(test)]
 mod maintenance_contract_tests;
 mod provider_profile;
+mod public_cache;
 mod restore;
 mod secret;
 mod sse;
@@ -1067,13 +1068,18 @@ fn cancel_hosted_ai(registry: State<'_, ai::RequestRegistry>, request_id: String
 /// renderer 只能给 `routeId` + `query` + `body`；method/path/cookie 由 native
 /// 路由表注入，`deny_unknown_fields` 拒绝凭据与 URL 字段。无会话访问
 /// Required 路由直接 `not-authenticated`，不产生网络请求。
+///
+/// `cache` 是 K1 公开持久缓存：只有 `public-data-cards.query` 的响应会被
+/// 观察（白名单投影 + 并发守卫）；缓存失败只体现为响应上的
+/// `cache.outcome`，不改变在线业务语义。
 #[tauri::command]
 async fn cloud_card_library_request(
     cloud: State<'_, cloud::CloudState>,
     secrets: State<'_, SharedSecretStore>,
+    cache: State<'_, public_cache::PublicReadCache>,
     request: cloud::CloudRouteRequest,
 ) -> Result<cloud::CloudRouteResponse, cloud::CloudError> {
-    cloud::cloud_card_library_request(&cloud, secrets.inner().as_ref(), request).await
+    cloud::cloud_card_library_request(&cloud, secrets.inner().as_ref(), &cache, request).await
 }
 
 /// 消息中心云端请求：与卡库同一套固定路由窄边界（D5.1d-1）。`summary`/
@@ -1157,6 +1163,56 @@ async fn desktop_config_write(
     .map_err(|_| {
         config::ConfigError::new(config::ConfigErrorCode::InternalError, "配置写入任务失败")
     })?
+}
+
+/* ── D5.1-K1 公开资料持久只读缓存 ───────────────────────────────────────
+ *
+ * `public-read-cache.sqlite` 是与正式本地库物理隔离的派生缓存：renderer
+ * 只能推送策略、查统计、清库——记录本身没有 renderer 可见的读取命令
+ * （K2 离线降级才开放读取通路）。三条命令一律 `spawn_blocking`：缓存 I/O
+ * 不得落在 WebView 主线程上。
+ */
+
+/// 推送公开缓存策略。renderer 已把 config.json 的归一结果折叠成
+/// `{captureEnabled, maxBytes, whenFull}`——native 不再做域判定，只做
+/// `deny_unknown_fields` + 预算合法性复核。
+#[tauri::command]
+async fn public_read_cache_apply_policy(
+    app: tauri::AppHandle,
+    policy: public_cache::PublicCachePolicyDto,
+) -> Result<(), public_cache::PublicCacheError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<public_cache::PublicReadCache>()
+            .apply_policy(policy)
+    })
+    .await
+    .map_err(|_| public_cache::PublicCacheError::internal("缓存策略应用任务失败"))?
+}
+
+/// 公开缓存统计：用量、条目计数与真实状态（empty/ready/unavailable/
+/// unsupported-schema）。如实报告——缓存损坏只表现为状态，不伪装为空库。
+#[tauri::command]
+async fn public_read_cache_stats(
+    app: tauri::AppHandle,
+) -> Result<public_cache::PublicCacheStats, public_cache::PublicCacheError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<public_cache::PublicReadCache>().stats()
+    })
+    .await
+    .map_err(|_| public_cache::PublicCacheError::internal("缓存统计任务失败"))?
+}
+
+/// 清空公开缓存。推进 `write_epoch`：在途响应一律按 stale 丢弃，不会在
+/// 清理后回填。幂等——空库返回 `{removedEntries: 0, freedBytes: 0}`。
+#[tauri::command]
+async fn public_read_cache_clear(
+    app: tauri::AppHandle,
+) -> Result<public_cache::PublicCacheClearResult, public_cache::PublicCacheError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<public_cache::PublicReadCache>().clear()
+    })
+    .await
+    .map_err(|_| public_cache::PublicCacheError::internal("缓存清理任务失败"))?
 }
 
 /// 打开固定的配置目录（设置页「显示路径」的配套入口）；不开放任意路径。
@@ -1301,6 +1357,11 @@ pub fn run() {
                     .map_err(|error| format!("cannot initialize the announcements client: {}", error.message))?,
             );
 
+            // D5.1-K1：公开持久缓存与正式本地库共用同一数据目录，但独立
+            // SQLite 文件、独立连接、独立 schema 版本——损坏/未知版本只让
+            // 缓存停用，绝不拖垮启动。惰性打开：首个公开读取才建文件。
+            app.manage(public_cache::PublicReadCache::at(&data_root));
+
             app.manage(instance);
             app.manage(library);
             app.manage(archive_export);
@@ -1361,7 +1422,10 @@ pub fn run() {
             announcements_refresh,
             desktop_config_read,
             desktop_config_write,
-            desktop_config_open_directory
+            desktop_config_open_directory,
+            public_read_cache_apply_policy,
+            public_read_cache_stats,
+            public_read_cache_clear
         ])
         .run(tauri::generate_context!())
         .expect("error while running MahoShojo Generator desktop app");

@@ -1873,6 +1873,10 @@ pub struct CloudRouteRequest {
 pub struct CloudRouteResponse {
     pub status: u16,
     pub body: serde_json::Value,
+    /// D5.1-K1：本次响应与公开持久缓存的关系。只有固定公开路由
+    /// （`public-data-cards.query`）会携带；其它路由不输出该字段。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache: Option<crate::public_cache::CacheOutcome>,
 }
 
 /// 有界读取响应正文并解析为 JSON。空正文按 `null` 处理（204/HEAD 兼容）；
@@ -1915,6 +1919,7 @@ async fn dispatch_cloud_route(
     state: &CloudState,
     secrets: &dyn SecretStore,
     routes: &'static [CloudRoute],
+    public_cache: Option<&crate::public_cache::PublicReadCache>,
     request: CloudRouteRequest,
     context: &str,
     response_max_bytes: usize,
@@ -1979,6 +1984,17 @@ async fn dispatch_cloud_route(
             .body(bytes);
     }
 
+    // D5.1-K1：只有固定公开路由进入持久缓存观察；发送前取并发快照
+    // （epoch + mutation_seq），防止在途响应复活撤回/清理后的状态。
+    // 观察失败（缓存未开/损坏）不阻塞在线请求——本次响应只带
+    // `cache.outcome = 'unavailable'`。
+    let observes_public = public_cache.is_some() && route.id == PUBLIC_READ_CARDS_ROUTE_ID;
+    let observe_ticket = if observes_public {
+        public_cache.and_then(|cache| cache.begin_observe())
+    } else {
+        None
+    };
+
     let response = builder
         .timeout(SHORT_REQUEST_TIMEOUT)
         .send()
@@ -1992,21 +2008,60 @@ async fn dispatch_cloud_route(
         clear_session(secrets)?;
     }
 
+    // `Cache-Control` 是缓存的存储许可证据，必须在 body 流被消费前取出。
+    let cache_control = if observes_public {
+        response
+            .headers()
+            .get(reqwest::header::CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned)
+    } else {
+        None
+    };
+
     let body = read_bounded_json(response, context, response_max_bytes).await?;
-    Ok(CloudRouteResponse { status, body })
+    let cache = if observes_public {
+        Some(match (observe_ticket, public_cache) {
+            (Some(ticket), Some(cache)) => cache.observe_response(
+                &ticket,
+                &state.origin,
+                request.query.as_ref(),
+                cache_control.as_deref(),
+                status,
+                &body,
+            ),
+            _ => crate::public_cache::CacheOutcome::unavailable(),
+        })
+    } else {
+        None
+    };
+    Ok(CloudRouteResponse {
+        status,
+        body,
+        cache,
+    })
 }
+
+/// `public-data-cards.query`：K1 持久公开缓存唯一观察的路由。
+const PUBLIC_READ_CARDS_ROUTE_ID: &str = "public-data-cards.query";
 
 /// `cloud_card_library_request`：数据卡库的固定路由窄请求（D5.0e，
 /// `DESK-ONLINE-010`）。边界语义见 `dispatch_cloud_route`。
+///
+/// `cache` 是 K1 公开持久缓存 state：只有 `public-data-cards.query` 的
+/// 响应会进入观察（白名单投影 + epoch/revision 并发守卫），其余路由的
+/// `response.cache` 恒为 `None`——私有路由从不靠近它。
 pub async fn cloud_card_library_request(
     state: &CloudState,
     secrets: &dyn SecretStore,
+    cache: &crate::public_cache::PublicReadCache,
     request: CloudRouteRequest,
 ) -> Result<CloudRouteResponse, CloudError> {
     dispatch_cloud_route(
         state,
         secrets,
         CARD_LIBRARY_ROUTES,
+        Some(cache),
         request,
         "数据卡请求",
         CARD_LIBRARY_RESPONSE_MAX_BYTES,
@@ -2018,6 +2073,7 @@ pub async fn cloud_card_library_request(
 /// `cloud_messages_request`：消息中心的固定路由窄请求（D5.1d-1）。
 /// 边界语义同 `dispatch_cloud_route`；`summary`/`read`/`read-all` 属
 /// Required——无本地凭据不产生请求；`list` 匿名可读全站消息。
+/// 消息路由一律不进入公开缓存（`None`）。
 pub async fn cloud_messages_request(
     state: &CloudState,
     secrets: &dyn SecretStore,
@@ -2027,6 +2083,7 @@ pub async fn cloud_messages_request(
         state,
         secrets,
         MESSAGES_ROUTES,
+        None,
         request,
         "消息请求",
         MESSAGES_RESPONSE_MAX_BYTES,
@@ -2234,6 +2291,8 @@ mod tests {
         last_card_request: Mutex<Option<(String, String, Option<serde_json::Value>)>>,
         /// `Some((status, body))` 时卡库路由返回覆盖响应（测 401/错误分支）。
         card_response_override: Mutex<Option<(u16, String)>>,
+        /// 卡库路由响应附加头（K1：注入 `Cache-Control` 存储许可证据）。
+        card_extra_headers: Mutex<Vec<(String, String)>>,
         /// 最近一次 `/api/me/profile` 请求的原始 head（断言 cookie 注入）。
         last_me_profile_head: Mutex<Option<String>>,
         /// `Some((status, body))` 时资料路由返回覆盖响应（测 401/越界分支）。
@@ -2256,6 +2315,7 @@ mod tests {
             hosted_json_response: Mutex::new(None),
             last_card_request: Mutex::new(None),
             card_response_override: Mutex::new(None),
+            card_extra_headers: Mutex::new(Vec::new()),
             last_me_profile_head: Mutex::new(None),
             me_profile_override: Mutex::new(None),
             shutdown: CancellationToken::new(),
@@ -2425,19 +2485,22 @@ mod tests {
                         head.to_string(),
                         serde_json::from_slice(body).ok(),
                     ));
+                    let mut extra = self.card_extra_headers.lock().unwrap().clone();
                     if let Some((status, override_body)) =
                         self.card_response_override.lock().unwrap().clone()
                     {
+                        let mut headers =
+                            vec![("Content-Type".to_string(), "application/json".to_string())];
+                        headers.append(&mut extra);
                         return MockResponse {
                             status,
-                            headers: vec![(
-                                "Content-Type".to_string(),
-                                "application/json".to_string(),
-                            )],
+                            headers,
                             body: override_body,
                         };
                     }
-                    json(serde_json::json!({"success": true}))
+                    let mut response = json(serde_json::json!({"success": true}));
+                    response.headers.append(&mut extra);
+                    response
                 }
                 DR_READINESS_PATH => {
                     let override_response = self.readiness_override.lock().unwrap().clone();
@@ -3586,6 +3649,37 @@ mod tests {
         }
     }
 
+    /// K1 公开缓存的测试实例：临时目录 + 退出时清理。
+    struct TestCache {
+        dir: std::path::PathBuf,
+        cache: crate::public_cache::PublicReadCache,
+    }
+
+    impl TestCache {
+        fn new(label: &str) -> Self {
+            static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let unique = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let dir = std::env::temp_dir().join(format!(
+                "mahoshojo-cloud-cache-{label}-{}-{unique}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).expect("create cache dir");
+            let cache = crate::public_cache::PublicReadCache::at(&dir);
+            Self { dir, cache }
+        }
+
+        fn get(&self) -> &crate::public_cache::PublicReadCache {
+            &self.cache
+        }
+    }
+
+    impl Drop for TestCache {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
     fn stored_test_session() -> StoredSession {
         StoredSession {
             cookie: "better-auth.session_token=native.tok".to_string(),
@@ -3604,11 +3698,13 @@ mod tests {
             let server = spawn_mock_server();
             let state = CloudState::with_origin(&server.origin);
             let secrets = MemorySecrets::new();
+            let cache = TestCache::new("unknown-route");
             store_session(&secrets, &stored_test_session()).unwrap();
 
             let error = cloud_card_library_request(
                 &state,
                 &secrets,
+                cache.get(),
                 card_request("arbitrary-internal-route"),
             )
             .await
@@ -3620,6 +3716,7 @@ mod tests {
             let error = cloud_card_library_request(
                 &state,
                 &secrets,
+                cache.get(),
                 CloudRouteRequest {
                     route_id: "public-data-cards.query".to_string(),
                     query: None,
@@ -3640,10 +3737,15 @@ mod tests {
             let state = CloudState::with_origin(&server.origin);
             let secrets = MemorySecrets::new();
 
-            let error =
-                cloud_card_library_request(&state, &secrets, card_request("data-cards.query"))
-                    .await
-                    .unwrap_err();
+            let cache = TestCache::new("required-no-session");
+            let error = cloud_card_library_request(
+                &state,
+                &secrets,
+                cache.get(),
+                card_request("data-cards.query"),
+            )
+            .await
+            .unwrap_err();
             assert_eq!(error.code, CloudErrorCode::NotAuthenticated);
             // fail-closed 不能产生网络请求。
             assert!(server.last_card_request.lock().unwrap().is_none());
@@ -3656,6 +3758,7 @@ mod tests {
             let server = spawn_mock_server();
             let state = CloudState::with_origin(&server.origin);
             let secrets = MemorySecrets::new();
+            let cache = TestCache::new("optional-anon");
 
             // 无会话：公开路由匿名成功，不带 Cookie。
             let mut request = card_request("public-data-cards.query");
@@ -3663,7 +3766,7 @@ mod tests {
                 ("type".to_string(), "character".to_string()),
                 ("limit".to_string(), "12".to_string()),
             ]));
-            let response = cloud_card_library_request(&state, &secrets, request)
+            let response = cloud_card_library_request(&state, &secrets, cache.get(), request)
                 .await
                 .expect("optional route must work anonymously");
             assert_eq!(response.status, 200);
@@ -3682,6 +3785,7 @@ mod tests {
             let response = cloud_card_library_request(
                 &state,
                 &secrets,
+                cache.get(),
                 CloudRouteRequest {
                     route_id: "data-cards.create".to_string(),
                     query: None,
@@ -3710,12 +3814,17 @@ mod tests {
             let secrets = MemorySecrets::new();
             store_session(&secrets, &stored_test_session()).unwrap();
 
+            let cache = TestCache::new("required-401");
             *server.card_response_override.lock().unwrap() =
                 Some((401, r#"{"success":false,"error":"未登录"}"#.to_string()));
-            let response =
-                cloud_card_library_request(&state, &secrets, card_request("favorites.query"))
-                    .await
-                    .expect("401 是业务响应而不是传输失败");
+            let response = cloud_card_library_request(
+                &state,
+                &secrets,
+                cache.get(),
+                card_request("favorites.query"),
+            )
+            .await
+            .expect("401 是业务响应而不是传输失败");
             assert_eq!(response.status, 401);
             // 服务端明确否认会话 → 本地凭据清除（与 cloud_auth_status 同语义）。
             assert!(load_session(&secrets).unwrap().is_none());
@@ -3728,6 +3837,7 @@ mod tests {
             let server = spawn_mock_server();
             let state = CloudState::with_origin(&server.origin);
             let secrets = MemorySecrets::new();
+            let cache = TestCache::new("bounds");
             store_session(&secrets, &stored_test_session()).unwrap();
 
             // 超长 query value 拒绝。
@@ -3736,7 +3846,7 @@ mod tests {
                 "search".to_string(),
                 "x".repeat(CLOUD_ROUTE_QUERY_VALUE_MAX + 1),
             )]));
-            let error = cloud_card_library_request(&state, &secrets, request)
+            let error = cloud_card_library_request(&state, &secrets, cache.get(), request)
                 .await
                 .unwrap_err();
             assert_eq!(error.code, CloudErrorCode::InvalidRequest);
@@ -3748,6 +3858,7 @@ mod tests {
             let response = cloud_card_library_request(
                 &state,
                 &secrets,
+                cache.get(),
                 CloudRouteRequest {
                     route_id: "data-cards.create".to_string(),
                     query: None,
@@ -3768,6 +3879,7 @@ mod tests {
             let error = cloud_card_library_request(
                 &state,
                 &secrets,
+                cache.get(),
                 CloudRouteRequest {
                     route_id: "data-cards.create".to_string(),
                     query: None,
@@ -3790,16 +3902,121 @@ mod tests {
             let state = CloudState::with_origin(&server.origin);
             let secrets = MemorySecrets::new();
 
+            let cache = TestCache::new("oversize-response");
             *server.card_response_override.lock().unwrap() =
                 Some((200, "x".repeat(CARD_LIBRARY_RESPONSE_MAX_BYTES + 8)));
             let error = cloud_card_library_request(
                 &state,
                 &secrets,
+                cache.get(),
                 card_request("public-data-cards.query"),
             )
             .await
             .unwrap_err();
             assert_eq!(error.code, CloudErrorCode::InvalidResponse);
+        });
+    }
+
+    /* ── K1 公开持久缓存观察钩（D5.1-K1） ──────────────────────────────── */
+
+    #[test]
+    fn public_route_captures_response_and_reports_outcome() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            let cache = TestCache::new("observe-capture");
+            // 服务端明确允许公开存储。
+            *server.card_extra_headers.lock().unwrap() = vec![(
+                "Cache-Control".to_string(),
+                "public, max-age=15".to_string(),
+            )];
+            *server.card_response_override.lock().unwrap() = Some((
+                200,
+                serde_json::json!({
+                    "success": true,
+                    "cards": [{
+                        "id": "card-a", "user_id": 1, "type": "character",
+                        "name": "Alpha", "description": "d", "is_public": 1,
+                        "review_status": "approved",
+                        "created_at": "2026-10-01T00:00:00Z",
+                        "updated_at": "2026-10-02T00:00:00Z",
+                        "usage_count": 0, "like_count": 0, "favorite_count": 0,
+                        "is_recommended": 0, "username": "author",
+                        "favorited_at": null
+                    }],
+                    "total": 1, "nextOffset": null
+                })
+                .to_string(),
+            ));
+
+            let mut request = card_request("public-data-cards.query");
+            request.query = Some(std::collections::BTreeMap::from([(
+                "view".to_string(),
+                "summary".to_string(),
+            )]));
+            let response = cloud_card_library_request(&state, &secrets, cache.get(), request)
+                .await
+                .expect("public query must succeed");
+            assert_eq!(response.status, 200);
+            let report = response.cache.expect("公开路由必须携带 cache 报告");
+            assert_eq!(
+                report.outcome,
+                crate::public_cache::CacheOutcomeKind::Captured
+            );
+            assert_eq!(report.captured, 1);
+            let stats = cache.get().stats().expect("stats");
+            assert_eq!(stats.summary_count, 1);
+        });
+    }
+
+    #[test]
+    fn private_route_response_carries_no_cache_report() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            let cache = TestCache::new("observe-private");
+            store_session(&secrets, &stored_test_session()).unwrap();
+            *server.card_response_override.lock().unwrap() =
+                Some((200, r#"{"success":true,"cards":[]}"#.to_string()));
+
+            let response = cloud_card_library_request(
+                &state,
+                &secrets,
+                cache.get(),
+                card_request("data-cards.query"),
+            )
+            .await
+            .expect("private query must succeed");
+            assert!(response.cache.is_none(), "私有路由绝不靠近公开缓存报告");
+        });
+    }
+
+    #[test]
+    fn public_404_withdraws_and_reports() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            let cache = TestCache::new("observe-withdraw");
+            *server.card_response_override.lock().unwrap() =
+                Some((404, r#"{"success":false}"#.to_string()));
+
+            let mut request = card_request("public-data-cards.query");
+            request.query = Some(std::collections::BTreeMap::from([(
+                "id".to_string(),
+                "card-gone".to_string(),
+            )]));
+            let response = cloud_card_library_request(&state, &secrets, cache.get(), request)
+                .await
+                .expect("404 是业务响应而不是传输失败");
+            assert_eq!(response.status, 404);
+            let report = response.cache.expect("公开路由必须携带 cache 报告");
+            assert_eq!(
+                report.outcome,
+                crate::public_cache::CacheOutcomeKind::Withdrawn
+            );
         });
     }
 
