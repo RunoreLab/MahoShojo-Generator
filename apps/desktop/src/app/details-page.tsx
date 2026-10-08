@@ -403,7 +403,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   const showTextInput = question?.allowCustom !== false || !questionHasOptions;
   const updateAnswer = (value: string) => {
     if (!flowItem) return;
-    updateDraft({ answers: { ...answersByKey, [flowItem.key]: value } });
+    updateDraft({ answers: { ...session.getSnapshot().draft.answers, [flowItem.key]: value } });
   };
   const applySelection = (selection: QuestionnaireSelection) => {
     updateSelections(applyQuestionnaireSelection(selections, selection, {
@@ -447,30 +447,37 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   const clientProfilesBlocked =
     target.location === 'client' && (profilesLoading || profilesError !== null);
   const generate = (discardUnsavedResult = false) => {
+    const current = session.getSnapshot();
+    const submissionSelections = current.draft.questionnaireSelections?.length
+      ? current.draft.questionnaireSelections
+      : (provisionalBuiltin ? [provisionalBuiltin] : []);
+    // 末题推荐选项会在同一事件中更新草稿并生成，不能沿用渲染时的流程或签名资格。
+    const submissionItems = resolveQuestionnaireReferences(buildQuestionnaireContextItems(submissionSelections));
+    const submissionFlow = buildQuestionnaireFlow(submissionItems, current.draft.answers).flow;
     // `questionnaireError` 不进门禁：它只描述内置问卷加载失败，而当前生效的可能是
     // 用户自备的选择集——选择集存在且流程非空就足以生成（与 Web 同口径，P2-r1）。
-    if (!guard.ready || busy || !executionMode || effectiveSelections.length === 0 || flow.length === 0 || questionnaireLoading || clientProfilesBlocked || state.pendingRestore || session.isDraftBlocked()) return;
+    if (!guard.ready || session.isBusy() || !executionMode || submissionSelections.length === 0 || submissionFlow.length === 0 || questionnaireLoading || clientProfilesBlocked || current.pendingRestore || session.isDraftBlocked()) return;
     if (target.location === 'client' && !selected) return;
     if (!discardUnsavedResult) {
       if (session.hasUnsavedResult()) { pendingActionRef.current = 'generate'; setConfirmRegenerate('unsaved'); return; }
       // hosted-json 结果不确定时再次生成 = 可能的第二次调用，必须显式确认（D5.1a-r1）。
-      if (state.phase === 'uncertain') { pendingActionRef.current = 'generate'; setConfirmRegenerate('uncertain'); return; }
+      if (current.phase === 'uncertain') { pendingActionRef.current = 'generate'; setConfirmRegenerate('uncertain'); return; }
     }
     try {
-      const answers = buildDetailsAnswers(flow, session.getSnapshot().draft.answers);
+      const answers = buildDetailsAnswers(submissionFlow, current.draft.answers);
       setActionError(null);
       setActionInfo(null);
       void session.generate(
         { invoke, profileId: selected?.id ?? '' },
         {
           answers,
-          language: session.getSnapshot().draft.language,
-          loreText: buildQuestionnaireSelectionLoreText(effectiveSelections),
+          language: current.draft.language,
+          loreText: buildQuestionnaireSelectionLoreText(submissionSelections),
           hosted: {
-            selections: [...effectiveSelections],
+            selections: [...submissionSelections],
             allowNativeSignature: isQuestionnaireGenerationNativeSignatureAllowed(
-              effectiveSelections,
-              hasOverLimitAnswer,
+              submissionSelections,
+              hasOverLimitQuestionnaireAnswers(submissionFlow, current.draft.answers),
             ),
           },
         },
@@ -479,6 +486,33 @@ function DetailsForm({ session }: { session: DetailsSession }) {
       );
     } catch (error) { setActionError(error instanceof Error ? error.message : '问卷无法生成。'); }
   };
+
+  const proceedToNextQuestion = (nextAnswers: Record<string, string>) => {
+    if (!flowItem) return;
+    const { flow: nextFlow, indexByKey } = buildQuestionnaireFlow(flowItems, nextAnswers);
+    const nextIndex = (indexByKey.get(flowItem.key) ?? -1) + 1;
+    setActionError(null);
+    if (nextIndex < nextFlow.length) setQuestionIndex(nextIndex);
+    else generate();
+  };
+  const handleOptionSelect = (value: string) => {
+    if (!flowItem || !guard.ready || session.isBusy() || session.getSnapshot().pendingRestore || session.isDraftBlocked()) return;
+    const nextAnswers = { ...session.getSnapshot().draft.answers, [flowItem.key]: value };
+    updateDraft({ answers: nextAnswers });
+    proceedToNextQuestion(nextAnswers);
+  };
+  const handleNext = () => {
+    if (!flowItem || !guard.ready || session.isBusy() || session.getSnapshot().pendingRestore || session.isDraftBlocked()) return;
+    const nextAnswers = session.getSnapshot().draft.answers;
+    if (question?.required === true && !nextAnswers[flowItem.key]?.trim()) {
+      setActionError('本题为必答，请填写后再继续。');
+      return;
+    }
+    proceedToNextQuestion(nextAnswers);
+  };
+  const nextButtonLabel = currentIndex === flow.length - 1
+    ? (question?.required || answer.trim() ? '生成' : '跳过并生成')
+    : (!question?.required && !answer.trim() ? '跳过并继续' : '下一题');
 
   /** 快速随机：纯本机产出（不经模型），结果走与生成完成相同的相位与保存通路。 */
   const runQuickRandom = useCallback(() => {
@@ -798,19 +832,12 @@ function DetailsForm({ session }: { session: DetailsSession }) {
                   {flowItem && question && <QuestionnaireQuestionPanel
                     theme={DETAILS_QUESTIONNAIRE_THEME} progressLabel={`第 ${currentIndex + 1} / ${flow.length} 题`} progressPercent={Math.round((currentIndex + 1) / flow.length * 100)}
                     questionText={question.question} questionnaireTitle={flowItem.questionnaireTitle} noticeText="请基于您构想的虚拟角色身份回答，并确保内容符合公序良俗，请勿使用任何真实信息。" helperText={question.helperText}
-                    isRequired={question.required === true} skipText="本题可跳过，不作答将不会记录" options={question.options} optionsHintText="点击选项填写回答" onOptionSelect={updateAnswer} suggestions={showTextInput ? question.suggestions : undefined} onSuggestionSelect={updateAnswer}
+                    isRequired={question.required === true} skipText="本题可跳过，不作答将不会记录" options={question.options} optionsHintText="推荐选项（点击后自动前进，末题生成）" onOptionSelect={handleOptionSelect} suggestions={showTextInput ? question.suggestions : undefined} onSuggestionSelect={updateAnswer}
                     showTextInput={showTextInput} answer={answer} onAnswerChange={updateAnswer} placeholder={question.placeholder} answerLength={answer.trim().length} maxLength={getAnswerLimitInfo(question.maxLength).limit}
                     showLimitLabel limitLabel={`建议不超过 ${getAnswerLimitInfo(question.maxLength).limit ?? 500} 字，不限制生成`} isOverLimit={isAnswerOverLimit(answer, question.maxLength)} overLimitText="回答超过建议长度，仍可生成未签名角色卡。"
-                    prevLabel="上一题" nextButtonContent="下一题" onPrev={() => setQuestionIndex((index) => Math.max(0, index - 1))}
-                    onNext={() => {
-                      if (question.required === true && !answer.trim()) {
-                        setActionError('本题为必答，请填写后再继续。');
-                        return;
-                      }
-                      setActionError(null);
-                      setQuestionIndex((index) => Math.min(flow.length - 1, index + 1));
-                    }}
-                    disablePrev={currentIndex === 0} disableNext={currentIndex >= flow.length - 1} prevButtonClass={actionClass} nextButtonClass={actionClass}
+                    prevLabel="上一题" nextButtonContent={nextButtonLabel} onPrev={() => setQuestionIndex((index) => Math.max(0, index - 1))}
+                    onNext={handleNext}
+                    disablePrev={currentIndex === 0} disableNext={busy || (question.required === true && !answer.trim())} prevButtonClass={actionClass} nextButtonClass={actionClass}
                   />}
                 </fieldset>
                 {/* 批量填充/卡导入/答案概览/备份导出——与 Web `/details` 同一套共享区段。 */}

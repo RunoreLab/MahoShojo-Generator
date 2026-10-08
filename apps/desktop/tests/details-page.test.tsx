@@ -5,6 +5,7 @@ import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { RouterProvider } from '@tanstack/react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { QuestionnaireQuestion } from '@mahoshojo/domain/questionnaire-definition';
 import { buildUnsignedMagicalGirlDetailsCard } from '@mahoshojo/ai-core/magical-girl-details-generation';
 import type { DetailsGenerationOutcome } from '../src/features/details/generation';
 import { DETAILS_DRAFT_KEY } from '../src/features/details/session';
@@ -66,7 +67,157 @@ const mount = async () => {
   await settle(); return router;
 };
 
+const storeStepQuestionnaire = (questions: QuestionnaireQuestion[], answers: Record<string, string> = {}) => {
+  window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify({
+    version: 1, language: '简体中文',
+    answers: Object.fromEntries(Object.entries(answers).map(([id, value]) => [`preset:steps::${id}`, value])),
+    questionnaireSelections: [{
+      source: 'preset', selectionId: 'preset:steps',
+      questionnaire: { id: 'steps', kind: 'magical-girl', title: '逐题测试', nativeAllowed: true, questions },
+    }],
+  }));
+};
+const fillCurrentAnswer = async (value: string) => {
+  const textarea = container.querySelector<HTMLTextAreaElement>('.ui-web-questionnaire-answer-input')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, value);
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+};
+
 describe('Desktop Details real route and session UI (native adapter mock)', () => {
+
+  it('fills suggestions without advancing and follows updated displayIf/jump flow through option submission', async () => {
+    storeStepQuestionnaire([
+      { id: 'prelude', question: '后来显现的前题', displayIf: { questionId: 'gate', operator: 'equals', value: '展开分支' } },
+      { id: 'gate', question: '选择路线', options: ['展开分支'], suggestions: ['文字灵感'] },
+      { id: 'branch', question: '条件分支', options: ['转到末题'], displayIf: { questionId: 'gate', operator: 'equals', value: '展开分支' }, jump: { when: { questionId: 'branch', operator: 'notEmpty' }, to: 'last' } },
+      { id: 'middle', question: '跳过的题' },
+      { id: 'last', question: '收尾选项', options: ['结束调查'], maxLength: 2, jump: { when: { questionId: 'last', operator: 'notEmpty' }, toEnd: true } },
+      { id: 'tail', question: '跳过的尾题' },
+    ], { middle: '旧中题回答', tail: '旧尾题回答' });
+    await mount(); await click('恢复草稿');
+    await click('文字灵感');
+    expect(container.querySelector('.ui-web-questionnaire-answer-input')?.getAttribute('aria-label')).toBe('选择路线');
+    expect(container.querySelector<HTMLTextAreaElement>('.ui-web-questionnaire-answer-input')?.value).toBe('文字灵感');
+    expect(mocks.execute).not.toHaveBeenCalled();
+    await click('展开分支');
+    expect(container.querySelector('.ui-web-questionnaire-answer-input')?.getAttribute('aria-label')).toBe('条件分支');
+    await click('转到末题');
+    expect(container.querySelector('.ui-web-questionnaire-answer-input')?.getAttribute('aria-label')).toBe('收尾选项');
+    expect(mocks.execute).not.toHaveBeenCalled();
+    await click('结束调查');
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.execute.mock.calls[0]![1]).toMatchObject({
+      answers: [
+        { question: '选择路线', answer: '展开分支' },
+        { question: '条件分支', answer: '转到末题' },
+        { question: '收尾选项', answer: '结束调查' },
+      ],
+      hosted: { allowNativeSignature: false },
+    });
+  });
+
+  it('keeps the current required question gated and lets optional Next skip through final generation', async () => {
+    storeStepQuestionnaire([
+      { id: 'required', question: '必答题', required: true },
+      { id: 'optional', question: '选答题' },
+      { id: 'last', question: '末题' },
+    ]);
+    await mount(); await click('恢复草稿');
+    expect(button('下一题').disabled).toBe(true);
+    await click('下一题');
+    expect(container.textContent).toContain('第 1 / 3 题');
+    expect(mocks.execute).not.toHaveBeenCalled();
+    await fillCurrentAnswer('  必答内容  '); await click('下一题');
+    await click('跳过并继续');
+    expect(button('跳过并生成').disabled).toBe(false);
+    await click('跳过并生成');
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.execute.mock.calls[0]![1].answers).toEqual([expect.objectContaining({ question: '必答题', answer: '必答内容' })]);
+  });
+
+  it('requires at least one answer at the final step without adding a whole-questionnaire required gate', async () => {
+    storeStepQuestionnaire([
+      { id: 'required', question: '此前的必答题', required: true },
+      { id: 'last', question: '末题' },
+    ]);
+    await mount(); await click('恢复草稿'); await click('2');
+    await click('跳过并生成');
+    expect(container.textContent).toContain('请至少填写一题后再生成。');
+    expect(mocks.execute).not.toHaveBeenCalled();
+    await fillCurrentAnswer('末题回答'); await click('生成');
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.execute.mock.calls[0]![1].answers).toEqual([expect.objectContaining({ question: '末题', answer: '末题回答' })]);
+  });
+
+  it.each(['option', 'next'] as const)('synchronously locks repeated final %s submission to one request', async (entry) => {
+    storeStepQuestionnaire([{ id: 'last', question: '末题', options: ['推荐回答'] }]);
+    let finish!: (outcome: DetailsGenerationOutcome) => void;
+    mocks.execute.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    await mount(); await click('恢复草稿');
+    if (entry === 'next') await fillCurrentAnswer('文本回答');
+    const submit = button(entry === 'option' ? '推荐回答' : '生成');
+    await act(async () => { submit.click(); submit.click(); });
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.execute.mock.calls[0]![1]).toMatchObject({
+      answers: [{ question: '末题', answer: entry === 'option' ? '推荐回答' : '文本回答' }],
+      hosted: { allowNativeSignature: true },
+    });
+    await act(async () => finish(completed));
+  });
+
+  it.each(['option', 'next'] as const)('keeps final %s regeneration behind unsaved and uncertain confirmations, including cancel', async (entry) => {
+    storeStepQuestionnaire([{ id: 'last', question: '末题', options: ['推荐回答'] }], { last: '原回答' });
+    await mount(); await click('恢复草稿'); await click('发送问卷并生成');
+    const submit = () => click(entry === 'option' ? '推荐回答' : '生成');
+    await submit();
+    expect(container.querySelector('dialog')?.open).toBe(true);
+    expect(container.querySelector('dialog')?.textContent).toContain('尚未保存到本地卡库');
+    await click('取消');
+    expect(container.querySelector('dialog')?.open).toBe(false);
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    mocks.execute.mockResolvedValueOnce({
+      status: 'uncertain', mode: 'hosted-json', rawText: '未确认正文', message: '无法确认服务器执行结果',
+    } satisfies DetailsGenerationOutcome);
+    await submit(); await click('确定重新生成');
+    expect(mocks.execute).toHaveBeenCalledTimes(2);
+    await submit();
+    expect(container.querySelector('dialog')?.open).toBe(true);
+    expect(container.querySelector('dialog')?.textContent).toContain('重复调用与费用');
+    expect(container.querySelector('dialog')?.textContent).not.toContain('保存后重新生成');
+    await click('取消');
+    expect(mocks.execute).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain('未确认正文');
+  });
+
+  it('keeps final option and Next behind draft restoration and native guard readiness', async () => {
+    storeStepQuestionnaire([{ id: 'last', question: '末题', options: ['推荐回答'] }]);
+    let ready!: (release: () => void) => void;
+    mocks.listen.mockImplementation(() => new Promise((resolve) => { ready = resolve; }));
+    await mount();
+    const pendingFieldset = container.querySelector<HTMLFieldSetElement>('fieldset');
+    expect(pendingFieldset?.disabled).toBe(true);
+    expect(mocks.execute).not.toHaveBeenCalled();
+    await click('恢复草稿');
+    expect(button('推荐回答').closest('fieldset')?.disabled).toBe(true);
+    await click('推荐回答'); await click('跳过并生成');
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(container.querySelector<HTMLTextAreaElement>('.ui-web-questionnaire-answer-input')?.value).toBe('');
+    await act(async () => ready(vi.fn())); await settle();
+    await click('推荐回答');
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps final option and Next generation blocked when the client Provider cannot load', async () => {
+    storeStepQuestionnaire([{ id: 'last', question: '末题', options: ['推荐回答'] }]);
+    mocks.profiles.mockRejectedValue(new Error('profile unavailable'));
+    await mount(); await click('恢复草稿'); await click('推荐回答');
+    expect(container.querySelector<HTMLTextAreaElement>('.ui-web-questionnaire-answer-input')?.value).toBe('推荐回答');
+    await click('生成');
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
   it('keeps the brand at the top when starting the questionnaire', async () => {
     await mount();
     const logo = container.querySelector('img[alt="Questionnaire Logo"]');
@@ -112,7 +263,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     expect(container.textContent).toContain('进度 67%');
     expect(container.textContent).toContain('有效字数：0/500');
     expect(container.textContent).toContain('本题可跳过，不作答将不会记录');
-    await click('下一题');
+    await click('跳过并继续');
     expect(container.textContent).toContain('进度 100%');
     expect(container.textContent).toContain('有效字数：0/500');
     expect(mocks.execute).not.toHaveBeenCalled();
