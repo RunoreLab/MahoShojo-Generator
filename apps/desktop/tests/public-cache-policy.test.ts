@@ -198,6 +198,46 @@ describe('createPublicCachePolicySync', () => {
     stop();
   });
 
+  it('missing + invalidPresent pushes pause until createDefaultConfig re-pushes real defaults (K1-r1)', async () => {
+    // 隔离残留形态是「上一份配置不可读」而非首启：推送必须是暂停口径；
+    // 用户显式创建默认配置后才恢复推送文件默认值。
+    const applyCalls: unknown[] = [];
+    const invoke = makeInvoke(async (command, args) => {
+      if (command === 'desktop_config_read') {
+        return { ...readResult({ status: 'missing' }), invalidPresent: true };
+      }
+      if (command === 'public_read_cache_apply_policy') {
+        applyCalls.push(args?.policy);
+        return null;
+      }
+      if (command === 'desktop_config_write') return { revision: REV };
+      return undefined;
+    });
+    const store = new DesktopConfigStore({ invoke });
+    const stop = createPublicCachePolicySync(store, { invoke });
+    await store.ready();
+    await vi.waitFor(() => {
+      expect(applyCalls).toHaveLength(1);
+    });
+    expect(applyCalls[0]).toEqual({
+      captureEnabled: false,
+      maxBytes: 268_435_456,
+      whenFull: 'pause',
+    });
+
+    store.createDefaultConfig();
+    await vi.waitFor(() => {
+      expect(applyCalls).toHaveLength(2);
+    });
+    expect(applyCalls[1]).toEqual({
+      captureEnabled: true,
+      maxBytes: 268_435_456,
+      whenFull: 'pause',
+    });
+    expect(store.getSnapshot().publicCacheDegraded).toBe(false);
+    stop();
+  });
+
   it('a failed push is retried on the next publish instead of being swallowed', async () => {
     let applyAttempts = 0;
     const invoke = makeInvoke(async (command, _args) => {

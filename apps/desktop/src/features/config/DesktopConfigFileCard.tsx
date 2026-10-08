@@ -29,7 +29,8 @@ const fileStatusText = (status: string, fatal: boolean, invalidPresent: boolean)
 };
 
 export const DesktopConfigFileCard = () => {
-  const { state, reload, resetToDefaults, openDirectory } = useDesktopConfig();
+  const { state, reload, resetToDefaults, createDefaultConfig, openDirectory } =
+    useDesktopConfig();
   const busy = state.saving || state.status === 'loading';
 
   return (
@@ -59,7 +60,8 @@ export const DesktopConfigFileCard = () => {
       ) : null}
       {state.invalidPresent ? (
         <p className="mt-1 text-xs text-(--app-text-subtle)" data-testid="config-invalid-present">
-          同目录存在 config.json.invalid（被隔离的不可读文件，可手工打捞或删除）。
+          同目录存在 config.json.invalid（被隔离的不可读文件，可手工打捞或删除；下方
+          「创建默认配置」不会改动该文件）。
         </p>
       ) : null}
       {state.diagnostics.length > 0 ? (
@@ -81,7 +83,20 @@ export const DesktopConfigFileCard = () => {
         >
           打开所在目录
         </button>
-        {state.fileStatus === 'missing' ? null : (
+        {state.fileStatus === 'missing' ? (
+          // `.invalid` 隔离残留时给显式恢复入口：创建默认文件且不碰隔离
+          // 原件；普通首启则沿用「修改任一设置时创建」的惰性路径。
+          state.invalidPresent ? (
+            <button
+              type="button"
+              className="ui-web-settings-motion rounded-md border border-(--app-border) px-3 py-1.5 text-xs font-medium text-(--app-text-muted) transition-colors enabled:hover:border-(--app-accent-strong) enabled:hover:text-(--app-accent-strong) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--app-accent-strong) disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={state.status !== 'ready' || busy}
+              onClick={createDefaultConfig}
+            >
+              创建默认配置
+            </button>
+          ) : null
+        ) : (
           <button
             type="button"
             className="ui-web-settings-motion rounded-md border border-(--app-border) px-3 py-1.5 text-xs font-medium text-(--app-text-muted) transition-colors enabled:hover:border-(--app-accent-strong) enabled:hover:text-(--app-accent-strong) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--app-accent-strong) disabled:cursor-not-allowed disabled:opacity-50"

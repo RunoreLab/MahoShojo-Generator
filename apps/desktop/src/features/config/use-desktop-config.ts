@@ -41,6 +41,8 @@ export interface UseDesktopConfigResult {
   readonly reload: () => void;
   /** 显式恢复默认并写盘（原文件由 native .bak/.invalid 保留）。 */
   readonly resetToDefaults: () => void;
+  /** 文件缺失时的显式恢复：创建一份默认 config.json（不触碰 `.invalid` 隔离残留）。 */
+  readonly createDefaultConfig: () => void;
   /** 冲突草稿：基于最新磁盘内容重新应用刚才的修改。 */
   readonly reapplyConflictedDraft: () => void;
   /** 冲突草稿：放弃刚才未落盘的修改。 */
@@ -61,6 +63,7 @@ export const useDesktopConfig = (
     setField: (key, value) => store.setField(key, value),
     reload: () => void store.reload(),
     resetToDefaults: () => store.resetToDefaults(),
+    createDefaultConfig: () => store.createDefaultConfig(),
     reapplyConflictedDraft: () => store.reapplyConflictedDraft(),
     discardConflictedDraft: () => store.discardConflictedDraft(),
     openDirectory: () => void store.openDirectory(),

@@ -245,9 +245,20 @@ export class DesktopConfigStore {
           ...shared,
           fileStatus: 'missing',
           fileFatal: false,
-          publicCacheDegraded: false,
+          // 缺文件但同目录留有 `.invalid` 隔离残留 ≠ 首启——上一份配置
+          // 不可读，按「坏配置」口径暂停捕获与淘汰，直到显式恢复；普通
+          // 首次启动的 missing 仍应用默认值（DESK-CACHE-008，K1-r1）。
+          publicCacheDegraded: result.invalidPresent,
           values: DESKTOP_CONFIG_DEFAULTS,
-          diagnostics: [],
+          diagnostics: result.invalidPresent
+            ? [
+                {
+                  path: '$',
+                  message:
+                    'config.json 缺失，同目录留有被隔离的 config.json.invalid；缓存捕获已暂停——可手工修复/删除隔离文件后重新加载，或「创建默认配置」',
+                },
+              ]
+            : [],
         });
         return;
       case 'oversized':
@@ -333,6 +344,22 @@ export class DesktopConfigStore {
    */
   resetToDefaults(): void {
     if (this.state.status !== 'ready' || this.state.fileStatus === 'missing') return;
+    this.writeDefaults();
+  }
+
+  /**
+   * 「创建默认配置」：文件缺失（尤其 `.invalid` 隔离残留形态）时的显式
+   * 恢复——写 `{version:1, 默认值}`。`expectedRevision: null` 的 no-clobber
+   * 首写不覆盖隔离位，也不覆盖隔离窗口内外部重建的文件（native 回
+   * `config-conflict`，走既有草稿让位路径）。
+   */
+  createDefaultConfig(): void {
+    if (this.state.status !== 'ready' || this.state.fileStatus !== 'missing') return;
+    this.writeDefaults();
+  }
+
+  /** 恢复默认/创建默认共用的显式写意图：全部登记字段计入 touched。 */
+  private writeDefaults(): void {
     this.pending = null;
     this.conflictedDraft = null;
     this.publish({ saving: true, saveError: null });
@@ -402,12 +429,15 @@ export class DesktopConfigStore {
         this.conflictedDraft = Object.keys(remaining).length > 0 ? remaining : null;
       }
       // 写回内容再经同一解析——未登记键的诊断如实保留，不让 UI 保存
-      // 伪装成「配置文件完全干净」。
+      // 伪装成「配置文件完全干净」。`publicLibraryCache` 降级位同样按刚
+      // 落盘的内容重算：此前组损坏造成的 `publicCacheDegraded` 不能在
+      // 写成功后继续把缓存钉在降级暂停上（K1-r1）。
       const reparsed = parseDesktopConfigText(content);
       this.publish({
         status: 'ready',
         fileStatus: 'ok',
         fileFatal: false,
+        publicCacheDegraded: reparsed.publicCacheDegraded,
         values: intent.values,
         diagnostics: reparsed.diagnostics,
         saveError: null,

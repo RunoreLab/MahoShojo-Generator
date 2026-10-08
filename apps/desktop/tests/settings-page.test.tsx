@@ -242,6 +242,101 @@ describe('desktop settings shell', () => {
     ).toHaveLength(1);
   });
 
+  it('enabling eviction or lowering budget below usage requires explicit confirmation (K1-r1)', async () => {
+    // DESK-CACHE-003：会真实删除已缓存副本的两个动作（开自动清理、evict
+    // 模式下把上限调到低于当前用量）必须先经确认条，确认才写回 config。
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'public_read_cache_stats') {
+        return {
+          status: 'ready',
+          path: 'C:\\data\\public-read-cache.sqlite',
+          usageBytes: 300 * 1024 * 1024,
+          entryCount: 12,
+          summaryCount: 12,
+          bodyCount: 5,
+          withdrawnCount: 0,
+          appliedPolicy: {
+            captureEnabled: true,
+            maxBytes: 268_435_456,
+            whenFull: 'evict-least-recently-used',
+          },
+        };
+      }
+      return defaultInvokeImpl(command);
+    });
+    const lastWriteDoc = () => {
+      const call = invokeMock.mock.calls
+        .filter((entry) => entry[0] === 'desktop_config_write')
+        .at(-1);
+      return JSON.parse(
+        (call?.[1] as { request?: { content?: string } })?.request?.content ?? '{}',
+      ) as { publicLibraryCache?: { whenFull?: string; maxBytes?: unknown } };
+    };
+    const writeCount = () =>
+      invokeMock.mock.calls.filter((call) => call[0] === 'desktop_config_write').length;
+    await mountAt('/settings?section=data');
+    // 等统计就绪——用量判断依赖 stats，未就绪时降预算走「用量未知」确认分支。
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('public-read-cache.sqlite');
+    });
+
+    // 取消路径：选「自动清理最久未用」只出确认条，不落盘。
+    const evictOption = [...container.querySelectorAll('button')].find(
+      (el) => el.textContent === '自动清理最久未用',
+    );
+    await click(evictOption ?? null);
+    expect(
+      container.querySelector('[data-testid="public-cache-eviction-confirm"]'),
+    ).not.toBeNull();
+    expect(writeCount()).toBe(0);
+    const cancel = [
+      ...container.querySelectorAll(
+        '[data-testid="public-cache-eviction-confirm"] button',
+      ),
+    ].find((el) => el.textContent === '取消');
+    await click(cancel ?? null);
+    expect(
+      container.querySelector('[data-testid="public-cache-eviction-confirm"]'),
+    ).toBeNull();
+    expect(writeCount()).toBe(0);
+
+    // 确认路径：同一选择经确认后写回 evict 策略。
+    await click(evictOption ?? null);
+    const confirmEvict = [
+      ...container.querySelectorAll(
+        '[data-testid="public-cache-eviction-confirm"] button',
+      ),
+    ].find((el) => el.textContent === '确认');
+    await click(confirmEvict ?? null);
+    await vi.waitFor(() => {
+      expect(writeCount()).toBe(1);
+    });
+    expect(lastWriteDoc().publicLibraryCache?.whenFull).toBe(
+      'evict-least-recently-used',
+    );
+
+    // evict 模式下把上限调到低于当前用量（300MiB 占用 → 128MiB）：
+    // 确认条须列出将回收的条目/正文数量，确认后写回新上限。
+    const budget128 = [...container.querySelectorAll('button')].find(
+      (el) => el.textContent === '128 MiB',
+    );
+    await click(budget128 ?? null);
+    const confirmBar = container.querySelector(
+      '[data-testid="public-cache-eviction-confirm"]',
+    );
+    expect(confirmBar?.textContent).toContain('12 条');
+    expect(confirmBar?.textContent).toContain('5 条');
+    expect(writeCount()).toBe(1);
+    const confirmBudget = [...confirmBar!.querySelectorAll('button')].find(
+      (el) => el.textContent === '确认',
+    );
+    await click(confirmBudget ?? null);
+    await vi.waitFor(() => {
+      expect(writeCount()).toBe(2);
+    });
+    expect(lastWriteDoc().publicLibraryCache?.maxBytes).toBe(128 * 1024 * 1024);
+  });
+
   it('appearance group carries the Esc 快捷菜单 toggle wired to desktop.escapeMenu.enabled', async () => {
     // D5.1-N1：开关是 config.json 字段（desktop.escapeMenu.enabled，默认 true），
     // 挂在外观与交互组——与「在线与通知」共用同一个 DesktopConfigStore 读写路径。
@@ -412,6 +507,57 @@ describe('desktop settings shell', () => {
 
     expect(container.querySelector('[data-testid="config-invalid-present"]')).not.toBeNull();
     expect(container.textContent).toContain('config.json.invalid');
+    // 该形态按坏配置降级：缓存卡提示暂停，并提供「创建默认配置」出口。
+    expect(container.textContent).toContain('缓存配置无法校验');
+    expect(
+      [...container.querySelectorAll('button')].some(
+        (button) => button.textContent === '创建默认配置',
+      ),
+    ).toBe(true);
+  });
+
+  it('creating a default config over a quarantined-missing state issues a no-clobber write (K1-r1)', async () => {
+    let writes = 0;
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'desktop_config_read') {
+        return {
+          path: 'C:\\cfg\\config.json',
+          directory: 'C:\\cfg',
+          backupPresent: false,
+          invalidPresent: true,
+          file: { status: 'missing' as const },
+        };
+      }
+      if (command === 'desktop_config_write') {
+        writes += 1;
+        return { revision: `sha256:${'b'.repeat(64)}` };
+      }
+      return defaultInvokeImpl(command);
+    });
+    await mountAt('/settings?section=data');
+
+    const createButton = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent === '创建默认配置',
+    );
+    await click(createButton ?? null);
+
+    await vi.waitFor(() => {
+      expect(writes).toBe(1);
+    });
+    const request = (
+      invokeMock.mock.calls.filter((call) => call[0] === 'desktop_config_write').at(-1)?.[1] as {
+        request?: { expectedRevision?: string | null; content?: string };
+      }
+    )?.request;
+    // no-clobber 首写不带 revision；写入的是完整默认文档。
+    expect(request?.expectedRevision).toBeNull();
+    const doc = JSON.parse(request?.content ?? '{}') as Record<string, unknown>;
+    expect(doc.version).toBe(1);
+    // 隔离残留如实保留，降级提示随落盘成功消失。
+    expect(container.querySelector('[data-testid="config-invalid-present"]')).not.toBeNull();
+    await vi.waitFor(() => {
+      expect(container.textContent).not.toContain('缓存配置无法校验');
+    });
   });
 
   it('device controls write only localStorage — no account or network IPC', async () => {

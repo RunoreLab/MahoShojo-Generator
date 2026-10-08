@@ -210,6 +210,95 @@ describe('desktop config store — read projection', () => {
     expect(state.values.publicCacheCaptureEnabled).toBe(true);
     expect(state.values.publicCacheMaxBytes).toBe('unlimited');
   });
+
+  it('successful write recomputes publicCacheDegraded from the just-written content (K1-r1)', async () => {
+    // 组损坏时降级位为真；用户编辑（哪怕非缓存字段）写成功后，落盘内容
+    // 的缓存组已是合法值——降级位必须随写确认重算，不能把缓存钉在
+    // 「暂停捕获、不淘汰」的旧降级姿态上。
+    const invoke = makeInvoke(async (command) => {
+      if (command === 'desktop_config_read') {
+        return readResult(
+          okFile(
+            JSON.stringify({
+              version: 1,
+              publicLibraryCache: { captureEnabled: 'yes', maxBytes: 0, whenFull: 'wipe' },
+            }),
+          ),
+        );
+      }
+      if (command === 'desktop_config_write') return { revision: REV_B };
+      return undefined;
+    });
+    const store = new DesktopConfigStore({ invoke });
+    await store.ready();
+    expect(store.getSnapshot().publicCacheDegraded).toBe(true);
+
+    store.setField('confirmContentLinks', false);
+    await vi.waitFor(() => {
+      expect(store.getSnapshot().saving).toBe(false);
+    });
+
+    expect(store.getSnapshot().publicCacheDegraded).toBe(false);
+  });
+
+  it('missing + invalidPresent counts as a quarantined config — capture stays paused (K1-r1)', async () => {
+    // 隔离恢复落位失败的形态：主文件缺失 + `.invalid` 残留。这不是首启
+    // 「从未创建」——上一份配置不可读，缓存必须按坏配置口径暂停，不能
+    // 让默认 captureEnabled=true 静默复活捕获。
+    const invoke = makeInvoke(async (command) => {
+      if (command === 'desktop_config_read') {
+        return { ...readResult({ status: 'missing' }), invalidPresent: true };
+      }
+      return undefined;
+    });
+    const store = new DesktopConfigStore({ invoke });
+    await store.ready();
+
+    const state = store.getSnapshot();
+    expect(state.fileStatus).toBe('missing');
+    expect(state.invalidPresent).toBe(true);
+    expect(state.publicCacheDegraded).toBe(true);
+    expect(state.diagnostics.some((d) => d.message.includes('config.json.invalid'))).toBe(true);
+    // 文件可编辑基底仍在——显式恢复动作可用。
+    expect(store.editable()).toBe(true);
+  });
+
+  it('createDefaultConfig recovers a quarantined-missing file and clears the degraded bit', async () => {
+    let captured: { expectedRevision?: string | null; content?: string } | null = null;
+    const invoke = makeInvoke(async (command, args) => {
+      if (command === 'desktop_config_read') {
+        return { ...readResult({ status: 'missing' }), invalidPresent: true };
+      }
+      if (command === 'desktop_config_write') {
+        captured = (args?.request ?? null) as typeof captured;
+        return { revision: REV_B };
+      }
+      return undefined;
+    });
+    const store = new DesktopConfigStore({ invoke });
+    await store.ready();
+    expect(store.getSnapshot().publicCacheDegraded).toBe(true);
+
+    store.createDefaultConfig();
+    await vi.waitFor(() => {
+      expect(store.getSnapshot().saving).toBe(false);
+    });
+
+    // no-clobber 首写：不携带 revision，不覆盖 `.invalid` 或外部新文件。
+    expect(captured?.expectedRevision).toBeNull();
+    const doc = JSON.parse(captured?.content ?? '{}') as Record<string, unknown>;
+    expect(doc.version).toBe(1);
+    expect(doc.publicLibraryCache).toMatchObject({
+      captureEnabled: true,
+      maxBytes: 268_435_456,
+      whenFull: 'pause',
+    });
+    const state = store.getSnapshot();
+    expect(state.fileStatus).toBe('ok');
+    expect(state.publicCacheDegraded).toBe(false);
+    // `.invalid` 原件仍如实回显（native 未动它）。
+    expect(state.invalidPresent).toBe(true);
+  });
 });
 
 describe('desktop config store — write semantics', () => {
