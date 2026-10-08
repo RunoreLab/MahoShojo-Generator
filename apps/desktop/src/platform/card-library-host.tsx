@@ -19,6 +19,7 @@ import {
   type CardLibraryLinkProps,
   type CardLibraryOnlinePort,
   type CardLibraryPlatform,
+  type CardLibraryPublicCachePort,
   type CardLibraryPublicListQuery,
   type CardLibraryRemoteResult,
   type CardLibrarySlots,
@@ -28,6 +29,7 @@ import type { LocalCardRecordV1 } from '@mahoshojo/local-library/record';
 
 import { requestCardLibraryRoute } from './card-library-bridge';
 import { DesktopCloudError, type InvokeFn } from './cloud-bridge';
+import { queryPublicReadCache, readPublicCacheCard } from './public-cache-bridge';
 import { downloadTextFile } from './download-text-file';
 import { IpcLocalCardRepository } from './local-card-bridge';
 import { navigateByProductHref, resolveInternalHrefForHashHistory } from '../app/hash-history-fragment';
@@ -378,6 +380,46 @@ const desktopPlatform: CardLibraryPlatform = {
   downloadJson: downloadTextFile,
 };
 
+/**
+ * 公开资料持久缓存的宿主端口（D5.1-K2，DESK-CACHE-004/005）。
+ *
+ * 查询入参逐项白名单映射到 `desktop-ipc` 契约——`nativeOnly` 在共享类型上
+ * 就不存在（投影缺该字段），这里不需要也不能透传；其余可选字段按
+ * 「有值才携带」组装，空串/空数组不落进请求。`signal` 与在线通路同语义：
+ * IPC 无法中途取消，abort 物化为「调用方不认领结果」。
+ */
+export const createDesktopPublicCachePort = (
+  invokeFn: InvokeFn,
+  openCacheManagement: () => void,
+): CardLibraryPublicCachePort => ({
+  queryCachedCards: async (query, signal) =>
+    withAbort(
+      queryPublicReadCache(invokeFn, {
+        ...(query.type ? { type: query.type } : {}),
+        limit: query.limit,
+        offset: query.offset,
+        sortBy: query.sortBy,
+        ...(query.search ? { search: query.search } : {}),
+        ...(query.tagIds && query.tagIds.length > 0 ? { tagIds: [...query.tagIds] } : {}),
+        ...(query.tagMatch ? { tagMatch: query.tagMatch } : {}),
+        ...(query.author ? { author: query.author } : {}),
+        ...(query.minLikes ? { minLikes: query.minLikes } : {}),
+        ...(query.maxLikes ? { maxLikes: query.maxLikes } : {}),
+        ...(query.minUsage ? { minUsage: query.minUsage } : {}),
+        ...(query.maxUsage ? { maxUsage: query.maxUsage } : {}),
+        ...(query.minFavorites ? { minFavorites: query.minFavorites } : {}),
+        ...(query.maxFavorites ? { maxFavorites: query.maxFavorites } : {}),
+        ...(query.roleType ? { roleType: query.roleType } : {}),
+        ...(query.recommendedOnly ? { recommendedOnly: query.recommendedOnly } : {}),
+        ...(query.nativeAllowedOnly ? { nativeAllowedOnly: query.nativeAllowedOnly } : {}),
+      }),
+      signal,
+    ),
+  loadCachedCard: async (cardId, signal) =>
+    withAbort(readPublicCacheCard(invokeFn, cardId), signal),
+  openCacheManagement,
+});
+
 const desktopSlots: CardLibrarySlots = {
   // 详情/卡组插槽暂不注入：Desktop 尚无对应 UI——共享组件会把这些入口隐藏，
   // 而不是渲染点击无反应的按钮（端口契约的「不提供即无入口」语义）。
@@ -408,6 +450,7 @@ const desktopSlots: CardLibrarySlots = {
  */
 export function useDesktopCardLibraryHost(): CardLibraryHost {
   const { state } = useDesktopCloudSession();
+  const router = useRouter();
   /**
    * 三态投影（D5.0e-r1 → D5.2 正交会话后口径不变）：
    * - `account != null`（cached 或已验证）：`authenticated`——本机凭据即线上
@@ -435,7 +478,13 @@ export function useDesktopCardLibraryHost(): CardLibraryHost {
       },
       platform: desktopPlatform,
       slots: desktopSlots,
+      // K2：注入公开缓存只读端口——公开页签获得「已缓存」视图与在线失败
+      // 自动降级；「管理缓存」深链到设置「数据与存储」分组。
+      publicCache: createDesktopPublicCachePort(
+        (command, args) => invoke(command, args as never),
+        () => navigateByProductHref(router, '/settings?section=data'),
+      ),
     }),
-    [state.account, authStatus],
+    [state.account, authStatus, router],
   );
 }

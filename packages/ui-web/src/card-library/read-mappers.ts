@@ -132,7 +132,11 @@ export const mapDataCardSourceMeta = (rowInput: unknown): DataCardSourceMeta => 
 
 export const mapDataCardRuntimeSourceInfo = (rowInput: unknown): DataCardRuntimeSourceInfo => {
   const row = toRecord(rowInput) ?? {};
-  const isLocalLibrary = readString(row, ['_storageLocation']) === 'local';
+  // 'cache' 与 'local' 都折叠到 host-local 一侧：公开缓存快照是冻结输入，
+  // 不是已验证的线上引用——不产出 sourceDataCardId/sourceIsPublic，
+  // Strict/多人/权威写入必须由服务器重新物化（DESK-CACHE-007）。
+  const storageLocation = readString(row, ['_storageLocation']);
+  const isLocalLibrary = storageLocation === 'local' || storageLocation === 'cache';
   if (isLocalLibrary) {
     // 本地库内容没有线上记录可指；不产出 sourceDataCardId / sourceIsPublic，
     // 下游因此走 host-local 分支，与 ADR §8 / LIB-012 一致。
@@ -225,7 +229,11 @@ export const mapPublicDataCardRowToBattleSelectionPayload = (rowInput: unknown):
   const visibility = normalizePublicVisibilityValue(row);
   const author = sourceMeta.dataCardAuthor ?? '未知';
 
-  const isLocalLibrary = readString(row, ['storageLocation', '_storageLocation']) === 'local';
+  // 'cache'（公开缓存快照）与 'local' 折叠到同一侧：两者都不是已验证的
+  // 线上引用——不给 `_cardId`/`_storageLocation:'cloud'`，防止缓存冒充
+  // 当前线上卡获得 Strict/多人/权威写资格（DESK-CACHE-007）。
+  const storageLocation = readString(row, ['storageLocation', '_storageLocation']);
+  const isLocalLibrary = storageLocation === 'local' || storageLocation === 'cache';
 
   return {
     ...dataObject,

@@ -63,8 +63,14 @@ interface DataCardProps {
   /**
    * 数据卡所在的数据源。`local` 表示这条记录属于用户本机的本地库：
    * 线上语义（点赞/收藏/分享/审核状态）在这里一律不存在，动作集换成删除/下载/详情。
+   * `cache` 表示公开库持久缓存快照（D5.1-K2）：计数是抓取时的线上事实、
+   * 不是当前值；收藏/点赞/分享/审核状态同样不存在，动作集收成使用/详情。
    */
-  storageLocation?: 'cloud' | 'local';
+  storageLocation?: 'cloud' | 'local' | 'cache';
+  /** 仅缓存行：该快照是否持有完整正文（false = 仅摘要，正文/使用不可执行）。 */
+  cacheBodyAvailable?: boolean;
+  /** 仅缓存行：该投影最近一次被线上成功确认的 UTC 时刻。 */
+  cacheLastConfirmedAt?: string | null;
   /** 仅本地库卡片：删除本地库记录。 */
   onRemoveFromLibrary?: () => void;
   removePending?: boolean;
@@ -131,6 +137,8 @@ export default function DataCard({
   onReplace,
   authorBadges,
   storageLocation = 'cloud',
+  cacheBodyAvailable = false,
+  cacheLastConfirmedAt = null,
   onRemoveFromLibrary,
   removePending = false,
   onUploadToCloud,
@@ -145,6 +153,7 @@ export default function DataCard({
   const [favoriting, setFavoriting] = useState(false);
   const cardStatus = getDataCardStatus({ is_public: isPublic });
   const isLocalLibraryCard = storageLocation === 'local';
+  const isCachedCard = storageLocation === 'cache';
   const canDownload = Boolean(onDownload);
   const resolvedName = name?.trim() ? name : '未命名';
   const { display: displayName, full: fullName } = buildTitleDisplay(resolvedName);
@@ -328,6 +337,14 @@ export default function DataCard({
                 <HardDrive className="w-3 h-3" />
                 本地库
               </span>
+            ) : isCachedCard ? (
+              <span
+                className="text-xs px-2 py-1 rounded flex items-center gap-1 bg-violet-100 text-violet-700 border border-violet-200"
+                title={cacheLastConfirmedAt ? `本机缓存快照 · 最后确认 ${cacheLastConfirmedAt.slice(0, 10)}` : '本机缓存快照'}
+              >
+                <HardDrive className="w-3 h-3" />
+                本机缓存
+              </span>
             ) : (
               <span className={`text-xs px-2 py-1 rounded flex items-center gap-1 ${
                 cardStatus.status === 'banned'
@@ -407,7 +424,32 @@ export default function DataCard({
       {/* 底部区域 */}
       <div className="mt-auto flex flex-col gap-2">
         {/* 作者信息现在是单独一行，避免与按钮竞争空间 */}
-        {isLocalLibraryCard ? (
+        {isCachedCard ? (
+          <div className="data-card-author-row flex flex-wrap items-center gap-x-1 gap-y-0 min-w-0 max-w-full overflow-hidden">
+            {author ? (
+              onAuthorClick ? (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAuthorClick(author);
+                  }}
+                  className={`min-w-0 max-w-full text-xs ${subTextColor} hover:text-purple-600 hover:underline transition-colors text-left truncate`}
+                  title={`筛选作者: ${author}`}
+                >
+                  作者: {author}
+                </button>
+              ) : (
+                <p className={`min-w-0 max-w-full text-xs leading-[18px] ${subTextColor} truncate`} title={`作者: ${author}`}>
+                  作者: {author}
+                </p>
+              )
+            ) : null}
+            <p className="w-full text-xs text-gray-400">
+              本机缓存快照{cacheLastConfirmedAt ? ` · 最后确认 ${cacheLastConfirmedAt.slice(0, 10)}` : ''}
+              {cacheBodyAvailable ? '' : ' · 仅摘要'}
+            </p>
+          </div>
+        ) : isLocalLibraryCard ? (
           <p className="text-xs leading-[18px] text-gray-500 truncate" title={localLibraryOriginHint ?? undefined}>
             {localLibraryOriginHint ?? '仅保存在本机，不会上传'}
           </p>
@@ -441,7 +483,52 @@ export default function DataCard({
 
         {/* 操作按钮行 */}
         <div className="flex flex-wrap gap-3 text-sm items-center">
-          {isLocalLibraryCard ? (
+          {isCachedCard ? (
+            <>
+              {/* 计数是抓取时的线上事实，不是当前值——只展示，不做按钮（
+                  DESK-CACHE-004：缓存模式不发起收藏/点赞/统计写）。 */}
+              <span className="flex items-center gap-1 text-gray-400" title="抓取时的线上计数（非当前值）">
+                <Star className="w-4 h-4" />
+                <span>{favoriteCount}</span>
+              </span>
+              <span className="flex items-center gap-1 text-gray-400" title="抓取时的线上计数（非当前值）">
+                <Heart className="w-4 h-4" />
+                <span>{likeCount}</span>
+              </span>
+              {cacheBodyAvailable && canDownload ? (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDownload?.();
+                  }}
+                  className="flex items-center gap-1 text-gray-500 hover:text-blue-500 transition-colors"
+                  title={`导出这张缓存快照（计数为抓取时数值：${usageCount ?? 0}）`}
+                  aria-label="导出缓存快照"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>{usageCount}</span>
+                </button>
+              ) : null}
+              {!cacheBodyAvailable ? (
+                <span className="text-xs text-gray-400" title="尚未缓存正文，联网后可获取">
+                  仅摘要 · 未缓存正文
+                </span>
+              ) : null}
+              {cacheBodyAvailable && onViewDetails ? (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onViewDetails();
+                  }}
+                  className="flex items-center gap-1 text-gray-500 hover:text-purple-500 transition-colors"
+                  title="查看缓存快照的详细设定"
+                >
+                  <Info className="w-4 h-4" />
+                  <span className="text-xs">详情</span>
+                </button>
+              ) : null}
+            </>
+          ) : isLocalLibraryCard ? (
             <>
               {/* 本地库卡片的删除入口。删除是不可逆的本地操作，必须与"取消选择"区分开。 */}
               {onRemoveFromLibrary ? (

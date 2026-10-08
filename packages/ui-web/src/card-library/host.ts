@@ -182,6 +182,86 @@ export interface CardLibraryOnlinePort {
   ): Promise<{ ok: true } | { ok: false; error: string }>;
 }
 
+/* ── 公开库持久缓存读取端口（D5.1-K2，DESK-CACHE-004/005）──────────────── */
+
+/** 缓存摘要查询参数：对齐 `CardLibraryPublicListQuery` 中投影确实携带的筛选面。 */
+export interface CardLibraryCachedListQuery {
+  type?: OnlineDataCardType;
+  limit: number;
+  offset: number;
+  sortBy: 'likes' | 'usage' | 'favorites' | 'created_at';
+  search?: string;
+  tagIds?: readonly string[];
+  tagMatch?: 'any' | 'all';
+  author?: string;
+  minLikes?: string;
+  maxLikes?: string;
+  minUsage?: string;
+  maxUsage?: string;
+  minFavorites?: string;
+  maxFavorites?: string;
+  roleType?: 'magical-girl' | 'canshou' | 'general';
+  recommendedOnly?: boolean;
+  /**
+   * 刻意没有 `nativeOnly`：摘要投影不携带 isNative（来自 meta 侧表），
+   * 诚实口径是禁用该筛选并说明，而不是猜零或真（`DESK-CACHE-004`）。
+   */
+  nativeAllowedOnly?: boolean;
+}
+
+/** 缓存读路径的状态面——与 native `public_read_cache_stats` 同口径。 */
+export type CardLibraryCacheStatus = 'empty' | 'ready' | 'unavailable' | 'unsupported-schema';
+
+/** 一条缓存命中：抓取时的公开摘要投影 + 正文可得性。 */
+export interface CardLibraryCachedEntry {
+  card: Record<string, unknown>;
+  hasBody: boolean;
+  lastSuccessAt: string | null;
+  summaryUpdatedAt?: string | null;
+  bodyUpdatedAt?: string | null;
+}
+
+/**
+ * 摘要查询结果。`total`/`bodyCount` 是匹配本机缓存的行数——不是线上
+ * total；`status` 非 'ready' 时 entries/total 为零值，调用方如实展示
+ * 「缓存不可用/尚未建立」，不得说成「缓存里没有」。
+ */
+export interface CardLibraryCachedPage {
+  status: CardLibraryCacheStatus;
+  entries: CardLibraryCachedEntry[];
+  total: number;
+  bodyCount: number;
+}
+
+/** 单卡缓存可得性——撤回行绝不返回正文。 */
+export type CardLibraryCachedAvailability = 'full' | 'summary-only' | 'absent' | 'withdrawn';
+
+export interface CardLibraryCachedCardResult {
+  status: CardLibraryCacheStatus;
+  availability: CardLibraryCachedAvailability;
+  entry?: {
+    card: Record<string, unknown>;
+    bodyUpdatedAt?: string | null;
+    lastSuccessAt?: string | null;
+  } | null;
+}
+
+/**
+ * 公开资料持久缓存的宿主端口（Desktop native 提供；Web 不提供时公开库
+ * 不产生「已缓存资料」入口，也不做离线降级）。
+ *
+ * 端口是只读的：写入只发生在 native 观察线上响应的捕获路径上，
+ * renderer 不能经这里写缓存。
+ */
+export interface CardLibraryPublicCachePort {
+  /** 摘要集合上的离线搜索/筛选/排序/分页。 */
+  queryCachedCards(query: CardLibraryCachedListQuery, signal: AbortSignal): Promise<CardLibraryCachedPage>;
+  /** 按 cardId 取单卡；`availability='full'` 时 entry.card 才带正文。 */
+  loadCachedCard(cardId: string, signal: AbortSignal): Promise<CardLibraryCachedCardResult>;
+  /** 「管理缓存」入口（Desktop → 设置「数据与存储」）；不提供时 UI 不出现该链接。 */
+  openCacheManagement?(): void;
+}
+
 /**
  * 宿主提供的登录/账号投影。
  *
@@ -207,10 +287,14 @@ export interface CardLibraryAuthState {
  * （与 Web 各页的 `selectionId` 语义统一；D5.0e-r1）。
  */
 export interface CardLibrarySelectionContext {
-  /** 稳定且按来源隔离的标识：`cloud:<线上卡id>` / `local:<本机记录id>`。 */
+  /**
+   * 稳定且按来源隔离的标识：`cloud:<线上卡id>` / `local:<本机记录id>` /
+   * `cache:<公开卡id>`（公开缓存快照——`DESK-CACHE-007` 的冻结输入；它
+   * 不是已验证的线上引用，Strict/多人/权威写入照常由服务器重新验权）。
+   */
   selectionId: string;
-  storageLocation: 'local' | 'cloud';
-  /** 仅云端行有值；本地行 MUST NOT 产出（与 `_cardId === ''` 同一不变量）。 */
+  storageLocation: 'local' | 'cloud' | 'cache';
+  /** 仅云端行有值；本地行与缓存快照行 MUST NOT 产出（与 `_cardId === ''` 同一不变量）。 */
   cloudCardId?: string;
 }
 
@@ -287,4 +371,9 @@ export interface CardLibraryHost {
   local: CardLibraryLocalPort;
   platform: CardLibraryPlatform;
   slots: CardLibrarySlots;
+  /**
+   * 公开资料持久缓存（D5.1-K2）。宿主提供时公开库页签获得「已缓存」视图
+   * 与在线失败时的自动降级；不提供时公开库行为与既有线上路径完全一致。
+   */
+  publicCache?: CardLibraryPublicCachePort;
 }

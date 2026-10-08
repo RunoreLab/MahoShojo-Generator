@@ -481,6 +481,8 @@ export function DesktopCharacterManager() {
 
   // 「我的数据卡」：本地行直接以 `?card=` 打开记录（走既有加载与离开保护），
   // 云端行按内容副本载入为未保存草稿——不持有云端身份，不做写回。
+  // 公开缓存快照行（'cache'）同样落入副本草稿路径：它是冻结输入而不是
+  // 已验证的线上引用，提示语如实区分快照与云端身份（DESK-CACHE-007）。
   const handleSelectLibraryCard = useCallback((payload: BattleSelectionPayload, context: CardLibrarySelectionContext) => {
     // 仲裁在途时入口本应不可达；此处兜底，避免迟到恢复覆盖刚选入的内容。
     if (!draftRestoreReady) return;
@@ -499,7 +501,12 @@ export function DesktopCharacterManager() {
         : defaultCardTitle(data),
       data,
     });
-    setNotice({ tone: 'status', text: '已从云端载入数据卡副本，尚未保存到本地库；副本不携带云端身份。' });
+    setNotice({
+      tone: 'status',
+      text: context.storageLocation === 'cache'
+        ? '已从本机缓存快照载入数据卡副本，尚未保存到本地库；快照可能与线上最新版本不同，副本不携带云端身份。'
+        : '已从云端载入数据卡副本，尚未保存到本地库；副本不携带云端身份。',
+    });
   }, [open, openRecord, draftRestoreReady]);
 
   const save = async () => {

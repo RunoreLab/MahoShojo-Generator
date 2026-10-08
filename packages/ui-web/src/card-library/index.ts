@@ -39,11 +39,14 @@ export type {
   PublicDataCardCompatRow,
 } from './read-mappers';
 export {
+  getCachedDataCardRowMeta,
+  isCachedDataCardRow,
   isLocalDataCardRow,
   mapLocalCardRecordToDetailsCard,
   mapLocalCardRecordToRow,
+  markCachedDataCardRow,
 } from './rows';
-export type { LocalDataCardRow } from './rows';
+export type { CachedDataCardRowMeta, LocalDataCardRow } from './rows';
 export { saveLocalDataCard } from './save-local-data-card';
 export type { SaveLocalDataCardInput, SaveLocalDataCardResult } from './save-local-data-card';
 export { isDefinitiveClientTerminalStatus, isRetryableStatus } from './net-status';
@@ -59,6 +62,12 @@ export type { LocalLibraryAutoSaveInput, LocalLibraryAutoSaveResult } from './us
 export type {
   CardLibraryAuthState,
   CardLibraryAuthStatus,
+  CardLibraryCachedAvailability,
+  CardLibraryCachedCardResult,
+  CardLibraryCachedEntry,
+  CardLibraryCachedListQuery,
+  CardLibraryCachedPage,
+  CardLibraryCacheStatus,
   CardLibraryCardMeta,
   CardLibraryDeckDetail,
   CardLibraryDetailsCard,
@@ -71,6 +80,7 @@ export type {
   CardLibraryMarks,
   CardLibraryOnlinePort,
   CardLibraryPlatform,
+  CardLibraryPublicCachePort,
   CardLibraryPublicCardBody,
   CardLibraryPublicListBody,
   CardLibraryPublicListQuery,

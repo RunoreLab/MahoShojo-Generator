@@ -505,3 +505,129 @@ test('会话探测（unknown）不清账号绑定状态：A→unknown→A 收藏
   await settle();
   expect(isFavoritedRendered()).toBe(true);
 });
+
+/* ── D5.1-K2 公开缓存视图 ─────────────────────────────────────────────── */
+
+const cachedEntry = (id: string, hasBody = true) => ({
+  card: { ...publicCard(id), data: JSON.stringify({ codename: id }) },
+  hasBody,
+  lastSuccessAt: '2026-10-05T00:00:00Z',
+  summaryUpdatedAt: '2026-10-05T00:00:00Z',
+  bodyUpdatedAt: hasBody ? '2026-10-05T00:00:00Z' : null,
+});
+
+const createCachePort = (entries: Array<ReturnType<typeof cachedEntry>>) => ({
+  queryCachedCards: vi.fn(async () => ({
+    status: 'ready' as const,
+    entries,
+    total: entries.length,
+    bodyCount: entries.filter((entry) => entry.hasBody).length,
+  })),
+  loadCachedCard: vi.fn(async (cardId: string) => ({
+    status: 'ready' as const,
+    availability: 'full' as const,
+    entry: {
+      card: { ...publicCard(cardId), data: JSON.stringify({ codename: cardId }) },
+      bodyUpdatedAt: '2026-10-05T00:00:00Z',
+      lastSuccessAt: '2026-10-05T00:00:00Z',
+    },
+  })),
+});
+
+test('在线失败自动降级到本机缓存：快照行标记 stale、不出现收藏入口', async () => {
+  const { host } = createHost([]);
+  host.publicCache = createCachePort([cachedEntry('card-c')]);
+  await render({
+    host, isOpen: true, onClose: vi.fn(), onSelectCard: vi.fn(),
+    selectedType: 'character', initialTab: 'public',
+  });
+  await settle();
+
+  expect(host.publicCache!.queryCachedCards).toHaveBeenCalled();
+  expect(document.body.textContent).toContain('线上公开库暂时不可用');
+  expect(document.body.textContent).toContain('公开角色 card-c');
+  expect(document.body.textContent).toContain('本机缓存');
+  // 缓存行的收藏/点赞是服务器权威写路径——入口不出现，不是点了再失败。
+  expect([...document.body.querySelectorAll('button')].some((b) => b.title === '收藏')).toBe(false);
+  expect([...document.body.querySelectorAll('button')].some((b) => b.title === '点赞')).toBe(false);
+});
+
+test('缓存快照行选择：cache 作用域、无服务器身份、不触发在线读取与使用统计', async () => {
+  const { host, online } = createHost([]);
+  const cache = createCachePort([cachedEntry('card-c')]);
+  host.publicCache = cache;
+  const onSelectCard = vi.fn();
+  await render({
+    host, isOpen: true, onClose: vi.fn(), onSelectCard,
+    selectedType: 'character', initialTab: 'public',
+  });
+  await settle();
+
+  await click(document.body.querySelector('[role="button"][aria-label="选择公开角色 card-c"]')!);
+  await settle();
+
+  expect(onSelectCard).toHaveBeenCalledTimes(1);
+  const [payload, context] = onSelectCard.mock.calls[0]! as [Record<string, unknown>, unknown];
+  // 快照正文不是已验证的线上引用——折叠到 local 一侧（DESK-CACHE-007）。
+  expect(payload._cardId).toBe('');
+  expect(payload._storageLocation).toBe('local');
+  expect(payload.codename).toBe('card-c');
+  expect(context).toEqual({ selectionId: 'cache:card-c', storageLocation: 'cache' });
+  expect(cache.loadCachedCard).toHaveBeenCalledWith('card-c', expect.anything());
+  // 降级中不重撞刚失败的在线路径；正文读取走缓存通道。
+  expect(online.fetchPublicCardById).not.toHaveBeenCalled();
+  expect(online.loadFullCard).not.toHaveBeenCalled();
+  expect(online.reportCardStat).not.toHaveBeenCalled();
+});
+
+test('仅摘要缓存行不可选：入口禁用且不发起任何读取', async () => {
+  const { host } = createHost([]);
+  const cache = createCachePort([cachedEntry('card-s', false)]);
+  host.publicCache = cache;
+  const onSelectCard = vi.fn();
+  await render({
+    host, isOpen: true, onClose: vi.fn(), onSelectCard,
+    selectedType: 'character', initialTab: 'public',
+  });
+  await settle();
+
+  expect(document.body.textContent).toContain('仅摘要');
+  const row = document.body.querySelector('[role="button"][aria-label="选择公开角色 card-s"]');
+  expect(row?.getAttribute('aria-disabled')).toBe('true');
+  await click(row!);
+  await settle();
+
+  expect(onSelectCard).not.toHaveBeenCalled();
+  expect(cache.loadCachedCard).not.toHaveBeenCalled();
+});
+
+test('「已缓存」主动浏览缓存视图：查询缓存、显示快照横幅、可回到线上', async () => {
+  const fetchPublicCards = vi.fn(async () => ({
+    ok: true as const, status: 200,
+    data: { success: true, cards: [publicCard('online-1')], total: 1, nextOffset: null },
+  }));
+  const { host } = createHost([], { online: { fetchPublicCards } });
+  const cache = createCachePort([cachedEntry('card-c')]);
+  host.publicCache = cache;
+  await render({
+    host, isOpen: true, onClose: vi.fn(), onSelectCard: vi.fn(),
+    selectedType: 'character', initialTab: 'public',
+  });
+  await settle();
+  expect(document.body.textContent).toContain('公开角色 online-1');
+
+  await click([...document.body.querySelectorAll('button')].find((b) => b.textContent?.includes('已缓存'))!);
+  await settle();
+
+  expect(cache.queryCachedCards).toHaveBeenCalled();
+  expect(document.body.textContent).toContain('正在浏览本机缓存的公开资料快照');
+  expect(document.body.textContent).toContain('公开角色 card-c');
+  // 主动缓存视图不混入当前线上结果（DESK-CACHE-004）。
+  expect(document.body.textContent).not.toContain('公开角色 online-1');
+  const onlineCalls = fetchPublicCards.mock.calls.length;
+
+  await click([...document.body.querySelectorAll('button')].find((b) => b.textContent?.includes('回到线上'))!);
+  await settle();
+  expect(fetchPublicCards.mock.calls.length).toBeGreaterThan(onlineCalls);
+  expect(document.body.textContent).toContain('公开角色 online-1');
+});

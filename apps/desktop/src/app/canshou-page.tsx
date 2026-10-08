@@ -890,7 +890,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
               {detailsSelection && (
                 <>
                   <p className="mt-2 text-sm text-(--app-text-muted)">
-                    来源：{detailsSelection.source === 'preset' ? '预设' : detailsSelection.source === 'upload' ? '本地上传/本地库' : '云端数据卡'}
+                    来源：{detailsSelection.selectionId?.startsWith('cache:') ? '公开库缓存快照（可能与线上最新版本不同）' : detailsSelection.source === 'preset' ? '预设' : detailsSelection.source === 'upload' ? '本地上传/本地库' : '云端数据卡'}
                     {detailsSelection.dataCardAuthor ? ` · 作者：${detailsSelection.dataCardAuthor}` : ''}
                     {detailsSelection.questionnaire.nativeAllowed ? ' · 原生许可' : ' · 非原生'}
                     {` · 题目 ${detailsSelection.questionnaire.questions.length} 道`}

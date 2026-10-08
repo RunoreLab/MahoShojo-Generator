@@ -204,7 +204,7 @@ export const PublicCacheSettingsCard = () => {
   return (
     <SettingsCard
       title="公开资料缓存"
-      description="把在线读到过的公开资料副本缓存在本机（public-read-cache.sqlite），为后续离线浏览能力积累内容；当前版本不直接展示缓存内容。这是派生数据：清除只移除缓存副本，不影响本地库与你的数据。"
+      description="把在线读到过的公开资料副本缓存在本机（public-read-cache.sqlite）。服务不可达时，数据卡选择弹窗的公开页签可切换「已缓存」视图离线浏览/搜索快照，在线失败也会自动降级到缓存内容；快照不会因存放时间长而淘汰。这是派生数据：清除只移除缓存副本，不影响本地库与你的数据。"
       actions={
         <button
           type="button"

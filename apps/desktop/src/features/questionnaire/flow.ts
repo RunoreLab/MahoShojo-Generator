@@ -59,7 +59,10 @@ export const buildQuestionnaireFlowItems = (
 /**
  * 问卷数据卡的当前选择来源；`cardId` 只存在于云端卡——本地卡没有服务器身份。
  * `selectionId` 是选中实例的作用域标识（`cloud:<id>` / `local:<recordId>` /
- * `builtin:<questionnaireId>`），决定答案键的隔离边界。
+ * `cache:<id>` / `builtin:<questionnaireId>`），决定答案键的隔离边界。
+ * 公开缓存快照（`cache:`）在选择载荷里折叠到 `_storageLocation:'local'`
+ * 一侧——冻结输入、无服务器身份，kind 因此是 `local`，wire 走 `upload`
+ * 非信任嵌入路径（DESK-CACHE-007）。
  */
 export interface QuestionnaireSource {
   kind: 'builtin' | 'local' | 'cloud';

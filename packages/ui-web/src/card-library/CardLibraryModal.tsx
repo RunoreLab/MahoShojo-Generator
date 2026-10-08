@@ -16,11 +16,11 @@ import {
   mapPublicDataCardRowToBattleSelectionPayload,
   normalizePublicVisibilityValue,
 } from './read-mappers';
-import { isLocalDataCardRow, mapLocalCardRecordToDetailsCard, type LocalDataCardRow } from './rows';
+import { isLocalDataCardRow, mapLocalCardRecordToDetailsCard, markCachedDataCardRow, getCachedDataCardRowMeta, isCachedDataCardRow, type LocalDataCardRow } from './rows';
 import { buildSafeFileName } from '../client/fileName';
 import { useLocalDataCards } from './use-local-data-cards';
 import { useLocalLibraryAutoSave } from './use-local-library-auto-save';
-import { ChevronDown, Filter } from 'lucide-react';
+import { ChevronDown, Filter, HardDrive } from 'lucide-react';
 import { BaseModal } from '../modal/BaseModal';
 import { isTopmostFocusTrapLayer, useEscapeLayer } from '../modal/escape-stack';
 import { ModalTabs, modalTabIds, type ModalTabItem } from '../modal/ModalTabs';
@@ -28,7 +28,13 @@ import { buttonClassName } from './Button';
 import { DataCardEmptyState } from './DataCardEmptyState';
 import { getDataCardStatus } from './status';
 import type { BadgeDefinition } from './badge-types';
-import type { CardLibraryHost, CardLibrarySelectionContext } from './host';
+import type {
+  CardLibraryCachedListQuery,
+  CardLibraryCacheStatus,
+  CardLibraryHost,
+  CardLibrarySelectionContext,
+} from './host';
+import { PUBLIC_DATA_CARD_NOT_FOUND_CODE } from '@mahoshojo/contracts/desktop-cloud';
 import {
   ONLINE_DATA_CARD_TYPES,
   OnlineDataCardTypeSchema,
@@ -78,6 +84,12 @@ const normalizeCardTypeForLibrary = (card: unknown): DataCardType => {
   const parsed = OnlineDataCardTypeSchema.safeParse((card as { type?: unknown })?.type);
   return parsed.success ? parsed.data : 'character';
 };
+
+/**
+ * 缓存正文不可执行的终态错误（撤回/仅摘要/缺失/明确业务不可用）。
+ * 与「传输类失败回落缓存」区分开：它直接终止选择流程，不回落、不重试。
+ */
+class CachedCardUnavailableError extends Error {}
 
 const normalizeTagIds = (value: unknown): string[] => {
   const rawList: string[] = [];
@@ -447,6 +459,29 @@ export function CardLibraryModal({
   const { cards: rawUserDataCards, setCards: setUserDataCards, reload: loadUserDataCards } = myPage;
   const { setCards: setFavoriteCards } = favoritesPage;
   const [publicError, setPublicError] = useState<string | null>(null);
+  /* ── 公开缓存视图（D5.1-K2）────────────────────────────────────────
+   * 三态：'online'（当前线上结果/在线失败仅保留 stale 行）、'cache'
+   * （用户主动浏览已缓存资料）、自动降级（在线失败且无 stale 行时展示
+   * cachedView 快照）。`publicFailedKey` 记「哪个请求语义在线上失败」，
+   * 只有 key 与当前查询一致才判降级，换查询语义后不会误贴失败标签。
+   */
+  const [publicViewMode, setPublicViewMode] = useState<'online' | 'cache'>('online');
+  const [publicFailedKey, setPublicFailedKey] = useState<string | null>(null);
+  const [cachedView, setCachedView] = useState<{
+    key: string;
+    entries: any[];
+    /** 匹配本机缓存的行数——不是线上 total（DESK-CACHE-004）。 */
+    total: number;
+    bodyCount: number;
+    totalPages: number;
+    status: CardLibraryCacheStatus;
+    /** 部分类型查询不可用（该类型贡献 0 行），如实提示覆盖受限。 */
+    partial: boolean;
+  } | null>(null);
+  const cacheFetchAbortControllerRef = useRef<AbortController | null>(null);
+  const [cacheLoading, setCacheLoading] = useState(false);
+  /** 连接恢复/窗口回前台的重验证合并节流。 */
+  const lastReconnectAtRef = useRef(0);
   const isLocalTab = activeTab === 'local';
   const localCards = useLocalDataCards(host.local.repository, isOpen && isLocalTab, effectiveAllowedTypes, debouncedSearchQuery);
   const localRecordById = useMemo(
@@ -479,7 +514,7 @@ export function CardLibraryModal({
     setSelectError(null);
   }
 
-  const listLoading = activeTab === 'my' ? myPage.loading : activeTab === 'favorites' ? favoritesPage.loading : isLocalTab ? localCards.loading : isLoading;
+  const listLoading = activeTab === 'my' ? myPage.loading : activeTab === 'favorites' ? favoritesPage.loading : isLocalTab ? localCards.loading : (isLoading || cacheLoading);
   const listError = activeTab === 'my' ? myPage.error : activeTab === 'favorites' ? favoritesPage.error : isLocalTab ? localCards.error : publicError;
   const listIdle = activeTab === 'my' ? myPage.status === 'idle' : activeTab === 'favorites' ? favoritesPage.status === 'idle' : false;
   const { reload: reloadFavorites } = favoritesPage;
@@ -557,6 +592,161 @@ export function CardLibraryModal({
     }));
   }, [inferRoleType]);
 
+  /**
+   * K2：把「当前查询语义」投影到本机缓存查询。字段逐一白名单对应，不额外加
+   * 条件；`nativeOnly` 刻意缺席——缓存投影没有 isNative，如实口径是禁用
+   * 该筛选并说明，而不是静默放行全部结果或把缺失当 false 过滤掉。
+   */
+  const buildCachedQueries = useCallback((page: number, searchTerm?: string): CardLibraryCachedListQuery[] => {
+    const trimmed = searchTerm ?? debouncedSearchQuery.trim();
+    return effectiveAllowedTypes.map((type) => ({
+      type,
+      limit: cardsPerPage,
+      offset: (page - 1) * cardsPerPage,
+      sortBy,
+      search: trimmed || undefined,
+      tagIds: selectedTagIds.length > 0 ? selectedTagIds : undefined,
+      tagMatch: tagMatchMode,
+      author: publicFilters.author || undefined,
+      minLikes: publicFilters.minLikes || undefined,
+      maxLikes: publicFilters.maxLikes || undefined,
+      minUsage: publicFilters.minUsage || undefined,
+      maxUsage: publicFilters.maxUsage || undefined,
+      minFavorites: publicFilters.minFavorites || undefined,
+      maxFavorites: publicFilters.maxFavorites || undefined,
+      roleType:
+        publicFilters.roleType && selectedType === 'character'
+          ? publicFilters.roleType
+          : undefined,
+      recommendedOnly: publicFilters.recommendedOnly || undefined,
+      nativeAllowedOnly: publicFilters.nativeAllowedOnly || undefined,
+    }));
+  }, [debouncedSearchQuery, effectiveAllowedTypes, sortBy, selectedTagIds, tagMatchMode, publicFilters, selectedType, cardsPerPage]);
+
+  /**
+   * 读取一页本机缓存并打上 `__readSource:'cache'` 标记。多类型逐类型聚合
+   * 与在线路径同构；任一类型缓存不可用时该类型贡献 0 行，并以 `partial`
+   * 如实标注覆盖受限。Abort 只丢弃过期请求，不写任何状态。
+   */
+  const loadCachedListPage = useCallback(async (page: number, requestKey: string, searchTerm?: string) => {
+    const port = host.publicCache;
+    if (!port) return;
+    cacheFetchAbortControllerRef.current?.abort();
+    const abortController = new AbortController();
+    cacheFetchAbortControllerRef.current = abortController;
+    setCacheLoading(true);
+    try {
+      const pages = await Promise.all(
+        buildCachedQueries(page, searchTerm).map((query) => port.queryCachedCards(query, abortController.signal)),
+      );
+      if (abortController.signal.aborted) return;
+      const entries = pages.flatMap((p) =>
+        p.entries.map((entry) =>
+          markCachedDataCardRow(
+            { ...entry.card, roleType: inferRoleType(entry.card) || undefined },
+            { hasBody: entry.hasBody, lastSuccessAt: entry.lastSuccessAt },
+          ),
+        ),
+      );
+      const status: CardLibraryCacheStatus =
+        pages.every((p) => p.status === 'ready') ? 'ready'
+        : pages.every((p) => p.status === 'empty') ? 'empty'
+        : pages.some((p) => p.status === 'ready') ? 'ready'
+        : pages.some((p) => p.status === 'unavailable') ? 'unavailable'
+        : pages.some((p) => p.status === 'unsupported-schema') ? 'unsupported-schema'
+        : 'empty';
+      setCachedView({
+        key: requestKey,
+        entries,
+        total: pages.reduce((sum, p) => sum + p.total, 0),
+        bodyCount: pages.reduce((sum, p) => sum + p.bodyCount, 0),
+        totalPages: Math.max(1, ...pages.map((p) => Math.ceil(p.total / cardsPerPage))),
+        status,
+        partial: pages.some((p) => p.status === 'unavailable' || p.status === 'unsupported-schema'),
+      });
+    } catch {
+      if (abortController.signal.aborted) return;
+      setCachedView({
+        key: requestKey,
+        entries: [], total: 0, bodyCount: 0, totalPages: 1,
+        status: 'unavailable', partial: false,
+      });
+    } finally {
+      // 与在线 owner 同一约定：被更新的请求取代时不清 loading、不释放 ref。
+      if (cacheFetchAbortControllerRef.current === abortController) {
+        cacheFetchAbortControllerRef.current = null;
+        setCacheLoading(false);
+      }
+    }
+  }, [host.publicCache, buildCachedQueries, inferRoleType, cardsPerPage]);
+
+  /**
+   * 当前公开查询的请求键——在线/缓存两套结果共用同一语义源：
+   * 主动缓存视图固定 list 语义（粘贴链接检索按搜索词匹配 card_id），
+   * 在线视图 uuid 检索走 'id' 语义，与 loadPublicDataCards 的分支一致。
+   */
+  const currentPublicRequestKey = useMemo(() => {
+    const trimmed = debouncedSearchQuery.trim();
+    if (publicViewMode === 'cache') {
+      return buildPublicRequestKey('list', {
+        page: currentPage, sort: sortBy, search: trimmed || undefined,
+        filters: publicFilters, tagIds: selectedTagIds, tagMatch: tagMatchMode,
+      });
+    }
+    const uuidMatch = trimmed.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+    return uuidMatch
+      ? buildPublicRequestKey('id', { cardId: uuidMatch[0] })
+      : buildPublicRequestKey('list', {
+          page: currentPage, sort: sortBy, search: trimmed || undefined,
+          filters: publicFilters, tagIds: selectedTagIds, tagMatch: tagMatchMode,
+        });
+  }, [publicViewMode, debouncedSearchQuery, currentPage, sortBy, publicFilters, selectedTagIds, tagMatchMode, buildPublicRequestKey]);
+
+  /**
+   * 降级判定的三层口径：
+   * - `publicDegradedActive`：当前查询语义在线上失败；
+   * - `staleOnlineRowsShown`：该查询本次成功过，同 key 的在线行仍是最新已知事实，
+   *   显示它而不是更早的缓存（缓存仍照常补齐，供换查询时使用）；
+   * - `cachedViewShown`：主动缓存视图，或降级且没有可保留在线行时展示快照。
+   */
+  const publicDegradedActive =
+    isPublicTab &&
+    publicViewMode === 'online' &&
+    publicFailedKey !== null &&
+    publicFailedKey === currentPublicRequestKey;
+  const staleOnlineRowsShown =
+    publicDegradedActive &&
+    publicLoadedRequestKeyRef.current === currentPublicRequestKey &&
+    publicDataCards.length > 0;
+  const cachedViewShown = isPublicTab && cachedView !== null && (
+    (publicViewMode === 'cache' && cachedView.key === currentPublicRequestKey) ||
+    (publicDegradedActive && !staleOnlineRowsShown && cachedView.key === publicFailedKey)
+  );
+  /**
+   * 数据来源横幅的两态：'browse' 用户主动查看缓存；'degraded' 在线失败
+   * 自动落到缓存快照。同 key 在线失败但仍有 stale 在线行时 banner 为空——
+   * 那条路沿用既有 listError「上次成功结果」口径，语义已经准确。
+   */
+  const publicCacheBanner: 'browse' | 'degraded' | null =
+    !isPublicTab ? null
+    : publicViewMode === 'cache' ? 'browse'
+    : cachedViewShown ? 'degraded'
+    : null;
+  /** 「仅看原生」在缓存投影里没有 isNative 字段——忽略并说明，不静默放行。 */
+  const nativeOnlyIgnored = Boolean(publicCacheBanner) && publicFilters.nativeOnly;
+
+  const reloadCachedCurrentQuery = useCallback((page: number) => {
+    if (!isPublicTab || !host.publicCache) return;
+    const trimmed = debouncedSearchQuery.trim();
+    const requestKey = buildPublicRequestKey('list', {
+      page, sort: sortBy, search: trimmed || undefined,
+      filters: publicFilters, tagIds: selectedTagIds, tagMatch: tagMatchMode,
+    });
+    // 粘贴分享链接时取链接中的 uuid 做检索词——整串不是 card_id 的 LIKE 前缀。
+    const uuidMatch = trimmed.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+    void loadCachedListPage(page, requestKey, uuidMatch ? uuidMatch[0] : undefined);
+  }, [isPublicTab, host.publicCache, debouncedSearchQuery, sortBy, publicFilters, selectedTagIds, tagMatchMode, buildPublicRequestKey, loadCachedListPage]);
+
   const loadTagOptions = useCallback(async (options: { force?: boolean } = {}) => {
     if (tagOptionsInFlightRef.current) return;
     if (!options.force && tagOptionsSettledRef.current) return;
@@ -581,8 +771,11 @@ export function CardLibraryModal({
   }, [host.online]);
 
   const ensureTagOptions = useCallback(() => {
+    // 缓存视图不暗中请求标签候选——候选列表属于线上元数据；
+    // 已选标签与已加载候选在缓存视图里照常生效。
+    if (publicCacheBanner !== null) return;
     void loadTagOptions();
-  }, [loadTagOptions]);
+  }, [loadTagOptions, publicCacheBanner]);
 
   const userDataCards = useMemo(() => mapWithRoleType(
     rawUserDataCards.filter((card: any) => effectiveAllowedTypeSet.has(card.type)),
@@ -612,6 +805,7 @@ export function CardLibraryModal({
         publicLoadedRequestKeyRef.current = requestKey;
         setPublicDataCards(card ? mapWithRoleType([card]) : []);
         setPublicTotalPages(1);
+        setPublicFailedKey(null);
       } else {
         failedStatus = result.status;
         throw new Error(`获取数据卡失败（HTTP ${result.status}）`);
@@ -629,13 +823,18 @@ export function CardLibraryModal({
         setPublicTotalPages(null);
       }
       setPublicError(error instanceof Error ? error.message : '获取数据卡失败');
+      setPublicFailedKey(requestKey);
+      // 在线失败后查一次本机缓存：没有可保留的在线行时才可能展示快照，
+      // 4xx 终态已判定在线事实不存在，缓存行仍会标 stale 而非冒充存在。
+      // 搜索词用提取出的 cardId——分享链接整串不是 card_id 的 LIKE 前缀。
+      if (!keepStale) void loadCachedListPage(1, requestKey, cardId);
     } finally {
       if (publicFetchAbortControllerRef.current === abortController) {
         publicFetchAbortControllerRef.current = null;
         setIsLoading(false);
       }
     }
-  }, [host.online, buildPublicRequestKey, effectiveAllowedTypeSet, mapWithRoleType]);
+  }, [host.online, buildPublicRequestKey, effectiveAllowedTypeSet, mapWithRoleType, loadCachedListPage]);
 
   // 【修改】获取公开数据卡，现在会接收所有筛选条件
   const loadPublicDataCards = useCallback(async (
@@ -701,6 +900,7 @@ export function CardLibraryModal({
       const cards = mapWithRoleType(batches.flatMap((batch) => batch.cards));
       publicLoadedRequestKeyRef.current = requestKey;
       setPublicDataCards(cards);
+      setPublicFailedKey(null);
       // 多类型并行请求时总页数取各类型最大（与 Web 旧行为一致：跨类型分页各自独立）。
       setPublicTotalPages(
         batches.every((batch) => batch.total !== null)
@@ -715,15 +915,19 @@ export function CardLibraryModal({
         publicLoadedRequestKeyRef.current = null;
         setPublicDataCards([]);
         setPublicTotalPages(null);
+        // K2：本次失败语义没有可保留的在线行——查本机缓存，命中的快照
+        // 以 stale 标记展示，不混入（也不冒充）线上结果。
+        void loadCachedListPage(page, requestKey);
       }
       setPublicError(error instanceof Error ? error.message : '获取公开数据卡失败');
+      setPublicFailedKey(requestKey);
     } finally {
       if (publicFetchAbortControllerRef.current === abortController) {
         publicFetchAbortControllerRef.current = null;
         setIsLoading(false);
       }
     }
-  }, [host.online, buildPublicRequestKey, selectedType, effectiveAllowedTypes, cardsPerPage, mapWithRoleType]);
+  }, [host.online, buildPublicRequestKey, selectedType, effectiveAllowedTypes, cardsPerPage, mapWithRoleType, loadCachedListPage]);
 
   // 公开查询的显式重放入口：始终使用当前 debouncedSearchQuery + publicFilters，
   // 页码由调用方显式传入（不读取 currentPage，避免翻页 → callback identity → effect 的间接依赖），
@@ -740,13 +944,13 @@ export function CardLibraryModal({
   }, [isPublicTab, debouncedSearchQuery, sortBy, publicFilters, selectedTagIds, tagMatchMode, loadCardByIdForDisplay, loadPublicDataCards]);
 
   // 公开页签的服务端分页越界回收：total 已知而当前页超出时（并发删卡、筛选收紧等）
-  // 回收到最后一页并重新拉取。
+  // 回收到最后一页并重新拉取。缓存视图 totalPages 已 clamp，不进入此回收。
   useEffect(() => {
-    if (!isOpen || !isPublicTab || publicTotalPages === null || currentPage <= publicTotalPages) return;
+    if (!isOpen || !isPublicTab || publicViewMode === 'cache' || publicTotalPages === null || currentPage <= publicTotalPages) return;
     const next = Math.max(1, publicTotalPages);
     setCurrentPage(next);
     reloadPublicCurrentQuery(next);
-  }, [isOpen, isPublicTab, publicTotalPages, currentPage, reloadPublicCurrentQuery]);
+  }, [isOpen, isPublicTab, publicViewMode, publicTotalPages, currentPage, reloadPublicCurrentQuery]);
 
   const sortFavorites = useCallback((items: any[], criteria: 'likes' | 'usage' | 'favorites' | 'created_at') => {
     const sorted = [...items];
@@ -805,24 +1009,61 @@ export function CardLibraryModal({
     if (!isOpen || !isPublicTab) {
       publicFetchAbortControllerRef.current?.abort();
       publicFetchAbortControllerRef.current = null;
+      cacheFetchAbortControllerRef.current?.abort();
+      cacheFetchAbortControllerRef.current = null;
     }
   }, [isOpen, isPublicTab]);
 
   // 公开查询的唯一请求 owner：防抖搜索、Tab、排序、筛选、标签变化都从这里发起。
   // 翻页不在其中：reloadPublicCurrentQuery 不读取 currentPage（页码显式传参），
   // 本 effect 依赖链也不含 currentPage，翻页由 handlePageChange 独占发起。
+  // K2：主动缓存视图下同一 owner 改发缓存查询——进入公开库默认在线视图，
+  // 线上查询仍照常发出；切换视图时页码归一，在线/缓存分页互不串扰。
   useEffect(() => {
     if (!isOpen) return;
 
     setCurrentPage(1);
     if (!isPublicTab) return;
 
+    if (publicViewMode === 'cache') {
+      reloadCachedCurrentQuery(1);
+      return;
+    }
     reloadPublicCurrentQuery(1);
-  }, [debouncedSearchQuery, isOpen, activeTab, isPublicTab, sortBy, publicFilters, selectedTagIds, tagMatchMode, reloadPublicCurrentQuery]);
+  }, [debouncedSearchQuery, isOpen, activeTab, isPublicTab, publicViewMode, sortBy, publicFilters, selectedTagIds, tagMatchMode, reloadPublicCurrentQuery, reloadCachedCurrentQuery]);
+
+  // K2：连接恢复信号/窗口回到前台触发一次合并的重验证。
+  // - 降级中：重试线上查询，成功即自动回到当前线上结果；
+  // - 主动缓存视图：保留用户选择，只刷新快照视图本身；
+  // - 'online' 事件是恢复信号，强制重发；focus 走 15s 节流防连击。
+  useEffect(() => {
+    if (!isOpen || !isPublicTab || typeof window === 'undefined') return;
+    const maybeRevalidate = (force: boolean) => {
+      const now = Date.now();
+      if (!force && now - lastReconnectAtRef.current < 15_000) return;
+      lastReconnectAtRef.current = now;
+      if (publicViewMode === 'cache') {
+        reloadCachedCurrentQuery(currentPage);
+        return;
+      }
+      if (publicFailedKey !== null || force) {
+        reloadPublicCurrentQuery(currentPage);
+      }
+    };
+    const onOnline = () => maybeRevalidate(true);
+    const onFocus = () => maybeRevalidate(false);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [isOpen, isPublicTab, publicViewMode, publicFailedKey, currentPage, reloadPublicCurrentQuery, reloadCachedCurrentQuery]);
 
   useEffect(() => {
     return () => {
       publicFetchAbortControllerRef.current?.abort();
+      cacheFetchAbortControllerRef.current?.abort();
     };
   }, []);
 
@@ -841,6 +1082,11 @@ export function CardLibraryModal({
     setTagOptionsError(null);
     tagOptionsSettledRef.current = false;
     tagOptionsInFlightRef.current = false;
+    // 每次打开默认回到在线视图并发出线上查询（进入公开库必走线上口径）；
+    // 主动缓存视图不跨弹窗会话延续，避免「曾经点过缓存」变成隐式锁定。
+    setPublicViewMode('online');
+    setPublicFailedKey(null);
+    setCachedView(null);
 
     const fallbackTab: BattleDataTab = effectiveTabs[0] ?? 'public';
     const canUseInitialTab = Boolean(initialTab && effectiveTabs.includes(initialTab));
@@ -873,6 +1119,64 @@ export function CardLibraryModal({
   const canToggle = selectionMode === 'multi' && typeof onToggleCard === 'function';
   const canImportDeck = allowDeckImport && Boolean(host.slots.DecksModal) && isAuthenticated && selectionMode === 'multi' && selectedType === 'character' && (typeof onToggleCard === 'function' || typeof onSelectCard === 'function');
 
+  /**
+   * K2：取缓存行的正文快照（DESK-CACHE-005）。
+   *
+   * 联网可达且当前查询没有被判「线上失败」时先按需重验证单卡：
+   * 明确的撤回证据（业务错误码或 native 已写入撤回标记）→ 不再提供缓存
+   * 替代；传输类失败/未知 4xx 才回落缓存正文。仅摘要/缺失/撤回是终态，
+   * 用 CachedCardUnavailableError 终止选择流程，错误文案如实说明。
+   */
+  const loadCachedCardBody = useCallback(async (
+    cardId: string,
+    signal: AbortSignal,
+  ): Promise<{ card: Record<string, unknown>; viaCache: boolean }> => {
+    const port = host.publicCache;
+    if (!port) throw new CachedCardUnavailableError('本机缓存不可用');
+    const degradedNow = publicFailedKey !== null && publicFailedKey === currentPublicRequestKey;
+    const mayReachOnline = (typeof navigator === 'undefined' || navigator.onLine !== false) && !degradedNow;
+    if (mayReachOnline) {
+      try {
+        const res = await host.online.fetchPublicCardById(cardId, signal);
+        if (signal.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+        const body = res.data as { success?: unknown; card?: unknown; code?: unknown } | undefined;
+        if (res.ok && body?.success === true && body.card) {
+          // 按需重验证成功：这份正文是本次线上已验证事实，
+          // 选择语义可如实升级为 'cloud'（selectionId 同步换 cloud:<id>）。
+          return { card: body.card as Record<string, unknown>, viaCache: false };
+        }
+        // 只有明确业务撤回码才是终态；401/无码 404/5xx/HTML 一律当传输失败回落缓存。
+        if (body?.code === PUBLIC_DATA_CARD_NOT_FOUND_CODE) {
+          throw new CachedCardUnavailableError('这张卡已从公开库撤回或不再公开，缓存快照不再提供。');
+        }
+      } catch (error) {
+        if (error instanceof CachedCardUnavailableError) throw error;
+        if (error instanceof Error && error.name === 'AbortError') throw error;
+        // 其余（网络层/解析层）皆传输类失败，继续走缓存。
+      }
+    }
+    const result = await port.loadCachedCard(cardId, signal);
+    if (signal.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
+    if (result.availability === 'full' && result.entry) {
+      // 快照必须重新带 storageLocation:'cache' 标记——IPC 返回的新对象
+      // 不带行标记，否则 payload mapper 会把缓存卡误判成 cloud 身份。
+      return {
+        card: markCachedDataCardRow(result.entry.card as Record<string, unknown>, {
+          hasBody: true,
+          lastSuccessAt: result.entry.lastSuccessAt ?? null,
+        }),
+        viaCache: true,
+      };
+    }
+    if (result.availability === 'withdrawn') {
+      throw new CachedCardUnavailableError('这张卡已从公开库撤回或不再公开。');
+    }
+    if (result.availability === 'summary-only') {
+      throw new CachedCardUnavailableError('这张卡只缓存了摘要，正文需联网后获取。');
+    }
+    throw new CachedCardUnavailableError('本机缓存中没有这张卡。');
+  }, [host.publicCache, host.online, publicFailedKey, currentPublicRequestKey]);
+
   // 处理卡片选择
   const handleSelectCard = async (card: any) => {
     const cardId = typeof card?.id === 'string' ? card.id : '';
@@ -901,16 +1205,25 @@ export function CardLibraryModal({
       const signal = cardReadController.current.signal;
       // 本地库记录本来就带着完整正文；走 host.online.loadFullCard 只会得到一次注定 404 的请求。
       const isLocalRow = isLocalDataCardRow(card);
+      // 缓存行只按正文快照选择/预览——仅摘要行在 UI 层已禁用入口，这里兜底拦截。
+      const isCacheRow = isCachedDataCardRow(card);
+      if (isCacheRow && !getCachedDataCardRowMeta(card)?.hasBody) return;
+      const cachedResolved = isCacheRow ? await loadCachedCardBody(cardId, signal) : null;
       const full = isLocalRow
         ? card
-        : typeof card.data === 'string' ? card : await host.online.loadFullCard(card, activeTab === 'my' ? 'my' : 'public', signal);
+        : isCacheRow
+          ? cachedResolved!.card
+          : typeof card.data === 'string' ? card : await host.online.loadFullCard(card, activeTab === 'my' ? 'my' : 'public', signal);
       if (signal.aborted) return;
       const payload = mapPublicDataCardRowToBattleSelectionPayload(full);
-      // 选中上下文：canonical 卡 id 相同的不同来源副本（云端卡 vs 本地副本）
-      // 必须产出不同 selectionId，下游问卷作用域据此隔离（D5.0e-r1）。
+      // 选中上下文：canonical 卡 id 相同的不同来源副本（云端卡 vs 本地副本 vs 缓存快照）
+      // 必须产出不同 selectionId，下游问卷作用域据此隔离（D5.0e-r1 / D5.1-K2）。
+      // 缓存行按需重验证成功时正文已是线上已验证事实，语义如实升级为 cloud。
       const selectionContext: CardLibrarySelectionContext = isLocalRow
         ? { selectionId: `local:${cardId}`, storageLocation: 'local' }
-        : { selectionId: `cloud:${cardId}`, storageLocation: 'cloud', cloudCardId: cardId };
+        : isCacheRow && cachedResolved?.viaCache !== false
+          ? { selectionId: `cache:${cardId}`, storageLocation: 'cache' }
+          : { selectionId: `cloud:${cardId}`, storageLocation: 'cloud', cloudCardId: cardId };
 
       if (selectionMode === 'multi') {
         if (canToggle) {
@@ -923,8 +1236,10 @@ export function CardLibraryModal({
         onClose();
       }
 
-      // 如果是公开卡片且未使用过，增加使用次数（仅在「加入」时触发）
-      if (nextSelected && isPublicVisibility(payload._isPublic) && !host.platform.marks.isUsed(cardId)) {
+      // 如果是公开卡片且未使用过，增加使用次数（仅在「加入」时触发）。
+      // `_cardId !== ''` 即已验证的线上身份：本地行与缓存快照（`_cardId:''`）
+      // 不产生线上计数；缓存行重验证成功后才恢复线上身份，此时计数是诚实的。
+      if (nextSelected && payload._cardId !== '' && isPublicVisibility(payload._isPublic) && !host.platform.marks.isUsed(cardId)) {
         void (async () => {
           try {
             if (await host.online.reportCardStat(cardId, 'usage')) {
@@ -1012,9 +1327,13 @@ export function CardLibraryModal({
     if (!downloadJson) return;
     try {
       const signal = cardReadController.current.signal;
+      const isCacheRow = isCachedDataCardRow(card);
+      if (isCacheRow && !getCachedDataCardRowMeta(card)?.hasBody) return;
       const full = isLocalDataCardRow(card)
         ? card
-        : typeof card.data === 'string' ? card : await host.online.loadFullCard(card, activeTab === 'my' ? 'my' : 'public', signal);
+        : isCacheRow
+          ? (await loadCachedCardBody(card.id, signal)).card
+          : typeof card.data === 'string' ? card : await host.online.loadFullCard(card, activeTab === 'my' ? 'my' : 'public', signal);
       if (signal.aborted) return;
       let cardPayload = full.data;
       if (typeof cardPayload === 'string') {
@@ -1026,7 +1345,7 @@ export function CardLibraryModal({
       if (error instanceof Error && error.name === 'AbortError') return;
       setSelectError(error instanceof Error ? error.message : '保存数据卡失败');
     }
-  }, [activeTab, host.online, host.platform]);
+  }, [activeTab, host.online, host.platform, loadCachedCardBody]);
 
   /**
    * 从本机本地库删除一张数据卡。
@@ -1150,7 +1469,10 @@ export function CardLibraryModal({
         setShowDetailsModal(true);
         return;
       }
-      const full = await host.online.loadFullCard(card, activeTab === 'my' ? 'my' : 'public', signal);
+      // 缓存行详情 = 正文快照；仅摘要行入口已禁用，这里兜底用缓存正文通道。
+      const full = isCachedDataCardRow(card)
+        ? (await loadCachedCardBody(card.id, signal)).card
+        : await host.online.loadFullCard(card, activeTab === 'my' ? 'my' : 'public', signal);
       if (signal.aborted) return;
       setSelectedCard(full);
       setShowDetailsModal(true);
@@ -1160,7 +1482,7 @@ export function CardLibraryModal({
     } finally {
       if (cardDetailControllerRef.current === controller) cardDetailControllerRef.current = null;
     }
-  }, [activeTab, host.online, localRecordById]);
+  }, [activeTab, host.online, localRecordById, loadCachedCardBody]);
 
   // 【新增】处理高级筛选输入变化
   const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -1276,10 +1598,12 @@ export function CardLibraryModal({
   }, [isAuthenticated, host.online, adjustFavoriteCount, sortFavorites, sortBy, setUserDataCards, setFavoriteCards, reloadFavorites]);
 
   // 处理页码变化：翻页请求的显式 owner；公开页签无论筛选如何都重新发起服务端分页请求。
+  // 在线/缓存两套分页互不串扰：缓存视图的翻页只读本机快照。
   const handlePageChange = (newPage: number) => {
     setCurrentPage(newPage);
     if (isPublicTab) {
-      reloadPublicCurrentQuery(newPage);
+      if (publicViewMode === 'cache') reloadCachedCurrentQuery(newPage);
+      else reloadPublicCurrentQuery(newPage);
     }
   };
 
@@ -1374,9 +1698,15 @@ export function CardLibraryModal({
     if (activeTab === 'my') return paginatedUserCards;
     if (activeTab === 'favorites') return paginatedFavoriteCards;
     if (isLocalTab) return localPaginatedCards;
-    if (isPublicTab) return publicPaginatedCards;
+    // 缓存视图命中的行已是独立分页结果（不是在线行集的再过滤），
+    // 直接整页展示；主动缓存视图中查询在飞时回空集，不把上一次线上行
+    // 短暂投影到「本机缓存」横幅下。
+    if (isPublicTab) {
+      if (publicViewMode === 'cache') return cachedViewShown ? (cachedView?.entries ?? []) : [];
+      return cachedViewShown ? (cachedView?.entries ?? []) : publicPaginatedCards;
+    }
     return [];
-  }, [activeTab, isLocalTab, isPublicTab, paginatedUserCards, paginatedFavoriteCards, localPaginatedCards, publicPaginatedCards]);
+  }, [activeTab, isLocalTab, isPublicTab, publicViewMode, paginatedUserCards, paginatedFavoriteCards, localPaginatedCards, publicPaginatedCards, cachedViewShown, cachedView]);
 
   // 「搜索/筛选无命中」和「这个库里本来就没有」对用户是两件事，空状态必须分开说。
   // 标签是与关键词、高级筛选各自独立的状态，且在每一个页签上都渲染，
@@ -1391,15 +1721,18 @@ export function CardLibraryModal({
     if (activeTab === 'my') { loadUserDataCards(); return; }
     if (activeTab === 'favorites') { favoritesPage.reload(); return; }
     if (isLocalTab) { localCards.reload(); return; }
+    // 主动缓存视图的「重试」重读缓存快照——重连线上走横幅的「回到线上」。
+    if (isPublicTab && publicViewMode === 'cache') { reloadCachedCurrentQuery(currentPage); return; }
     reloadPublicCurrentQuery(currentPage);
-  }, [activeTab, isLocalTab, localCards, favoritesPage, reloadPublicCurrentQuery, currentPage, loadUserDataCards]);
+  }, [activeTab, isLocalTab, isPublicTab, publicViewMode, localCards, favoritesPage, reloadPublicCurrentQuery, reloadCachedCurrentQuery, currentPage, loadUserDataCards]);
 
   const displayCardIds = useMemo(() => {
     const out: string[] = [];
     const seen = new Set<string>();
     for (const card of displayCards as any[]) {
-      // 本地库记录不参与服务器侧的批量元数据请求：它们没有技术值、段位或审核状态。
-      if (isLocalDataCardRow(card)) continue;
+      // 本地库记录与缓存快照行都不参与服务器侧的批量元数据请求：
+      // 前者没有线上身份；后者是冻结输入，缓存模式不得暗中请求线上辅助端点。
+      if (isLocalDataCardRow(card) || isCachedDataCardRow(card)) continue;
       const id = typeof card?.id === 'string' ? card.id.trim() : '';
       if (!id) continue;
       if (seen.has(id)) continue;
@@ -1473,9 +1806,10 @@ export function CardLibraryModal({
     // 宿主未提供徽章批量查询时整体降级为不显示，不产生空请求。
     if (!fetchAuthorBadgesBatch) return;
 
-    // 提取需要获取徽章的用户 ID
+    // 提取需要获取徽章的用户 ID（缓存快照行跳过——不暗中请求线上徽章端点）。
     const pendingUserIds = new Set<number>();
     for (const card of displayCards as any[]) {
+      if (isCachedDataCardRow(card)) continue;
       const uid = typeof card?.user_id === 'number' ? card.user_id : 0;
       if (uid > 0 && !Object.prototype.hasOwnProperty.call(authorBadgesById, uid)) {
         pendingUserIds.add(uid);
@@ -1519,7 +1853,9 @@ export function CardLibraryModal({
     : isLocalTab
       ? localTotalPages
     : isPublicTab
-        ? publicTotalPages
+        ? (cachedViewShown
+            ? cachedView?.totalPages ?? null
+            : publicViewMode === 'cache' ? null : publicTotalPages)
         : null;
   const typeLabelMap: Record<BattleDataSelectedType, string> = {
     character: '角色',
@@ -1589,7 +1925,10 @@ export function CardLibraryModal({
       if (next === 'my') loadUserDataCards();
       else if (next === 'local') localCards.reload();
       else if (next === 'favorites') favoritesPage.reload();
-      else if (next === 'public' || next === 'recommended') reloadPublicCurrentQuery(1);
+      else if (next === 'public' || next === 'recommended') {
+        if (publicViewMode === 'cache') reloadCachedCurrentQuery(1);
+        else reloadPublicCurrentQuery(1);
+      }
       return;
     }
     setActiveTab(next);
@@ -1677,6 +2016,22 @@ export function CardLibraryModal({
                   className={`flex items-center gap-1 px-3 py-2 text-sm rounded-lg transition-colors ${isFilterActive ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
                 >
                   <Filter className="w-4 h-4" /> 高级筛选 <ChevronDown className={`w-4 h-4 transition-transform ${showAdvancedFilters ? 'rotate-180' : ''}`} />
+                </button>
+              )}
+              {isPublicTab && host.publicCache && (
+                <button
+                  type="button"
+                  onClick={() => setPublicViewMode((mode) => (mode === 'cache' ? 'online' : 'cache'))}
+                  className={`flex items-center gap-1 px-3 py-2 text-sm rounded-lg transition-colors ${
+                    publicViewMode === 'cache'
+                      ? 'bg-amber-500 text-white hover:bg-amber-600'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                  title={publicViewMode === 'cache'
+                    ? '回到线上公开库（自动重新查询当前线上结果）'
+                    : '浏览本机缓存的公开资料快照（不依赖网络）'}
+                >
+                  <HardDrive className="w-4 h-4" /> {publicViewMode === 'cache' ? '线上' : '已缓存'}
                 </button>
               )}
             </div>
@@ -1795,6 +2150,11 @@ export function CardLibraryModal({
                 {tagOptionsError && (
                   <div className="mt-1 text-[11px] text-red-600">{tagOptionsError}</div>
                 )}
+                {publicCacheBanner !== null && tagOptions.length === 0 && (
+                  <div className="mt-1 text-[11px] text-gray-400">
+                    缓存视图：标签候选项需联网加载；已选标签仍可作用于缓存筛选。
+                  </div>
+                )}
               </div>
             )}
             {/* 【新增】高级筛选面板 */}
@@ -1849,9 +2209,9 @@ export function CardLibraryModal({
                       name="nativeOnly"
                       checked={filters.nativeOnly}
                       onChange={handleFilterChange}
-                      disabled={selectedType === 'questionnaire'}
+                      disabled={selectedType === 'questionnaire' || publicCacheBanner !== null}
                     />
-                    <span className={selectedType === 'questionnaire' ? 'text-gray-400' : ''}>仅看原生</span>
+                    <span className={selectedType === 'questionnaire' || publicCacheBanner !== null ? 'text-gray-400' : ''}>仅看原生</span>
                   </label>
                   <label className="inline-flex items-center gap-2 text-xs text-gray-700">
                     <input
@@ -1864,6 +2224,11 @@ export function CardLibraryModal({
                     <span className={selectedType !== 'questionnaire' ? 'text-gray-400' : ''}>仅看原生许可</span>
                   </label>
                 </div>
+                {publicCacheBanner !== null && (
+                  <p className="text-[11px] leading-5 text-gray-500">
+                    缓存视图：「仅看原生」依赖线上元数据，当前不可用并已忽略；「仅看原生许可」按抓取时保存的标记筛选，不代表当前资格。
+                  </p>
+                )}
                 <div className="flex justify-end gap-2 pt-2">
                   <button onClick={resetFilters} className="px-3 py-1.5 text-xs bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">重置</button>
                   <button onClick={applyFilters} className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-md hover:bg-purple-700">应用筛选</button>
@@ -1872,7 +2237,7 @@ export function CardLibraryModal({
             )}
           </div>
 
-          {listError && <div role="alert" className="mb-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">
+          {listError && !cachedViewShown && publicCacheBanner !== 'browse' && <div role="alert" className="mb-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">
             {displayCards.length ? `刷新失败，当前显示上次成功结果：${listError}` : `数据卡加载失败：${listError}`}
             <button type="button" disabled={listLoading} className="ml-3 px-3 py-2 rounded bg-white disabled:opacity-50"
               onClick={reloadActiveList}>重试</button>
@@ -1914,6 +2279,77 @@ export function CardLibraryModal({
                 {host.slots.renderLocalLibraryBanner?.()}
               </div>
             ) : null}
+            {publicCacheBanner ? (
+              <div className={`mb-3 rounded-lg border px-3 py-2 text-sm ${
+                publicCacheBanner === 'browse'
+                  ? 'border-amber-200 bg-amber-50 text-amber-900'
+                  : 'border-red-200 bg-red-50 text-red-800'
+              }`}>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                  <HardDrive className="h-4 w-4 shrink-0" />
+                  <span className="min-w-0">
+                    {publicCacheBanner === 'browse' ? (
+                      <>
+                        正在浏览本机缓存的公开资料快照
+                        {cachedView && cachedView.key === currentPublicRequestKey
+                          ? `：命中 ${cachedView.total} 条（${cachedView.bodyCount} 条已缓存正文可离线打开）`
+                          : ''}
+                        ，不是当前线上结果。
+                      </>
+                    ) : (
+                      <>
+                        线上公开库暂时不可用{publicError ? `（${publicError}）` : ''}，
+                        正在显示本机缓存快照，不代表线上现状。
+                      </>
+                    )}
+                    {cachedViewShown && cachedView ? (
+                      <>
+                        {cachedView.status === 'unavailable' ? ' 缓存库当前不可用。' : ''}
+                        {cachedView.status === 'unsupported-schema' ? ' 缓存库由更新版本创建，本版本不可读取。' : ''}
+                        {cachedView.partial ? ' 部分类型缓存不可用，结果可能不全。' : ''}
+                        {nativeOnlyIgnored ? ' 「仅看原生」筛选依赖线上元数据，缓存中不可用、已忽略。' : ''}
+                      </>
+                    ) : null}
+                  </span>
+                  <span className="flex-1" />
+                  {publicCacheBanner === 'browse' ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => reloadCachedCurrentQuery(currentPage)}
+                        className="rounded border border-amber-300 bg-white px-2 py-1 text-xs text-amber-900 hover:bg-amber-100"
+                      >
+                        刷新快照视图
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPublicViewMode('online')}
+                        className="rounded border border-amber-300 bg-white px-2 py-1 text-xs text-amber-900 hover:bg-amber-100"
+                      >
+                        回到线上
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => reloadPublicCurrentQuery(currentPage)}
+                      className="rounded border border-red-300 bg-white px-2 py-1 text-xs text-red-800 hover:bg-red-100"
+                    >
+                      重试线上
+                    </button>
+                  )}
+                  {host.publicCache?.openCacheManagement ? (
+                    <button
+                      type="button"
+                      onClick={() => host.publicCache?.openCacheManagement?.()}
+                      className="rounded border border-gray-300 bg-white px-2 py-1 text-xs text-gray-700 hover:bg-gray-100"
+                    >
+                      管理缓存
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
 	            {(listLoading || listIdle) && displayCards.length === 0 ? (
 	              <div className="flex justify-center items-center min-h-[40vh]"><div className="text-gray-500">加载中...</div></div>
 	            ) : displayCards.length === 0 ? (
@@ -1925,6 +2361,8 @@ export function CardLibraryModal({
 	                onRetry={listError ? reloadActiveList : undefined}
 	                localLibraryLink={host.slots.localLibraryLink}
 	                renderLocalEmpty={host.slots.renderLocalLibraryEmpty}
+                  cacheView={publicCacheBanner}
+                  cachedStatus={cachedView?.status}
 	              />
 	            ) : (
 		              <div
@@ -1937,16 +2375,24 @@ export function CardLibraryModal({
                       >
 		                {displayCards.map((card: any) => {
 		                  const isFavorited = favoriteIds.has(card.id);
+		                  const cachedMeta = getCachedDataCardRowMeta(card);
+		                  const rowIsCached = cachedMeta !== null;
+		                  const rowIsLocal = isLocalDataCardRow(card);
 		                  // unknown（会话探测中）不等于已登出：入口保持可用，真正拒绝由
 		                  // handleFavoriteToggleForCard 的 authenticated 检查兜底。
-		                  const enableFavorite = authStatus !== 'unauthenticated' && activeTab !== 'my';
+		                  // 缓存行不提供收藏入口——收藏是服务器权威写路径（DESK-CACHE-004）。
+		                  const enableFavorite = authStatus !== 'unauthenticated' && activeTab !== 'my' && !rowIsCached;
 	                    const isSelected = selectedIdSet.has(card.id);
-	                    const itemDisabled = selectionMode === 'multi' && !isSelected && atLimit;
+	                    // 仅摘要缓存行：可浏览元数据，但正文相关动作一律不可执行。
+	                    const rowBodyUnavailable = rowIsCached && cachedMeta.hasBody !== true;
+	                    const itemDisabled = rowBodyUnavailable || (selectionMode === 'multi' && !isSelected && atLimit);
 	                    const showQuickToggle = selectionMode === 'multi';
-	                    const quickToggleDisabled = isSelected ? !canToggle : itemDisabled;
-	                    const quickToggleTitle = isSelected
-	                      ? (canToggle ? '移除' : '当前模式不支持移除')
-	                      : (itemDisabled ? '已达到上限' : '加入');
+	                    const quickToggleDisabled = rowBodyUnavailable || (isSelected ? !canToggle : itemDisabled);
+	                    const quickToggleTitle = rowBodyUnavailable
+	                      ? '只缓存了摘要，联网后才能使用这张卡'
+	                      : isSelected
+	                        ? (canToggle ? '移除' : '当前模式不支持移除')
+	                        : (itemDisabled ? '已达到上限' : '加入');
                       const questionnaireNativeAllowed = resolveQuestionnaireNativeAllowed(card);
 
 		                  return (
@@ -2000,16 +2446,18 @@ export function CardLibraryModal({
 	                          copyText: host.platform.copyText,
 	                          reportStat: host.online.reportCardStat,
 	                        }}
-	                        storageLocation={isLocalDataCardRow(card) ? 'local' : 'cloud'}
-	                        onRemoveFromLibrary={isLocalDataCardRow(card) ? () => setPendingLocalRemoval(card) : undefined}
+	                        storageLocation={rowIsLocal ? 'local' : rowIsCached ? 'cache' : 'cloud'}
+                          cacheBodyAvailable={cachedMeta?.hasBody}
+                          cacheLastConfirmedAt={cachedMeta?.lastSuccessAt}
+	                        onRemoveFromLibrary={rowIsLocal ? () => setPendingLocalRemoval(card) : undefined}
 	                        removePending={removingLocalId === card.id}
 	                        onUploadToCloud={
-	                          isLocalDataCardRow(card) && host.online.uploadLocalRecord
+	                          rowIsLocal && host.online.uploadLocalRecord
 	                            ? () => void handleUploadLocalCard(card)
 	                            : undefined
 	                        }
 	                        uploadPending={uploadingLocalId === card.id}
-	                        localLibraryOriginHint={isLocalDataCardRow(card) ? '仅保存在本机，不会上传' : null}
+	                        localLibraryOriginHint={rowIsLocal ? '仅保存在本机，不会上传' : null}
 	                        id={card.id}
 	                        name={card.name}
 	                        description={card.description}
@@ -2031,10 +2479,10 @@ export function CardLibraryModal({
 	                        isRecommended={card.is_recommended === 1}
 	                        author={activeTab === 'my' ? '我' : (card.username || '未知')}
 	                        authorBadges={activeTab === 'my' ? currentUserEquippedBadges : (authorBadgesById[card.user_id] ?? [])}
-		                        onViewDetails={allowCardDetails && host.slots.CardDetailsModal ? () => { void openCardDetails(card); } : undefined}
+		                        onViewDetails={allowCardDetails && host.slots.CardDetailsModal && !rowBodyUnavailable ? () => { void openCardDetails(card); } : undefined}
 	                        onAuthorClick={handleAuthorClick}
 	                        onToggleFavorite={enableFavorite ? (next) => handleFavoriteToggleForCard(card, next) : undefined}
-	                        onDownload={host.platform.downloadJson ? () => { void handleDownloadCard(card); } : undefined}
+	                        onDownload={host.platform.downloadJson && !rowBodyUnavailable ? () => { void handleDownloadCard(card); } : undefined}
 	                      />
 	                    </div>
 	                  );
@@ -2058,9 +2506,13 @@ export function CardLibraryModal({
             (activeTab === 'my' && myPage.total > cardsPerPage) ||
             (activeTab === 'favorites' && favoritesPage.total > cardsPerPage) ||
             (isPublicTab && (
-              publicTotalPages !== null
-                ? publicTotalPages > 1 || currentPage > 1
-                : (displayCards.length >= cardsPerPage || currentPage > 1)
+              publicViewMode === 'cache'
+                ? cachedViewShown && ((cachedView?.totalPages ?? 1) > 1 || currentPage > 1)
+                : cachedViewShown
+                  ? (cachedView?.totalPages ?? 1) > 1 || currentPage > 1
+                  : publicTotalPages !== null
+                    ? publicTotalPages > 1 || currentPage > 1
+                    : (displayCards.length >= cardsPerPage || currentPage > 1)
             ))
           ) &&
             <div className="flex justify-center items-center gap-2 pt-4 border-t mt-4">
@@ -2084,9 +2536,13 @@ export function CardLibraryModal({
                       ? currentPage >= favoritesTotalPages
                       : isLocalTab
                         ? currentPage >= localTotalPages
-                        : publicTotalPages
-                          ? currentPage >= publicTotalPages
-                          : displayCards.length < cardsPerPage
+                        : publicViewMode === 'cache'
+                          ? !cachedViewShown || currentPage >= (cachedView?.totalPages ?? 1)
+                          : cachedViewShown
+                            ? currentPage >= (cachedView?.totalPages ?? 1)
+                            : publicTotalPages
+                              ? currentPage >= publicTotalPages
+                              : displayCards.length < cardsPerPage
                 }
                 className={buttonClassName({ variant: 'secondary', size: 'md' })}
               >
