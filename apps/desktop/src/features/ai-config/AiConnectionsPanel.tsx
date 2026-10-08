@@ -4,8 +4,7 @@
 // （隐藏/恢复/复制为自定义连接）、自定义连接 CRUD。凭据只写 OS 凭据存储，
 // UI 只展示「是否存在」，永远读不回明文。
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { useMemo, useState } from 'react';
 
 import { getModelGenerationCapabilities } from '@mahoshojo/ai-core/generation-settings';
 import {
@@ -13,19 +12,9 @@ import {
   AdvancedGenerationSettings,
   describeAiDirectUnsupportedReason,
 } from '@mahoshojo/ui-web/ai-provider';
-import {
-  requiresExplicitPublicHttpConfirmation,
-  type DirectProviderProfileV1,
-} from '@mahoshojo/contracts/provider-profile';
-import type { AIModelOption } from '@mahoshojo/ai-core/provider-catalog';
+import { type DirectProviderProfileV1 } from '@mahoshojo/contracts/provider-profile';
 
-import { createDesktopAiExecutionPort } from '../../platform/desktop-ai-execution';
-import { DesktopAiError } from '../../platform/direct-ai-bridge';
-import {
-  PROVIDER_PRESETS,
-  ProfileDraftError,
-  type ProfileDraft,
-} from '../providers/profile-draft';
+import { PROVIDER_PRESETS, type ProfileDraft } from '../providers/profile-draft';
 
 import {
   DESKTOP_EDITABLE_PROFILE_ADAPTERS,
@@ -36,216 +25,23 @@ import {
   type DesktopSecretPresence,
 } from './desktop-ai-config';
 import { useDesktopAiConfig, type UseDesktopAiConfigResult } from './use-desktop-ai-config';
-
-const newConnectionId = () => `conn_${Math.random().toString(36).slice(2, 12)}`;
+import {
+  ConnectionEditor,
+  draftFromProfile,
+  newConnectionId,
+  saveConnectionDraft,
+  type EditingState,
+} from './connection-editor';
+import { ConnectionTestSection } from './connection-test';
 
 const modeLabel = (mode: 'direct-local' | 'direct-remote'): string =>
   mode === 'direct-local'
     ? '客户端 · 本机模型服务'
     : '客户端 · 远端供应商（需要联网）';
 
-interface EditingState {
-  draft: ProfileDraft;
-  /** 从预设复制时带入的直连模型清单（供 modelId datalist）；自由连接为 null。 */
-  presetModels: readonly AIModelOption[] | null;
-  isExisting: boolean;
-  /** 被编辑 Profile 是否携带 apiKeyRef（决定是否提供「清除凭据」选项）。 */
-  hasKeyRef: boolean;
-}
-
-const draftFromProfile = (profile: DirectProviderProfileV1): ProfileDraft => ({
-  id: profile.id,
-  name: profile.name,
-  baseUrl: profile.baseUrl,
-  modelId: profile.modelId,
-  allowPublicHttp: profile.transport?.allowPublicHttp === true,
-});
-
-const ConnectionEditor = ({
-  editing,
-  existingSecretKnown,
-  saving,
-  onCancel,
-  onSave,
-}: {
-  editing: EditingState;
-  existingSecretKnown: boolean;
-  saving: boolean;
-  onCancel: () => void;
-  onSave: (draft: ProfileDraft) => Promise<void>;
-}) => {
-  const [draft, setDraft] = useState<ProfileDraft>(editing.draft);
-  const [error, setError] = useState<string | null>(null);
-  const needsHttpConfirm = useMemo(
-    () => requiresExplicitPublicHttpConfirmation(draft.baseUrl.trim()),
-    [draft.baseUrl],
-  );
-
-  const patch = (changes: Partial<ProfileDraft>) => {
-    setDraft((current) => ({ ...current, ...changes }));
-    setError(null);
-  };
-
-  // DESK-AIP-003.7：存在未保存修改（含易失 Key 输入）时关闭表单需显式确认；
-  // 确认放弃后明文只随 React state 丢弃，不进入任何持久化草稿。
-  const isDirty =
-    draft.name !== editing.draft.name ||
-    draft.baseUrl !== editing.draft.baseUrl ||
-    draft.modelId !== editing.draft.modelId ||
-    (draft.apiKey ?? '') !== '' ||
-    draft.allowPublicHttp !== editing.draft.allowPublicHttp ||
-    draft.clearApiKey === true;
-  const cancelEditing = () => {
-    if (
-      isDirty &&
-      typeof window !== 'undefined' &&
-      !window.confirm('连接配置有未保存的更改（包括已输入的 API Key），确认放弃？')
-    ) {
-      return;
-    }
-    onCancel();
-  };
-
-  const submit = async () => {
-    setError(null);
-    try {
-      // 用户明确勾选过 allowPublicHttp 才写入；非 loopback http 未勾选时让 schema 拒绝。
-      let payload: ProfileDraft = needsHttpConfirm
-        ? draft
-        : { ...draft, allowPublicHttp: undefined };
-      // 清除凭据时丢弃录入框内容，避免与「更换」语义撞车（store 也会拒）。
-      if (payload.clearApiKey === true) {
-        payload = { ...payload, apiKey: undefined };
-      }
-      await onSave(payload);
-    } catch (cause) {
-      setError(
-        cause instanceof ProfileDraftError
-          ? `${cause.field}: ${cause.message}`
-          : cause instanceof Error
-            ? cause.message
-            : '保存连接失败',
-      );
-    }
-  };
-
-  const datalistId = `ai-conn-models-${draft.id}`;
-
-  return (
-    <div className="battle-lite-accent-box flex flex-col gap-3 rounded-lg p-3 text-sm">
-      <h3 className="battle-lite-strong-text text-xs font-semibold">
-        {editing.isExisting ? '编辑连接' : '新建连接'}
-      </h3>
-      <label className="flex flex-col gap-1 text-xs">
-        <span className="battle-lite-muted-text">显示名</span>
-        <input
-          className="input-field"
-          value={draft.name}
-          onChange={(event) => patch({ name: event.target.value })}
-        />
-      </label>
-      <label className="flex flex-col gap-1 text-xs">
-        <span className="battle-lite-muted-text">Endpoint（OpenAI-compatible 根路径）</span>
-        <input
-          className="input-field font-mono"
-          value={draft.baseUrl}
-          placeholder="https://api.example.com/v1"
-          onChange={(event) => patch({ baseUrl: event.target.value })}
-        />
-      </label>
-      <label className="flex flex-col gap-1 text-xs">
-        <span className="battle-lite-muted-text">默认模型 id</span>
-        <input
-          className="input-field font-mono"
-          value={draft.modelId}
-          placeholder="例如 qwen3:8b"
-          list={editing.presetModels ? datalistId : undefined}
-          autoComplete="off"
-          spellCheck={false}
-          onChange={(event) => patch({ modelId: event.target.value })}
-        />
-        {editing.presetModels && (
-          <datalist id={datalistId}>
-            {editing.presetModels.map((model) => (
-              <option key={model.value} value={model.value}>
-                {model.label}
-              </option>
-            ))}
-          </datalist>
-        )}
-      </label>
-      {needsHttpConfirm && (
-        <label className="flex items-start gap-2 text-xs">
-          <input
-            type="checkbox"
-            className="mt-0.5 h-4 w-4"
-            checked={draft.allowPublicHttp === true}
-            onChange={(event) => patch({ allowPublicHttp: event.target.checked })}
-          />
-          <span>
-            允许通过明文 HTTP 连接此远端地址。请求内容将以明文经过网络，仅在你信任该网络时启用。
-          </span>
-        </label>
-      )}
-      <label className="flex flex-col gap-1 text-xs">
-        <span className="battle-lite-muted-text">API Key（可留空）</span>
-        <input
-          className="input-field font-mono"
-          type="password"
-          autoComplete="off"
-          spellCheck={false}
-          disabled={draft.clearApiKey === true}
-          placeholder={
-            draft.clearApiKey === true
-              ? '保存时清除已存凭据'
-              : editing.isExisting && existingSecretKnown
-                ? '已保存凭据，留空保持不变'
-                : '输入后写入操作系统凭据存储'
-          }
-          value={draft.apiKey ?? ''}
-          onChange={(event) => patch({ apiKey: event.target.value })}
-        />
-        <span className="battle-lite-subtle-text">
-          凭据只写入操作系统凭据存储，保存后本页无法再读回。
-        </span>
-      </label>
-      {editing.isExisting && editing.hasKeyRef && (
-        <label className="flex items-center gap-2 text-xs">
-          <input
-            type="checkbox"
-            className="h-4 w-4"
-            checked={draft.clearApiKey === true}
-            onChange={(event) => patch({ clearApiKey: event.target.checked })}
-          />
-          <span className="battle-lite-muted-text">
-            清除已保存的 API Key（保存后该连接不再携带凭据）
-          </span>
-        </label>
-      )}
-      {error && <p className="battle-lite-subtle-text text-xs">保存失败：{error}</p>}
-      <div className="flex gap-2">
-        <button
-          type="button"
-          className="rounded-lg bg-(--app-accent) px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-          disabled={saving}
-          onClick={() => void submit()}
-        >
-          {saving ? '保存中…' : '保存连接'}
-        </button>
-        <button
-          type="button"
-          className="rounded-lg border border-(--app-border-strong) px-3 py-1.5 text-xs"
-          onClick={cancelEditing}
-        >
-          取消
-        </button>
-      </div>
-    </div>
-  );
-};
 
 /** DESK-ONLINE-004：区分未配置、缺失、已配置与存储失败；未知不猜成「未配置」。 */
-const secretStatusLabel = (
+export const secretStatusLabel = (
   status: DesktopSecretPresence | undefined,
   hasKeyRef: boolean,
 ): string => {
@@ -429,16 +225,6 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
   const { state, store } = aiConfig;
   const [editing, setEditing] = useState<EditingState | null>(null);
   const [showHidden, setShowHidden] = useState(false);
-  const [testState, setTestState] = useState<
-    | { status: 'idle' }
-    | { status: 'running' }
-    | { status: 'done'; text: string }
-    | { status: 'cancelled' }
-    | { status: 'failed'; message: string }
-  >({ status: 'idle' });
-  const testAbortRef = useRef<AbortController | null>(null);
-  // run identity：切换目标时 revision++，旧 run 的迟到终态不得再写 UI。
-  const testRevisionRef = useRef(0);
 
   const target = resolveDesktopAiTarget(
     state.selection,
@@ -473,97 +259,11 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
   };
 
   const saveEditing = async (draft: ProfileDraft) => {
-    try {
-      await store.saveConnection(draft);
-    } catch (cause) {
-      // 连接本体可能已落盘、只是激活/列表刷新失败：如实呈现 saved-not-activated
-      // （DESK-AIP-003.5），重试沿用同一 draft.id，不产生第二条 Profile。
-      const saved = store.getSnapshot().profiles.some((item) => item.id === draft.id);
-      if (saved) {
-        throw new Error(
-          `连接已保存，但启用为当前连接失败：${
-            cause instanceof Error ? cause.message : '配置写入失败'
-          }。可在连接列表中对该连接「设为当前」。`,
-        );
-      }
-      throw cause;
-    }
+    // 连接本体可能已落盘、只是激活/列表刷新失败：如实呈现 saved-not-activated
+    // （DESK-AIP-003.5），重试沿用同一 draft.id，不产生第二条 Profile。
+    await saveConnectionDraft(store, draft);
     setEditing(null);
   };
-
-  const runConnectionTest = async () => {
-    const profile = target.profile;
-    const mode = target.mode;
-    if (!profile || !mode || testState.status === 'running') return;
-    const revision = ++testRevisionRef.current;
-    setTestState({ status: 'running' });
-    const controller = new AbortController();
-    testAbortRef.current = controller;
-    // 目标已切换时迟到的结果直接丢弃——新旧目标之间的状态不串台。
-    const isCurrentRun = () => revision === testRevisionRef.current;
-    try {
-      const result = await createDesktopAiExecutionPort({
-        invoke,
-        profileId: profile.id,
-      }).execute(
-        {
-          requestId: `conn-test-${crypto.randomUUID()}`,
-          contractVersion: 1,
-          mode,
-          modelId: target.modelId ?? profile.modelId,
-          messages: [{ role: 'user', content: '用一句话介绍你自己。' }],
-        },
-        controller.signal,
-      );
-      if (!isCurrentRun()) return;
-      setTestState(
-        result.status === 'completed'
-          ? { status: 'done', text: result.output.text ?? '' }
-          : result.status === 'cancelled'
-            ? { status: 'cancelled' }
-            : { status: 'failed', message: result.error.message ?? result.error.code },
-      );
-    } catch (cause) {
-      if (!isCurrentRun()) return;
-      setTestState(
-        controller.signal.aborted
-          ? { status: 'cancelled' }
-          : {
-              status: 'failed',
-              message:
-                cause instanceof DesktopAiError
-                  ? `${cause.code}: ${cause.message}`
-                  : cause instanceof Error
-                    ? cause.message
-                    : '连接测试失败',
-            },
-      );
-    } finally {
-      if (testAbortRef.current === controller) testAbortRef.current = null;
-    }
-  };
-
-  const cancelConnectionTest = () => {
-    testAbortRef.current?.abort();
-  };
-
-  // 切换/删除当前连接时中止在途测试并重置结果；卸载同样中止（Direct 默认无应用层
-  // 硬超时，挂着没人收会一直占流）。用字段值做依赖而不是拼字符串，id/modelId 含
-  // 分隔符也不会误判。
-  const testTargetId = target.profile?.id ?? null;
-  const testTargetModel = target.modelId;
-  useEffect(() => {
-    testRevisionRef.current += 1;
-    testAbortRef.current?.abort();
-    setTestState({ status: 'idle' });
-  }, [testTargetId, testTargetModel]);
-  useEffect(
-    () => () => {
-      testRevisionRef.current += 1;
-      testAbortRef.current?.abort();
-    },
-    [],
-  );
 
   const blockedOverlay = state.overlayState === 'blocked';
 
@@ -645,38 +345,7 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
             )}
           </div>
         )}
-        {target.profile && target.mode && (
-          <div className="flex gap-2">
-            {testState.status === 'running' ? (
-              <button
-                type="button"
-                className="rounded-lg border border-(--app-border-strong) px-3 py-1.5 text-xs"
-                onClick={cancelConnectionTest}
-              >
-                取消测试
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="rounded-lg border border-(--app-border-strong) px-3 py-1.5 text-xs"
-                onClick={() => void runConnectionTest()}
-              >
-                测试当前连接
-              </button>
-            )}
-          </div>
-        )}
-        {testState.status === 'done' && (
-          <p className="battle-lite-subtle-text whitespace-pre-wrap text-xs">
-            测试输出：{testState.text || '（空）'}
-          </p>
-        )}
-        {testState.status === 'cancelled' && (
-          <p className="battle-lite-subtle-text text-xs">测试已取消。</p>
-        )}
-        {testState.status === 'failed' && (
-          <p className="battle-lite-subtle-text text-xs">测试失败：{testState.message}</p>
-        )}
+        {target.profile && target.mode && <ConnectionTestSection target={target} />}
       </div>
 
       {/* 未实现 adapter 的连接不展示高级参数——不显示无实际发送效果的控件
@@ -818,6 +487,7 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
             state.secretStatus[editing.draft.id] === 'present'
           }
           saving={state.savingConnection}
+          saveLabel="保存连接"
           onCancel={() => setEditing(null)}
           onSave={saveEditing}
         />

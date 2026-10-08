@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from '@tanstack/react-router';
-import { getModelGenerationCapabilities } from '@mahoshojo/ai-core/generation-settings';
 import { MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES } from '@mahoshojo/contracts/desktop-ipc';
-import { AiExecutionLocationField, AdvancedGenerationSettings } from '@mahoshojo/ui-web/ai-provider';
 import {
   AiReasoningPanel,
   GenerationModeSwitcher,
@@ -30,6 +28,7 @@ import {
 } from '../features/scenario/session';
 import type { ScenarioCardKind, ScenarioExecutionMode } from '../features/scenario/generation';
 import { resolveDesktopAiTarget } from '../features/ai-config/desktop-ai-config';
+import { DesktopAiProviderPanel } from '../features/ai-config/desktop-ai-provider-panel';
 import { useDesktopAiConfig } from '../features/ai-config/use-desktop-ai-config';
 import { downloadTextFile } from '../platform/download-text-file';
 import { IpcLocalCardRepository } from '../platform/local-card-bridge';
@@ -74,7 +73,7 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
   const router = useRouter();
   const { openFixed } = useExternalLinks();
   // AI 连接与执行位置与设置页共用同一份 overlay/profiles 状态（D5.0b）。
-  const { state: aiState, store: aiStore } = useDesktopAiConfig();
+  const { state: aiState } = useDesktopAiConfig();
   const target = resolveDesktopAiTarget(
     aiState.selection,
     aiState.profiles,
@@ -145,9 +144,6 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
   // 不消费本地 profile（两个执行位置正交，DESK-ONLINE-001/009）。
   const clientProfilesBlocked =
     target.location === 'client' && (profilesLoading || profilesError !== null);
-  const targetCapabilities = selected
-    ? getModelGenerationCapabilities(selected.id, target.modelId ?? selected.modelId)
-    : undefined;
   const recommended = recommendedSaveModes(deviceType === 'mobile');
   const jsonSaveMode = recommended.jsonSaveMode;
   const tokenEstimateText = useMemo(
@@ -236,66 +232,34 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
             {profilesError && <p role="alert">{target.location === 'server' ? '本地 Provider 配置加载失败，仅影响客户端执行。' : profilesError}</p>}
             <fieldset disabled={busy || blockedDraft} className="flex min-w-0 flex-col gap-4">
               <legend className="mb-2 font-semibold">生成设置</legend>
-              <AiExecutionLocationField
-                value={target.location}
-                client={{ enabled: true }}
-                server={{ enabled: true }}
-                onChange={(location) => aiStore.selectExecutionLocation(location)}
+              <DesktopAiProviderPanel
+                generationMode={draft.generationMode}
+                copy={{
+                  serverOutput: {
+                    stream: 'Markdown 流式输出（通用情景卡，未签名）',
+                    nonStream: '结构化 JSON 输出（服务器签名）',
+                  },
+                  emptyProfilesHint: '回答可以先填写，配置加载后再生成。',
+                  serverFootnote:
+                    '不使用客户端连接与高级模型参数（由服务器侧 System Default 解析）。切换执行位置不会丢失已填写的回答。',
+                  payloadNoun: '情景回答',
+                }}
+                controlsSlot={
+                  <div>
+                    <GenerationModeSwitcher
+                      value={draft.generationMode}
+                      disabled={target.location === 'client'}
+                      onChange={(next) => updateDraft({ generationMode: next })}
+                      helper={false}
+                    />
+                    {target.location === 'client' && (
+                      <p className="mt-1 text-sm text-(--app-text-muted)">
+                        客户端执行仅支持结构化（非流式）生成；流式「通用情景卡」需经服务器通路。
+                      </p>
+                    )}
+                  </div>
+                }
               />
-              <div>
-                <GenerationModeSwitcher
-                  value={draft.generationMode}
-                  disabled={target.location === 'client'}
-                  onChange={(next) => updateDraft({ generationMode: next })}
-                  helper={false}
-                />
-                {target.location === 'client' && (
-                  <p className="mt-1 text-sm text-(--app-text-muted)">
-                    客户端执行仅支持结构化（非流式）生成；流式「通用情景卡」需经服务器通路。
-                  </p>
-                )}
-              </div>
-              <label className="flex flex-col gap-1">AI 连接
-                <select
-                  aria-label="AI 连接"
-                  className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)"
-                  value={aiState.selection.clientConnectionId ?? ''}
-                  disabled={aiState.overlayState !== 'ready'}
-                  onChange={(event) => {
-                    // 生成入口选连接=立即用它执行：两个维度一起显式落定。
-                    if (event.target.value) {
-                      aiStore.activateConnection(event.target.value);
-                    }
-                  }}
-                >
-                  {aiState.selection.clientConnectionId === null && <option value="">未选择连接</option>}
-                  {aiState.profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.modelId}</option>)}
-                </select>
-              </label>
-              {target.location === 'client' && !profilesLoading && !aiState.profiles.length && !profilesError && <p>请先在设置中保存 Provider。回答可以先填写，配置加载后再生成。</p>}
-              {target.location === 'server' && <div className="rounded border border-(--app-border) p-3">
-                <p>服务器 · 云端：由项目服务在服务器侧生成，{draft.generationMode === 'stream' ? 'Markdown 流式输出（通用情景卡，未签名）' : '结构化 JSON 输出（服务器签名）'}。</p>
-                <p>不使用客户端连接与高级模型参数（由服务器侧 System Default 解析）。切换执行位置不会丢失已填写的回答。</p>
-              </div>}
-              {target.location === 'client' && target.unavailableReason && <p role="status">{target.unavailableReason}</p>}
-              {target.location === 'client' && selected && mode && <div className="rounded border border-(--app-border) p-3">
-                <p>{mode === 'direct-local' ? '客户端 · 本机：发送到本机模型服务' : '客户端 · 远端：发送到你指定的外部模型服务'}</p>
-                <p className="break-all">接收方：{selected.baseUrl}</p>
-                <p>模型：{target.modelId ?? selected.modelId}。点击生成会发送情景回答；结果不带官方签名。</p>
-              </div>}
-              {/* 高级参数只随 direct 通路下发（hosted 在服务器侧解析）：仅客户端执行时展示。 */}
-              {target.location === 'client' && selected && mode && <AdvancedGenerationSettings
-                value={target.generationOverrides}
-                onChange={(next) => aiStore.setGenerationOverrides(selected.id, target.modelId ?? selected.modelId, next)}
-                temperatureSupported={targetCapabilities ? targetCapabilities.temperature.support !== 'unsupported' : true}
-                temperatureMax={targetCapabilities?.temperature.max}
-                maxOutputTokensMax={targetCapabilities?.maxOutputTokens.max}
-                thinkingSupport={targetCapabilities?.thinking.support ?? 'unknown'}
-                thinkingEfforts={targetCapabilities?.thinking.efforts}
-                canDisableThinking={targetCapabilities
-                  ? targetCapabilities.thinking.support === 'supported' && targetCapabilities.thinking.canDisable !== false
-                  : true}
-              />}
             </fieldset>
             <fieldset disabled={busy || blockedDraft} className="flex min-w-0 flex-col gap-4">
               <legend className="mb-2 font-semibold">情景要素</legend>

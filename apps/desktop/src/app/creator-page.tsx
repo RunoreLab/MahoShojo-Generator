@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Link, useRouter } from '@tanstack/react-router';
-import { getModelGenerationCapabilities } from '@mahoshojo/ai-core/generation-settings';
 import { MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES } from '@mahoshojo/contracts/desktop-ipc';
 import { getRandomFlowers } from '@mahoshojo/domain/flowers';
 import { exceedsUtf8ByteLimit } from '@mahoshojo/domain/data-card-size';
@@ -57,7 +56,6 @@ import {
   reconcileCreatorBuildRuleSelection,
   reconcileQuestionnaireSelectionsForTemplate,
 } from '@mahoshojo/domain/creator/selection';
-import { AiExecutionLocationField, AdvancedGenerationSettings } from '@mahoshojo/ui-web/ai-provider';
 import {
   AiReasoningPanel,
   AnswerReviewList,
@@ -108,6 +106,7 @@ import type { CreatorExecutionMode } from '../features/creator/generation';
 import { parseCreatorQuestionnaireCardSelection, toQuestionnaireSelection } from '../features/creator/questionnaire';
 import { QUESTIONNAIRE_DRAFT_DEFAULT_LANGUAGE } from '../features/questionnaire/session';
 import { resolveDesktopAiTarget } from '../features/ai-config/desktop-ai-config';
+import { DesktopAiProviderPanel } from '../features/ai-config/desktop-ai-provider-panel';
 import { useDesktopAiConfig } from '../features/ai-config/use-desktop-ai-config';
 import { useDesktopCloudSession } from '../features/account/use-desktop-cloud-session';
 import { useDesktopCardLibraryHost } from '../platform/card-library-host';
@@ -173,7 +172,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const router = useRouter();
   const { openFixed } = useExternalLinks();
-  const { state: aiState, store: aiStore } = useDesktopAiConfig();
+  const { state: aiState } = useDesktopAiConfig();
   const target = resolveDesktopAiTarget(
     aiState.selection,
     aiState.profiles,
@@ -545,9 +544,6 @@ function CreatorForm({ session }: { session: CreatorSession }) {
   const executionMode: CreatorExecutionMode | null = target.location === 'server' ? hostedMode : mode;
   // 本地 Provider 配置只门禁客户端执行：server 偏好由 hosted System Default 解析。
   const clientProfilesBlocked = target.location === 'client' && (profilesLoading || profilesError !== null);
-  const targetCapabilities = selected
-    ? getModelGenerationCapabilities(selected.id, target.modelId ?? selected.modelId)
-    : undefined;
   const recommendedImageMode = recommendedSaveModes(deviceType === 'mobile').imageSaveMode;
   const recommendedJsonMode = recommendedSaveModes(deviceType === 'mobile').jsonSaveMode;
   const imageSaveMode = draft.imageSaveMode ?? recommendedImageMode;
@@ -973,67 +969,39 @@ function CreatorForm({ session }: { session: CreatorSession }) {
   const advancedSidebarPanel = (
     <fieldset disabled={busy || blockedDraft || questionnaireLoading || !guard.ready} className="flex min-w-0 flex-col gap-4">
       <legend className="mb-2 font-semibold">高级生成</legend>
-      <AiExecutionLocationField
-        value={target.location}
-        client={{ enabled: true }}
-        server={{ enabled: true }}
-        onChange={(location) => aiStore.selectExecutionLocation(location)}
-      />
-      <GenerationModeSwitcher
-        value={generationMode}
-        disabled={target.location === 'client'}
-        helper={false}
-        onChange={(next: GenerationMode) => {
-          const normalizedTemplate = normalizeCreatorTemplateForGenerationMode(next, template);
-          if (normalizedTemplate !== session.getSnapshot().draft.template) invalidatePresetLoads();
-          updateDraft({
-            generationMode: next,
-            template: normalizedTemplate,
-          });
+      <DesktopAiProviderPanel
+        generationMode={generationMode}
+        copy={{
+          serverOutput: {
+            stream: 'Markdown 流式输出（未签名）',
+            nonStream: '结构化 JSON 输出（问卷原生许可时可获官方签名）',
+          },
+          emptyProfilesHint: '问卷可以先填写，配置加载后再生成。',
+          serverFootnote:
+            '不使用客户端连接与高级模型参数（由服务器侧 System Default 解析）。切换执行位置不会丢失已填写的创作输入。',
+          payloadNoun: '已填写的创作输入',
         }}
+        controlsSlot={
+          <>
+            <GenerationModeSwitcher
+              value={generationMode}
+              disabled={target.location === 'client'}
+              helper={false}
+              onChange={(next: GenerationMode) => {
+                const normalizedTemplate = normalizeCreatorTemplateForGenerationMode(next, template);
+                if (normalizedTemplate !== session.getSnapshot().draft.template) invalidatePresetLoads();
+                updateDraft({
+                  generationMode: next,
+                  template: normalizedTemplate,
+                });
+              }}
+            />
+            {target.location === 'client' && (
+              <p className="text-xs text-(--app-text-subtle)">客户端执行为结构化 JSON 直生：流式选项仅在服务器通路生效。</p>
+            )}
+          </>
+        }
       />
-      {target.location === 'client' && (
-        <p className="text-xs text-(--app-text-subtle)">客户端执行为结构化 JSON 直生：流式选项仅在服务器通路生效。</p>
-      )}
-      <label className="flex flex-col gap-1">AI 连接
-        <select
-          aria-label="AI 连接"
-          className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)"
-          value={aiState.selection.clientConnectionId ?? ''}
-          disabled={aiState.overlayState !== 'ready'}
-          onChange={(event) => {
-            if (event.target.value) {
-              aiStore.activateConnection(event.target.value);
-            }
-          }}
-        >
-          {aiState.selection.clientConnectionId === null && <option value="">未选择连接</option>}
-          {aiState.profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.modelId}</option>)}
-        </select>
-      </label>
-      {target.location === 'client' && !profilesLoading && !aiState.profiles.length && !profilesError && <p>请先在<Link to="/settings" className="underline">设置</Link>中保存 Provider。问卷可以先填写，配置加载后再生成。</p>}
-      {target.location === 'server' && <div className="rounded border border-(--app-border) p-3">
-        <p>服务器 · 云端：由项目服务在服务器侧生成，{generationMode === 'stream' ? 'Markdown 流式输出（未签名）' : '结构化 JSON 输出（问卷原生许可时可获官方签名）'}。</p>
-        <p>不使用客户端连接与高级模型参数（由服务器侧 System Default 解析）。切换执行位置不会丢失已填写的问卷回答。</p>
-      </div>}
-      {target.location === 'client' && target.unavailableReason && <p role="status">{target.unavailableReason}</p>}
-      {target.location === 'client' && selected && mode && <div className="rounded border border-(--app-border) p-3">
-        <p>{mode === 'direct-local' ? '客户端 · 本机：发送到本机模型服务' : '客户端 · 远端：发送到你指定的外部模型服务'}</p>
-        <p className="break-all">接收方：{selected.baseUrl}</p>
-        <p>模型：{target.modelId ?? selected.modelId}。点击生成会发送已填写的创作输入；结果不带官方签名。</p>
-      </div>}
-      {target.location === 'client' && selected && mode && <AdvancedGenerationSettings
-        value={target.generationOverrides}
-        onChange={(next) => aiStore.setGenerationOverrides(selected.id, target.modelId ?? selected.modelId, next)}
-        temperatureSupported={targetCapabilities ? targetCapabilities.temperature.support !== 'unsupported' : true}
-        temperatureMax={targetCapabilities?.temperature.max}
-        maxOutputTokensMax={targetCapabilities?.maxOutputTokens.max}
-        thinkingSupport={targetCapabilities?.thinking.support ?? 'unknown'}
-        thinkingEfforts={targetCapabilities?.thinking.efforts}
-        canDisableThinking={targetCapabilities
-          ? targetCapabilities.thinking.support === 'supported' && targetCapabilities.thinking.canDisable !== false
-          : true}
-      />}
       <label className="flex flex-col gap-1">输出语言
         <select aria-label="输出语言" className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)" value={draft.language} onChange={(event) => updateDraft({ language: event.target.value })}>
           {(languages.length ? languages : [{ code: draft.language, name: draft.language }]).map((lang) => (

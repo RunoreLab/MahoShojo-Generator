@@ -248,7 +248,8 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
   it('loads and shows unsupported adapters instead of hiding them', async () => {
     mocks.profiles.mockResolvedValue({ id: 'local', name: 'Anthropic profile', adapter: 'anthropic', baseUrl: 'https://model.example/v1', modelId: 'model' });
     await mount(); await click('开始回答问卷');
-    expect(container.querySelector('select[aria-label="AI 连接"]')?.textContent).toContain('Anthropic profile');
+    // 自定义连接选择器（非原生 select）：已选连接名展示在 trigger 上。
+    expect(container.textContent).toContain('Anthropic profile');
     expect(container.textContent).toContain('当前客户端尚未实现 anthropic 适配器');
     expect(button('发送问卷并生成').disabled).toBe(true);
   });
