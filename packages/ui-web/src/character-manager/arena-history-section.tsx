@@ -1,3 +1,5 @@
+import { ArenaHistoryEntrySchema } from '@mahoshojo/domain/data-card-schemas';
+
 export interface ArenaHistoryEntryLike {
   readonly id: unknown;
   readonly title?: string;
@@ -19,6 +21,9 @@ export interface CharacterManagerArenaHistorySectionProps {
   /** 「重置属性」生成新 `world_line_id`；默认 `crypto.randomUUID()`（带降级）。 */
   readonly createId?: () => string;
 }
+
+// 编辑器只读取标题；旧卡的字符串 id 仍可显示，删除按原始位置而不是信任 id。
+const HistoryEntryTitleSchema = ArenaHistoryEntrySchema.pick({ title: true });
 
 const defaultConfirm = (text: string): boolean =>
   typeof window === 'undefined' ? false : window.confirm(text);
@@ -43,10 +48,11 @@ export function CharacterManagerArenaHistorySection({
 }: CharacterManagerArenaHistorySectionProps) {
   if (!history) return null;
 
-  const handleDeleteEntry = (id: unknown) => {
+  const entries = Array.isArray(history.entries) ? history.entries : [];
+  const handleDeleteEntry = (index: number) => {
     onChange({
       ...history,
-      entries: (history.entries ?? []).filter((entry) => entry.id !== id),
+      entries: entries.filter((_, entryIndex) => entryIndex !== index),
     });
   };
 
@@ -70,12 +76,19 @@ export function CharacterManagerArenaHistorySection({
     <fieldset className="border border-gray-300 p-4 rounded-lg mt-4">
       <legend className="text-sm font-semibold px-2 text-gray-600">历战记录管理</legend>
       <div className="space-y-4">
-        {(history.entries ?? []).map((entry) => (
-          <div key={String(entry.id)} className="flex items-start justify-between bg-gray-50 p-2 rounded">
-            <p className="text-xs" title={entry.title}>{String(entry.id)}: {entry.title}</p>
-            <button onClick={() => handleDeleteEntry(entry.id)} className="text-red-500 hover:text-red-700 text-xs font-bold px-2">删除</button>
-          </div>
-        ))}
+        {history.entries != null && !Array.isArray(history.entries) && (
+          <p role="alert" className="text-xs text-gray-600">历战记录 entries 不是数组，原始数据仍保留；可导出 JSON 修正后重新导入。</p>
+        )}
+        {entries.map((entry, index) => {
+          const parsed = HistoryEntryTitleSchema.safeParse(entry);
+          const id = parsed.success && (typeof entry.id === 'string' || typeof entry.id === 'number' || typeof entry.id === 'boolean') ? String(entry.id) : `条目 ${index + 1}`;
+          return <div key={index} className="flex items-start justify-between bg-gray-50 p-2 rounded">
+            {parsed.success
+              ? <p className="text-xs" title={parsed.data.title}>{id}: {parsed.data.title}</p>
+              : <p role="status" className="text-xs">{id}: 格式暂不支持预览，原始记录仍保留。</p>}
+            <button onClick={() => handleDeleteEntry(index)} className="text-red-500 hover:text-red-700 text-xs font-bold px-2">删除</button>
+          </div>;
+        })}
         <div className="flex flex-wrap gap-2 pt-2 border-t">
           <button onClick={handleResetAttributes} className="text-xs bg-yellow-100 text-yellow-800 px-3 py-1 rounded hover:bg-yellow-200">重置属性</button>
           <button onClick={handleClearEntries} className="text-xs bg-red-100 text-red-800 px-3 py-1 rounded hover:bg-red-200">清除所有记录</button>

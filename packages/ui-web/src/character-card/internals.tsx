@@ -16,6 +16,7 @@ import type {
   CharacterCardPortraitAsset,
 } from './types';
 import type { ArenaHistory } from '@mahoshojo/domain/arena-types';
+import { ArenaHistoryEntrySchema } from '@mahoshojo/domain/data-card-schemas';
 import type { ReactNode } from 'react';
 
 export const waitForNextPaint = async () => {
@@ -165,6 +166,11 @@ export function PortraitBlock({ portraitAsset, subjectName }: {
 // 历战记录折叠块
 // ---------------------------------------------------------------------------
 
+// 只验证展示真正读取的字段，不因未展示的旧 metadata 阻断正文预览。
+const PreviewArenaHistoryEntrySchema = ArenaHistoryEntrySchema.pick({
+  id: true, type: true, title: true, winner: true, impact: true,
+});
+
 export function ArenaHistoryBlock({
   history,
   Markdown,
@@ -184,7 +190,11 @@ export function ArenaHistoryBlock({
     return null;
   }
 
-  const entries = [...history.entries].reverse();
+  const entries = history.entries.flatMap((entry, index) => {
+    const parsed = PreviewArenaHistoryEntrySchema.safeParse(entry);
+    return parsed.success ? [{ ...parsed.data, previewKey: `${parsed.data.id ?? 'entry'}:${index}` }] : [];
+  }).reverse();
+  const unsupportedCount = history.entries.length - entries.length;
 
   return (
     <div className="result-item">
@@ -196,9 +206,10 @@ export function ArenaHistoryBlock({
       </button>
       {isHistoryVisible && (
         <div className="result-value mt-2 space-y-2 text-xs">
+          {unsupportedCount > 0 && <p role="status">{unsupportedCount} 条历战记录格式暂不支持预览，原始数据仍保留。</p>}
           {entries.map((entry) => (
             <div
-              key={entry.id}
+              key={entry.previewKey}
               className={resolveEntryBackground ? 'p-2 rounded' : 'p-2 bg-black bg-opacity-10 rounded'}
               style={resolveEntryBackground ? { backgroundColor: resolveEntryBackground() } : entryBackground ? { backgroundColor: entryBackground } : undefined}
             >

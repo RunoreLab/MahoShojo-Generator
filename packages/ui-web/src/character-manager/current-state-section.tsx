@@ -18,6 +18,22 @@ const defaultCreateId = (): string => {
     : `field-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
+// 只检查控件读取所需的结构；空 label 是重命名中的合法编辑暂态。
+const hasEditableStateShape = (value: unknown): boolean => {
+  if (value == null) return true;
+  if (typeof value !== 'object' || Array.isArray(value)) return false;
+  const state = value as Record<string, unknown>;
+  if (state.summary != null && typeof state.summary !== 'string') return false;
+  if (state.fields == null) return true;
+  return Array.isArray(state.fields) && state.fields.every((entry: unknown) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+    const field = entry as Record<string, unknown>;
+    return typeof field.id === 'string' && typeof field.label === 'string'
+      && typeof field.type === 'string'
+      && (field.value == null || ['string', 'number', 'boolean'].includes(typeof field.value));
+  });
+};
+
 /**
  * 「当前状态」fieldset（自 Web `CharacterManagerPage` 抽取）：状态摘要 + 自定义字段
  * （label/type/value 三元组）。`updated_at` 在每次提交时刷新——这是数据契约的一部分，
@@ -29,6 +45,15 @@ export function CharacterManagerCurrentStateSection({
   createId = defaultCreateId,
   summaryHint = '修改当前状态将使原生签名失效。请尽量统一使用状态摘要，避免随意增加自定义字段。',
 }: CharacterManagerCurrentStateSectionProps) {
+  // 仅保护安全读取，沿用原字段对象；不按最终 schema 拦截输入中间态。
+  if (!hasEditableStateShape(state)) {
+    return <fieldset className="border border-gray-300 p-4 rounded-lg mt-4">
+      <legend className="text-sm font-semibold px-2 text-gray-600">当前状态</legend>
+      <p role="alert" className="text-xs text-gray-600">当前状态格式暂不支持结构化编辑，原始数据仍保留；可导出 JSON 修正后重新导入。</p>
+      <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words text-xs">{JSON.stringify(state, null, 2)}</pre>
+    </fieldset>;
+  }
+
   const snapshot: CharacterCurrentState = {
     summary: state?.summary ?? '',
     fields: Array.isArray(state?.fields) ? state.fields : [],

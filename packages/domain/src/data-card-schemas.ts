@@ -147,6 +147,9 @@ const arenaHistoryEntrySchema = z.object({
   }).optional(),
 });
 
+// 共享预览读取现有契约；新增出口不改变卡片校验或持久化语义。
+export { arenaHistoryEntrySchema as ArenaHistoryEntrySchema };
+
 const arenaHistoryAttributesSchema = z.object({
   world_line_id: z.string().optional(),
   created_at: z.string().optional(),

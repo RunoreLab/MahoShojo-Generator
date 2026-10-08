@@ -1,6 +1,7 @@
 import clsx from 'clsx';
 
 import type { CharacterCurrentState, CurrentStateField } from '@mahoshojo/domain/arena-types';
+import { CurrentStateSchema } from '@mahoshojo/domain/data-card-schemas';
 
 import { MarkdownBlock as SharedMarkdownBlock, type MarkdownBlockVariant } from '../markdown';
 import type { CharacterCardMarkdown } from './types';
@@ -25,9 +26,16 @@ export interface CurrentStatePanelProps {
 
 export function CurrentStatePanel({ state, variant = 'dark', className, Markdown = SharedMarkdownBlock }: CurrentStatePanelProps) {
   if (!state) return null;
-  const hasSummary = Boolean(state.summary && state.summary.trim());
-  const fields = Array.isArray(state.fields) ? state.fields : [];
+  // 编辑器保留未知/不合法字段，预览只能读安全投影，不能修写原卡。
+  const parsed = CurrentStateSchema.safeParse(state);
+  if (!parsed.success) {
+    return <p role="status" className={clsx('result-item text-xs', className)}>当前状态格式暂不支持预览，原始数据仍保留。</p>;
+  }
+  const view = parsed.data;
+  const hasSummary = Boolean(view.summary.trim());
+  const fields = view.fields;
   const hasFields = fields.length > 0;
+  const updatedAt = view.updated_at && Number.isFinite(Date.parse(view.updated_at)) ? view.updated_at : null;
   if (!hasSummary && !hasFields) return null;
 
   const labelClass = variant === 'light' ? 'text-gray-700' : 'text-white/80';
@@ -39,7 +47,7 @@ export function CurrentStatePanel({ state, variant = 'dark', className, Markdown
       <div className="result-label">🧭 当前状态</div>
       <div className="result-value text-sm space-y-2">
         {hasSummary && (
-          <Markdown content={state.summary} variant={variant} />
+          <Markdown content={view.summary} variant={variant} />
         )}
         {hasFields && (
           <ul className="text-xs space-y-1">
@@ -53,8 +61,8 @@ export function CurrentStatePanel({ state, variant = 'dark', className, Markdown
             ))}
           </ul>
         )}
-        {state.updated_at && (
-          <p className={clsx('text-[10px]', timestampClass)}>最近更新：{new Date(state.updated_at).toLocaleString()}</p>
+        {updatedAt && (
+          <p className={clsx('text-[10px]', timestampClass)}>最近更新：{new Date(updatedAt).toLocaleString()}</p>
         )}
       </div>
     </div>
