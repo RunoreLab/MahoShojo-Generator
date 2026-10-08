@@ -12,7 +12,7 @@
 **目标**：Desktop AI 选择器是 Web `AiProviderSelector` 的增强型宿主，在外观、字段、键盘操作、文案和共同状态交互上复用相同组件；用户在任一已交付生成入口中可以选择可直连的内置供应商、填写 Key/模型并在当前选择器内保存为连接，或选择、编辑已有连接并使用一个连接下的多个模型。
 
 **本轮**：
-- `apps/desktop/src/app/{details,canshou,free,scenario}-page.tsx` 四个入口与设置页的 AI 配置部分。
+- `apps/desktop/src/app/{details,canshou,free,scenario,creator}-page.tsx` 五个入口与设置页的 AI 配置部分（`/creator` 经 D5.1-G3 审查决策增补，见文末「增补记录」）。
 - `packages/ui-web/src/ai-provider` 的受控视图/控件、`apps/web/components/AiProviderSelector.tsx` 作为现行 Web 回归基线。
 - `apps/desktop/src/features/ai-config` 的唯一 Store、Native Profile/SecretStore bridge、非秘密 overlay 版本迁移。
 
@@ -153,7 +153,7 @@
 
 **AIP-3 首次保存与连接编辑**：已有 Profile 创建/编辑与 staged SecretStore 接入受控选择器，明确保存与激活的部分成功恢复、Key tri-state、旧字段无损 patch、编辑期间任务冻结安全。先单个 `/scenario` 纵切跑通，再扩四页，不复制临时页面代码。
 
-**AIP-4 四页与设置共源闭合**：迁移 `/details`、`/canshou`、`/free`、`/scenario` 与设置页统一选用 Store/视图；将执行位置与生成方式放在 Web 原有生成设置区段相邻展示；修正页面级生成方式帮助文案及可见配置区块；各页面原有草稿、问卷、附件、结果和保存逻辑不被替换。
+**AIP-4 五页与设置共源闭合**：迁移 `/details`、`/canshou`、`/free`、`/scenario`、`/creator` 与设置页统一选用 Store/视图；将执行位置与生成方式放在 Web 原有生成设置区段相邻展示；修正页面级生成方式帮助文案及可见配置区块；各页面原有草稿、问卷、附件、结果和保存逻辑不被替换。
 
 **AIP-5 自动+实机验收**：全仓 lint/typecheck/unit/integration、Native loopback SSE/mock、Store 错误注入、Web 既有行为回归、窗口/主题/键盘/触控、重启迁移与 Keychain 故障。需要真实 Direct Endpoint/公网测试的现存 D1 门禁仍保持待验状态，不用 mock 测试冒充真实端点验证；不默认消耗用户线上模型额度。
 
@@ -163,7 +163,7 @@
 
 ## DESK-AIP-012 发布前最低证据
 
-1. **产品金样**：四页和 Web 同宽/同缩放/同主题对照截图/DOM 测试，共用分段控件验证执行位置与生成方式视觉/布局一致，说明不同执行模式下合理差异；错误默认 helper 消失；桌面打开选择器即可配置预设，无需去设置页前置创建 Profile。
+1. **产品金样**：五页和 Web 同宽/同缩放/同主题对照截图/DOM 测试，共用分段控件验证执行位置与生成方式视觉/布局一致，说明不同执行模式下合理差异；错误默认 helper 消失；桌面打开选择器即可配置预设，无需去设置页前置创建 Profile。
 2. **存量兼容**：overlay v2→v3、重复迁移、损坏/未知版本、配置过大、旧 Profile/secretRef、无 Key、重复名称、特殊模型 ID（含 `:`/`__proto__`）、切换/删除/重启全部覆盖。
 3. **请求真实性**：本地 mock 捕获 Native 实际端点和 `modelId`、确认 Key 不在 renderer 业务请求/日志/配置/普通云 API 中；未实现模型参数没有被 UI 伪装为已生效。
 4. **竞态与失败注入**：双击保存、Secret 写失败、Profile 写失败、刷新失败、overlay 写失败、并发轮换 Key、生成时修改连接、旧请求取消/未知终态、Store 多页面同步无串台。
@@ -223,11 +223,11 @@
 | `apps/desktop/src/features/ai-config/desktop-ai-config.ts` | overlay v2、resolve 只用 `profile.modelId` | v3 解析和 `selectedModelId` 生效目标解析；保留无静默回退 |
 | `apps/desktop/src/features/ai-config/desktop-ai-config-store.ts` | Native Profile/SecretStore 唯一事实源；保存后选连接 | 追加多模型状态、保存并激活的可恢复状态与安全编辑 |
 | `apps/desktop/src/features/ai-config/AiConnectionsPanel.tsx` | 原生连接选择与独立 ConnectionEditor | 消费共享选择器及同一连接表单；设置页保留高级管理 |
-| `apps/desktop/src/app/{details,canshou,free,scenario}-page.tsx` | 四处分别装配 `<select>` 与高级设置 | 统一使用 Desktop AI Panel；保留各自业务输入/草稿/结果模式 |
+| `apps/desktop/src/app/{details,canshou,free,scenario,creator}-page.tsx` | 五处分别装配 `<select>` 与高级设置 | 统一使用 Desktop AI Panel；保留各自业务输入/草稿/结果模式 |
 | `apps/desktop/src/features/generation/executor.ts` | Direct intent 已接受覆盖的 `modelId`，thinking 暂不下发 | 取冻结的生效模型和参数；未支持参数有真实 UI 门禁 |
 | `apps/desktop/src-tauri/src/{ai,provider_profile,cloud}.rs` | Profile-ID-only Direct、Native Key 解析；Hosted 排斥 renderer `customProvider` | 保留权限边界；仅修复已证实的轮换 Key 并发漏洞，不放宽 Hosted |
 
-## 附录 C：四页最小对照矩阵（AIP-0 建立基线时补截图证据）
+## 附录 C：五页最小对照矩阵（AIP-0 建立基线时补截图证据）
 
 | 页面 | Web 基线已见控件 | Desktop 当前 AI 配置差异 | 本轮必须统一的部分 |
 | --- | --- | --- | --- |
@@ -235,5 +235,10 @@
 | `/free` | Provider 选择器、Schema、语言、模式及具体说明 | 原生连接、配置区顺序和模式限制另行装配 | Provider/模型/Key 共源；Schema、附件、草稿保持业务差异 |
 | `/details` | Provider、生成方式、完整问卷区 | 原生连接与参数面板另行装配 | 生成设置的共同区段共源；问卷/结果/随机/导入由既有 P2 管辖 |
 | `/canshou` | Provider、生成方式、问卷/结果区 | 同上 | 与 details 相同的生成区；残兽专属问卷/结果保留 |
+| `/creator` | Provider 选择器、生成方式（流式/非流式）、语言与高级生成设置区 | 原生连接与执行位置另行装配 | 统一连接选择器与执行位置/生成方式区段；问卷、规则车卡、结果快照与保存保持 Creator 业务差异 |
 
 **对照边界**：不同分辨率截图不能单独证明布局实现不相同。共源验证应在相同窗口/视口/缩放与数据状态下执行，检查外层骨架、CSS、组件 Props、文字、行为、状态归属与主题；合理的执行宿主差异必须在用例中单独标注。
+
+## 增补记录
+
+- **2026-10-08（D5.1-G3 审查决策）**：`/creator` 创作工房完成纵切后，AIP-4 的 Desktop 生成页面覆盖自四页扩为五页——`/creator` 同样使用统一连接选择器、客户端/服务器执行开关，以及共享的高级生成设置布局；Web 侧仍只共享适合共享的外观与组件，不改变其 Provider 持久化或 BYOK 能力。本增补对应审查报告「需要决策的两件事」第 1 项的采纳结论。
