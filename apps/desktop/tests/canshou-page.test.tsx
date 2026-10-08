@@ -15,7 +15,7 @@ import { DESKTOP_AI_CONFIG_STORAGE_KEY } from '../src/features/ai-config/desktop
 import { createDesktopRouter } from '../src/app/router';
 import { describeRegenerateConfirm } from '../src/app/canshou-page';
 
-const mocks = vi.hoisted(() => ({ execute: vi.fn(), save: vi.fn(), listen: vi.fn(), profiles: vi.fn() }));
+const mocks = vi.hoisted(() => ({ execute: vi.fn(), save: vi.fn(), listen: vi.fn(), profiles: vi.fn(), scrollResult: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), isTauri: () => true }));
 vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ onCloseRequested: mocks.listen }) }));
 vi.mock('../src/features/canshou/generation', async (original) => ({ ...await original<object>(), executeCanshouGeneration: mocks.execute }));
@@ -58,6 +58,7 @@ beforeEach(() => {
   mocks.listen.mockImplementation(async (handler) => { close = handler; return vi.fn(); });
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => questionnaire })));
   vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+  HTMLElement.prototype.scrollIntoView = mocks.scrollResult;
   vi.spyOn(window, 'confirm').mockReturnValue(false);
   HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   HTMLDialogElement.prototype.close = function () { this.open = false; };
@@ -174,6 +175,7 @@ describe('Desktop Canshou real route and session UI (native adapter mock)', () =
   it.each(['option', 'next'] as const)('keeps final %s regeneration behind unsaved and uncertain confirmations, including cancel', async (entry) => {
     storeStepQuestionnaire([{ id: 'last', question: '末题', options: ['推荐回答'] }], { last: '原回答' });
     await mount(); await click('恢复草稿'); await click('发送问卷并生成');
+    await click('返回编辑答案');
     const submit = () => click(entry === 'option' ? '推荐回答' : '生成');
     await submit();
     expect(container.querySelector('dialog')?.open).toBe(true);
@@ -329,7 +331,12 @@ describe('Desktop Canshou real route and session UI (native adapter mock)', () =
     expect(languageToggle.getAttribute('aria-expanded')).toBe('true');
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     await act(async () => finish(completed));
-    for (const control of controls) expect(control!.matches(':disabled')).toBe(false);
+    expect(container.querySelector('.ui-web-questionnaire-answer-input')).toBeNull();
+    expect(container.querySelector('[aria-label="生成结果"]')).toBeTruthy();
+    await click('返回编辑答案');
+    expect(container.querySelector('.ui-web-questionnaire-answer-input')?.matches(':disabled')).toBe(false);
+    expect(container.querySelector('select[aria-label="生成语言"]')?.matches(':disabled')).toBe(false);
+    expect(container.querySelector('button[role="combobox"]')?.matches(':disabled')).toBe(false);
   });
 
   it('shows rounded progress, effective soft limits and skip guidance only for optional questions', async () => {
@@ -369,7 +376,7 @@ describe('Desktop Canshou real route and session UI (native adapter mock)', () =
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 
-  it('restores only on explicit action then generates once and saves the canshou result', async () => {
+  it('shows only the new result, saves it and preserves the session while editing without scrolling again', async () => {
     window.localStorage.setItem(CANSHOU_DRAFT_KEY, JSON.stringify(draft()));
     await mount();
     expect(container.querySelector('[data-testid="page-canshou"]')).toBeTruthy();
@@ -380,15 +387,54 @@ describe('Desktop Canshou real route and session UI (native adapter mock)', () =
     await click('恢复草稿');
     expect(container.querySelector('img[alt="残兽调查"]')).toBe(logo);
     expect(container.querySelector('textarea')?.value).toBe('巢穴');
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ top: window.innerHeight + 1 } as DOMRect);
     await click('发送问卷并生成');
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(mocks.execute.mock.calls[0]![2]).toMatchObject({ mode: 'direct-local', modelId: 'model' });
     expect(container.textContent).toContain('巢穴回声 · 未签名');
     expect(container.textContent).toContain('雾状表皮');
+    expect(container.querySelector('.ui-web-questionnaire-answer-input')).toBeNull();
+    expect(container.querySelector('[aria-label="问卷来源"]')).toBeNull();
+    expect(container.querySelector('[aria-label="介绍"]')).toBeNull();
     expect(container.querySelector('.container > .card')?.contains(container.querySelector('[aria-label="生成结果"]'))).toBe(true);
+    expect(mocks.scrollResult).toHaveBeenCalledTimes(1);
     await click('保存到本地卡库');
     expect(mocks.save).toHaveBeenCalledTimes(1);
     expect(container.textContent).toContain('已保存到本地卡库。');
+    const savedDraft = window.localStorage.getItem(CANSHOU_DRAFT_KEY);
+    const write = vi.spyOn(Storage.prototype, 'setItem');
+    const remove = vi.spyOn(Storage.prototype, 'removeItem');
+    const viewToggle = button('返回编辑答案');
+    viewToggle.focus();
+    await click('返回编辑答案');
+    expect(button('查看当前结果')).toBe(viewToggle);
+    expect(document.activeElement).toBe(viewToggle);
+    expect(container.querySelector('[aria-label="生成结果"]')).toBeNull();
+    expect(container.querySelector<HTMLTextAreaElement>('.ui-web-questionnaire-answer-input')?.value).toBe('巢穴');
+    await click('查看当前结果');
+    expect(button('返回编辑答案')).toBe(viewToggle);
+    expect(document.activeElement).toBe(viewToggle);
+    expect(container.querySelector('.ui-web-questionnaire-answer-input')).toBeNull();
+    expect(container.textContent).toContain('巢穴回声 · 未签名');
+    expect(container.textContent).toContain('已保存到本地卡库。');
+    expect(button('保存到本地卡库').disabled).toBe(true);
+    expect(window.localStorage.getItem(CANSHOU_DRAFT_KEY)).toBe(savedDraft);
+    expect(write.mock.calls.filter(([key]) => key === CANSHOU_DRAFT_KEY)).toHaveLength(0);
+    expect(remove).not.toHaveBeenCalled();
+    await click('返回编辑答案'); await fillCurrentAnswer('编辑后的巢穴'); await click('查看当前结果');
+    const editedDraft = JSON.parse(window.localStorage.getItem(CANSHOU_DRAFT_KEY)!);
+    expect(Object.values(editedDraft.answers)).toContain('编辑后的巢穴');
+    expect(editedDraft.output).toEqual(JSON.parse(savedDraft!).output);
+    expect(container.textContent).toContain('已保存到本地卡库。');
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.save).toHaveBeenCalledTimes(1);
+    expect(mocks.scrollResult).toHaveBeenCalledTimes(1);
+    await click('返回编辑答案'); await click('重新生成');
+    expect(mocks.execute).toHaveBeenCalledTimes(2);
+    expect(mocks.execute.mock.calls[1]![1].answers[0].answer).toBe('编辑后的巢穴');
+    expect(container.querySelector('[aria-label="生成结果"]')).toBeTruthy();
+    expect(container.querySelector('.ui-web-questionnaire-answer-input')).toBeNull();
+    expect(mocks.scrollResult).toHaveBeenCalledTimes(2);
   });
 
   it('quick random produces an unsigned canshou card without invoking the model', async () => {
@@ -397,20 +443,100 @@ describe('Desktop Canshou real route and session UI (native adapter mock)', () =
     expect(mocks.execute).not.toHaveBeenCalled();
     expect(container.textContent).toContain('未签名');
     expect(container.textContent).toContain('保存到本地卡库');
+    expect(container.querySelector('[aria-label="生成结果"]')).toBeTruthy();
+    expect(container.querySelector('.ui-web-questionnaire-answer-input')).toBeNull();
+    expect(container.querySelector('[aria-label="介绍"]')).toBeNull();
+    await click('返回编辑答案');
+    expect(container.querySelector('.ui-web-questionnaire-answer-input')).toBeTruthy();
+    expect(container.querySelector('[aria-label="介绍"]')).toBeNull();
+    await click('查看当前结果');
     // 本机即时产出落草稿为 completed——恢复后不自动重生成。
     expect(JSON.parse(window.localStorage.getItem(CANSHOU_DRAFT_KEY)!).output.phase).toBe('completed');
   });
 
-  it('confirms replacement before regenerating an unsaved result', async () => {
+  it('keeps result regeneration behind unsaved and uncertain confirmations without dispatch on cancel', async () => {
     window.localStorage.setItem(CANSHOU_DRAFT_KEY, JSON.stringify(draft()));
     await mount(); await click('恢复草稿'); await click('发送问卷并生成');
+    const savedDraft = window.localStorage.getItem(CANSHOU_DRAFT_KEY);
     await click('重新生成');
     expect(container.querySelector('dialog')?.open).toBe(true);
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     await click('取消');
     expect(container.querySelector('dialog')?.open).toBe(false);
+    expect(window.localStorage.getItem(CANSHOU_DRAFT_KEY)).toBe(savedDraft);
+    expect(container.querySelector('[aria-label="生成结果"]')?.textContent).toContain('巢穴回声');
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    mocks.execute.mockResolvedValueOnce({ status: 'uncertain', mode: 'hosted-json', rawText: '未确认正文', message: '无法确认服务器执行结果' } satisfies CanshouGenerationOutcome);
     await click('重新生成'); await click('确定重新生成');
     expect(mocks.execute).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('.ui-web-questionnaire-answer-input')).toBeTruthy();
+    expect(container.querySelector('[aria-label="生成结果"]')).toBeNull();
+    await click('重新生成');
+    expect(container.querySelector('dialog')?.open).toBe(true);
+    expect(container.querySelector('dialog')?.textContent).toContain('重复调用与费用');
+    await click('取消');
+    expect(mocks.execute).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain('未确认正文');
+    expect(JSON.parse(window.localStorage.getItem(CANSHOU_DRAFT_KEY)!).answers).toEqual(draft().answers);
+  });
+
+  it('keeps the result and answers after save-before-regeneration fails, including editing and returning', async () => {
+    window.localStorage.setItem(CANSHOU_DRAFT_KEY, JSON.stringify(draft()));
+    mocks.save.mockRejectedValueOnce(new Error('disk unavailable'));
+    await mount(); await click('恢复草稿'); await click('发送问卷并生成');
+    const savedDraft = window.localStorage.getItem(CANSHOU_DRAFT_KEY);
+    await click('重新生成'); await click('保存后重新生成');
+    expect(container.querySelector('dialog')?.open).toBe(true);
+    expect(container.querySelector('dialog')?.textContent).toContain('保存到本地卡库失败');
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.save).toHaveBeenCalledTimes(1);
+    await click('取消'); await click('返回编辑答案');
+    expect(container.querySelector<HTMLTextAreaElement>('.ui-web-questionnaire-answer-input')?.value).toBe('巢穴');
+    await click('查看当前结果');
+    expect(container.querySelector('[aria-label="生成结果"]')?.textContent).toContain('巢穴回声');
+    expect(container.querySelector('[aria-label="生成结果"]')?.textContent).toContain('保存到本地卡库失败');
+    expect(button('保存到本地卡库').disabled).toBe(false);
+    expect(window.localStorage.getItem(CANSHOU_DRAFT_KEY)).toBe(savedDraft);
+    await click('保存到本地卡库');
+    expect(container.textContent).toContain('已保存到本地卡库。');
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('restores a completed draft directly to its result without dispatch and keeps draft clearing available', async () => {
+    window.localStorage.setItem(CANSHOU_DRAFT_KEY, JSON.stringify({
+      ...draft(), output: { mode: 'direct-local', phase: 'completed', cardKind: 'canshou', card, rawText: completed.rawText },
+    }));
+    await mount();
+    expect(container.querySelector('[aria-label="生成结果"]')).toBeNull();
+    await click('恢复草稿');
+    expect(container.querySelector('[aria-label="生成结果"]')?.textContent).toContain('巢穴回声');
+    expect(container.querySelector('.ui-web-questionnaire-answer-input')).toBeNull();
+    expect(container.textContent).toContain(completed.rawText);
+    const savedDraft = window.localStorage.getItem(CANSHOU_DRAFT_KEY);
+    await click('返回编辑答案');
+    expect(container.querySelector<HTMLTextAreaElement>('.ui-web-questionnaire-answer-input')?.value).toBe('巢穴');
+    await click('查看当前结果'); await click('清除草稿'); await click('保留草稿');
+    expect(window.localStorage.getItem(CANSHOU_DRAFT_KEY)).toBe(savedDraft);
+    expect(container.querySelector('[aria-label="生成结果"]')).toBeTruthy();
+    await click('清除草稿'); await click('确认清除');
+    expect(container.querySelector('[aria-label="生成结果"]')).toBeNull();
+    expect(container.querySelector('[aria-label="介绍"]')).toBeTruthy();
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it.each(['failed', 'cancelled', 'uncertain'] as const)('restores %s output without a card to editable answers and visible residue', async (phase) => {
+    window.localStorage.setItem(CANSHOU_DRAFT_KEY, JSON.stringify({
+      ...draft(), output: { mode: 'hosted-json', phase, card: null, rawText: '上次中断的正文' },
+    }));
+    await mount(); await click('恢复草稿');
+    expect(container.querySelector('[aria-label="生成结果"]')).toBeNull();
+    expect(container.querySelector<HTMLTextAreaElement>('.ui-web-questionnaire-answer-input')?.value).toBe('巢穴');
+    expect(container.querySelector('details:has(> pre)')?.hasAttribute('open')).toBe(true);
+    expect(container.textContent).toContain('上次中断的正文');
+    expect(mocks.execute).not.toHaveBeenCalled();
+    await fillCurrentAnswer('继续作答');
+    expect(JSON.parse(window.localStorage.getItem(CANSHOU_DRAFT_KEY)!).output.rawText).toBe('上次中断的正文');
   });
 
   it('uncertain phase gates regeneration behind explicit confirm copy', () => {
@@ -423,15 +549,21 @@ describe('Desktop Canshou real route and session UI (native adapter mock)', () =
     expect(unsaved.description).toContain('尚未保存');
   });
 
-  it('cancels in-flight generation and keeps partial output in draft', async () => {
+  it.each(['questionnaire', 'result'] as const)('keeps cancellation available when generating from the %s and retains partial output', async (entry) => {
     window.localStorage.setItem(CANSHOU_DRAFT_KEY, JSON.stringify(draft()));
     let finish!: (outcome: CanshouGenerationOutcome) => void;
+    await mount(); await click('恢复草稿');
+    if (entry === 'result') await click('发送问卷并生成');
     mocks.execute.mockImplementation((_o, _i, _t, _s, partial) => { partial('半截残兽正文'); return new Promise((resolve) => { finish = resolve; }); });
-    await mount(); await click('恢复草稿'); await click('发送问卷并生成');
+    if (entry === 'result') { await click('重新生成'); await click('确定重新生成'); }
+    else await click('发送问卷并生成');
+    expect(container.querySelector('[aria-label="生成结果"]')).toBeNull();
+    expect(button('取消生成').disabled).toBe(false);
     await click('取消生成');
-    expect(mocks.execute.mock.calls[0]![3].aborted).toBe(true);
+    expect(mocks.execute.mock.lastCall![3].aborted).toBe(true);
     await act(async () => finish({ status: 'cancelled', mode: 'direct-local', rawText: '半截残兽正文', reason: 'aborted' }));
     expect(container.textContent).toContain('半截残兽正文');
+    expect(container.querySelector<HTMLTextAreaElement>('.ui-web-questionnaire-answer-input')?.value).toBe('巢穴');
     expect(JSON.parse(window.localStorage.getItem(CANSHOU_DRAFT_KEY)!).output.rawText).toBe('半截残兽正文');
   });
 

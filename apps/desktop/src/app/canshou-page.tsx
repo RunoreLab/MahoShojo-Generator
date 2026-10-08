@@ -173,6 +173,8 @@ function CanshouForm({ session }: { session: CanshouSession }) {
   const [confirmRegenerate, setConfirmRegenerate] = useState<false | ConfirmRegenerateKind>(false);
   const pendingActionRef = useRef<PendingRegenerateAction>('generate');
   const [showIntroduction, setShowIntroduction] = useState(true);
+  // 只切换展示：编辑回答时保留旧结果与保存状态，替换仍须经过原有重生确认。
+  const [editingAnswers, setEditingAnswers] = useState(false);
   const [showQuestionnaireSettings, setShowQuestionnaireSettings] = useState(false);
   const [showLanguageSection, setShowLanguageSection] = useState(false);
   const [showPasteImport, setShowPasteImport] = useState(false);
@@ -465,6 +467,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
       const answers = buildCanshouAnswers(submissionFlow, current.draft.answers);
       setActionError(null);
       setActionInfo(null);
+      setEditingAnswers(false);
       void session.generate(
         { invoke, profileId: selected?.id ?? '' },
         {
@@ -518,6 +521,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
       const data = generateRandomCanshou();
       session.applyLocalResult(data, 'canshou', true);
       setShowIntroduction(false);
+      setEditingAnswers(false);
       setActionError(null);
     } catch (error) {
       console.error('随机生成失败: ', error);
@@ -665,6 +669,10 @@ function CanshouForm({ session }: { session: CanshouSession }) {
   // 截图产物的 blob URL 在被新图替换或页面卸载时回收——过早回收会让弹窗预览断图。
   useEffect(() => () => revokeBlobUrl(savedImageUrl), [savedImageUrl]);
   const resolvedResultPayload = state.card;
+  const showResult = Boolean(state.card) && !editingAnswers;
+  const generationDisabled = !guard.ready || busy || questionnaireLoading || clientProfilesBlocked
+    || effectiveSelections.length === 0 || flow.length === 0 || !executionMode
+    || (target.location === 'client' && !selected) || blockedDraft;
   const hasLoreOnly = effectiveSelections.length > 0 && flowItems.length === 0
     && effectiveSelections.some((selection) => Boolean(selection.questionnaire.loreMarkdown?.trim()));
   const confirmCopy = confirmRegenerate === false
@@ -695,7 +703,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
                 // 刚恢复的回答并立即落盘为空（不可逆丢失，P2-r1）。
                 previousTargetsRef.current = null;
                 previousSignatureRef.current = null;
-                session.restoreDraft(); setShowIntroduction(false); setSelectionReady(true);
+                session.restoreDraft(); setShowIntroduction(false); setEditingAnswers(false); setSelectionReady(true);
               }}
               onRetrySave={() => session.retryDraftSave()}
               onRequestClear={() => setConfirmClear(true)}
@@ -706,7 +714,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
                   // 同「恢复草稿」：清空后重新注入的默认选择不应拿旧基线做重映射。
                   previousTargetsRef.current = null;
                   previousSignatureRef.current = null;
-                  session.discardDraft(); setConfirmClear(false); setQuestionIndex(0); setShowIntroduction(true); setSelectionReady(false);
+                  session.discardDraft(); setConfirmClear(false); setQuestionIndex(0); setShowIntroduction(true); setEditingAnswers(false); setSelectionReady(false);
                 }}>确认清除</button>
                 <button className={actionClass} onClick={() => setConfirmClear(false)}>保留草稿</button>
               </div>}
@@ -723,7 +731,11 @@ function CanshouForm({ session }: { session: CanshouSession }) {
                 {profilesError && <p role="alert">{target.location === 'server' ? '本地 Provider 配置加载失败，仅影响客户端执行。' : profilesError}</p>}
               </div>
             )}
-            {showIntroduction && !state.pendingRestore ? (
+            {state.card && <div className="mb-4 flex flex-wrap gap-2">
+              <button className={actionClass} onClick={() => { setEditingAnswers((value) => !value); setShowIntroduction(false); }}>{editingAnswers ? '查看当前结果' : '返回编辑答案'}</button>
+              {showResult && <button className={actionClass} disabled={generationDisabled} onClick={() => generate()}>重新生成</button>}
+            </div>}
+            {!showResult && (showIntroduction && !state.pendingRestore && state.phase === 'idle' ? (
               <section aria-label="介绍">
                 <DetailsIntroSection
                   description={null}
@@ -883,11 +895,11 @@ function CanshouForm({ session }: { session: CanshouSession }) {
                   disabled={busy}
                 />
                 <div className="flex flex-wrap gap-2">
-                  <button className={actionClass} disabled={!guard.ready || busy || questionnaireLoading || clientProfilesBlocked || effectiveSelections.length === 0 || flow.length === 0 || !executionMode || (target.location === 'client' && !selected) || blockedDraft} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '发送问卷并生成' : '重新生成'}</button>
+                  <button className={actionClass} disabled={generationDisabled} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '发送问卷并生成' : '重新生成'}</button>
                   {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}
                 </div>
               </>
-            )}
+            ))}
             <dialog ref={regenerateDialog} aria-labelledby="regenerate-title" aria-describedby="regenerate-description" className="m-auto max-w-lg rounded-lg border border-(--app-border) bg-(--app-surface) p-5 text-(--app-text) backdrop:bg-black/40" onCancel={(event) => { event.preventDefault(); if (!session.isBusy()) setConfirmRegenerate(false); }}>
               <h2 id="regenerate-title" className="text-xl font-semibold">{confirmCopy?.title ?? '重新生成？'}</h2>
               <p id="regenerate-description" className="my-3">{confirmCopy?.description}</p>
@@ -930,7 +942,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
               </div>
             )}
             <div ref={resultSectionRef}>
-              {state.card && <section aria-label="生成结果" className="flex flex-col gap-3">
+              {showResult && state.card && <section aria-label="生成结果" className="flex flex-col gap-3">
                 <h2 className="text-xl font-semibold">
                   {typeof state.card.name === 'string' && state.card.name ? state.card.name : '未命名残兽'}
                   {' · '}{resultSignatureLabel}
