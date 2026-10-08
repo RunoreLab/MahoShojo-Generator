@@ -13,7 +13,6 @@ import {
 import {
   DesktopGenerationSession,
   type GenerationSessionFamily,
-  type StoredGenerationDraft,
 } from '../src/features/generation/session';
 import { STREAM_DIRECT_AI_COMMAND } from '../src/platform/direct-ai-bridge';
 import { HOSTED_AI_REQUEST_COMMAND, STREAM_HOSTED_AI_COMMAND } from '../src/platform/cloud-bridge';
@@ -201,7 +200,7 @@ describe('通用生成会话（草稿公共件与家族钩子）', () => {
     await session.generate({ invoke: vi.fn(), profileId: '' }, { prompt: 'x' }, { mode: 'hosted-json' });
     expect(session.getSnapshot().phase).toBe('completed');
     await expect(session.saveResult()).resolves.toBe(true);
-    const record = putIfAbsent.mock.calls[0]![0] as { cardType: string; title: string; provenance: { kind: string; signature?: string; execution: string } };
+    const record = (putIfAbsent.mock.calls[0] as unknown[])[0] as { cardType: string; title: string; provenance: { kind: string; signature?: string; execution: string } };
     expect(record.cardType).toBe('character');
     expect(record.title).toBe('签卡');
     expect(record.provenance).toMatchObject({ kind: 'official-signed', signature: 'sig-1', execution: 'hosted' });
@@ -215,7 +214,7 @@ describe('通用生成会话（草稿公共件与家族钩子）', () => {
     const session = new DesktopGenerationSession(fakeSessionFamily(), { storage, repository: repo, initialDraft: { prompt: '' } });
     session.restoreDraft();
     await expect(session.saveResult()).resolves.toBe(true);
-    const record = putIfAbsent.mock.calls[0]![0] as { provenance: { kind: string; signature?: string } };
+    const record = (putIfAbsent.mock.calls[0] as unknown[])[0] as { provenance: { kind: string; signature?: string } };
     expect(record.provenance).toMatchObject({ kind: 'signature-unverified', signature: 'sig-restored' });
 
     const putIfAbsent2 = vi.fn(async () => ({ written: true }));
@@ -226,7 +225,7 @@ describe('通用生成会话（草稿公共件与家族钩子）', () => {
     session2.restoreDraft();
     expect((session2.getSnapshot().card as Record<string, unknown>).signature).toBeUndefined();
     await expect(session2.saveResult()).resolves.toBe(true);
-    const record2 = putIfAbsent2.mock.calls[0]![0] as { cardType: string; provenance: { kind: string } };
+    const record2 = (putIfAbsent2.mock.calls[0] as unknown[])[0] as { cardType: string; provenance: { kind: string } };
     expect(record2.cardType).toBe('scenario');
     expect(record2.provenance.kind).toBe('unsigned');
   });

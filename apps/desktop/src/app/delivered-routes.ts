@@ -24,6 +24,7 @@ export const DELIVERED_ROUTES: readonly string[] = [
   '/',
   '/details',
   '/canshou',
+  '/free',
   '/character-manager',
   '/encyclopedia',
   '/encyclopedia/[slug]',
