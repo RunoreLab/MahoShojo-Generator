@@ -1,4 +1,5 @@
 import { OnlineDataCardTypeSchema } from '@mahoshojo/contracts/data-cards';
+import { PUBLIC_DATA_CARD_NOT_FOUND_CODE } from '@mahoshojo/contracts/desktop-cloud';
 import { getRequestUrl } from '@/lib/request-url';
 // app/api/public-data-cards/handler.ts
 
@@ -112,9 +113,12 @@ async function handler(req: Request): Promise<Response> {
       if (id) {
         const card = await getPublicDataCardByIdStrict(id);
         if (!card) {
+          // 稳定业务错误码：Desktop 公开缓存只凭它确认「业务级不可用」并
+          // 撤回缓存行——仅凭 404 + success:false 不构成撤回证据。
           return new Response(
             JSON.stringify({
               success: false,
+              code: PUBLIC_DATA_CARD_NOT_FOUND_CODE,
               error: '数据卡不存在',
             }),
             {

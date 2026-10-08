@@ -61,11 +61,29 @@ pub const MAX_BUDGET_BYTES: u64 = 9_007_199_254_740_991; // Number.MAX_SAFE_INTE
 const META_WRITE_EPOCH: &str = "write_epoch";
 const META_MUTATION_SEQ: &str = "mutation_seq";
 
+/// `?id=` 单卡 404 响应里确认「业务级不可用」的稳定错误码
+/// （`DESK-CACHE-006`：可识别业务响应才允许撤回，任意 404 不算）。
+/// 由 `/api/public-data-cards` 回写 `code` 字段，与
+/// `fixtures/desktop-cloud.json` 的 `publicReadCache.withdrawalErrorCode`
+/// 同源对拍。
+pub const WITHDRAWAL_ERROR_CODE: &str = "PUBLIC_DATA_CARD_NOT_FOUND";
+
+/// 撤回失效占位的容量边界：它不参与 LRU 淘汰也不是可回收内容，因此
+/// 数量本身必须受限——超出上限时只回收最旧的失效标记，不动任何正缓存
+/// 记录（`DESK-CACHE-003`「负缓存限量回收，不据此回收旧正卡」）。
+const MAX_WITHDRAWN_MARKERS: i64 = 1024;
+
+/// 写盘失败后的熔断窗口：窗口内正/负写入直接报告 `unavailable`，不让
+/// 每次公开请求都重撞同一个磁盘错误（`DESK-CACHE-003`：IO 失败暂停增长，
+/// 不靠无限重试占满磁盘）。`clear`/stats 不受限——用户显式重试随时可行。
+const WRITE_FAILURE_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(30);
+
 /* ── 公开投影白名单（fixture `cardLibrary.publicReadCache` 镜像） ──────── */
 
 /// 摘要响应允许持久化的字段。账号关系字段（`favorited_at` 等）刻意不在内：
 /// 公开源里它们恒为 null，但白名单保证即使服务端变化它们也进不了缓存。
-const SUMMARY_FIELDS: &[&str] = &[
+/// `pub(crate)`：cloud.rs 的 fixture 对拍测试直接引用这份名单。
+pub(crate) const SUMMARY_FIELDS: &[&str] = &[
     "id",
     "user_id",
     "type",
@@ -89,7 +107,7 @@ const SUMMARY_FIELDS: &[&str] = &[
 
 /// 单卡完整响应允许持久化的字段。`deleted_at`（软删内部状态）与一切身份/
 /// 凭据字段刻意不在内。
-const CARD_FIELDS: &[&str] = &[
+pub(crate) const CARD_FIELDS: &[&str] = &[
     "id",
     "user_id",
     "type",
@@ -164,11 +182,14 @@ pub struct PublicCachePolicyDto {
 }
 
 impl Default for PublicCachePolicyDto {
-    /// 与 `DESKTOP_CONFIG_DEFAULTS` 一致：缺文件即「首次默认」——捕获开启、
-    /// 256 MiB、满额暂停。renderer 推送会覆盖这份进程内默认。
+    /// 进程内初始态是「策略尚未确认」，不是配置默认值：config.json 读取
+    /// 与 renderer 策略推送完成之前一律暂停正缓存（`DESK-CACHE-008` 的
+    /// 降级姿态）。否则「用户已关闭捕获」或「配置损坏需降级」时，启动到
+    /// 首次推送之间会留下一段按默认开启捕获的窗口。renderer 首次推送
+    /// 后这里的内容即被覆盖。
     fn default() -> Self {
         Self {
-            capture_enabled: true,
+            capture_enabled: false,
             max_bytes: CacheBudget::Limited(DEFAULT_BUDGET_BYTES),
             when_full: CacheWhenFull::Pause,
         }
@@ -301,6 +322,16 @@ enum ConnState {
 struct CacheInner {
     conn: ConnState,
     policy: PublicCachePolicyDto,
+    /// 最近一次写盘失败的熔断截止时刻；窗口内需要写盘的捕获/撤回直接
+    /// 报告 `unavailable` 而不重撞同一磁盘错误。`clear` 成功后复位。
+    write_cooldown_until: Option<std::time::Instant>,
+}
+
+/// native 侧共享状态本体：`Mutex` 保证单连接单写者。
+#[derive(Debug)]
+struct PublicReadCacheShared {
+    path: PathBuf,
+    inner: Mutex<CacheInner>,
 }
 
 /// 一次在途公开请求拿到的并发快照。见模块头的 epoch/revision 说明。
@@ -311,42 +342,61 @@ pub struct ObserveTicket {
 }
 
 /// Tauri managed state：固定路径 + 进程内唯一互斥——单连接单写者。
+/// `Clone` 是 `Arc` 级共享：异步云端通路克隆一个句柄进
+/// `spawn_blocking`，与命令面看到的是同一份连接与策略。
+#[derive(Clone)]
 pub struct PublicReadCache {
-    path: PathBuf,
-    inner: Mutex<CacheInner>,
+    shared: std::sync::Arc<PublicReadCacheShared>,
 }
 
 impl PublicReadCache {
     /// `data_root` 由 native 在 setup 产生；这里只负责拼固定文件名。
     pub fn at(data_root: &Path) -> Self {
         Self {
-            path: data_root.join(PUBLIC_READ_CACHE_FILE),
-            inner: Mutex::new(CacheInner {
-                conn: ConnState::Closed,
-                policy: PublicCachePolicyDto::default(),
+            shared: std::sync::Arc::new(PublicReadCacheShared {
+                path: data_root.join(PUBLIC_READ_CACHE_FILE),
+                inner: Mutex::new(CacheInner {
+                    conn: ConnState::Closed,
+                    policy: PublicCachePolicyDto::default(),
+                    write_cooldown_until: None,
+                }),
             }),
         }
     }
 
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, CacheInner>, PublicCacheError> {
-        self.inner
+        self.shared
+            .inner
             .lock()
             .map_err(|_| PublicCacheError::new(PublicCacheErrorCode::InternalError, "缓存锁已中毒"))
     }
 
     /// `public_read_cache_apply_policy`：登记当前生效策略。
     ///
-    /// `captureEnabled` 由开到关的转换会推进 `write_epoch`——禁用窗口前发出
-    /// 的响应因此不会在其后悄悄回填。关闭期间必要的撤回失效处理仍允许
-    /// （`captureEnabled` 只暂停正缓存，不暂停失效）。
+    /// `captureEnabled` 任一方向的转换都推进 `write_epoch`：禁用使「禁用
+    /// 窗口前发出的响应」失效；启用同样使「禁用/未确认窗口内发出的响应」
+    /// 失效——它们是在捕获关闭的世界里取得的票据，不能在重新开启后悄悄
+    /// 回填。关闭期间必要的撤回失效处理仍允许（`captureEnabled` 只暂停
+    /// 正缓存，不暂停失效）。
+    ///
+    /// epoch 推进失败不再静默：连接随即标记为不可用并返回错误——宁可让
+    /// 缓存降级，也不能让「在途隔离已生效」变成一个无法验证的假设。
     pub fn apply_policy(&self, policy: PublicCachePolicyDto) -> Result<(), PublicCacheError> {
         let mut inner = self.lock()?;
-        let was_enabled = inner.policy.capture_enabled;
+        let transition = inner.policy.capture_enabled != policy.capture_enabled;
         inner.policy = policy;
-        if was_enabled && !policy.capture_enabled {
+        if transition {
             // 库还没开过 ⇒ 没有任何在途 ticket，bump 无从谈起。
-            if let ConnState::Open(conn) = &inner.conn {
-                let _ = bump_meta(conn, META_WRITE_EPOCH);
+            let bump_failed = match &inner.conn {
+                ConnState::Open(conn) => bump_meta(conn, META_WRITE_EPOCH).is_err(),
+                _ => false,
+            };
+            if bump_failed {
+                inner.conn = ConnState::Failed(OpenFailure::Storage);
+                return Err(PublicCacheError::new(
+                    PublicCacheErrorCode::StorageUnavailable,
+                    "缓存策略切换的并发隔离更新失败，缓存已停用",
+                ));
             }
         }
         Ok(())
@@ -355,8 +405,8 @@ impl PublicReadCache {
     /// 公开请求发送前的并发快照。缓存不可用时返回 `None`——调用方仍走在线
     /// 路径，只是本次响应带 `cache.outcome = 'unavailable'`。
     pub fn begin_observe(&self) -> Option<ObserveTicket> {
-        let mut inner = self.inner.lock().ok()?;
-        let conn = ensure_open(&mut inner, &self.path)?;
+        let mut inner = self.shared.inner.lock().ok()?;
+        let conn = ensure_open(&mut inner, &self.shared.path)?;
         Some(ObserveTicket {
             epoch: meta_i64(conn, META_WRITE_EPOCH).ok()?,
             mutation_seq: meta_i64(conn, META_MUTATION_SEQ).ok()?,
@@ -375,20 +425,35 @@ impl PublicReadCache {
         body: &serde_json::Value,
     ) -> CacheOutcome {
         let verdict = classify(query, cache_control, status, body);
-        let Ok(mut inner) = self.inner.lock() else {
+        let Ok(mut inner) = self.shared.inner.lock() else {
             return CacheOutcome::unavailable();
         };
-        let policy = inner.policy;
-        let ConnState::Open(conn) = &mut inner.conn else {
+        // 经 `MutexGuard` 取字段会把借用记在整个 guard 上——先 deref 一次，
+        // 让 `conn` 与 `write_cooldown_until` 成为互不干扰的字段级借用。
+        let inner_ref = &mut *inner;
+        let policy = inner_ref.policy;
+        // 写盘熔断窗口：需要写盘的捕获/撤回直接报告不可用，不再逐次重撞
+        // 同一磁盘错误；不产生写盘的 Ignore 判定不受影响。
+        let cooling = inner_ref
+            .write_cooldown_until
+            .is_some_and(|deadline| deadline > std::time::Instant::now());
+        let ConnState::Open(conn) = &mut inner_ref.conn else {
             return CacheOutcome::unavailable();
         };
         let now = now_rfc3339();
         match verdict {
             PublicVerdict::Ignore => CacheOutcome::simple(CacheOutcomeKind::Ignored),
             PublicVerdict::Withdraw(card_id) => {
+                if cooling {
+                    return CacheOutcome::unavailable();
+                }
                 match withdraw_card(conn, scope, &card_id, ticket, &now) {
                     Ok(outcome) => outcome,
-                    Err(_) => CacheOutcome::unavailable(),
+                    Err(_) => {
+                        inner_ref.write_cooldown_until =
+                            Some(std::time::Instant::now() + WRITE_FAILURE_COOLDOWN);
+                        CacheOutcome::unavailable()
+                    }
                 }
             }
             PublicVerdict::Summaries(items, invalid) => {
@@ -399,8 +464,17 @@ impl PublicReadCache {
                         skipped: items.len() as u64 + invalid,
                     };
                 }
-                commit_captures(conn, scope, items, invalid, ticket, &policy, &now)
-                    .unwrap_or_else(|_| CacheOutcome::unavailable())
+                if cooling {
+                    return CacheOutcome::unavailable();
+                }
+                match commit_captures(conn, scope, items, invalid, ticket, &policy, &now) {
+                    Ok(outcome) => outcome,
+                    Err(_) => {
+                        inner_ref.write_cooldown_until =
+                            Some(std::time::Instant::now() + WRITE_FAILURE_COOLDOWN);
+                        CacheOutcome::unavailable()
+                    }
+                }
             }
             PublicVerdict::Card(item) => {
                 if !policy.capture_enabled {
@@ -410,8 +484,17 @@ impl PublicReadCache {
                         skipped: 1,
                     };
                 }
-                commit_captures(conn, scope, vec![item], 0, ticket, &policy, &now)
-                    .unwrap_or_else(|_| CacheOutcome::unavailable())
+                if cooling {
+                    return CacheOutcome::unavailable();
+                }
+                match commit_captures(conn, scope, vec![item], 0, ticket, &policy, &now) {
+                    Ok(outcome) => outcome,
+                    Err(_) => {
+                        inner_ref.write_cooldown_until =
+                            Some(std::time::Instant::now() + WRITE_FAILURE_COOLDOWN);
+                        CacheOutcome::unavailable()
+                    }
+                }
             }
         }
     }
@@ -420,7 +503,7 @@ impl PublicReadCache {
     /// 不为「看一眼统计」先造一个库。
     pub fn stats(&self) -> Result<PublicCacheStats, PublicCacheError> {
         let mut inner = self.lock()?;
-        let path = self.path.to_string_lossy().to_string();
+        let path = self.shared.path.to_string_lossy().to_string();
         let base = |status: &'static str, policy: PublicCachePolicyDto| PublicCacheStats {
             status,
             path: path.clone(),
@@ -441,10 +524,10 @@ impl PublicReadCache {
             }
             _ => {}
         }
-        if matches!(inner.conn, ConnState::Closed) && !self.path.exists() {
+        if matches!(inner.conn, ConnState::Closed) && !self.shared.path.exists() {
             return Ok(base("empty", policy));
         }
-        match ensure_open(&mut inner, &self.path) {
+        match ensure_open(&mut inner, &self.shared.path) {
             Some(conn) => {
                 let stats = query_stats(conn).map_err(|_| {
                     PublicCacheError::new(
@@ -469,16 +552,17 @@ impl PublicReadCache {
     }
 
     /// `public_read_cache_clear`：清空全部缓存行并推进 `write_epoch`——
-    /// 在途响应一律按 stale 丢弃，不会在清理后回填。
+    /// 在途响应一律按 stale 丢弃，不会在清理后回填。显式清理同时是
+    /// 写盘熔断的手动复位：成功后允许缓存立即重试写盘。
     pub fn clear(&self) -> Result<PublicCacheClearResult, PublicCacheError> {
         let mut inner = self.lock()?;
-        if matches!(inner.conn, ConnState::Closed) && !self.path.exists() {
+        if matches!(inner.conn, ConnState::Closed) && !self.shared.path.exists() {
             return Ok(PublicCacheClearResult {
                 removed_entries: 0,
                 freed_bytes: 0,
             });
         }
-        let Some(conn) = ensure_open(&mut inner, &self.path) else {
+        let Some(conn) = ensure_open(&mut inner, &self.shared.path) else {
             return Err(PublicCacheError::new(
                 PublicCacheErrorCode::StorageUnavailable,
                 "缓存库不可用，无法清理",
@@ -508,6 +592,8 @@ impl PublicReadCache {
         tx.commit().map_err(|_| {
             PublicCacheError::new(PublicCacheErrorCode::InternalError, "清理提交失败")
         })?;
+        // 清理成功说明磁盘写路径可用——熔断到此为止，后续捕获正常重试。
+        inner.write_cooldown_until = None;
         Ok(PublicCacheClearResult {
             removed_entries: removed,
             freed_bytes: freed,
@@ -540,6 +626,17 @@ fn ensure_open<'a>(inner: &'a mut CacheInner, path: &Path) -> Option<&'a mut Con
 
 fn open_cache(path: &Path) -> Result<Connection, OpenFailure> {
     let conn = Connection::open(path).map_err(|_| OpenFailure::Storage)?;
+    // 先读 `user_version` 再执行任何可持久化的写：journal_mode=WAL 本身
+    // 会改写数据库头，若先设 WAL 后查版本，「未知新版库」就可能已被本
+    // 进程修改——违背 DESK-CACHE-002「保留原库并禁用」的承诺。裸打开 +
+    // 一条读 pragma 不触碰文件内容，版本确认后才进入写路径。
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .map_err(|_| OpenFailure::Storage)?;
+    if version > SCHEMA_VERSION {
+        // 来自更新版本应用的库：不读不写不删，本次进程停用缓存。
+        return Err(OpenFailure::UnsupportedSchema);
+    }
     // 与正式库同一组 PRAGMA 理由：WAL 读写不互阻塞；FULL sync 保证崩溃一致性。
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
@@ -548,13 +645,6 @@ fn open_cache(path: &Path) -> Result<Connection, OpenFailure> {
     )
     .map_err(|_| OpenFailure::Storage)?;
 
-    let version: i64 = conn
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .map_err(|_| OpenFailure::Storage)?;
-    if version > SCHEMA_VERSION {
-        // 来自更新版本应用的库：不读不写不删，本次进程停用缓存。
-        return Err(OpenFailure::UnsupportedSchema);
-    }
     if version < SCHEMA_VERSION {
         migrate(&conn, version)?;
     }
@@ -700,7 +790,9 @@ fn text_field<'a>(
     source.get(key).and_then(serde_json::Value::as_str)
 }
 
-/// 单卡响应的公开性最低门槛：自声明公开 + 正文为字符串 + id 与请求一致。
+/// 单卡响应的公开性最低门槛：自声明公开、已过公开审核、正文为字符串、
+/// id 与请求一致。服务端契约意外变化（例如未审核记录混进公开面）时，
+/// native 宁可不缓存，也不把不该留的数据落盘。
 fn project_card(
     requested_id: &str,
     card: &serde_json::Map<String, serde_json::Value>,
@@ -709,6 +801,9 @@ fn project_card(
         return None;
     }
     if card.get("is_public").and_then(serde_json::Value::as_i64) != Some(1) {
+        return None;
+    }
+    if text_field(card, "review_status") != Some("approved") {
         return None;
     }
     let data = card.get("data")?;
@@ -723,13 +818,17 @@ fn project_card(
     })
 }
 
-/// 摘要条目的公开性最低门槛：自声明公开 + 基本展示字段在场。
+/// 摘要条目的公开性最低门槛：自声明公开 + 已过公开审核 + 基本展示
+/// 字段在场（同 `project_card` 的防御性复核理由）。
 fn project_summary(card: &serde_json::Value) -> Option<CaptureItem> {
     let card = card.as_object()?;
     let id = text_field(card, "id")?;
     text_field(card, "type")?;
     text_field(card, "name")?;
     if card.get("is_public").and_then(serde_json::Value::as_i64) != Some(1) {
+        return None;
+    }
+    if text_field(card, "review_status") != Some("approved") {
         return None;
     }
     Some(CaptureItem {
@@ -740,11 +839,12 @@ fn project_summary(card: &serde_json::Value) -> Option<CaptureItem> {
     })
 }
 
-/// 固定公开路由的响应分类（`DESK-CACHE-004`）：
+/// 固定公开路由的响应分类（`DESK-CACHE-004`/`006`）：
 ///
-/// - `?id=` + 404 `{success:false}` 是**业务级不可用**——唯一允许移除缓存
-///   的信号；503、HTML 404、401、网络错误都不是（它们到不了这里：非 JSON
-///   响应在 `read_bounded_json` 已被拒）。
+/// - `?id=` + 404 `{success:false, code: PUBLIC_DATA_CARD_NOT_FOUND}` 是
+///   **业务级不可用**——唯一允许移除缓存的信号；仅凭 404 + success:false
+///   不够：路由/版本错误也可能长成这个形状（503、HTML 404、401、网络
+///   错误本来就不是——非 JSON 响应在 `read_bounded_json` 已被拒）。
 /// - `?id=` + 200 `{success:true, card:{…}}` 且 card.id 与请求一致 → 正文投影；
 /// - `view=summary` + 200 `{success:true, cards:[…]}` → 摘要投影；
 /// - 一切其它形状、状态码与非 `public` 存储许可 → `Ignore`。
@@ -759,9 +859,13 @@ fn classify(
     };
     let single_id = query.get("id").filter(|id| !id.is_empty());
 
-    // 撤回信号不受存储许可约束——失效处理不是「把响应存起来」。
+    // 撤回信号不受存储许可约束——失效处理不是「把响应存起来」。证据必须
+    // 是服务端登记的业务错误码，不是「碰巧 404 且 success 为 false」。
     if let Some(id) = single_id {
-        if status == 404 && body.get("success") == Some(&serde_json::Value::Bool(false)) {
+        if status == 404
+            && body.get("success") == Some(&serde_json::Value::Bool(false))
+            && body.get("code") == Some(&serde_json::Value::String(WITHDRAWAL_ERROR_CODE.into()))
+        {
             return PublicVerdict::Withdraw(id.clone());
         }
     }
@@ -770,7 +874,7 @@ fn classify(
     }
 
     if let Some(id) = single_id {
-        if status != 200 {
+        if status != 200 || body.get("success") != Some(&serde_json::Value::Bool(true)) {
             return PublicVerdict::Ignore;
         }
         let Some(card) = body.get("card").and_then(|v| v.as_object()) else {
@@ -972,10 +1076,16 @@ fn write_row(conn: &Connection, row: &BuiltRow, revision: i64, now: &str) -> Cac
     Ok(())
 }
 
-/// 满额 LRU 淘汰：只回收 `availability='known'` 的条目（撤回占位不是可回收
-/// 内容），跳过本批次将要写的卡——否则会出现「刚腾出空间又被自己写回」的
-/// 空转。返回回收的字节数。
-fn evict_lru(conn: &Connection, need: u64, exclude: &BTreeSet<String>) -> CacheResult<u64> {
+/// 满额 LRU 的**候选**计算：只按 LRU 顺序挑够 `need` 的旧条目，不删除。
+/// 调用方先确认可回收量足够，再交 `evict_rows` 真正执行——「新写入失败
+/// 时保留已有快照」要求淘汰与写入成功绑定，不能腾了空间却写不进去。
+/// 只回收 `availability='known'` 的条目（撤回占位不是可回收内容），跳过
+/// 本批次将要写的卡——否则会出现「刚腾出空间又被自己写回」的空转。
+fn lru_eviction_candidates(
+    conn: &Connection,
+    need: u64,
+    exclude: &BTreeSet<String>,
+) -> CacheResult<Vec<(String, String, i64)>> {
     let mut stmt = conn
         .prepare(
             "SELECT card_id, source_scope, row_bytes FROM cards
@@ -990,20 +1100,32 @@ fn evict_lru(conn: &Connection, need: u64, exclude: &BTreeSet<String>) -> CacheR
         .map_err(|_| Failure)?;
     drop(stmt);
 
-    let mut freed = 0u64;
+    let mut picked = Vec::new();
+    let mut reclaimable = 0u64;
     for (card_id, scope, bytes) in candidates {
-        if freed >= need {
+        if reclaimable >= need {
             break;
         }
         if exclude.contains(&card_id) {
             continue;
         }
+        reclaimable += bytes.max(0) as u64;
+        picked.push((card_id, scope, bytes));
+    }
+    Ok(picked)
+}
+
+/// 真正删除候选行，返回回收的字节数。只在 `lru_eviction_candidates`
+/// 确认可回收量足够、且所属写入确定继续时调用。
+fn evict_rows(conn: &Connection, candidates: &[(String, String, i64)]) -> CacheResult<u64> {
+    let mut freed = 0u64;
+    for (card_id, scope, bytes) in candidates {
         conn.execute(
             "DELETE FROM cards WHERE card_id = ?1 AND source_scope = ?2",
             params![card_id, scope],
         )
         .map_err(|_| Failure)?;
-        freed += bytes as u64;
+        freed += (*bytes).max(0) as u64;
     }
     Ok(freed)
 }
@@ -1042,6 +1164,11 @@ fn commit_captures(
             }
         }
         let built = build_row(scope, item, existing.as_ref(), now);
+        // 替换记账是「旧记录字节出、新记录字节入」——旧行被更短正文
+        // 替换时用量必须下降，只算正向 delta 会把缩小当成不增不减。
+        let old_bytes = existing
+            .as_ref()
+            .map_or(0u64, |r| r.row_bytes.max(0) as u64);
         if let CacheBudget::Limited(budget) = policy.max_bytes {
             if built.row_bytes > budget {
                 // 单条记录超过整个预算：拒绝写入而不是清空缓存去迁就它。
@@ -1049,20 +1176,28 @@ fn commit_captures(
                 budget_skip = true;
                 continue;
             }
-            let delta = built
-                .row_bytes
-                .saturating_sub(existing.map_or(0, |r| r.row_bytes as u64));
-            if delta > 0 && usage.saturating_add(delta) > budget {
+            let required = usage
+                .saturating_sub(old_bytes)
+                .saturating_add(built.row_bytes);
+            if required > budget {
                 match policy.when_full {
                     CacheWhenFull::EvictLeastRecentlyUsed => {
-                        let need = usage + delta - budget;
-                        let freed = evict_lru(&tx, need, &batch_ids)?;
-                        usage = usage.saturating_sub(freed);
-                        if usage.saturating_add(delta) > budget {
+                        let need = required - budget;
+                        // 先只计算候选、确认可回收量足够，再删除——回收
+                        // 与随后这条写入同生共死，不会出现「腾了空间却没
+                        // 写进去」的白丢旧缓存。
+                        let candidates = lru_eviction_candidates(&tx, need, &batch_ids)?;
+                        let reclaimable: u64 = candidates
+                            .iter()
+                            .map(|(_, _, bytes)| (*bytes).max(0) as u64)
+                            .sum();
+                        if reclaimable < need {
                             skipped += 1;
                             budget_skip = true;
                             continue;
                         }
+                        let freed = evict_rows(&tx, &candidates)?;
+                        usage = usage.saturating_sub(freed);
                     }
                     CacheWhenFull::Pause => {
                         skipped += 1;
@@ -1071,7 +1206,6 @@ fn commit_captures(
                     }
                 }
             }
-            usage = usage.saturating_add(delta);
         }
 
         let seq = match write_seq {
@@ -1083,10 +1217,15 @@ fn commit_captures(
             }
         };
         write_row(&tx, &built, seq, now)?;
+        usage = usage
+            .saturating_sub(old_bytes)
+            .saturating_add(built.row_bytes);
         captured += 1;
     }
     tx.commit().map_err(|_| Failure)?;
 
+    // 分类如实归因：被跳过的原因决定 outcome——容量暂停不是「整页投影
+    // 全废」的挡箭牌，全是坏条目时应报告 ignored 而不是 paused。
     let kind = if captured > 0 {
         if skipped > 0 {
             CacheOutcomeKind::Partial
@@ -1095,10 +1234,12 @@ fn commit_captures(
         }
     } else if skipped == 0 {
         CacheOutcomeKind::Captured
-    } else if stale_skip && !budget_skip {
+    } else if budget_skip {
+        CacheOutcomeKind::Paused
+    } else if stale_skip {
         CacheOutcomeKind::Stale
     } else {
-        CacheOutcomeKind::Paused
+        CacheOutcomeKind::Ignored
     };
     Ok(CacheOutcome {
         outcome: kind,
@@ -1110,6 +1251,11 @@ fn commit_captures(
 /// 业务确认撤回：把卡移出公开可见/可选集合并清掉缓存正文，保留最小失效
 /// 信息（行本身 + availability 标记）——既阻止更旧的响应把它复活，也让
 /// 「这张卡曾经公开、后来撤回了」这个事实可诊断。
+///
+/// 只对**已有缓存行**的卡写占位：负记录不参与 LRU 淘汰也不是可回收
+/// 内容，为从未缓存过的 ID 无限量建档会让缓存文件持续增长（`DESK-CACHE-003`
+/// 负缓存限量）。从未缓存的卡 404 如实报告 withdrawn，但不落任何行——
+/// 迟到旧响应即使写入，也只是普通的可淘汰正缓存，不构成复活撤回态。
 fn withdraw_card(
     conn: &mut Connection,
     scope: &str,
@@ -1121,11 +1267,12 @@ fn withdraw_card(
     if meta_i64(&tx, META_WRITE_EPOCH)? != ticket.epoch {
         return Ok(CacheOutcome::simple(CacheOutcomeKind::Stale));
     }
-    if let Some(row) = read_row(&tx, scope, card_id)? {
-        if row.revision > ticket.mutation_seq {
-            // 已有更新的证据（更新的成功读取）——404 是迟到的旧响应。
-            return Ok(CacheOutcome::simple(CacheOutcomeKind::Stale));
-        }
+    let Some(row) = read_row(&tx, scope, card_id)? else {
+        return Ok(CacheOutcome::simple(CacheOutcomeKind::Withdrawn));
+    };
+    if row.revision > ticket.mutation_seq {
+        // 已有更新的证据（更新的成功读取）——404 是迟到的旧响应。
+        return Ok(CacheOutcome::simple(CacheOutcomeKind::Stale));
     }
     let seq = bump_meta(&tx, META_MUTATION_SEQ)?;
     tx.execute(
@@ -1149,14 +1296,32 @@ fn withdraw_card(
         params![card_id, scope, seq, ROW_OVERHEAD_BYTES as i64, now],
     )
     .map_err(|_| Failure)?;
+    enforce_withdrawn_cap(&tx, MAX_WITHDRAWN_MARKERS)?;
     tx.commit().map_err(|_| Failure)?;
     Ok(CacheOutcome::simple(CacheOutcomeKind::Withdrawn))
 }
 
+/// 撤回占位的容量边界：标记数量超限时只回收最旧的失效信息，不触碰任何
+/// 正缓存记录（`DESK-CACHE-003`：负缓存可限量回收，不得据此回收旧正卡）。
+fn enforce_withdrawn_cap(conn: &Connection, limit: i64) -> CacheResult<()> {
+    conn.execute(
+        "DELETE FROM cards WHERE availability = 'withdrawn' AND rowid NOT IN (
+            SELECT rowid FROM cards WHERE availability = 'withdrawn'
+            ORDER BY last_attempt_at DESC, card_id DESC, source_scope DESC
+            LIMIT ?1
+        )",
+        params![limit],
+    )
+    .map_err(|_| Failure)?;
+    Ok(())
+}
+
 fn query_stats(conn: &Connection) -> CacheResult<PublicCacheStats> {
+    // `entryCount` 的契约口径是「可见条目数」——撤回占位单独计数，
+    // 不混入可见集合（与 desktop-ipc 的字段注释一致）。
     conn.query_row(
         "SELECT COALESCE(SUM(row_bytes), 0),
-                COUNT(*),
+                COALESCE(SUM(CASE WHEN availability != 'withdrawn' THEN 1 ELSE 0 END), 0),
                 COALESCE(SUM(CASE WHEN summary_json IS NOT NULL THEN 1 ELSE 0 END), 0),
                 COALESCE(SUM(CASE WHEN card_json IS NOT NULL THEN 1 ELSE 0 END), 0),
                 COALESCE(SUM(CASE WHEN availability = 'withdrawn' THEN 1 ELSE 0 END), 0)
@@ -1276,6 +1441,23 @@ mod tests {
         cache.observe_response(&ticket, SCOPE, Some(query), cache_control, status, body)
     }
 
+    /// native 初始态是「策略尚未确认」——正缓存在第一次策略推送之前一律
+    /// 暂停。需要正写入的用例必须先显式确认策略。
+    fn enable_capture(cache: &PublicReadCache) {
+        cache
+            .apply_policy(PublicCachePolicyDto {
+                capture_enabled: true,
+                max_bytes: CacheBudget::Limited(DEFAULT_BUDGET_BYTES),
+                when_full: CacheWhenFull::Pause,
+            })
+            .expect("apply capture-enabled policy");
+    }
+
+    /// 业务级不可用响应：404 + 稳定错误码（`DESK-CACHE-006`）。
+    fn withdraw_body() -> serde_json::Value {
+        json!({"success": false, "code": WITHDRAWAL_ERROR_CODE})
+    }
+
     /// 直接开第二个只读连接查行（WAL 允许多连接）。
     fn open_row(
         root: &Path,
@@ -1367,6 +1549,7 @@ mod tests {
     fn captures_summary_page_and_single_card_with_projection() {
         let root = scratch("capture");
         let cache = PublicReadCache::at(&root);
+        enable_capture(&cache);
         let mut item_a = summary_item("card-a", "Alpha", "2026-10-02T00:00:00Z");
         set_field(&mut item_a, "viewerSecret", json!("must-not-persist"));
         set_field(&mut item_a, "favorited_at", json!("2026-10-03T00:00:00Z"));
@@ -1413,14 +1596,17 @@ mod tests {
     fn rejects_non_public_or_degenerate_projections() {
         let root = scratch("projection-gate");
         let cache = PublicReadCache::at(&root);
+        enable_capture(&cache);
         for mut item in [
             summary_item("p", "n", "2026-10-02T00:00:00Z"),
             summary_item("p2", "n", "2026-10-02T00:00:00Z"),
             summary_item("p3", "n", "2026-10-02T00:00:00Z"),
+            summary_item("p4", "n", "2026-10-02T00:00:00Z"),
         ] {
             match item["id"].as_str().unwrap() {
                 "p" => set_field(&mut item, "is_public", json!(0)),
                 "p2" => remove_field(&mut item, "is_public"),
+                "p3" => set_field(&mut item, "review_status", json!("pending")),
                 _ => remove_field(&mut item, "name"),
             }
             let outcome = observe(
@@ -1447,6 +1633,20 @@ mod tests {
         card["card"]["data"] = json!({"structured": true});
         let outcome = observe(&cache, &single_query("card-x"), Some(PUBLIC_CC), 200, &card);
         assert_eq!(outcome.outcome, CacheOutcomeKind::Ignored);
+        // 200 但 success:false 不是「业务成功」——不缓存。
+        let outcome = observe(
+            &cache,
+            &single_query("card-x"),
+            Some(PUBLIC_CC),
+            200,
+            &json!({"success": false, "card": {"id": "card-x", "is_public": 1, "data": "{}", "review_status": "approved"}}),
+        );
+        assert_eq!(outcome.outcome, CacheOutcomeKind::Ignored);
+        // 未过公开审核的单卡不落盘。
+        let mut card = single_card("card-x", "{}", "2026-10-02T00:00:00Z");
+        card["card"]["review_status"] = json!("pending");
+        let outcome = observe(&cache, &single_query("card-x"), Some(PUBLIC_CC), 200, &card);
+        assert_eq!(outcome.outcome, CacheOutcomeKind::Ignored);
         let stats = cache.stats().expect("stats");
         assert_eq!(stats.entry_count, 0);
         let _ = std::fs::remove_dir_all(&root);
@@ -1456,6 +1656,7 @@ mod tests {
     fn storage_permission_gates_everything() {
         let root = scratch("cache-control");
         let cache = PublicReadCache::at(&root);
+        enable_capture(&cache);
         let page = summary_page(vec![summary_item("card-a", "A", "2026-10-02T00:00:00Z")]);
         for header in [
             None,
@@ -1481,6 +1682,7 @@ mod tests {
     fn business_404_withdraws_but_service_errors_do_not() {
         let root = scratch("withdrawal");
         let cache = PublicReadCache::at(&root);
+        enable_capture(&cache);
         observe(
             &cache,
             &single_query("card-a"),
@@ -1488,10 +1690,16 @@ mod tests {
             200,
             &single_card("card-a", "{}", "2026-10-02T00:00:00Z"),
         );
-        // 503 / 401 不是撤回信号。
+        // 503 / 401 / 无稳定错误码的 404 都不是撤回信号。
         for (status, body) in [
             (503u16, json!({"success": false, "error": "maintenance"})),
             (401u16, json!({"success": false, "error": "unauthorized"})),
+            // 仅凭 404 + success:false 不足以确认业务撤回——缺稳定错误码。
+            (404u16, json!({"success": false})),
+            (
+                404u16,
+                json!({"success": false, "code": "SOME_OTHER_ERROR"}),
+            ),
         ] {
             let outcome = observe(
                 &cache,
@@ -1502,16 +1710,19 @@ mod tests {
             );
             assert_ne!(outcome.outcome, CacheOutcomeKind::Withdrawn);
             let (availability, _, card) = open_row(&root, SCOPE, "card-a").unwrap();
-            assert_eq!(availability, "known", "status={status} 不得撤回");
+            assert_eq!(
+                availability, "known",
+                "status={status} body={body} 不得撤回"
+            );
             assert!(card.is_some());
         }
-        // 业务级 404：正文清掉、保留失效占位。
+        // 业务级 404 + 稳定错误码：正文清掉、保留失效占位。
         let outcome = observe(
             &cache,
             &single_query("card-a"),
             Some(PUBLIC_CC),
             404,
-            &json!({"success": false}),
+            &withdraw_body(),
         );
         assert_eq!(outcome.outcome, CacheOutcomeKind::Withdrawn);
         let (availability, summary, card) = open_row(&root, SCOPE, "card-a").unwrap();
@@ -1527,6 +1738,7 @@ mod tests {
     fn stale_responses_cannot_resurrect_after_clear_or_withdrawal() {
         let root = scratch("fencing");
         let cache = PublicReadCache::at(&root);
+        enable_capture(&cache);
         observe(
             &cache,
             &single_query("card-a"),
@@ -1544,7 +1756,7 @@ mod tests {
             Some(&single_query("card-a")),
             Some(PUBLIC_CC),
             404,
-            &json!({"success": false}),
+            &withdraw_body(),
         );
         assert_eq!(outcome.outcome, CacheOutcomeKind::Withdrawn);
         cache.observe_response(
@@ -1583,12 +1795,20 @@ mod tests {
     fn fresh_fetch_can_republish_a_withdrawn_card() {
         let root = scratch("republish");
         let cache = PublicReadCache::at(&root);
+        enable_capture(&cache);
+        observe(
+            &cache,
+            &single_query("card-a"),
+            Some(PUBLIC_CC),
+            200,
+            &single_card("card-a", "v1", "2026-10-02T00:00:00Z"),
+        );
         observe(
             &cache,
             &single_query("card-a"),
             Some(PUBLIC_CC),
             404,
-            &json!({"success": false}),
+            &withdraw_body(),
         );
         assert_eq!(open_row(&root, SCOPE, "card-a").unwrap().0, "withdrawn");
         // 撤回之后到达的新响应（新票据）可以把它带回——那是真实的新证据。
@@ -1610,6 +1830,15 @@ mod tests {
     fn disabled_capture_blocks_positive_writes_but_not_withdrawal() {
         let root = scratch("disabled");
         let cache = PublicReadCache::at(&root);
+        enable_capture(&cache);
+        // 已缓存行的撤回失效处理不受捕获开关影响——先捕获再禁用再撤回。
+        observe(
+            &cache,
+            &single_query("a"),
+            Some(PUBLIC_CC),
+            200,
+            &single_card("a", "{}", "2026-10-02T00:00:00Z"),
+        );
         cache
             .apply_policy(PublicCachePolicyDto {
                 capture_enabled: false,
@@ -1625,16 +1854,16 @@ mod tests {
             &summary_page(vec![summary_item("a", "A", "2026-10-02T00:00:00Z")]),
         );
         assert_eq!(outcome.outcome, CacheOutcomeKind::Disabled);
-        assert!(open_row(&root, SCOPE, "a").is_none());
-        // 撤回失效处理不受捕获开关影响。
+        assert_eq!(open_row(&root, SCOPE, "a").unwrap().0, "known");
         let outcome = observe(
             &cache,
             &single_query("a"),
             Some(PUBLIC_CC),
             404,
-            &json!({"success": false}),
+            &withdraw_body(),
         );
         assert_eq!(outcome.outcome, CacheOutcomeKind::Withdrawn);
+        assert_eq!(open_row(&root, SCOPE, "a").unwrap().0, "withdrawn");
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1753,6 +1982,7 @@ mod tests {
     fn newer_summary_does_not_relabel_the_old_body() {
         let root = scratch("version-split");
         let cache = PublicReadCache::at(&root);
+        enable_capture(&cache);
         observe(
             &cache,
             &single_query("a"),
@@ -1802,6 +2032,7 @@ mod tests {
     fn source_scope_keeps_origins_separate() {
         let root = scratch("scopes");
         let cache = PublicReadCache::at(&root);
+        enable_capture(&cache);
         let ticket = cache.begin_observe().expect("ticket");
         let outcome = cache.observe_response(
             &ticket,
@@ -1821,6 +2052,7 @@ mod tests {
     fn clear_reports_counts_and_empties_the_cache() {
         let root = scratch("clear");
         let cache = PublicReadCache::at(&root);
+        enable_capture(&cache);
         observe(
             &cache,
             &single_query("a"),
@@ -1834,6 +2066,272 @@ mod tests {
         let stats = cache.stats().expect("stats");
         assert_eq!(stats.entry_count, 0);
         assert_eq!(stats.usage_bytes, 0);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /* ── K1-r1：策略门禁、撤回证据边界与故障收口 ────────────────────── */
+
+    #[test]
+    fn capture_stays_paused_until_policy_is_confirmed() {
+        // 「策略尚未确认」的进程初始态不得按默认开启捕获：用户已关闭捕获
+        // 或配置需降级时，启动到首次推送之间不允许出现提前捕获窗口。
+        let root = scratch("unconfirmed");
+        let cache = PublicReadCache::at(&root);
+        let outcome = observe(
+            &cache,
+            &summary_query(),
+            Some(PUBLIC_CC),
+            200,
+            &summary_page(vec![summary_item("a", "A", "2026-10-02T00:00:00Z")]),
+        );
+        assert_eq!(outcome.outcome, CacheOutcomeKind::Disabled);
+        assert!(open_row(&root, SCOPE, "a").is_none());
+        let stats = cache.stats().expect("stats");
+        assert!(!stats.applied_policy.capture_enabled);
+
+        // 首次推送「开启」后才允许正写入。
+        enable_capture(&cache);
+        let outcome = observe(
+            &cache,
+            &summary_query(),
+            Some(PUBLIC_CC),
+            200,
+            &summary_page(vec![summary_item("a", "A", "2026-10-02T00:00:00Z")]),
+        );
+        assert_eq!(outcome.outcome, CacheOutcomeKind::Captured);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn responses_sent_before_enable_cannot_refill_afterwards() {
+        // 请求发出时捕获尚未确认——即使随后开启，该响应的票据也应被
+        // transition 的 epoch 推进作废，不能把「禁用世界里取得的响应」
+        // 回填进缓存。
+        let root = scratch("pre-enable-ticket");
+        let cache = PublicReadCache::at(&root);
+        let stale_ticket = cache.begin_observe().expect("ticket while disabled");
+        enable_capture(&cache);
+        let outcome = cache.observe_response(
+            &stale_ticket,
+            SCOPE,
+            Some(&summary_query()),
+            Some(PUBLIC_CC),
+            200,
+            &summary_page(vec![summary_item("a", "A", "2026-10-02T00:00:00Z")]),
+        );
+        assert_eq!(outcome.outcome, CacheOutcomeKind::Stale);
+        assert!(open_row(&root, SCOPE, "a").is_none());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn inflight_during_disabled_window_stays_dead_after_reenable() {
+        // 开→关→开：禁用窗口里发出的票据在重新开启后依然是死票——
+        // 两个方向的 transition 都必须推进 epoch。
+        let root = scratch("disable-reenable");
+        let cache = PublicReadCache::at(&root);
+        enable_capture(&cache);
+        cache
+            .apply_policy(PublicCachePolicyDto {
+                capture_enabled: false,
+                max_bytes: CacheBudget::Limited(DEFAULT_BUDGET_BYTES),
+                when_full: CacheWhenFull::Pause,
+            })
+            .expect("disable");
+        let stale_ticket = cache.begin_observe().expect("ticket while disabled");
+        enable_capture(&cache);
+        let outcome = cache.observe_response(
+            &stale_ticket,
+            SCOPE,
+            Some(&single_query("a")),
+            Some(PUBLIC_CC),
+            200,
+            &single_card("a", "{}", "2026-10-02T00:00:00Z"),
+        );
+        assert_eq!(outcome.outcome, CacheOutcomeKind::Stale);
+        assert!(open_row(&root, SCOPE, "a").is_none());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn shrinking_a_row_frees_budget_for_the_next_write() {
+        // 替换为更短正文时容量记账必须回扣旧记录字节，否则满额判定
+        // 会按只增不减的幻觉拒绝后续本可放下的写入。
+        let root = scratch("shrink-delta");
+        let cache = PublicReadCache::at(&root);
+        cache
+            .apply_policy(PublicCachePolicyDto {
+                capture_enabled: true,
+                max_bytes: CacheBudget::Limited(MIN_BUDGET_BYTES),
+                when_full: CacheWhenFull::Pause,
+            })
+            .expect("apply policy");
+        let big = "x".repeat(600 * 1024);
+        let outcome = observe(
+            &cache,
+            &single_query("a"),
+            Some(PUBLIC_CC),
+            200,
+            &single_card("a", &big, "2026-10-02T00:00:00Z"),
+        );
+        assert_eq!(outcome.outcome, CacheOutcomeKind::Captured);
+        // a 换成 ~100KiB：旧行字节必须出账，usage 回落。
+        let small = "y".repeat(100 * 1024);
+        let outcome = observe(
+            &cache,
+            &single_query("a"),
+            Some(PUBLIC_CC),
+            200,
+            &single_card("a", &small, "2026-10-03T00:00:00Z"),
+        );
+        assert_eq!(outcome.outcome, CacheOutcomeKind::Captured);
+        let stats = cache.stats().expect("stats");
+        assert!(
+            stats.usage_bytes < 200 * 1024,
+            "usage={}",
+            stats.usage_bytes
+        );
+        // 900KiB 新卡：100K + 900K < 1MiB——若旧占用没回扣必然误满。
+        let bigger = "z".repeat(900 * 1024);
+        let outcome = observe(
+            &cache,
+            &single_query("b"),
+            Some(PUBLIC_CC),
+            200,
+            &single_card("b", &bigger, "2026-10-04T00:00:00Z"),
+        );
+        assert_eq!(outcome.outcome, CacheOutcomeKind::Captured);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn withdrawal_without_an_existing_row_writes_no_marker() {
+        // 负记录不回收、不参与 LRU——为从未缓存的 ID 无限量建档会让缓存
+        // 文件持续增长。404 如实报告撤回，但不落任何行。
+        let root = scratch("no-marker");
+        let cache = PublicReadCache::at(&root);
+        enable_capture(&cache);
+        let outcome = observe(
+            &cache,
+            &single_query("never-cached"),
+            Some(PUBLIC_CC),
+            404,
+            &withdraw_body(),
+        );
+        assert_eq!(outcome.outcome, CacheOutcomeKind::Withdrawn);
+        assert!(open_row(&root, SCOPE, "never-cached").is_none());
+        let stats = cache.stats().expect("stats");
+        assert_eq!(stats.withdrawn_count, 0);
+        assert_eq!(stats.entry_count, 0);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn withdrawn_markers_are_bounded_without_touching_live_rows() {
+        let root = scratch("marker-cap");
+        let cache = PublicReadCache::at(&root);
+        enable_capture(&cache);
+        for id in ["a", "b", "c", "d", "e"] {
+            observe(
+                &cache,
+                &single_query(id),
+                Some(PUBLIC_CC),
+                200,
+                &single_card(id, "{}", "2026-10-02T00:00:00Z"),
+            );
+        }
+        // a/b 撤回成占位；c/d/e 保留正缓存。
+        for id in ["a", "b"] {
+            let outcome = observe(
+                &cache,
+                &single_query(id),
+                Some(PUBLIC_CC),
+                404,
+                &withdraw_body(),
+            );
+            assert_eq!(outcome.outcome, CacheOutcomeKind::Withdrawn);
+        }
+        // 直接按小上限触发回收：最旧的占位被清掉，正缓存一行不动。
+        // 用固定老时间戳保证 a 必然最旧，不依赖测试运行的真实时钟。
+        let conn = Connection::open(root.join(PUBLIC_READ_CACHE_FILE)).expect("open cache file");
+        conn.execute(
+            "UPDATE cards SET last_attempt_at = '2020-01-01T00:00:00Z' WHERE card_id = 'a'",
+            [],
+        )
+        .unwrap();
+        enforce_withdrawn_cap(&conn, 1).expect("cap");
+        assert!(
+            open_row(&root, SCOPE, "a").is_none(),
+            "最旧的失效占位先回收"
+        );
+        assert_eq!(open_row(&root, SCOPE, "b").unwrap().0, "withdrawn");
+        for id in ["c", "d", "e"] {
+            assert_eq!(open_row(&root, SCOPE, id).unwrap().0, "known");
+        }
+        // 统计口径：可见条目与撤回占位分开计数。
+        let stats = cache.stats().expect("stats");
+        assert_eq!(stats.entry_count, 3);
+        assert_eq!(stats.withdrawn_count, 1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn write_failure_trips_cooldown_instead_of_retrying_every_request() {
+        // 写路径故障后熔断：窗口内的写盘尝试直接报告不可用，不让每次
+        // 公开请求都重撞同一个磁盘错误（DESK-CACHE-003 故障暂停）。
+        // 用第二个连接持写锁制造确定性的写入失败——读路径不受影响，
+        // 票据照常签发，失败精确落在写盘事务里。
+        let root = scratch("cooldown");
+        let cache = PublicReadCache::at(&root);
+        enable_capture(&cache);
+        cache.begin_observe().expect("open the db first");
+        let blocker = Connection::open(root.join(PUBLIC_READ_CACHE_FILE)).expect("open cache file");
+        blocker
+            .execute_batch("BEGIN IMMEDIATE")
+            .expect("hold write lock");
+        let outcome = observe(
+            &cache,
+            &single_query("a"),
+            Some(PUBLIC_CC),
+            200,
+            &single_card("a", "{}", "2026-10-02T00:00:00Z"),
+        );
+        assert_eq!(outcome.outcome, CacheOutcomeKind::Unavailable);
+        // 熔断窗口内第二次需要写盘的观察直接不可用——不再重撞同一写锁。
+        let outcome = observe(
+            &cache,
+            &single_query("b"),
+            Some(PUBLIC_CC),
+            200,
+            &single_card("b", "{}", "2026-10-02T00:00:00Z"),
+        );
+        assert_eq!(outcome.outcome, CacheOutcomeKind::Unavailable);
+        blocker.execute_batch("ROLLBACK").expect("release lock");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn stats_counts_visible_entries_separately_from_withdrawn_markers() {
+        let root = scratch("stats-split");
+        let cache = PublicReadCache::at(&root);
+        enable_capture(&cache);
+        observe(
+            &cache,
+            &single_query("a"),
+            Some(PUBLIC_CC),
+            200,
+            &single_card("a", "{}", "2026-10-02T00:00:00Z"),
+        );
+        observe(
+            &cache,
+            &single_query("a"),
+            Some(PUBLIC_CC),
+            404,
+            &withdraw_body(),
+        );
+        let stats = cache.stats().expect("stats");
+        assert_eq!(stats.entry_count, 0, "撤回占位不计入可见条目");
+        assert_eq!(stats.withdrawn_count, 1);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

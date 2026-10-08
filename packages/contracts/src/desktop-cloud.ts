@@ -422,6 +422,16 @@ export const DesktopCardLibraryRequestSchema = z.object({
 export type DesktopCardLibraryRequest = z.infer<typeof DesktopCardLibraryRequestSchema>;
 
 /**
+ * `?id=` 单卡 404 响应里确认「业务级不可用」的稳定错误码（D5.1-K1-r1，
+ * DESK-CACHE-006）。`/api/public-data-cards` 的真实「不存在」响应回写
+ * `{success:false, code: PUBLIC_DATA_CARD_NOT_FOUND_CODE, error}`；native
+ * 只认这个码才把缓存行标记为撤回——路由/版本错误凑巧 404 + success:false
+ * 不构成撤回证据。与 fixture `cardLibrary.publicReadCache.withdrawalErrorCode`
+ * 同源对拍。
+ */
+export const PUBLIC_DATA_CARD_NOT_FOUND_CODE = 'PUBLIC_DATA_CARD_NOT_FOUND';
+
+/**
  * 公开摘要响应允许进入持久缓存的字段白名单（D5.1-K1，DESK-CACHE-004）。
  *
  * `favorited_at` 等账号关系字段刻意**不在**名单内——公开摘要接口里它恒为

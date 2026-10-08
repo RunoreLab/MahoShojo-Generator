@@ -89,6 +89,7 @@
       "requiredCacheControlToken": "public",
       "forbiddenCacheControlTokens": ["no-store", "private", "no-cache"],
       "withdrawalStatus": 404,
+      "withdrawalErrorCode": "PUBLIC_DATA_CARD_NOT_FOUND",
       "summaryFields": [
         "id",
         "user_id",

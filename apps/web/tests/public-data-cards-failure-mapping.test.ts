@@ -83,13 +83,15 @@ describe('public-data-cards failure mapping', () => {
     expect(mocks.getDataCardByIdWithAuthorAndTags).not.toHaveBeenCalled();
   });
 
-  test('单卡查询成功且无行 → 404（业务终态）', async () => {
+  test('单卡查询成功且无行 → 404 + 稳定业务错误码（Desktop 缓存撤回证据）', async () => {
     mocks.getDataCardByIdWithAuthorAndTags.mockResolvedValueOnce(null);
 
     const response = await handler(new Request('https://example.test/api/public-data-cards?id=card-1'));
     expect(response.status).toBe(404);
     const payload = await response.json();
     expect(payload).toMatchObject({ success: false, error: '数据卡不存在' });
+    // 稳定机器可读码——native 只凭它把缓存行标记为撤回（DESK-CACHE-006）。
+    expect(payload.code).toBe('PUBLIC_DATA_CARD_NOT_FOUND');
   });
 
   test('单卡查询成功 → 200', async () => {

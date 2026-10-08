@@ -40,6 +40,7 @@ import {
   MAX_DESKTOP_AUTH_CODE_VERIFIER_LENGTH,
   MAX_DESKTOP_AUTH_STATE_LENGTH,
   MIN_DESKTOP_AUTH_CODE_VERIFIER_LENGTH,
+  PUBLIC_DATA_CARD_NOT_FOUND_CODE,
   isDesktopLoopbackRedirectUri,
 } from '../src/desktop-cloud';
 import { DataCardSummarySchema } from '../src/data-cards';
@@ -71,6 +72,7 @@ type DesktopCloudFixture = {
       requiredCacheControlToken: string;
       forbiddenCacheControlTokens: string[];
       withdrawalStatus: number;
+      withdrawalErrorCode: string;
       summaryFields: string[];
       cardFields: string[];
     };
@@ -422,6 +424,8 @@ describe('公开库持久缓存投影（D5.1-K1）', () => {
       expect(['no-store', 'private', 'no-cache']).toContain(token);
     }
     expect(cache.withdrawalStatus).toBe(404);
+    // 撤回证据是稳定业务错误码——native 不凭裸 404 + success:false 失效缓存。
+    expect(cache.withdrawalErrorCode).toBe(PUBLIC_DATA_CARD_NOT_FOUND_CODE);
   });
 
   it('卡库响应的 cache 报告字段是可选且 strict 的', () => {

@@ -1906,6 +1906,16 @@ async fn read_bounded_json(
     serde_json::from_slice(&buffer).map_err(|_| CloudError::invalid_response(context))
 }
 
+/// `dispatch_cloud_route` 的宿主环境：CloudState 单例、secret store、
+/// 该命令面的固定路由表与可选公开缓存句柄——随命令入口而不同，不随
+/// 单笔请求变化。
+struct CloudDispatchEnv<'a> {
+    state: &'a CloudState,
+    secrets: &'a dyn SecretStore,
+    routes: &'static [CloudRoute],
+    public_cache: Option<&'a crate::public_cache::PublicReadCache>,
+}
+
 /// 固定路由窄请求的公共分发：
 ///
 /// - `query`/`body` 只是业务参数——renderer 携带 URL/path/header/凭据字段的
@@ -1916,16 +1926,13 @@ async fn read_bounded_json(
 /// - 任何传输失败都是 `network-error`/`server-unavailable`，绝不伪装成
 ///   业务成功。
 async fn dispatch_cloud_route(
-    state: &CloudState,
-    secrets: &dyn SecretStore,
-    routes: &'static [CloudRoute],
-    public_cache: Option<&crate::public_cache::PublicReadCache>,
+    env: &CloudDispatchEnv<'_>,
     request: CloudRouteRequest,
     context: &str,
     response_max_bytes: usize,
     body_max_bytes: usize,
 ) -> Result<CloudRouteResponse, CloudError> {
-    let route = lookup_cloud_route(routes, &request.route_id)
+    let route = lookup_cloud_route(env.routes, &request.route_id)
         .ok_or_else(|| invalid_request("未知的云端路由标识"))?;
 
     if request.body.is_some() && route.method == reqwest::Method::GET {
@@ -1956,7 +1963,7 @@ async fn dispatch_cloud_route(
         }
     };
 
-    let session = load_session(secrets)?;
+    let session = load_session(env.secrets)?;
     if route.auth == CloudRouteAuth::Required && session.is_none() {
         return Err(CloudError::new(
             CloudErrorCode::NotAuthenticated,
@@ -1964,16 +1971,17 @@ async fn dispatch_cloud_route(
         ));
     }
 
-    let mut url = url::Url::parse(&format!("{}{}", state.origin, route.path))
+    let mut url = url::Url::parse(&format!("{}{}", env.state.origin, route.path))
         .map_err(|_| CloudError::new(CloudErrorCode::InternalError, "固定路由 URL 组装失败"))?;
     if let Some(query) = &request.query {
         url.query_pairs_mut().extend_pairs(query.iter());
     }
 
-    let mut builder = state
+    let mut builder = env
+        .state
         .http
         .request(route.method.clone(), url)
-        .header(reqwest::header::ORIGIN, &state.origin)
+        .header(reqwest::header::ORIGIN, &env.state.origin)
         .header(reqwest::header::ACCEPT, "application/json");
     if let Some(session) = &session {
         builder = builder.header(reqwest::header::COOKIE, &session.cookie);
@@ -1987,12 +1995,21 @@ async fn dispatch_cloud_route(
     // D5.1-K1：只有固定公开路由进入持久缓存观察；发送前取并发快照
     // （epoch + mutation_seq），防止在途响应复活撤回/清理后的状态。
     // 观察失败（缓存未开/损坏）不阻塞在线请求——本次响应只带
-    // `cache.outcome = 'unavailable'`。
-    let observes_public = public_cache.is_some() && route.id == PUBLIC_READ_CARDS_ROUTE_ID;
-    let observe_ticket = if observes_public {
-        public_cache.and_then(|cache| cache.begin_observe())
+    // `cache.outcome = 'unavailable'`。缓存读写是同步 SQLite I/O，
+    // 两次接触都放进受控阻塞任务，不占用 async worker、也不拖延已经
+    // 拿到的线上结果。
+    let observes_public = env.public_cache.is_some() && route.id == PUBLIC_READ_CARDS_ROUTE_ID;
+    let observe_handle = if observes_public {
+        env.public_cache.cloned()
     } else {
         None
+    };
+    let observe_ticket = match observe_handle.clone() {
+        Some(cache) => tokio::task::spawn_blocking(move || cache.begin_observe())
+            .await
+            .ok()
+            .flatten(),
+        None => None,
     };
 
     let response = builder
@@ -2005,31 +2022,38 @@ async fn dispatch_cloud_route(
     // 服务端对 Required 路由明确 401 = 本地凭据已被否认：与 `cloud_auth_status`
     // 一致地清除会话，但响应原样透传给 renderer（业务错误不是传输失败）。
     if route.auth == CloudRouteAuth::Required && status == 401 {
-        clear_session(secrets)?;
+        clear_session(env.secrets)?;
     }
 
     // `Cache-Control` 是缓存的存储许可证据，必须在 body 流被消费前取出。
+    // RFC 9111 允许同名字段多次出现——`public` 与 `no-store` 分处两个字段
+    // 值时必须合并判定；任一值不可解析按「无许可」收口。
     let cache_control = if observes_public {
-        response
-            .headers()
-            .get(reqwest::header::CACHE_CONTROL)
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_owned)
+        merged_cache_control(response.headers())
     } else {
         None
     };
 
     let body = read_bounded_json(response, context, response_max_bytes).await?;
     let cache = if observes_public {
-        Some(match (observe_ticket, public_cache) {
-            (Some(ticket), Some(cache)) => cache.observe_response(
-                &ticket,
-                &state.origin,
-                request.query.as_ref(),
-                cache_control.as_deref(),
-                status,
-                &body,
-            ),
+        Some(match (observe_ticket, observe_handle) {
+            (Some(ticket), Some(cache)) => {
+                let scope = env.state.origin.clone();
+                let query = request.query.clone();
+                let body_for_cache = body.clone();
+                tokio::task::spawn_blocking(move || {
+                    cache.observe_response(
+                        &ticket,
+                        &scope,
+                        query.as_ref(),
+                        cache_control.as_deref(),
+                        status,
+                        &body_for_cache,
+                    )
+                })
+                .await
+                .unwrap_or_else(|_| crate::public_cache::CacheOutcome::unavailable())
+            }
             _ => crate::public_cache::CacheOutcome::unavailable(),
         })
     } else {
@@ -2040,6 +2064,22 @@ async fn dispatch_cloud_route(
         body,
         cache,
     })
+}
+
+/// 合并重复的 `Cache-Control` 字段值为单份判定文本（RFC 9111 §5.2：
+/// 同名字段可合并为一个逗号分隔列表）。缺头返回 `None`；任一值不是
+/// 合法文本同样返回 `None`——「无法解析的存储许可」按无许可收口，
+/// 不猜服务端意图。
+fn merged_cache_control(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    let mut parts = Vec::new();
+    for value in headers.get_all(reqwest::header::CACHE_CONTROL).iter() {
+        parts.push(value.to_str().ok()?.to_owned());
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(", "))
+    }
 }
 
 /// `public-data-cards.query`：K1 持久公开缓存唯一观察的路由。
@@ -2058,10 +2098,12 @@ pub async fn cloud_card_library_request(
     request: CloudRouteRequest,
 ) -> Result<CloudRouteResponse, CloudError> {
     dispatch_cloud_route(
-        state,
-        secrets,
-        CARD_LIBRARY_ROUTES,
-        Some(cache),
+        &CloudDispatchEnv {
+            state,
+            secrets,
+            routes: CARD_LIBRARY_ROUTES,
+            public_cache: Some(cache),
+        },
         request,
         "数据卡请求",
         CARD_LIBRARY_RESPONSE_MAX_BYTES,
@@ -2080,10 +2122,12 @@ pub async fn cloud_messages_request(
     request: CloudRouteRequest,
 ) -> Result<CloudRouteResponse, CloudError> {
     dispatch_cloud_route(
-        state,
-        secrets,
-        MESSAGES_ROUTES,
-        None,
+        &CloudDispatchEnv {
+            state,
+            secrets,
+            routes: MESSAGES_ROUTES,
+            public_cache: None,
+        },
         request,
         "消息请求",
         MESSAGES_RESPONSE_MAX_BYTES,
@@ -3064,6 +3108,45 @@ mod tests {
                 id = route.id
             );
         }
+
+        // K1 公开持久缓存判定常量与 fixture `cardLibrary.publicReadCache`
+        // 同源对拍：来源路由、存储许可 token、撤回状态码/稳定错误码与投影
+        // 白名单——两侧任一侧漂移即失败。
+        let cache_fixture = &fixture["cardLibrary"]["publicReadCache"];
+        assert_eq!(
+            cache_fixture["sourceRouteId"].as_str(),
+            Some(PUBLIC_READ_CARDS_ROUTE_ID)
+        );
+        assert_eq!(
+            cache_fixture["requiredCacheControlToken"].as_str(),
+            Some("public")
+        );
+        let forbidden: Vec<&str> = cache_fixture["forbiddenCacheControlTokens"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect();
+        assert_eq!(forbidden, ["no-store", "private", "no-cache"]);
+        assert_eq!(cache_fixture["withdrawalStatus"].as_u64(), Some(404));
+        assert_eq!(
+            cache_fixture["withdrawalErrorCode"].as_str(),
+            Some(crate::public_cache::WITHDRAWAL_ERROR_CODE)
+        );
+        let summary_fields: Vec<&str> = cache_fixture["summaryFields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect();
+        assert_eq!(summary_fields, crate::public_cache::SUMMARY_FIELDS);
+        let card_fields: Vec<&str> = cache_fixture["cardFields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|value| value.as_str().unwrap())
+            .collect();
+        assert_eq!(card_fields, crate::public_cache::CARD_FIELDS);
     }
 
     /* ── hosted 生成适配 ─────────────────────────────────────────────── */
@@ -3672,6 +3755,20 @@ mod tests {
         fn get(&self) -> &crate::public_cache::PublicReadCache {
             &self.cache
         }
+
+        /// K1-r1：native 初始态是「策略尚未确认」——正缓存在第一次策略推送
+        /// 之前一律暂停。需要正写入的用例必须先显式确认策略。
+        fn enable_capture(&self) {
+            self.cache
+                .apply_policy(crate::public_cache::PublicCachePolicyDto {
+                    capture_enabled: true,
+                    max_bytes: crate::public_cache::CacheBudget::Limited(
+                        crate::public_cache::DEFAULT_BUDGET_BYTES,
+                    ),
+                    when_full: crate::public_cache::CacheWhenFull::Pause,
+                })
+                .expect("apply capture-enabled policy");
+        }
     }
 
     impl Drop for TestCache {
@@ -3926,6 +4023,7 @@ mod tests {
             let state = CloudState::with_origin(&server.origin);
             let secrets = MemorySecrets::new();
             let cache = TestCache::new("observe-capture");
+            cache.enable_capture();
             // 服务端明确允许公开存储。
             *server.card_extra_headers.lock().unwrap() = vec![(
                 "Cache-Control".to_string(),
@@ -4000,8 +4098,12 @@ mod tests {
             let state = CloudState::with_origin(&server.origin);
             let secrets = MemorySecrets::new();
             let cache = TestCache::new("observe-withdraw");
-            *server.card_response_override.lock().unwrap() =
-                Some((404, r#"{"success":false}"#.to_string()));
+            // 仅凭 404 + success:false 不是撤回证据——可能是路由/版本错误；
+            // 必须带服务端登记的业务错误码（DESK-CACHE-006）。
+            *server.card_response_override.lock().unwrap() = Some((
+                404,
+                r#"{"success":false,"code":"PUBLIC_DATA_CARD_NOT_FOUND"}"#.to_string(),
+            ));
 
             let mut request = card_request("public-data-cards.query");
             request.query = Some(std::collections::BTreeMap::from([(
@@ -4016,6 +4118,102 @@ mod tests {
             assert_eq!(
                 report.outcome,
                 crate::public_cache::CacheOutcomeKind::Withdrawn
+            );
+
+            // 无稳定错误码的 404：不得撤回，只如实报告 ignored。
+            *server.card_response_override.lock().unwrap() =
+                Some((404, r#"{"success":false}"#.to_string()));
+            let mut request = card_request("public-data-cards.query");
+            request.query = Some(std::collections::BTreeMap::from([(
+                "id".to_string(),
+                "card-gone".to_string(),
+            )]));
+            let response = cloud_card_library_request(&state, &secrets, cache.get(), request)
+                .await
+                .expect("generic 404 也是业务响应");
+            let report = response.cache.expect("公开路由必须携带 cache 报告");
+            assert_eq!(
+                report.outcome,
+                crate::public_cache::CacheOutcomeKind::Ignored
+            );
+        });
+    }
+
+    /// RFC 9111 允许同名 `Cache-Control` 字段多次出现：两个字段值必须合并
+    /// 判定——`public` 与 `no-store` 分处两个头时值更严的拒绝语义胜出。
+    #[test]
+    fn public_route_merges_repeated_cache_control_headers() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            let cache = TestCache::new("observe-cc-merge");
+            cache.enable_capture();
+            *server.card_response_override.lock().unwrap() = Some((
+                200,
+                serde_json::json!({
+                    "success": true,
+                    "cards": [{
+                        "id": "card-a", "user_id": 1, "type": "character",
+                        "name": "Alpha", "description": "d", "is_public": 1,
+                        "review_status": "approved",
+                        "created_at": "2026-10-01T00:00:00Z",
+                        "updated_at": "2026-10-02T00:00:00Z",
+                        "usage_count": 0, "like_count": 0, "favorite_count": 0,
+                        "is_recommended": 0, "username": "author"
+                    }],
+                    "total": 1, "nextOffset": null
+                })
+                .to_string(),
+            ));
+
+            let summary_request = || {
+                let mut request = card_request("public-data-cards.query");
+                request.query = Some(std::collections::BTreeMap::from([(
+                    "view".to_string(),
+                    "summary".to_string(),
+                )]));
+                request
+            };
+
+            // `public` 与 `max-age` 分处两个头：合并后仍是合法存储许可。
+            *server.card_extra_headers.lock().unwrap() = vec![
+                ("Cache-Control".to_string(), "public".to_string()),
+                ("Cache-Control".to_string(), "max-age=15".to_string()),
+            ];
+            let response =
+                cloud_card_library_request(&state, &secrets, cache.get(), summary_request())
+                    .await
+                    .expect("query must succeed");
+            assert_eq!(
+                response.cache.expect("cache report").outcome,
+                crate::public_cache::CacheOutcomeKind::Captured
+            );
+            assert_eq!(
+                cache.get().stats().expect("stats").entry_count,
+                1,
+                "合并后许可成立必须落盘"
+            );
+
+            // `public` 与 `no-store` 分处两个头：任何一个值里的禁止指令
+            // 都否决整份响应的存储许可。
+            cache.get().clear().expect("clear");
+            *server.card_extra_headers.lock().unwrap() = vec![
+                ("Cache-Control".to_string(), "public".to_string()),
+                ("Cache-Control".to_string(), "no-store".to_string()),
+            ];
+            let response =
+                cloud_card_library_request(&state, &secrets, cache.get(), summary_request())
+                    .await
+                    .expect("query must succeed");
+            assert_eq!(
+                response.cache.expect("cache report").outcome,
+                crate::public_cache::CacheOutcomeKind::Ignored
+            );
+            assert_eq!(
+                cache.get().stats().expect("stats").entry_count,
+                0,
+                "任一字段值含 no-store 即不得落盘"
             );
         });
     }
