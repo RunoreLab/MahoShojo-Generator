@@ -322,15 +322,21 @@ export const CreatorPage: React.FC = () => {
     () => (primaryBuildRuleId ? tryLoadBuildRulePresetById(primaryBuildRuleId) : null),
     [primaryBuildRuleId]
   );
+  // 失效规则容错（G3-r1）：本机偏好可能引用已移除的规则预设，渲染期先按预设
+  // 存在性过滤再求值，失效项由 reconcileCreatorBuildRuleSelection 效应统一剔除。
+  const evaluableBuildRuleIds = useMemo(
+    () => selectedBuildRuleIds.filter((ruleId) => tryLoadBuildRulePresetById(ruleId) !== null),
+    [selectedBuildRuleIds]
+  );
   const buildRuleRuntimeResults = useMemo(
     () =>
-      selectedBuildRuleIds.map((ruleId) =>
+      evaluableBuildRuleIds.map((ruleId) =>
         evaluateBuildRuleState({
           ruleId,
           inputs: buildRuleInputsById[ruleId] ?? createDefaultBuildRuleInputs(ruleId),
         })
       ),
-    [selectedBuildRuleIds, buildRuleInputsById]
+    [evaluableBuildRuleIds, buildRuleInputsById]
   );
   const primaryBuildRuleRuntimeResult = useMemo(
     () => buildRuleRuntimeResults.find((rule) => rule.ruleId === primaryBuildRuleId) ?? null,

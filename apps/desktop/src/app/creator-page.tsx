@@ -240,12 +240,19 @@ function CreatorForm({ session }: { session: CreatorSession }) {
     () => (primaryRuleId ? tryLoadBuildRulePresetById(primaryRuleId) : null),
     [primaryRuleId],
   );
+  // 失效规则容错（G3-r1）：草稿只校验 ruleId 是字符串，旧版本/手工编辑的草稿
+  // 可能引用已移除预设——渲染期先按预设存在性过滤再求值，失效项由模板对账
+  // 效应统一剔除并回写草稿（渲染期不改草稿）。
+  const evaluableRuleIds = useMemo(
+    () => selectedRuleIds.filter((ruleId) => tryLoadBuildRulePresetById(ruleId) !== null),
+    [selectedRuleIds],
+  );
   const buildRuleRuntimeResults = useMemo(
-    () => selectedRuleIds.map((ruleId) => evaluateBuildRuleState({
+    () => evaluableRuleIds.map((ruleId) => evaluateBuildRuleState({
       ruleId,
       inputs: ruleInputsById[ruleId] ?? createDefaultBuildRuleInputs(ruleId),
     })),
-    [selectedRuleIds, ruleInputsById],
+    [evaluableRuleIds, ruleInputsById],
   );
   const primaryBuildRuleRuntimeResult = useMemo(
     () => buildRuleRuntimeResults.find((rule) => rule.ruleId === primaryRuleId) ?? null,

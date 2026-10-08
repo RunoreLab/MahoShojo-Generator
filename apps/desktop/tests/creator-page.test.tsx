@@ -191,6 +191,32 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     expect(mocks.save.mock.calls[0]![0]).toMatchObject({ cardType: 'character', title: '雾都巡夜人' });
   });
 
+  it('restores drafts referencing removed build-rule presets without crashing (G3-r1)', async () => {
+    // 旧版本/手工编辑的草稿可能引用已下架规则：渲染期过滤先于求值，
+    // 对账效应再剔除失效项并回写草稿，页面保持可操作。
+    window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft({
+      selectedRuleIds: ['arena-trpg-lite', 'removed-rule'],
+      primaryRuleId: 'removed-rule',
+      ruleInputsById: { 'removed-rule': { ignored: true } },
+    })));
+    await mount();
+    await click('恢复草稿');
+    expect(container.textContent).toContain('问题 1 /');
+    await settle();
+    const stored = JSON.parse(window.localStorage.getItem(CREATOR_DRAFT_KEY)!) as {
+      selectedRuleIds?: string[];
+      primaryRuleId?: string | null;
+    };
+    expect(stored.selectedRuleIds).toEqual(['arena-trpg-lite']);
+    expect(stored.primaryRuleId).toBe('arena-trpg-lite');
+    expect(button('生成数据卡').disabled).toBe(false);
+    await click('生成数据卡');
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.execute.mock.calls[0]![1].buildRuleRequests).toEqual([
+      { ruleId: 'arena-trpg-lite', version: expect.any(String), inputs: expect.any(Object) },
+    ]);
+  });
+
   it('refuses the un-wired scenario template with an explanatory error instead of dispatching', async () => {
     aiConfig('server');
     window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft({ template: 'scenario' })));
