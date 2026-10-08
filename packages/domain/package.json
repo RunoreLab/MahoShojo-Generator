@@ -120,6 +120,11 @@
       "import": "./src/creator/stream-prompt.ts",
       "default": "./src/creator/stream-prompt.ts"
     },
+    "./creator/stream-result": {
+      "types": "./src/creator/stream-result.ts",
+      "import": "./src/creator/stream-result.ts",
+      "default": "./src/creator/stream-result.ts"
+    },
     "./creator/request-body": {
       "types": "./src/creator/request-body.ts",
       "import": "./src/creator/request-body.ts",

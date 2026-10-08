@@ -2,7 +2,7 @@ import React from 'react';
 import { expect, test } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-import { CreatorMainStage } from '@/components/creator/CreatorMainStage';
+import { CreatorMainStage } from '@mahoshojo/ui-web/creator';
 
 test('CreatorMainStage 在 questionnaire 阶段只保留主任务区域', () => {
   const html = renderToStaticMarkup(

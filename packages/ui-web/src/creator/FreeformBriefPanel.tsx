@@ -2,7 +2,7 @@ import {
   CREATOR_INPUT_CLASS,
   CREATOR_PANEL_SURFACE_CLASS,
   joinCreatorClassNames,
-} from '@/components/creator/surfaceStyles';
+} from './surfaceStyles';
 
 type FreeformBriefPanelProps = {
   value: string;

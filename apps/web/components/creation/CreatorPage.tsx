@@ -59,16 +59,19 @@ import {
 } from '@mahoshojo/domain/questionnaire-answer-export';
 import { CharacterPortraitAssetPanel } from '@/components/shared/CharacterPortraitAssetPanel';
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
-import { TemplateSelector } from '@/components/creator/TemplateSelector';
-import { FreeformBriefPanel } from '@/components/creator/FreeformBriefPanel';
-import { BuildRulePicker } from '@/components/creator/BuildRulePicker';
-import { BuildRulePanel } from '@/components/creator/BuildRulePanel';
-import { BuildSummaryPanel } from '@/components/creator/BuildSummaryPanel';
+import Footer from '@/components/Footer';
+import {
+  BuildRulePanel,
+  BuildRulePicker,
+  BuildSummaryPanel,
+  CreatorQuestionnaireSidebarPanel,
+  CreatorResultStageContent,
+  CreatorStructuredResultCard,
+  CreatorWorkbenchPage,
+  FreeformBriefPanel,
+  TemplateSelector,
+} from '@mahoshojo/ui-web/creator';
 import { CreatorAdvancedSidebarPanel } from '@/components/creator/CreatorAdvancedSidebarPanel';
-import { CreatorQuestionnaireSidebarPanel } from '@/components/creator/CreatorQuestionnaireSidebarPanel';
-import { CreatorResultStageContent } from '@/components/creator/CreatorResultStageContent';
-import { CreatorStructuredResultCard } from '@/components/creator/CreatorStructuredResultCard';
-import { CreatorWorkbenchPage } from '@/components/creator/CreatorWorkbenchPage';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { CREATOR_PAGE_COPY } from '@/lib/creator/page-copy';
 import {
@@ -2398,6 +2401,7 @@ export const CreatorPage: React.FC = () => {
         mainTitle={mainTitle}
         mainContent={mainContent}
         showFooter={showFooter}
+        footer={<Footer textWhite={true} />}
         overlayContent={creatorOverlayContent}
       />
     </>

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
+import { CollapsibleSection } from './CollapsibleSection';
 
 type CreatorSidebarProps = {
   layoutMode: 'desktop' | 'mobile';

@@ -2,7 +2,7 @@ import React from 'react';
 import { describe, expect, test } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-import { CreatorStructuredResultCard } from '@/components/creator/CreatorStructuredResultCard';
+import { CreatorStructuredResultCard } from '@mahoshojo/ui-web/creator';
 
 describe('CreatorStructuredResultCard', () => {
   test('canshou 模板结果使用 CanshouCard 渲染', () => {

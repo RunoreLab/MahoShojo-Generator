@@ -1,10 +1,10 @@
-import { CREATOR_TEMPLATE_OPTIONS, isCreatorStreamTemplate, type CreatorTemplateId } from '@/lib/creator/templates';
+import { CREATOR_TEMPLATE_OPTIONS, isCreatorStreamTemplate, type CreatorTemplateId } from '@mahoshojo/domain/creator/templates';
 import {
   CREATOR_PANEL_SURFACE_CLASS,
   CREATOR_SUBPANEL_ACTIVE_CLASS,
   CREATOR_SUBPANEL_SURFACE_CLASS,
   joinCreatorClassNames,
-} from '@/components/creator/surfaceStyles';
+} from './surfaceStyles';
 
 type TemplateSelectorProps = {
   value: CreatorTemplateId;

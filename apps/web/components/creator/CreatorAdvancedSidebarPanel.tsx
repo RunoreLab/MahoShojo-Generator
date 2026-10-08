@@ -4,7 +4,7 @@ import {
   CREATOR_INPUT_CLASS,
   CREATOR_SUBPANEL_SURFACE_CLASS,
   joinCreatorClassNames,
-} from '@/components/creator/surfaceStyles';
+} from '@mahoshojo/ui-web/creator';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import type { ProviderCooldownMode } from '@/lib/cooldown';

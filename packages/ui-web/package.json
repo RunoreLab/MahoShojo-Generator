@@ -105,6 +105,11 @@
       "import": "./src/character-card/index.ts",
       "default": "./src/character-card/index.ts"
     },
+    "./creator": {
+      "types": "./src/creator/index.ts",
+      "import": "./src/creator/index.ts",
+      "default": "./src/creator/index.ts"
+    },
     "./local-archive": {
       "types": "./src/local-archive/index.ts",
       "import": "./src/local-archive/index.ts",

@@ -5,7 +5,7 @@ import {
   CREATOR_PANEL_SURFACE_CLASS,
   CREATOR_SUBPANEL_ACTIVE_CLASS,
   CREATOR_SUBPANEL_SURFACE_CLASS,
-} from '@/components/creator/surfaceStyles';
+} from '@mahoshojo/ui-web/creator';
 
 test('creator workbench surface 使用独立的高对比 token，避免浅色模式边框消失', () => {
   expect(CREATOR_PANEL_SURFACE_CLASS).toContain('border-[var(--creator-panel-border)]');

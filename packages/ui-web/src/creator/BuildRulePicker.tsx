@@ -1,10 +1,10 @@
-import type { BuildRulePresetIndex } from '@/lib/creator/types';
+import type { BuildRulePresetIndex } from '@mahoshojo/domain/creator/types';
 import {
   CREATOR_PANEL_SURFACE_CLASS,
   CREATOR_SUBPANEL_ACTIVE_CLASS,
   CREATOR_SUBPANEL_SURFACE_CLASS,
   joinCreatorClassNames,
-} from '@/components/creator/surfaceStyles';
+} from './surfaceStyles';
 
 type BuildRulePickerProps = {
   presets: BuildRulePresetIndex;

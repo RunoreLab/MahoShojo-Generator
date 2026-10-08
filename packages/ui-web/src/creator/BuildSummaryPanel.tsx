@@ -1,9 +1,9 @@
-import type { BuildRuleRuntimeResult } from '@/lib/creator/types';
+import type { BuildRuleRuntimeResult } from '@mahoshojo/domain/creator/types';
 import {
   CREATOR_PANEL_SURFACE_CLASS,
   CREATOR_SUBPANEL_SURFACE_CLASS,
   joinCreatorClassNames,
-} from '@/components/creator/surfaceStyles';
+} from './surfaceStyles';
 
 type BuildSummaryPanelProps = {
   runtimeResult: BuildRuleRuntimeResult;

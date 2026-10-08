@@ -2,7 +2,7 @@ import React from 'react';
 import { expect, test } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server.node';
 
-import { CreatorWorkbenchPage } from '@/components/creator/CreatorWorkbenchPage';
+import { CreatorWorkbenchPage } from '@mahoshojo/ui-web/creator';
 
 test('CreatorWorkbenchPage 在 result 阶段仍输出工作台壳与 overlay 内容', () => {
   const previousWindow = (globalThis as typeof globalThis & { window?: unknown }).window;

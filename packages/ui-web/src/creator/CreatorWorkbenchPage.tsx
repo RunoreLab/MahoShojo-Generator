@@ -1,11 +1,9 @@
 import type { Key, ReactNode } from 'react';
 
-import Footer from '@/components/Footer';
-
-import { CreatorMainStage } from '@/components/creator/CreatorMainStage';
-import { CreatorOverviewCard } from '@/components/creator/CreatorOverviewCard';
-import { CreatorSidebar } from '@/components/creator/CreatorSidebar';
-import { CreatorWorkbenchLayout } from '@/components/creator/CreatorWorkbenchLayout';
+import { CreatorMainStage } from './CreatorMainStage';
+import { CreatorOverviewCard } from './CreatorOverviewCard';
+import { CreatorSidebar } from './CreatorSidebar';
+import { CreatorWorkbenchLayout } from './CreatorWorkbenchLayout';
 
 type CreatorWorkbenchPageProps = {
   layoutMode: 'desktop' | 'mobile';
@@ -24,6 +22,8 @@ type CreatorWorkbenchPageProps = {
   mainTitle?: string;
   mainContent: ReactNode;
   showFooter?: boolean;
+  /** 页脚由宿主注入（Web 传 Footer，Desktop 传壳层页脚）；缺省不渲染。 */
+  footer?: ReactNode;
   overlayContent?: ReactNode;
 };
 
@@ -44,6 +44,7 @@ export function CreatorWorkbenchPage({
   mainTitle,
   mainContent,
   showFooter = false,
+  footer,
   overlayContent,
 }: CreatorWorkbenchPageProps) {
   return (
@@ -71,7 +72,7 @@ export function CreatorWorkbenchPage({
         )}
         main={<CreatorMainStage stage={mainStage} title={mainTitle} topContent={mainTopContent} content={mainContent} />}
       />
-      {showFooter ? <Footer textWhite={true} /> : null}
+      {showFooter ? footer : null}
       {overlayContent}
     </div>
   );

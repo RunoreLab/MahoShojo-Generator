@@ -8,5 +8,6 @@ export * from './prompt';
 export * from './server';
 export * from './card-metadata';
 export * from './stream-prompt';
+export * from './stream-result';
 export * from './request-body';
 export * from './selection';
