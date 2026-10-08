@@ -12,6 +12,7 @@
 
 import {
   AI_PROVIDER_PRESETS,
+  SYSTEM_PROVIDER_OPTION,
   describeAiPresetDirectSupport,
   describeAiPresetModelDirectSupport,
   listDirectCapableAiPresetModels,
@@ -61,6 +62,13 @@ export interface DesktopAiSelection {
   executionPreference: 'client' | 'server';
   /** 客户端连接选择；null = 尚未选择。 */
   clientConnectionId: string | null;
+  /**
+   * 「使用系统默认配置」通道的模型选择（overlay v4 起）。
+   * 取值为 `SYSTEM_PROVIDER_OPTION.models` 中的模型 ID（`'default'` 表示服务器
+   * 默认顺序）；缺省等同 `'default'`。与 Web `providerId:'system' + modelId`
+   * 语义一致，非秘密偏好，不含凭据。
+   */
+  systemModelId?: string;
 }
 
 /**
@@ -93,6 +101,23 @@ export const isValidDesktopModelId = (value: unknown): value is string =>
   value.trim().length <= DESKTOP_MODEL_ID_MAX_LENGTH &&
   !DANGEROUS_MODEL_ID_CHAR_PATTERN.test(value);
 
+/**
+ * `generationOverrides` 中为「使用系统默认配置」通道保留的 scope key。
+ * 与 Web `arena.customProvider.generationOverrides.system.<modelId>` 语义一致。
+ * 该值同时被保留为 Profile ID 命名禁区——一个名叫 `system` 的连接会与
+ * 系统通道的覆盖作用域撞名，store 在保存时拒绝（`modelsByProfileId` 只按
+ * Profile ID 索引，不用于系统通道）。
+ */
+export const DESKTOP_SYSTEM_OVERRIDES_SCOPE = 'system';
+
+/** 「使用系统默认配置」当前可选的系统模型清单（与目录单一事实源同序）。 */
+export const listDesktopSystemModelOptions = (): readonly AIModelOption[] =>
+  SYSTEM_PROVIDER_OPTION.models;
+
+/** 判定一个模型 ID 是否仍在系统默认配置的公开清单内。 */
+export const isDesktopSystemModelId = (modelId: string): boolean =>
+  SYSTEM_PROVIDER_OPTION.models.some((model) => model.value === modelId);
+
 /** 持久化 overlay：只含非敏感偏好，secret 永远不进这份文档。 */
 export interface DesktopAiConfigOverlay {
   selection: DesktopAiSelection;
@@ -121,12 +146,19 @@ export type DesktopSecretPresence = 'unknown' | 'absent' | 'present' | 'error';
 const isObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
+const DESKTOP_SELECTION_KEYS = new Set([
+  'executionPreference',
+  'clientConnectionId',
+  'systemModelId',
+]);
+
 const isValidSelection = (value: unknown): value is DesktopAiSelection =>
   isObject(value) &&
-  Object.keys(value).length === 2 &&
+  Object.keys(value).every((key) => DESKTOP_SELECTION_KEYS.has(key)) &&
   (value.executionPreference === 'client' || value.executionPreference === 'server') &&
   (value.clientConnectionId === null ||
-    (typeof value.clientConnectionId === 'string' && value.clientConnectionId.trim().length > 0));
+    (typeof value.clientConnectionId === 'string' && value.clientConnectionId.trim().length > 0)) &&
+  (value.systemModelId === undefined || isValidDesktopModelId(value.systemModelId));
 
 /**
  * fail-closed 解析持久化 overlay。
@@ -135,9 +167,10 @@ const isValidSelection = (value: unknown): value is DesktopAiSelection =>
  */
 export const parseDesktopAiConfigOverlay = (raw: string): DesktopAiConfigOverlay => {
   const value: unknown = JSON.parse(raw);
-  // v2 → v3 迁移：v2 文档缺省 `modelsByProfileId`，解析后初始化为空表；
-  // 下一次落盘即以 v3 写回（受检、幂等——只在整体解析成功后写）。
-  if (!isObject(value) || (value.version !== 2 && value.version !== 3)) {
+  // v2 → v4 迁移：v2 缺省 `modelsByProfileId`，v3 缺省 `selection.systemModelId`；
+  // 解析后各自初始化为空，下一次落盘即以 v4 写回（受检、幂等——只在整体解析
+  // 成功后写）。未知版本继续 fail-closed。
+  if (!isObject(value) || (value.version !== 2 && value.version !== 3 && value.version !== 4)) {
     throw new Error('AI 配置版本不受支持');
   }
   if (!isValidSelection(value.selection)) {
@@ -210,7 +243,7 @@ export const parseDesktopAiConfigOverlay = (raw: string): DesktopAiConfigOverlay
 };
 
 export const serializeDesktopAiConfigOverlay = (overlay: DesktopAiConfigOverlay): string =>
-  JSON.stringify({ version: 3, ...overlay });
+  JSON.stringify({ version: 4, ...overlay });
 
 /** 预设展示行：整条支持度 + 该宿主上已核验可直连的模型清单。 */
 export interface DesktopPresetEntry {
@@ -265,16 +298,28 @@ export const resolveDesktopAiTarget = (
   modelsByProfileId: Readonly<Record<string, DesktopProfileModelSelection>>,
 ): ResolvedDesktopAiTarget => {
   if (selection.executionPreference === 'server') {
+    // 「使用系统默认配置」通道：模型清单来自 SYSTEM_PROVIDER_OPTION（与 Web
+    // 同一目录事实源）；未选择时生效模型为 'default'（服务器默认顺序）。
+    // 显式选择过、后被目录移除的模型保留原值供诊断并要求重新选择——
+    // 不静默回落默认模型，也不允许拿悬空 ID 去执行。
+    const systemModelIds = SYSTEM_PROVIDER_OPTION.models.map((model) => model.value);
+    const storedSystemModelId = selection.systemModelId;
+    const systemModelDangling =
+      storedSystemModelId !== undefined && !systemModelIds.includes(storedSystemModelId);
+    const effectiveSystemModelId = storedSystemModelId ?? 'default';
     return {
       location: 'server',
       profile: null,
       mode: null,
-      modelId: null,
-      availableModelIds: [],
-      generationOverrides: undefined,
+      modelId: effectiveSystemModelId,
+      availableModelIds: systemModelIds,
+      generationOverrides:
+        generationOverrides[DESKTOP_SYSTEM_OVERRIDES_SCOPE]?.[effectiveSystemModelId],
       // hosted 通路已接入：可执行性由 dispatch 时 DESK-094 兼容/可达性门禁裁决，
       // 登录与否只影响会话 cookie 是否附带，不是前置条件。
-      unavailableReason: null,
+      unavailableReason: systemModelDangling
+        ? '所选系统模型已不在支持列表中，请重新选择'
+        : null,
     };
   }
 

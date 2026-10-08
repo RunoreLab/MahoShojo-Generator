@@ -45,6 +45,9 @@ export const useConnectionTest = (target: ResolvedDesktopAiTarget) => {
           contractVersion: 1,
           mode,
           modelId,
+          // 测试只验证连通性，输出预算压到最小——真实供应商按 token 计费，
+          // 不给供应商机会生成超出需要的长回复（P2 测试开销上限）。
+          maxOutputTokens: 32,
           messages: [{ role: 'user', content: '用一句话介绍你自己。' }],
         },
         controller.signal,
@@ -82,13 +85,17 @@ export const useConnectionTest = (target: ResolvedDesktopAiTarget) => {
   };
 
   // 用字段值做依赖而不是拼字符串，id/modelId 含分隔符也不会误判。
+  // 配置 revision 一并纳入：同 ID 同模型下改了 Endpoint（updatedAt）或
+  // 轮换了 Key（apiKeyRef），旧测试结果不得继续显示（P2 测试结果归属）。
   const testTargetId = target.profile?.id ?? null;
   const testTargetModel = target.modelId;
+  const testTargetUpdatedAt = target.profile?.updatedAt ?? null;
+  const testTargetKeyRef = target.profile?.apiKeyRef ?? null;
   useEffect(() => {
     testRevisionRef.current += 1;
     testAbortRef.current?.abort();
     setTestState({ status: 'idle' });
-  }, [testTargetId, testTargetModel]);
+  }, [testTargetId, testTargetModel, testTargetUpdatedAt, testTargetKeyRef]);
   useEffect(
     () => () => {
       testRevisionRef.current += 1;
@@ -124,6 +131,9 @@ export const ConnectionTestSection = ({ target }: { target: ResolvedDesktopAiTar
           </button>
         )}
       </div>
+      <p className="battle-lite-subtle-text text-xs">
+        测试会向该连接发送一次真实请求（输出上限 32 tokens），可能产生极少量供应商费用。
+      </p>
       {testState.status === 'done' && (
         <p className="battle-lite-subtle-text whitespace-pre-wrap text-xs">
           测试输出：{testState.text || '（空）'}

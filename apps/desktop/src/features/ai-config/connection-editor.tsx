@@ -4,7 +4,7 @@
 // 「新建自定义连接」）共同消费——编辑器只有这一份实现，设置页和生成页不得
 // 再各长一套仅外观相似的表单（DESK-AIP-009.3/10）。
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { requiresExplicitPublicHttpConfirmation } from '@mahoshojo/contracts/provider-profile';
 import type { DirectProviderProfileV1 } from '@mahoshojo/contracts/provider-profile';
@@ -45,13 +45,30 @@ export const saveConnectionDraft = async (
   options: { activate?: boolean } = {},
 ): Promise<void> => {
   try {
-    await store.saveConnection(draft);
+    const result = await store.saveConnection(draft);
+    if (!result.persisted) {
+      // 保存主流程返回但 native 记录核验失败——不声称已保存，也不假装全失败。
+      throw new Error(
+        '连接保存结果无法核验：本地存储未返回该连接记录，请检查系统凭据/存储后重试',
+      );
+    }
     if (options.activate === true) {
       store.activateConnection(draft.id);
+      // 激活是显式操作但不抛出内部细节（未知 Profile/无效模型静默 no-op）；
+      // 这里做结果核验——选择没真正切过去就按「已保存但未启用」处理。
+      const selection = store.getSnapshot().selection;
+      if (
+        selection.executionPreference !== 'client' ||
+        selection.clientConnectionId !== draft.id
+      ) {
+        throw new Error('配置写入失败（激活未生效）');
+      }
     }
   } catch (cause) {
-    const saved = store.getSnapshot().profiles.some((item) => item.id === draft.id);
-    if (saved) {
+    // native 记录核验而非信任本地列表缓存：Profile 已落盘但激活/刷新未跟上
+    // 属于部分成功，重试沿用同一 draft.id，不产生第二条 Profile。
+    const persisted = await store.isProfilePersisted(draft.id).catch(() => false);
+    if (persisted) {
       throw new Error(
         `连接已保存，但启用为当前连接失败：${
           cause instanceof Error ? cause.message : '配置写入失败'
@@ -69,6 +86,7 @@ export const ConnectionEditor = ({
   saveLabel,
   onCancel,
   onSave,
+  onDirtyChange,
 }: {
   editing: EditingState;
   existingSecretKnown: boolean;
@@ -77,9 +95,23 @@ export const ConnectionEditor = ({
   saveLabel: string;
   onCancel: () => void;
   onSave: (draft: ProfileDraft) => Promise<void>;
+  /**
+   * 未保存修改状态上抛（含易失 Key 输入）：父级据此在切换编辑对象、
+   * 切换供应商、跳转管理页等路径上统一做离开确认（r1 草稿竞态收口）。
+   */
+  onDirtyChange?: (dirty: boolean) => void;
 }) => {
   const [draft, setDraft] = useState<ProfileDraft>(editing.draft);
   const [error, setError] = useState<string | null>(null);
+  // P1 草稿竞态：连续编辑 A、B 且组件未卸载时，残留草稿会被当成新对象提交。
+  // 按连接身份在渲染期同步重置（React「render 期间调整 state」模式）；
+  // 调用方同时以 key={draft.id} 强制重挂载获得完整重置，两者互为冗余。
+  const [seenDraftId, setSeenDraftId] = useState(editing.draft.id);
+  if (seenDraftId !== editing.draft.id) {
+    setSeenDraftId(editing.draft.id);
+    setDraft(editing.draft);
+    setError(null);
+  }
   const needsHttpConfirm = useMemo(
     () => requiresExplicitPublicHttpConfirmation(draft.baseUrl.trim()),
     [draft.baseUrl],
@@ -99,6 +131,9 @@ export const ConnectionEditor = ({
     (draft.apiKey ?? '') !== '' ||
     draft.allowPublicHttp !== editing.draft.allowPublicHttp ||
     draft.clearApiKey === true;
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
   const cancelEditing = () => {
     if (
       isDirty &&

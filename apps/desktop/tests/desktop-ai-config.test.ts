@@ -162,7 +162,8 @@ describe('parseDesktopAiConfigOverlay', () => {
 
   it('fails closed on unsupported version, corrupt selection and non-schema overrides', () => {
     expect(() => parseDesktopAiConfigOverlay('{"version":1}')).toThrow('版本');
-    expect(() => parseDesktopAiConfigOverlay('{"version":4}')).toThrow('版本');
+    expect(() => parseDesktopAiConfigOverlay('{"version":5}')).toThrow('版本');
+    expect(() => parseDesktopAiConfigOverlay('{"version":4}')).toThrow('选择');
     expect(() =>
       parseDesktopAiConfigOverlay(
         JSON.stringify({
@@ -203,7 +204,7 @@ describe('parseDesktopAiConfigOverlay', () => {
     ).toThrow('隐藏');
   });
 
-  it('migrates v2 without modelsByProfileId and writes back as v3', () => {
+  it('migrates v2 without modelsByProfileId and writes back as v4', () => {
     const parsed = parseDesktopAiConfigOverlay(
       JSON.stringify({
         version: 2,
@@ -214,8 +215,8 @@ describe('parseDesktopAiConfigOverlay', () => {
     );
     expect(parsed.modelsByProfileId).toEqual({});
     expect(parsed.generationOverrides).toEqual({ p1: { m1: { temperature: 0.4 } } });
-    // 下一次落盘即以 v3 写回（受检、幂等）。
-    expect(serializeDesktopAiConfigOverlay(parsed)).toContain('"version":3');
+    // 下一次落盘即以 v4 写回（受检、幂等）。
+    expect(serializeDesktopAiConfigOverlay(parsed)).toContain('"version":4');
     expect(JSON.parse(serializeDesktopAiConfigOverlay(parsed)).modelsByProfileId).toEqual({});
   });
 
@@ -276,6 +277,11 @@ describe('resolveDesktopAiTarget', () => {
     expect(target.profile).toBeNull();
     expect(target.mode).toBeNull();
     expect(target.unavailableReason).toBeNull();
+    // 「使用系统默认配置」未选择模型时生效为 'default'（服务器默认顺序），
+    // 候选清单来自系统目录（与 Web 同一事实源，含 glm-5.3-flash）。
+    expect(target.modelId).toBe('default');
+    expect(target.availableModelIds).toContain('default');
+    expect(target.availableModelIds).toContain('glm-5.3-flash');
   });
 
   it('guides configuration when no client connection is selected', () => {
@@ -518,7 +524,7 @@ describe('DesktopAiConfigStore', () => {
     store.resetBlockedOverlay();
     await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
     expect(store.getSnapshot().overlayState).toBe('ready');
-    expect(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)).toContain('"version":3');
+    expect(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)).toContain('"version":4');
   });
 
   it('persists hide/restore of presets', async () => {
@@ -556,7 +562,7 @@ describe('DesktopAiConfigStore', () => {
     // 执行位置与连接选择不因模型切换被改写。
     expect(store.getSnapshot().selection).toEqual(clientSelection('p_local'));
     const persisted = JSON.parse(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)!);
-    expect(persisted.version).toBe(3);
+    expect(persisted.version).toBe(4);
     expect(persisted.modelsByProfileId.p_local).toEqual({
       selectedModelId: 'qwen3:14b',
       customModelIds: ['qwen3:14b'],
@@ -728,8 +734,8 @@ describe('DesktopAiConfigStore', () => {
     expect(native.secrets.has(native.profiles.get('p_new')!.apiKeyRef!)).toBe(true);
     expect(JSON.stringify(native.profiles.get('p_new'))).not.toContain('sk-secret');
     expect(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)!).not.toContain('sk-secret');
-    // 保存后自动选中。
-    expect(store.getSnapshot().selection).toEqual(clientSelection('p_new'));
+    // r1-B：保存不再隐式选中——「保存」与「激活为当前连接」是两个显式操作。
+    expect(store.getSnapshot().selection).toEqual(clientSelection(null));
     expect(store.getSnapshot().secretStatus['p_new']).toBe('present');
   });
 
@@ -1032,6 +1038,198 @@ describe('DesktopAiConfigStore', () => {
         reopened.getSnapshot().modelsByProfileId,
       ).generationOverrides,
     ).toEqual({ temperature: 0.7 });
+  });
+
+  it('keeps memory and disk on the last good state when overlay persist fails', async () => {
+    // r1-B 原子性：先持久化候选、成功后才替换内存——写盘失败时两边都停在
+    // 上一有效状态，且失败的修改不会残留在内存里等下一次写入偷渡落盘。
+    const storage = createStorage();
+    const store = createStore(storage, createNativeStub([profileFixture()]).invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().overlayState).toBe('ready'));
+
+    const diskBefore = storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)!;
+    vi.spyOn(storage, 'setItem').mockImplementationOnce(() => {
+      throw new Error('quota exceeded');
+    });
+    expect(() => store.selectClientConnection('p_local')).toThrow('quota');
+    expect(store.getSnapshot().selection).toEqual(clientSelection(null));
+    expect(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)).toBe(diskBefore);
+
+    // 恢复可写后，下一次成功写入只包含新操作，不带回失败的修改。
+    store.selectExecutionLocation('server');
+    const persisted = JSON.parse(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)!);
+    expect(persisted.selection).toEqual({
+      executionPreference: 'server',
+      clientConnectionId: null,
+    });
+  });
+
+  it('serializes concurrent saveConnection calls (single-flight per draft)', async () => {
+    const storage = createStorage();
+    const native = createNativeStub();
+    const store = createStore(storage, native.invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().overlayState).toBe('ready'));
+
+    const draft = {
+      id: 'p_new',
+      name: '新连接',
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      modelId: 'm',
+    };
+    const first = store.saveConnection(draft);
+    // 同一候选 ID 的渲染内重复提交幂等复用同一事务——native 只落盘一次。
+    const second = store.saveConnection({ ...draft });
+    await expect(first).resolves.toEqual({ profileId: 'p_new', persisted: true });
+    await expect(second).resolves.toEqual({ profileId: 'p_new', persisted: true });
+    expect(
+      native.calls.filter((command) => command === 'save_provider_profile'),
+    ).toHaveLength(1);
+
+    // 不同草稿撞进事务窗口：立即拒绝而不是排队顶替。
+    const third = store.saveConnection({ ...draft, id: 'p_other' });
+    // 上一事务已完成（saveConnectionInFlight 已清），这条应正常成功。
+    await expect(third).resolves.toEqual({ profileId: 'p_other', persisted: true });
+  });
+
+  it('rejects a second different draft while a save is still in flight', async () => {
+    const storage = createStorage();
+    const native = createNativeStub();
+    // 让 save_provider_profile 挂起，保证第二次提交落在事务窗口内。
+    let releaseSave: (() => void) | null = null;
+    const invoke = (async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'save_provider_profile') {
+        await new Promise<void>((resolve) => {
+          releaseSave = resolve;
+        });
+      }
+      return native.invoke(command, args);
+    }) as DesktopAiConfigInvokeFn;
+    const store = createStore(storage, invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().overlayState).toBe('ready'));
+
+    const pending = store.saveConnection({
+      id: 'p_a',
+      name: '甲',
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      modelId: 'm',
+    });
+    await expect(
+      store.saveConnection({
+        id: 'p_b',
+        name: '乙',
+        baseUrl: 'http://127.0.0.1:1234/v1',
+        modelId: 'm',
+      }),
+    ).rejects.toThrow('正在保存');
+    // 等第一个事务真正挂到 save_provider_profile 上再放行。
+    await vi.waitFor(() => expect(releaseSave).toBeTypeOf('function'));
+    releaseSave!();
+    await pending;
+    // 被拒的草稿从未触达 native。
+    expect(native.profiles.has('p_b')).toBe(false);
+    expect(native.profiles.has('p_a')).toBe(true);
+  });
+
+  it('rejects the reserved system scope id as a profile id', async () => {
+    const native = createNativeStub();
+    const store = createStore(createStorage(), native.invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().overlayState).toBe('ready'));
+
+    // `system` 是「使用系统默认配置」的生成覆盖 scope——同名 Profile 会撞键。
+    await expect(
+      store.saveConnection({
+        id: 'system',
+        name: '撞名',
+        baseUrl: 'http://127.0.0.1:1234/v1',
+        modelId: 'm',
+      }),
+    ).rejects.toThrow('保留');
+    expect(native.calls).not.toContain('save_provider_profile');
+  });
+
+  it('persists the system-channel model selection and resolves it like Web', async () => {
+    const storage = createStorage();
+    const store = createStore(storage, createNativeStub().invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().overlayState).toBe('ready'));
+
+    store.selectExecutionLocation('server');
+    store.selectSystemModel('glm-5.3-flash');
+    expect(store.getSnapshot().selection.systemModelId).toBe('glm-5.3-flash');
+    expect(
+      resolveDesktopAiTarget(
+        store.getSnapshot().selection,
+        store.getSnapshot().profiles,
+        store.getSnapshot().generationOverrides,
+        store.getSnapshot().modelsByProfileId,
+      ).modelId,
+    ).toBe('glm-5.3-flash');
+    expect(
+      JSON.parse(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)!).selection.systemModelId,
+    ).toBe('glm-5.3-flash');
+
+    // 不在公开清单内的 ID 拒绝写入——写入路径不产生悬空值。
+    store.selectSystemModel('not-a-real-model');
+    expect(store.getSnapshot().selection.systemModelId).toBe('glm-5.3-flash');
+
+    // 目录移除后的悬空系统模型保留原值、要求重新选择（不静默回落默认）。
+    const dangling = resolveDesktopAiTarget(
+      { executionPreference: 'server', clientConnectionId: null, systemModelId: 'retired-model' },
+      [],
+      {},
+      {},
+    );
+    expect(dangling.modelId).toBe('retired-model');
+    expect(dangling.unavailableReason).toContain('重新选择');
+  });
+
+  it('keeps system-channel state through activation and refresh cleanup', async () => {
+    const storage = createStorage();
+    const native = createNativeStub([profileFixture()]);
+    const store = createStore(storage, native.invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
+
+    store.selectSystemModel('glm-5.3-flash');
+    store.setGenerationOverrides('system', 'glm-5.3-flash', { temperature: 0.2 });
+    store.activateConnection('p_local');
+    // 激活客户端连接不清掉系统通道偏好——两个维度正交。
+    expect(store.getSnapshot().selection.systemModelId).toBe('glm-5.3-flash');
+    expect(store.getSnapshot().generationOverrides['system']).toEqual({
+      'glm-5.3-flash': { temperature: 0.2 },
+    });
+
+    // 删除客户端连接触发孤儿清理：'system' scope 不是孤儿 Profile 数据。
+    store.selectClientConnection('p_local');
+    await store.deleteConnection('p_local');
+    expect(store.getSnapshot().generationOverrides['system']).toEqual({
+      'glm-5.3-flash': { temperature: 0.2 },
+    });
+    expect(store.getSnapshot().selection.systemModelId).toBe('glm-5.3-flash');
+    expect(store.getSnapshot().selection.clientConnectionId).toBeNull();
+  });
+
+  it('reports saved-but-not-activated through isProfilePersisted verification', async () => {
+    const storage = createStorage();
+    const native = createNativeStub();
+    const store = createStore(storage, native.invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().overlayState).toBe('ready'));
+
+    const result = await store.saveConnection({
+      id: 'p_new',
+      name: '新连接',
+      baseUrl: 'http://127.0.0.1:1234/v1',
+      modelId: 'm',
+    });
+    expect(result).toEqual({ profileId: 'p_new', persisted: true });
+    // native 记录核验独立于本地列表缓存。
+    expect(await store.isProfilePersisted('p_new')).toBe(true);
+    expect(await store.isProfilePersisted('never-saved')).toBe(false);
   });
 
   it('never issues a secret-read command: only set/has/delete exist', async () => {

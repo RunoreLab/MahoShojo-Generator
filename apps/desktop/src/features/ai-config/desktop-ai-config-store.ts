@@ -34,6 +34,8 @@ import {
 import {
   DESKTOP_AI_CONFIG_DEFAULT_OVERLAY,
   DESKTOP_EDITABLE_PROFILE_ADAPTERS,
+  DESKTOP_SYSTEM_OVERRIDES_SCOPE,
+  isDesktopSystemModelId,
   isValidDesktopModelId,
   parseDesktopAiConfigOverlay,
   serializeDesktopAiConfigOverlay,
@@ -82,6 +84,17 @@ export interface DesktopAiConfigState {
   /** profileId → 凭据存在性；只回答存在性，永不读回明文。 */
   secretStatus: Readonly<Record<string, DesktopSecretPresence>>;
   savingConnection: boolean;
+}
+
+/**
+ * `saveConnection` 的分阶段结果（r1-B 部分成功收口）。
+ * - `profileId`：已提交保存的 Profile ID；
+ * - `persisted`：native 记录核验——Profile 已落盘可读。保存主流程成功但
+ *   列表刷新/激活跟不上时，调用方据此如实呈现「已保存」而不是误报失败。
+ */
+export interface DesktopSaveConnectionResult {
+  profileId: string;
+  persisted: boolean;
 }
 
 const INITIAL_STATE: DesktopAiConfigState = {
@@ -140,14 +153,25 @@ export class DesktopAiConfigStore {
     return this.state.overlayState === 'ready';
   }
 
-  /** overlay 落盘；blocked 状态拒绝写入，避免覆盖一份自己读不懂的数据。 */
-  private persistOverlay(): void {
-    if (this.state.overlayState === 'blocked') return;
-    const raw = serializeDesktopAiConfigOverlay(this.overlay);
+  /**
+   * 受检 overlay 提交（r1-B 原子性收口）：候选快照 → 持久化 → 替换内存 → 发布。
+   *
+   * 写盘失败（超限 / storage 异常）时**先**抛出，`this.overlay` 保持上一有效
+   * 状态——内存与磁盘不会分叉，也不会把失败的修改残留在内存里等下一次成功
+   * 写入时偷偷带落盘。blocked 状态一律不写。
+   */
+  private commitOverlay(
+    mutate: (overlay: DesktopAiConfigOverlay) => DesktopAiConfigOverlay,
+  ): void {
+    if (!this.overlayWritable) return;
+    const candidate = mutate(this.overlay);
+    const raw = serializeDesktopAiConfigOverlay(candidate);
     if (raw.length > MAX_OVERLAY_CHARACTERS) {
       throw new Error('AI 配置超过大小限制，未写入');
     }
     this.deps.storage.setItem(DESKTOP_AI_CONFIG_STORAGE_KEY, raw);
+    this.overlay = candidate;
+    this.publishOverlay();
   }
 
   /** 幂等初始化：overlay 同步读取，profiles 异步加载。 */
@@ -215,10 +239,13 @@ export class DesktopAiConfigStore {
         // 清理指向已删除连接的孤儿 overrides。选择本身**不**被改写：
         // 悬空的 clientConnectionId 保留原 ID 由解析层给出诊断（DESK-ONLINE-002
         // 要求显式解除/替换引用，不做 silent fallback）。
+        // `system` scope 属于「使用系统默认配置」通道，不是孤儿 Profile 数据。
         const knownIds = new Set(profiles.map((profile) => profile.id));
+        const isLiveScope = (scopeId: string) =>
+          scopeId === DESKTOP_SYSTEM_OVERRIDES_SCOPE || knownIds.has(scopeId);
         const generationOverrides = Object.fromEntries(
-          Object.entries(this.overlay.generationOverrides).filter(([profileId]) =>
-            knownIds.has(profileId),
+          Object.entries(this.overlay.generationOverrides).filter(([scopeId]) =>
+            isLiveScope(scopeId),
           ),
         );
         const modelsByProfileId = Object.fromEntries(
@@ -226,13 +253,16 @@ export class DesktopAiConfigStore {
             knownIds.has(profileId),
           ),
         );
-        this.overlay = {
-          ...this.overlay,
-          generationOverrides,
-          modelsByProfileId,
-        };
-        this.persistOverlay();
-        this.publishOverlay();
+        try {
+          this.commitOverlay((overlay) => ({
+            ...overlay,
+            generationOverrides,
+            modelsByProfileId,
+          }));
+        } catch {
+          // 孤儿清理是尽力而为的卫生动作：写盘失败时内存与磁盘继续保持
+          // 上一有效状态（含未清理的孤儿条目），不影响 profiles 加载结果。
+        }
 
         this.publish({
           profiles,
@@ -255,13 +285,10 @@ export class DesktopAiConfigStore {
 
   /** 只改执行位置偏好；客户端连接选择保持不变（两个维度正交）。 */
   selectExecutionLocation = (location: 'client' | 'server'): void => {
-    if (!this.overlayWritable) return;
-    this.overlay = {
-      ...this.overlay,
-      selection: { ...this.overlay.selection, executionPreference: location },
-    };
-    this.persistOverlay();
-    this.publishOverlay();
+    this.commitOverlay((overlay) => ({
+      ...overlay,
+      selection: { ...overlay.selection, executionPreference: location },
+    }));
   };
 
   /**
@@ -272,13 +299,24 @@ export class DesktopAiConfigStore {
    * 语义走 `activateConnection`。
    */
   selectClientConnection = (profileId: string): void => {
-    if (!this.overlayWritable) return;
-    this.overlay = {
-      ...this.overlay,
-      selection: { ...this.overlay.selection, clientConnectionId: profileId },
-    };
-    this.persistOverlay();
-    this.publishOverlay();
+    this.commitOverlay((overlay) => ({
+      ...overlay,
+      selection: { ...overlay.selection, clientConnectionId: profileId },
+    }));
+  };
+
+  /**
+   * 选择「使用系统默认配置」通道的模型（与 Web `system + modelId` 同语义）。
+   * 只写非秘密偏好；不在公开清单内的模型 ID 拒绝写入——悬空值保留由解析层
+   * 诊断，写入路径不接受未知值。
+   */
+  selectSystemModel = (modelId: string): void => {
+    const trimmed = modelId.trim();
+    if (!isDesktopSystemModelId(trimmed)) return;
+    this.commitOverlay((overlay) => ({
+      ...overlay,
+      selection: { ...overlay.selection, systemModelId: trimmed },
+    }));
   };
 
   /**
@@ -306,12 +344,16 @@ export class DesktopAiConfigStore {
       (entry?.selectedModelId !== undefined && available.has(entry.selectedModelId)
         ? entry.selectedModelId
         : profile.modelId);
-    this.overlay = {
-      ...this.overlay,
-      selection: { executionPreference: 'client', clientConnectionId: profileId },
+    this.commitOverlay((overlay) => ({
+      ...overlay,
+      selection: {
+        executionPreference: 'client',
+        clientConnectionId: profileId,
+        systemModelId: overlay.selection.systemModelId,
+      },
       modelsByProfileId: Object.assign(
         Object.create(null) as Record<string, DesktopProfileModelSelection>,
-        this.overlay.modelsByProfileId,
+        overlay.modelsByProfileId,
         {
           [profileId]: {
             customModelIds: entry?.customModelIds ?? [],
@@ -319,37 +361,27 @@ export class DesktopAiConfigStore {
           },
         },
       ),
-    };
-    this.persistOverlay();
-    this.publishOverlay();
+    }));
   };
 
   hidePreset = (presetId: string): void => {
     if (!this.overlayWritable) return;
     if (this.overlay.hiddenPresetIds.includes(presetId)) return;
-    this.overlay = {
-      ...this.overlay,
-      hiddenPresetIds: [...this.overlay.hiddenPresetIds, presetId],
-    };
-    this.persistOverlay();
-    this.publishOverlay();
+    this.commitOverlay((overlay) => ({
+      ...overlay,
+      hiddenPresetIds: [...overlay.hiddenPresetIds, presetId],
+    }));
   };
 
   unhidePreset = (presetId: string): void => {
-    if (!this.overlayWritable) return;
-    this.overlay = {
-      ...this.overlay,
-      hiddenPresetIds: this.overlay.hiddenPresetIds.filter((id) => id !== presetId),
-    };
-    this.persistOverlay();
-    this.publishOverlay();
+    this.commitOverlay((overlay) => ({
+      ...overlay,
+      hiddenPresetIds: overlay.hiddenPresetIds.filter((id) => id !== presetId),
+    }));
   };
 
   restoreAllPresets = (): void => {
-    if (!this.overlayWritable) return;
-    this.overlay = { ...this.overlay, hiddenPresetIds: [] };
-    this.persistOverlay();
-    this.publishOverlay();
+    this.commitOverlay((overlay) => ({ ...overlay, hiddenPresetIds: [] }));
   };
 
   /** 写入某连接+模型的生成覆盖；undefined 表示恢复默认（删除该模型条目）。 */
@@ -362,31 +394,31 @@ export class DesktopAiConfigStore {
     // null-prototype 字典：profileId/modelId 允许任意合法标识符（含 "__proto__"），
     // 直接往普通对象写 untrustedKey 会走原型 setter。computed key 的 {...} literal
     // 与 Object.assign 往 null-proto 目标写入均为 own-property 语义。
-    const next = Object.assign(
-      Object.create(null) as Record<string, Record<string, UserGenerationOverrides>>,
-      this.overlay.generationOverrides,
-    );
-    if (overrides === undefined) {
-      const models = Object.assign(
-        Object.create(null) as Record<string, UserGenerationOverrides>,
-        next[profileId],
+    this.commitOverlay((overlay) => {
+      const next = Object.assign(
+        Object.create(null) as Record<string, Record<string, UserGenerationOverrides>>,
+        overlay.generationOverrides,
       );
-      delete models[modelId];
-      if (Object.keys(models).length === 0) {
-        delete next[profileId];
+      if (overrides === undefined) {
+        const models = Object.assign(
+          Object.create(null) as Record<string, UserGenerationOverrides>,
+          next[profileId],
+        );
+        delete models[modelId];
+        if (Object.keys(models).length === 0) {
+          delete next[profileId];
+        } else {
+          next[profileId] = models;
+        }
       } else {
-        next[profileId] = models;
+        next[profileId] = Object.assign(
+          Object.create(null) as Record<string, UserGenerationOverrides>,
+          next[profileId],
+          { [modelId]: overrides },
+        );
       }
-    } else {
-      next[profileId] = Object.assign(
-        Object.create(null) as Record<string, UserGenerationOverrides>,
-        next[profileId],
-        { [modelId]: overrides },
-      );
-    }
-    this.overlay = { ...this.overlay, generationOverrides: next };
-    this.persistOverlay();
-    this.publishOverlay();
+      return { ...overlay, generationOverrides: next };
+    });
   };
 
   /** 写某连接的模型选择条目；entry 为 undefined 时删除整条（null-proto 字典）。 */
@@ -394,18 +426,18 @@ export class DesktopAiConfigStore {
     profileId: string,
     entry: DesktopProfileModelSelection | undefined,
   ): void {
-    const next = Object.assign(
-      Object.create(null) as Record<string, DesktopProfileModelSelection>,
-      this.overlay.modelsByProfileId,
-    );
-    if (entry === undefined) {
-      delete next[profileId];
-    } else {
-      next[profileId] = entry;
-    }
-    this.overlay = { ...this.overlay, modelsByProfileId: next };
-    this.persistOverlay();
-    this.publishOverlay();
+    this.commitOverlay((overlay) => {
+      const next = Object.assign(
+        Object.create(null) as Record<string, DesktopProfileModelSelection>,
+        overlay.modelsByProfileId,
+      );
+      if (entry === undefined) {
+        delete next[profileId];
+      } else {
+        next[profileId] = entry;
+      }
+      return { ...overlay, modelsByProfileId: next };
+    });
   }
 
   /**
@@ -492,9 +524,51 @@ export class DesktopAiConfigStore {
    * 静默开始使用新凭据；staged ref 即使回滚清理也失败，最多只留下一个没有任何
    * Profile 引用的孤儿 secret。ref 不拼长 profileId，避免撞 256 字符上限。
    */
-  saveConnection = async (draft: ProfileDraft): Promise<void> => {
+  /**
+   * native 记录核验：该 Profile 是否已保存可读。
+   * 用于区分「保存完全失败」与「已落盘但列表刷新/激活未跟上」的部分成功。
+   */
+  isProfilePersisted = async (profileId: string): Promise<boolean> => {
+    const profile = await getProviderProfile(this.deps.invoke, profileId).catch(() => null);
+    return profile !== null;
+  };
+
+  /** 入口级单飞互斥（r1-B）：同一时刻只允许一个保存事务。 */
+  private saveConnectionInFlight: {
+    profileId: string;
+    promise: Promise<DesktopSaveConnectionResult>;
+  } | null = null;
+
+  saveConnection = (draft: ProfileDraft): Promise<DesktopSaveConnectionResult> => {
+    const inFlight = this.saveConnectionInFlight;
+    if (inFlight !== null) {
+      if (inFlight.profileId === draft.id) {
+        // 同一候选 ID 的重复提交（双击/渲染内重入）幂等复用进行中的事务。
+        return inFlight.promise;
+      }
+      // 不同草稿撞进同一事务窗口属于竞态：立即拒绝，在前一个完成后重试，
+      // 不让两个连接互相等待或误报对方的结果。
+      return Promise.reject(
+        new ProfileDraftError('id', '另一个连接正在保存中，请稍后重试'),
+      );
+    }
+    const promise = this.saveConnectionInner(draft).finally(() => {
+      this.saveConnectionInFlight = null;
+    });
+    this.saveConnectionInFlight = { profileId: draft.id, promise };
+    return promise;
+  };
+
+  private saveConnectionInner = async (
+    draft: ProfileDraft,
+  ): Promise<DesktopSaveConnectionResult> => {
     this.publish({ savingConnection: true });
     try {
+      // `system` 保留给「使用系统默认配置」通道的生成覆盖 scope；
+      // 同名 Profile 会在 generationOverrides 里与系统通道撞名。
+      if (draft.id.trim() === DESKTOP_SYSTEM_OVERRIDES_SCOPE) {
+        throw new ProfileDraftError('id', '该标识已被系统默认配置保留，请换一个连接 ID');
+      }
       const existing = this.state.profiles.find((item) => item.id === draft.id);
       // 编辑器 capability 独立于执行 capability：简化编辑器只表达
       // openai-compatible，其他 adapter 的旧 Profile 只读展示，不得借保存把
@@ -567,8 +641,11 @@ export class DesktopAiConfigStore {
         await deleteProviderSecret(this.deps.invoke, existing.apiKeyRef).catch(() => undefined);
       }
       await this.refreshProfiles();
-      // 记住刚保存的连接作为客户端连接；不替用户切换执行位置偏好。
-      this.selectClientConnection(profile.id);
+      // native 记录核验：区分「保存失败」与「已落盘但后续环节未跟上」。
+      // 不做激活——「记住/启用这条连接」是调用方经 `activateConnection` 的
+      // 显式操作（r1-B：编辑保存不得偷改当前选择）。
+      const persisted = await this.isProfilePersisted(profile.id);
+      return { profileId: profile.id, persisted };
     } finally {
       this.publish({ savingConnection: false });
     }
@@ -592,13 +669,11 @@ export class DesktopAiConfigStore {
       await deleteProviderSecret(this.deps.invoke, existing.apiKeyRef).catch(() => undefined);
     }
 
-    if (this.overlay.selection.clientConnectionId === profileId && this.overlayWritable) {
-      this.overlay = {
-        ...this.overlay,
-        selection: { ...this.overlay.selection, clientConnectionId: null },
-      };
-      this.persistOverlay();
-      this.publishOverlay();
+    if (this.overlay.selection.clientConnectionId === profileId) {
+      this.commitOverlay((overlay) => ({
+        ...overlay,
+        selection: { ...overlay.selection, clientConnectionId: null },
+      }));
     }
     await this.refreshProfiles();
   };
