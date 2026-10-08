@@ -328,19 +328,72 @@ export const HostedGenerationRouteIdSchema = z.enum([
 ]);
 export type HostedGenerationRouteId = z.infer<typeof HostedGenerationRouteIdSchema>;
 
+/* ── hosted「使用系统默认配置」通道的非秘密偏好（D5.1-AIP-r1） ─────────────
+ *
+ * 与 Web `customProvider:{providerId:'system'}` 同语义：renderer 只声明
+ * 系统通道的模型选择与逐模型生成覆盖——`modelId` 从公开系统模型清单选择
+ * （'default' = 服务器默认顺序），生成覆盖按 `UserGenerationOverrides`
+ * wire 形状镜像。凭据从定义上不存在：native 注入 `customProvider` 时固定
+ * `providerId:'system'` + 空 `apiKey`，renderer 无服务端 BYOK 通道
+ * （DESK-093 继续成立）。字段均为 additive-optional——缺省即普通系统默认，
+ * 与 Web 折叠语义一致。
+ */
+
+/** `UserGenerationOverrides.thinking` 的 zod4 wire 镜像（与 ai-core zod3 同形）。 */
+export const DesktopHostedThinkingOverrideSchema = z.union([
+  z.object({ mode: z.literal('default') }).strict(),
+  z.object({ mode: z.literal('disabled') }).strict(),
+  z.object({
+    mode: z.literal('enabled'),
+    effort: z.enum(['minimal', 'low', 'medium', 'high', 'xhigh', 'max']).optional(),
+  }).strict(),
+]);
+export type DesktopHostedThinkingOverride = z.infer<
+  typeof DesktopHostedThinkingOverrideSchema
+>;
+
+/** `UserGenerationOverrides` 的 zod4 wire 镜像；上限与 ai-core `MAX_CUSTOM_PROVIDER_OUTPUT_TOKENS` 同源。 */
+export const DesktopHostedGenerationOverridesSchema = z.object({
+  maxOutputTokens: z.number().int().min(1).max(1_000_000).optional(),
+  temperature: z.number().finite().min(0).optional(),
+  thinking: DesktopHostedThinkingOverrideSchema.optional(),
+}).strict();
+export type DesktopHostedGenerationOverrides = z.infer<
+  typeof DesktopHostedGenerationOverridesSchema
+>;
+
+/**
+ * hosted 系统通道偏好。`modelId` 只允许非空短字符串且无控制字符——
+ * 「是否在系统公开清单内」由服务端 `resolveCustomProviderRuntime` 裁决
+ * （系统目录的唯一事实源在服务端，native 不复制清单）。
+ */
+export const DesktopHostedSystemConfigSchema = z.object({
+  modelId: z
+    .string()
+    .min(1)
+    .max(256)
+    .regex(/^[^\u0000-\u001f\u007f]+$/u, 'modelId 不得包含控制字符')
+    .optional(),
+  generationOverrides: DesktopHostedGenerationOverridesSchema.optional(),
+}).strict();
+export type DesktopHostedSystemConfig = z.infer<typeof DesktopHostedSystemConfigSchema>;
+
 /**
  * hosted 生成 IPC 输入。`body` 是目标路由的业务载荷（如
  * `{answers, questionnaires, language}`），**不得**携带 `customProvider`——
  * native 是唯一注入方，renderer 注入的字段一律拒绝。
  *
- * 服务器 BYOK 在 native 持有并校验的 Provider 绑定落地前保持关闭（DESK-093）：
- * 本契约不提供 `byok`/`secretRef`/`providerId`/`modelId` 等凭据字段，renderer
- * 携带这些字段即被 strict 校验拒绝。当前只开放系统默认通道。
+ * `systemConfig` 是「使用系统默认配置」通道的非秘密偏好（additive-optional），
+ * 与 Web `customProvider:{providerId:'system'}` 同语义；服务器 BYOK 在
+ * native 持有并校验的 Provider 绑定落地前保持关闭（DESK-093）：本契约不提供
+ * `byok`/`secretRef`/`providerId`/`apiKey` 等凭据字段，renderer 携带这些字段
+ * 即被 strict 校验拒绝。
  */
 export const DesktopHostedGenerateRequestSchema = z.object({
   requestId: z.string().min(1).max(128),
   routeId: HostedGenerationRouteIdSchema,
   body: SafeJsonValueSchema,
+  systemConfig: DesktopHostedSystemConfigSchema.optional(),
 }).strict();
 export type DesktopHostedGenerateRequest = z.infer<typeof DesktopHostedGenerateRequestSchema>;
 
@@ -362,12 +415,14 @@ export type HostedJsonGenerationRouteId = z.infer<typeof HostedJsonGenerationRou
 /**
  * hosted 非流式生成 IPC 输入。与 `DesktopHostedGenerateRequestSchema` 同形、
  * 同一套凭据边界：`body` 不得携带 `customProvider`（native 是唯一注入方），
- * `byok`/`secretRef`/`providerId`/`modelId` 等字段由 strict 校验拒绝。
+ * `systemConfig` 同为「使用系统默认配置」通道的非秘密偏好；
+ * `byok`/`secretRef`/`providerId`/`apiKey` 等字段由 strict 校验拒绝。
  */
 export const DesktopHostedJsonRequestSchema = z.object({
   requestId: z.string().min(1).max(128),
   routeId: HostedJsonGenerationRouteIdSchema,
   body: SafeJsonValueSchema,
+  systemConfig: DesktopHostedSystemConfigSchema.optional(),
 }).strict();
 export type DesktopHostedJsonRequest = z.infer<typeof DesktopHostedJsonRequestSchema>;
 

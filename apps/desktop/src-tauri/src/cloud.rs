@@ -1224,13 +1224,19 @@ pub async fn cloud_online_status(
     )
 }
 
-/* ── hosted 生成适配（当前只开放系统默认通道） ────────────────────────────
+/* ── hosted 生成适配（系统默认通道 + 非秘密系统通道偏好） ─────────────────
  *
- * renderer 只能声明 requestId / routeId / body：
+ * renderer 只能声明 requestId / routeId / body / systemConfig：
  * - `body` 不得携带 `customProvider`——native 是唯一注入方；
+ * - `systemConfig` 是「使用系统默认配置」通道的非秘密偏好（D5.1-AIP-r1，
+ *   与 Web `customProvider:{providerId:'system'}` 同语义）：模型选择与
+ *   生成覆盖。注入时 native 固定写 `providerId:'system'` + 空 `apiKey`，
+ *   renderer 没有指定其他 Provider 或携带凭据的通道；
  * - 服务器 BYOK 在 native 持有并校验的 Provider 绑定落地前保持关闭（DESK-093）：
- *   `byok`/`secretRef`/`providerId`/`modelId` 等字段由 `deny_unknown_fields`
- *   在 IPC 反序列化时直接拒绝，renderer 没有自选服务端凭据的通道。
+ *   `byok`/`secretRef`/`providerId`/`apiKey` 等字段由 `deny_unknown_fields`
+ *   在 IPC 反序列化时直接拒绝，renderer 没有自选服务端凭据的通道；
+ * - 「模型 ID 是否在系统公开清单内」由服务端 `resolveCustomProviderRuntime`
+ *   裁决——系统目录的唯一事实源在服务端，native 不复制清单；
  * - native 不依赖 renderer 侧的 schema 校验，输入在 Rust 侧独立 fail-closed。
  */
 
@@ -1275,21 +1281,35 @@ pub struct HostedSseEvent {
     pub data: serde_json::Value,
 }
 
+/// hosted「使用系统默认配置」通道的非秘密偏好（D5.1-AIP-r1）。
+/// 不含任何凭据字段：`providerId`/`apiKey`/`secretRef` 之类由
+/// `deny_unknown_fields` 直接拒绝——它们不是可选，是不存在。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloudHostedSystemConfig {
+    /// 系统通道模型 ID（'default' = 服务器默认顺序）。
+    pub model_id: Option<String>,
+    /// 逐模型生成覆盖（`UserGenerationOverrides` wire 形状；服务端再校验）。
+    pub generation_overrides: Option<serde_json::Value>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CloudHostedGenerateRequest {
     pub request_id: String,
     pub route_id: String,
     pub body: serde_json::Value,
+    pub system_config: Option<CloudHostedSystemConfig>,
 }
 
 fn invalid_request(message: impl Into<String>) -> CloudError {
     CloudError::new(CloudErrorCode::InvalidRequest, message)
 }
 
-/// 组装最终请求体：校验业务 body 形态与大小。
+/// 组装最终请求体：校验业务 body 形态与大小，并按 `systemConfig` 注入
+/// 系统通道 `customProvider`（D5.1-AIP-r1，与 Web 载荷同形）。
 /// renderer 提供的 body 里出现 `customProvider` 一律拒绝（凭据注入只发生在
-/// native 侧，当前无开放通道，更不允许 renderer 预置）。
+/// native 侧，更不允许 renderer 预置）。
 fn build_hosted_request_body(
     request: &CloudHostedGenerateRequest,
 ) -> Result<serde_json::Value, CloudError> {
@@ -1307,7 +1327,47 @@ fn build_hosted_request_body(
     if size > hosted_body_max_bytes(&request.route_id) {
         return Err(invalid_request("生成请求 body 超出大小上限"));
     }
-    Ok(request.body.clone())
+    let mut result = request.body.clone();
+    // 系统通道偏好 → `customProvider:{providerId:'system', modelId, apiKey:''}`。
+    // 折叠语义与 Web `buildCustomProviderPayload` 一致：'default' 且无生成
+    // 覆盖时不注入（普通系统默认），不给服务器发无意义载荷。
+    if let Some(config) = &request.system_config {
+        let model_id = config
+            .model_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .unwrap_or("default");
+        // 形状校验（native 独立 fail-closed）：非空短字符串、无控制字符；
+        // 是否在系统公开清单内由服务端裁决——目录唯一事实源不在 native。
+        if model_id.chars().count() > 256 || model_id.chars().any(|c| c.is_control()) {
+            return Err(invalid_request("系统通道模型 ID 无效"));
+        }
+        // 生成覆盖必须是 JSON 对象；空对象视同无覆盖（Web
+        // hasMeaningfulGenerationOverrides 语义），内容合法性由服务端 schema 仲裁。
+        let overrides = match &config.generation_overrides {
+            None => None,
+            Some(serde_json::Value::Object(map)) if map.is_empty() => None,
+            Some(value @ serde_json::Value::Object(_)) => Some(value.clone()),
+            Some(_) => return Err(invalid_request("generationOverrides 必须是对象")),
+        };
+        if model_id != "default" || overrides.is_some() {
+            let Some(result_body) = result.as_object_mut() else {
+                return Err(invalid_request("生成请求 body 必须是 JSON 对象"));
+            };
+            let mut custom_provider = serde_json::json!({
+                "providerId": "system",
+                "modelId": model_id,
+                // 系统通道不要求凭据；字段按服务端 strict schema 置空串。
+                "apiKey": "",
+            });
+            if let Some(overrides) = overrides {
+                custom_provider["generationOverrides"] = overrides;
+            }
+            result_body.insert("customProvider".to_string(), custom_provider);
+        }
+    }
+    Ok(result)
 }
 
 /// 增量 SSE 帧解析器：按 `\n\n` 或 `\r\n\r\n` 切帧，每帧取 `event:`/`data:` 行。
@@ -3276,6 +3336,7 @@ mod tests {
             request_id: "req-1".to_string(),
             route_id: HOSTED_ROUTE_DETAILS_STREAM.to_string(),
             body: serde_json::json!({"answers": [{"questionId": "q1", "answer": "a"}]}),
+            system_config: None,
         }
     }
 
@@ -3359,6 +3420,125 @@ mod tests {
         let body = build_hosted_request_body(&hosted_request()).unwrap();
         assert!(!body.as_object().unwrap().contains_key("customProvider"));
         assert!(body["answers"].is_array());
+    }
+
+    /// 「使用系统默认配置」通道的非秘密偏好（D5.1-AIP-r1）：
+    /// `systemConfig` → `customProvider:{providerId:'system'}` 注入，
+    /// 折叠语义与 Web `buildCustomProviderPayload` 一致。
+    #[test]
+    fn hosted_system_config_injects_system_custom_provider() {
+        // 显式非默认系统模型 → 注入 customProvider（apiKey 固定空串）。
+        let mut explicit = hosted_request();
+        explicit.system_config = Some(CloudHostedSystemConfig {
+            model_id: Some("glm-5.3-flash".to_string()),
+            generation_overrides: None,
+        });
+        let body = build_hosted_request_body(&explicit).unwrap();
+        let custom_provider = &body["customProvider"];
+        assert_eq!(custom_provider["providerId"], "system");
+        assert_eq!(custom_provider["modelId"], "glm-5.3-flash");
+        assert_eq!(custom_provider["apiKey"], "");
+        assert!(custom_provider.get("generationOverrides").is_none());
+        assert!(body["answers"].is_array());
+
+        // 'default' + 生成覆盖 → 仍注入（服务器需要看到覆盖项）。
+        let mut with_overrides = hosted_request();
+        with_overrides.system_config = Some(CloudHostedSystemConfig {
+            model_id: Some("default".to_string()),
+            generation_overrides: Some(serde_json::json!({
+                "temperature": 0.4,
+                "maxOutputTokens": 1024,
+            })),
+        });
+        let body = build_hosted_request_body(&with_overrides).unwrap();
+        let custom_provider = &body["customProvider"];
+        assert_eq!(custom_provider["providerId"], "system");
+        assert_eq!(custom_provider["modelId"], "default");
+        assert_eq!(custom_provider["generationOverrides"]["temperature"], 0.4);
+
+        // Web 折叠：'default' + 无覆盖 → 不注入；空对象视同无覆盖。
+        let mut folded = hosted_request();
+        folded.system_config = Some(CloudHostedSystemConfig {
+            model_id: Some("default".to_string()),
+            generation_overrides: None,
+        });
+        assert!(
+            !build_hosted_request_body(&folded).unwrap()["customProvider"].is_object()
+        );
+        folded.system_config = Some(CloudHostedSystemConfig {
+            model_id: None,
+            generation_overrides: Some(serde_json::json!({})),
+        });
+        assert!(
+            !build_hosted_request_body(&folded).unwrap()["customProvider"].is_object()
+        );
+
+        // 形状校验：控制字符/超长/非对象覆盖在 native 侧拒绝；
+        // 模型是否在系统清单内由服务端裁决，native 不复制目录。
+        let mut bad_model = hosted_request();
+        bad_model.system_config = Some(CloudHostedSystemConfig {
+            model_id: Some("m\nx".to_string()),
+            generation_overrides: None,
+        });
+        assert_eq!(
+            build_hosted_request_body(&bad_model).unwrap_err().code,
+            CloudErrorCode::InvalidRequest
+        );
+        let mut long_model = hosted_request();
+        long_model.system_config = Some(CloudHostedSystemConfig {
+            model_id: Some("m".repeat(257)),
+            generation_overrides: None,
+        });
+        assert_eq!(
+            build_hosted_request_body(&long_model).unwrap_err().code,
+            CloudErrorCode::InvalidRequest
+        );
+        let mut bad_overrides = hosted_request();
+        bad_overrides.system_config = Some(CloudHostedSystemConfig {
+            model_id: None,
+            generation_overrides: Some(serde_json::json!("flat")),
+        });
+        assert_eq!(
+            build_hosted_request_body(&bad_overrides).unwrap_err().code,
+            CloudErrorCode::InvalidRequest
+        );
+    }
+
+    /// `systemConfig` 自身同样受 `deny_unknown_fields` 约束：
+    /// 凭据字段在嵌套对象里也没有生存空间。
+    #[test]
+    fn hosted_system_config_denies_unknown_and_credential_fields() {
+        let with_api_key = serde_json::json!({
+            "requestId": "req-1",
+            "routeId": HOSTED_ROUTE_DETAILS_STREAM,
+            "body": {"answers": []},
+            "systemConfig": {
+                "modelId": "glm-5.3-flash",
+                "apiKey": "sk-smuggled"
+            }
+        });
+        assert!(serde_json::from_value::<CloudHostedGenerateRequest>(with_api_key).is_err());
+
+        let with_provider_id = serde_json::json!({
+            "requestId": "req-1",
+            "routeId": HOSTED_ROUTE_DETAILS_STREAM,
+            "body": {"answers": []},
+            "systemConfig": {
+                "modelId": "glm-5.3-flash",
+                "providerId": "deepseek"
+            }
+        });
+        assert!(serde_json::from_value::<CloudHostedGenerateRequest>(with_provider_id).is_err());
+
+        // 顶层凭据字段继续被拒（既有边界不回退）。
+        let with_top_level = serde_json::json!({
+            "requestId": "req-1",
+            "routeId": HOSTED_ROUTE_DETAILS_STREAM,
+            "body": {"answers": []},
+            "providerId": "deepseek",
+            "apiKey": "sk-smuggled"
+        });
+        assert!(serde_json::from_value::<CloudHostedGenerateRequest>(with_top_level).is_err());
     }
 
     /// BYOK 在 native Provider 绑定落地前保持关闭：`deny_unknown_fields`
@@ -3581,6 +3761,35 @@ mod tests {
         });
     }
 
+    /// 「使用系统默认配置」通道的显式模型选择经完整 dispatch 到达 wire
+    /// （D5.1-AIP-r1）：native 注入 `customProvider:{providerId:'system'}`，
+    /// 服务端按 Web 同形载荷裁决——凭据字段依旧不越过边界。
+    #[test]
+    fn hosted_stream_system_config_reaches_the_wire() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            let registry = crate::ai::RequestRegistry::default();
+            let sink = VecSink::new();
+
+            let mut request = hosted_request();
+            request.system_config = Some(CloudHostedSystemConfig {
+                model_id: Some("glm-5.3-flash".to_string()),
+                generation_overrides: Some(serde_json::json!({"temperature": 0.5})),
+            });
+            stream_hosted_ai(&state, &secrets, &registry, request, &sink)
+                .await
+                .unwrap();
+            let sent = server.last_generate_body.lock().unwrap().clone().unwrap();
+            let custom_provider = &sent["customProvider"];
+            assert_eq!(custom_provider["providerId"], "system");
+            assert_eq!(custom_provider["modelId"], "glm-5.3-flash");
+            assert_eq!(custom_provider["apiKey"], "");
+            assert_eq!(custom_provider["generationOverrides"]["temperature"], 0.5);
+        });
+    }
+
     #[test]
     fn hosted_stream_rejects_unknown_route_and_duplicate_inflight_request_id() {
         rt().block_on(async {
@@ -3690,6 +3899,7 @@ mod tests {
                 "answers": [{"questionId": "q1", "answer": "a"}],
                 "allowNativeSignature": true,
             }),
+            system_config: None,
         }
     }
 

@@ -10,6 +10,7 @@ import type {
 import type { AIReasoningEnvelope } from '@mahoshojo/contracts/ai-reasoning';
 import {
   hostedGenerationBodyMaxBytes,
+  type DesktopHostedSystemConfig,
   type HostedGenerationRouteId,
   type HostedJsonGenerationRouteId,
 } from '@mahoshojo/contracts/desktop-cloud';
@@ -39,10 +40,10 @@ export interface DesktopGenerationIntent {
   modelId?: string;
   /**
    * 连接级高级生成设置（D5.0b 统一配置状态）。
-   * 逐项覆盖任务默认值。`thinking` 可持久化但当前不下发：native
-   * `AiExecutionRequest` 标了 `deny_unknown_fields` 且尚无 thinking 字段，
-   * 携带会让整次请求反序列化失败。hosted 通路的生成设置在服务器侧解析，
-   * 本字段只对 direct 通路生效。
+   * 逐项覆盖任务默认值。direct 通路下发 temperature/maxOutputTokens（native
+   * `AiExecutionRequest` 尚无 thinking 字段，`thinking` 只持久化不下发）；
+   * hosted 通路经 `systemConfig.generationOverrides` 携带到服务器解析
+   * （D5.1-AIP-r1），语义与 Web `customProvider.generationOverrides` 一致。
    */
   overrides?: UserGenerationOverrides;
 }
@@ -259,6 +260,35 @@ const createHostedCancellation = (invoke: DesktopAiExecutionOptions['invoke'], r
   };
 };
 
+/**
+ * 「使用系统默认配置」通道的非秘密偏好 → hosted IPC `systemConfig`
+ * （D5.1-AIP-r1，与 Web `customProvider:{providerId:'system'}` 同语义）。
+ *
+ * `intent.modelId` 是系统通道的模型选择（'default' = 服务器默认顺序）；
+ * `intent.overrides` 为逐模型生成覆盖。字段均非秘密——native 注入
+ * `customProvider` 时固定 `providerId:'system'` + 空 `apiKey`，DESK-093
+ * 的 BYOK 边界不变。
+ *
+ * Web 折叠语义：'default' 且无任何生成覆盖时返回 undefined（普通系统
+ * 默认），不携带冗余字段。
+ */
+const buildHostedSystemConfig = (
+  intent: DesktopGenerationIntent,
+): DesktopHostedSystemConfig | undefined => {
+  const modelId = intent.modelId?.trim() ?? '';
+  const overrides = intent.overrides;
+  const hasOverrides =
+    overrides !== undefined &&
+    (overrides.maxOutputTokens !== undefined ||
+      overrides.temperature !== undefined ||
+      overrides.thinking !== undefined);
+  if ((modelId === '' || modelId === 'default') && !hasOverrides) return undefined;
+  return {
+    ...(modelId === '' ? {} : { modelId }),
+    ...(hasOverrides ? { generationOverrides: overrides } : {}),
+  };
+};
+
 /* ── hosted 流式：Markdown SSE → 流式结果卡（无 resign，DESK-ONLINE-009 延期项） ── */
 
 const executeHostedStreamGeneration = async <
@@ -272,6 +302,7 @@ const executeHostedStreamGeneration = async <
   intent: TIntent,
   signal: AbortSignal,
   body: Record<string, JsonValue>,
+  systemConfig: DesktopHostedSystemConfig | undefined,
   onPartialText?: (text: string) => void,
 ): Promise<DesktopGenerationOutcome<TCardKind>> => {
   let markdown = '';
@@ -287,7 +318,12 @@ const executeHostedStreamGeneration = async <
   try {
     await streamHostedAi(
       options.invoke,
-      { requestId: intent.requestId, routeId: family.streamRouteId, body },
+      {
+        requestId: intent.requestId,
+        routeId: family.streamRouteId,
+        body,
+        ...(systemConfig === undefined ? {} : { systemConfig }),
+      },
       (event) => {
         if (!isRecord(event.data)) return;
         const data = event.data;
@@ -420,6 +456,7 @@ const executeHostedJsonGeneration = async <
   intent: TIntent,
   signal: AbortSignal,
   body: Record<string, JsonValue>,
+  systemConfig: DesktopHostedSystemConfig | undefined,
 ): Promise<DesktopGenerationOutcome<TCardKind>> => {
   const cancel = createHostedCancellation(options.invoke, intent.requestId);
   const onAbort = () => cancel();
@@ -430,6 +467,7 @@ const executeHostedJsonGeneration = async <
       requestId: intent.requestId,
       routeId: family.jsonRouteId,
       body,
+      ...(systemConfig === undefined ? {} : { systemConfig }),
     });
     if (signal.aborted) {
       // 响应已返回但用户已要求取消：请求肯定到达过服务器，不能声称干净取消。
@@ -545,9 +583,12 @@ export const executeDesktopGeneration = async <
     if (oversize !== null) {
       return { status: 'failed', mode: intent.mode, rawText: '', message: oversize, code: 'invalid-request' };
     }
+    // 「使用系统默认配置」通道的模型选择/生成覆盖随请求一起过 IPC；
+    // 折叠语义与 Web 一致（'default' 且无覆盖 → 不携带字段）。
+    const systemConfig = buildHostedSystemConfig(intent);
     return intent.mode === 'hosted-stream'
-      ? executeHostedStreamGeneration(family, options, input, intent, signal, body, onPartialText)
-      : executeHostedJsonGeneration(family, options, input, intent, signal, body);
+      ? executeHostedStreamGeneration(family, options, input, intent, signal, body, systemConfig, onPartialText)
+      : executeHostedJsonGeneration(family, options, input, intent, signal, body, systemConfig);
   }
   return executeDirectGeneration(family, options, input, intent, signal, onPartialText);
 };

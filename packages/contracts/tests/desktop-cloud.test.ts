@@ -363,6 +363,73 @@ describe('renderer IPC 投影', () => {
     }).success).toBe(false);
   });
 
+  it('hosted systemConfig：「使用系统默认配置」通道的非秘密偏好（D5.1-AIP-r1）', () => {
+    // 显式系统模型选择（与 Web customProvider:{providerId:'system'} 同语义）。
+    expect(DesktopHostedGenerateRequestSchema.safeParse({
+      requestId: 'req-5',
+      routeId: 'generate-magical-girl-details-stream',
+      body: { answers: [] },
+      systemConfig: { modelId: 'glm-5.3-flash' },
+    }).success).toBe(true);
+
+    // 模型选择 + 生成覆盖。
+    expect(DesktopHostedGenerateRequestSchema.safeParse({
+      requestId: 'req-6',
+      routeId: 'generate-magical-girl-details-stream',
+      body: { answers: [] },
+      systemConfig: {
+        modelId: 'default',
+        generationOverrides: {
+          temperature: 0.4,
+          maxOutputTokens: 4096,
+          thinking: { mode: 'enabled', effort: 'medium' },
+        },
+      },
+    }).success).toBe(true);
+
+    // 凭据字段在 systemConfig 内部同样 fail-closed（DESK-093 不松口）。
+    for (const systemConfig of [
+      { modelId: 'glm-5.3-flash', apiKey: 'sk-smuggled' },
+      { modelId: 'glm-5.3-flash', providerId: 'deepseek' },
+      { modelId: 'glm-5.3-flash', secretRef: 'provider-key:abc' },
+      { modelId: 'glm-5.3-flash', baseUrl: 'https://api.example.com' },
+    ]) {
+      expect(DesktopHostedGenerateRequestSchema.safeParse({
+        requestId: 'req-7',
+        routeId: 'generate-magical-girl-details-stream',
+        body: {},
+        systemConfig,
+      }).success).toBe(false);
+    }
+
+    // 形状校验：控制字符、超长、非 schema 覆盖项拒绝；
+    // 「是否在系统清单内」归服务端裁决，契约层不做目录判断。
+    expect(DesktopHostedGenerateRequestSchema.safeParse({
+      requestId: 'req-8',
+      routeId: 'generate-magical-girl-details-stream',
+      body: {},
+      systemConfig: { modelId: 'm\nx' },
+    }).success).toBe(false);
+    expect(DesktopHostedGenerateRequestSchema.safeParse({
+      requestId: 'req-9',
+      routeId: 'generate-magical-girl-details-stream',
+      body: {},
+      systemConfig: { modelId: 'm'.repeat(257) },
+    }).success).toBe(false);
+    expect(DesktopHostedGenerateRequestSchema.safeParse({
+      requestId: 'req-10',
+      routeId: 'generate-magical-girl-details-stream',
+      body: {},
+      systemConfig: { generationOverrides: { temperature: 'hot' } },
+    }).success).toBe(false);
+    expect(DesktopHostedGenerateRequestSchema.safeParse({
+      requestId: 'req-11',
+      routeId: 'generate-magical-girl-details-stream',
+      body: {},
+      systemConfig: { generationOverrides: { temperature: 0.5, extra: 1 } },
+    }).success).toBe(false);
+  });
+
   it('hosted 非流式请求：独立路由白名单，凭据字段同样 fail-closed', () => {
     expect(DesktopHostedJsonRequestSchema.safeParse({
       requestId: 'req-1',
@@ -386,6 +453,20 @@ describe('renderer IPC 投影', () => {
       routeId: 'generate-magical-girl-details',
       body: {},
       secretRef: 'provider-key:abc',
+    }).success).toBe(false);
+
+    // 非流式通路同样携带「使用系统默认配置」通道偏好。
+    expect(DesktopHostedJsonRequestSchema.safeParse({
+      requestId: 'req-5',
+      routeId: 'generate-magical-girl-details',
+      body: { answers: [] },
+      systemConfig: { modelId: 'glm-5.3-flash' },
+    }).success).toBe(true);
+    expect(DesktopHostedJsonRequestSchema.safeParse({
+      requestId: 'req-6',
+      routeId: 'generate-magical-girl-details',
+      body: {},
+      systemConfig: { modelId: 'glm-5.3-flash', apiKey: 'sk-smuggled' },
     }).success).toBe(false);
   });
 
