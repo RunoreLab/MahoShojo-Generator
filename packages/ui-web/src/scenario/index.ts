@@ -6,3 +6,5 @@ export {
   type ScenarioOptionalField,
   type ScenarioQuestion,
 } from './product';
+export { ScenarioPageLayout, type ScenarioPageLayoutProps } from './ScenarioPageLayout';
+export { ScenarioTitleField, ScenarioQuestionFields, ScenarioBlankFields, ScenarioLanguageField } from './ScenarioFields';

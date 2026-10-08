@@ -12,7 +12,6 @@ import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
 import { ProviderCooldownNotice } from '@/components/ai/ProviderCooldownNotice';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { ErrorMessage } from '@/components/ErrorMessage';
-import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { convertDataCard, createBlankDataCard } from '@/lib/data-card-converter';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { StreamStopButton } from '@/components/shared/StreamStopButton';
@@ -35,7 +34,11 @@ import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 // 引导性问题 / 留空字段 / 初始回答与 Desktop 共源（ui-web/scenario）：
 // answers 以 label 为键直接进 prompt，双端口径必须一致。
 import {
-  SCENARIO_QUESTIONS as scenarioQuestions,
+  ScenarioPageLayout,
+  ScenarioTitleField,
+  ScenarioQuestionFields,
+  ScenarioBlankFields,
+  ScenarioLanguageField,
   SCENARIO_OPTIONAL_FIELDS as optionalFields,
   createInitialScenarioAnswers,
 } from '@mahoshojo/ui-web/scenario';
@@ -483,23 +486,10 @@ export const ScenarioPage: React.FC = () => {
   }, [resultData, resignDataCard, verifyOrigin]);
 
   return (
-    <>
-      <div className="magic-background-white">
-        <div className="container">
-            <div className="card">
-              <div className="text-center mb-4">
-                <div className="flex justify-center items-center" style={{ marginBottom: '1rem' }}>
-                  <img src="/scenario-shadow.webp" width={360} height={40} alt="箱庭物语" />
-                </div>
-                <p className="subtitle mt-2">情景生成器，创建独一无二的舞台，上演属于你的故事</p>
-                <EncyclopediaLinks
-                  items={[
-                    { slug: 'scenario-generator', text: '百科：箱庭物语（情景生成器）' },
-                    { slug: 'scenario-advanced', text: '百科：情景卡进阶（继承与长线）' },
-                  ]}
-                />
-              </div>
-
+    <ScenarioPageLayout
+      onNavigate={(href) => router.push(href)}
+      controls={(
+        <>
               <div className="space-y-6">
                 <div className="flex flex-col gap-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-900 sm:flex-row sm:items-center sm:justify-between">
                   <span>
@@ -516,61 +506,10 @@ export const ScenarioPage: React.FC = () => {
                   </button>
                 </div>
 
-                <div className="input-group">
-                  <label htmlFor="scenario-title-hint" className="input-label">情景标题（可选）</label>
-                  <input
-                    id="scenario-title-hint"
-                    value={scenarioTitleHint}
-                    onChange={(e) => setScenarioTitleHint(e.target.value)}
-                    placeholder="例如：深夜车站、雨夜访谈、黄昏钟楼"
-                    className="input-field"
-                    disabled={isGenerating}
-                  />
-                  <p className="text-xs text-gray-500 mt-1">用于流式生成时的标题回退；非流式会由 AI 自动命名。</p>
-                </div>
-
-                {scenarioQuestions.map(q => (
-                  <div key={q.id} className="input-group">
-                  <label htmlFor={q.id} className="input-label">{q.label}</label>
-                  <textarea
-                    id={q.id}
-                    value={answers[q.label]}
-                    onChange={(e) => handleAnswerChange(q.label, e.target.value)}
-                    placeholder={q.placeholder}
-                    className="input-field resize-y h-24"
-                    rows={3}
-                  />
-                </div>
-                ))}
-            </div>
-
-            {/* 高级选项UI */}
-            <div className="input-group mt-6">
-              <button
-                onClick={() => setIsAdvancedVisible(!isAdvancedVisible)}
-                className="text-sm font-semibold text-purple-700 hover:underline focus:outline-none"
-              >
-                {isAdvancedVisible ? '▼ ' : '▶ '}高级选项：强制留空字段
-              </button>
-              {isAdvancedVisible && (
-                <div className="mt-3 p-4 bg-purple-50 border border-purple-200 rounded-lg">
-                  <p className="text-xs text-gray-600 mb-3">勾选你希望AI在生成时强制留空的字段，以获得更灵活的情景文件。</p>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    {optionalFields.map(field => (
-                      <label key={field.value} className="flex items-center text-sm cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={fieldsToKeepEmpty.includes(field.value)}
-                          onChange={() => handleOptionalFieldChange(field.value)}
-                          className="h-4 w-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
-                        />
-                        <span className="ml-2 text-gray-700">{field.label}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
+                <ScenarioTitleField value={scenarioTitleHint} onChange={setScenarioTitleHint} disabled={isGenerating} />
+                <ScenarioQuestionFields answers={answers} onChange={handleAnswerChange} />
+              </div>
+              <ScenarioBlankFields expanded={isAdvancedVisible} onToggle={() => setIsAdvancedVisible(!isAdvancedVisible)} fields={fieldsToKeepEmpty} onChange={handleOptionalFieldChange} />
 
             <div className="input-group mt-6">
               <AiProviderSelector onConfigChange={setUserProviderConfig} />
@@ -584,24 +523,7 @@ export const ScenarioPage: React.FC = () => {
               />
             </div>
 
-            {/* 多语言支持 */}
-            <div className="input-group mt-6">
-              <label htmlFor="language-select" className="input-label">
-                <img src="/globe.svg" alt="Language" className="inline-block w-4 h-4 mr-2" />
-                生成语言
-              </label>
-              <select
-                id="language-select"
-                value={selectedLanguage}
-                onChange={(e) => setSelectedLanguage(e.target.value)}
-                className="input-field"
-                disabled={isGenerating}
-              >
-                {languages.map(lang => (
-                  <option key={lang.code} value={lang.code}>{lang.name}</option>
-                ))}
-              </select>
-            </div>
+            <ScenarioLanguageField value={selectedLanguage} languages={languages} onChange={setSelectedLanguage} disabled={isGenerating} />
 
             {/* 成功提示信息 */}
             {!isGenerating && generationMode === 'non-stream' && resultData && (
@@ -640,8 +562,10 @@ export const ScenarioPage: React.FC = () => {
             </div>
             {error && <ErrorMessage message={error} className="error-message mt-4" />}
             {streamNotice ? <div className="mt-3 text-center text-sm text-amber-700">{streamNotice}</div> : null}
-          </div>
-
+        </>
+      )}
+      results={(
+        <>
           {generationMode === 'non-stream' && resultData && (
             <>
               {nonStreamReasoning && (
@@ -770,9 +694,9 @@ export const ScenarioPage: React.FC = () => {
           <div className="text-center" style={{ marginTop: '2rem' }}>
             <Link href="/" className="footer-link">返回首页</Link>
           </div>
-        </div>
-        <Footer />
-      </div>
-    </>
+        </>
+      )}
+      footer={<Footer />}
+    />
   );
 };

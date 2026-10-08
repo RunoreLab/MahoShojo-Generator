@@ -9,7 +9,7 @@ import { resetDesktopAiConfigStoreForTests } from '../src/features/ai-config/use
 import { DESKTOP_AI_CONFIG_STORAGE_KEY } from '../src/features/ai-config/desktop-ai-config-store';
 import { createDesktopRouter } from '../src/app/router';
 
-const mocks = vi.hoisted(() => ({ execute: vi.fn(), save: vi.fn(), listen: vi.fn(), profiles: vi.fn() }));
+const mocks = vi.hoisted(() => ({ execute: vi.fn(), save: vi.fn(), listen: vi.fn(), profiles: vi.fn(), scrollResult: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), isTauri: () => true }));
 vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ onCloseRequested: mocks.listen }) }));
 vi.mock('../src/features/scenario/generation', async (original) => ({ ...await original<object>(), executeScenarioGeneration: mocks.execute }));
@@ -58,6 +58,7 @@ beforeEach(() => {
   mocks.listen.mockImplementation(async () => vi.fn());
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => [{ code: 'zh-CN', name: '简体中文' }] })));
   vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+  HTMLElement.prototype.scrollIntoView = mocks.scrollResult;
   vi.spyOn(window, 'confirm').mockReturnValue(false);
   HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   HTMLDialogElement.prototype.close = function () { this.open = false; };
@@ -86,6 +87,8 @@ describe('Desktop Scenario route and session UI (native adapter mock)', () => {
       (el) => el.getAttribute('aria-label') === '故事发生的场景是怎样的？',
     )!;
     expect(textarea.value).toBe('雨后的天台');
+    const inputCard = container.querySelector('.container > .card')!;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ top: window.innerHeight + 1 } as DOMRect);
     await click('生成情景');
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     const callInput = mocks.execute.mock.calls[0]![1] as {
@@ -98,9 +101,14 @@ describe('Desktop Scenario route and session UI (native adapter mock)', () => {
       titleHint: '',
     });
     expect(container.textContent).toContain('雨后采访');
+    const resultSection = container.querySelector('[aria-label="生成结果"]')!;
+    expect(inputCard.contains(resultSection)).toBe(false);
+    expect(mocks.scrollResult).toHaveBeenCalledTimes(1);
+    expect(mocks.scrollResult.mock.instances[0]).toBe(resultSection.parentElement);
     await click('保存到本地卡库');
     expect(mocks.save).toHaveBeenCalledTimes(1);
     expect(container.textContent).toContain('已保存到本地卡库');
+    expect(mocks.scrollResult).toHaveBeenCalledTimes(1);
   });
 
   it('confirms replacement before regenerating an unsaved result', async () => {
@@ -128,11 +136,16 @@ describe('Desktop Scenario route and session UI (native adapter mock)', () => {
     await mount();
     await click('恢复草稿');
     // D5.1-AIP-r1：草稿的流式偏好不改写、切回服务器即恢复；客户端只按
-    // 生效的「非流式」呈现，流式专属的标题输入也随之隐藏。
+    // 生效的「非流式」呈现。标题输入与 Web 一样保留可见，并明确提示仅流式回退；
+    // 可见不改变派发条件。
     const stored = JSON.parse(window.localStorage.getItem(SCENARIO_DRAFT_KEY)!);
     expect(stored.generationMode).toBe('stream');
     expect(container.textContent).toContain('客户端执行为结构化（非流式）直出');
-    expect(container.querySelector('input[aria-label="期望的情景标题"]')).toBeNull();
+    expect(container.querySelector<HTMLInputElement>('input[aria-label="情景标题"]')?.value).toBe('夜雨');
+    expect(container.querySelector('select[aria-label="生成语言"]')).not.toBeNull();
+    expect(container.textContent).toContain('非流式会由 AI 自动命名');
+    await click('生成情景');
+    expect(mocks.execute.mock.calls[0]![1]).toMatchObject({ titleHint: '' });
   });
 
   it('restored signed card is labelled unverified, not official (G2-r1 信任标签)', async () => {

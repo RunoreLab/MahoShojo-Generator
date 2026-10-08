@@ -13,10 +13,12 @@ import {
   useResultAutoScroll,
 } from '@mahoshojo/ui-web/details-controls';
 import { MarkdownBlock } from '@mahoshojo/ui-web/markdown';
-import { EncyclopediaLinks } from '@mahoshojo/ui-web/encyclopedia-views';
 import {
-  SCENARIO_OPTIONAL_FIELDS as OPTIONAL_FIELDS,
-  SCENARIO_QUESTIONS,
+  ScenarioPageLayout,
+  ScenarioTitleField,
+  ScenarioQuestionFields,
+  ScenarioBlankFields,
+  ScenarioLanguageField,
   createInitialScenarioAnswers as createInitialAnswers,
   hasAnyScenarioAnswer as hasAnyAnswer,
 } from '@mahoshojo/ui-web/scenario';
@@ -201,25 +203,11 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
       ? '含签名字段（本机未验证）'
       : '未签名（非原生卡）';
   return (
-    <div>
-      <section data-testid="page-scenario" className="magic-background-white">
-        <div className="container">
-          <div className="card flex flex-col gap-5">
-            {/* 页首品牌图与百科入口与 Web `/scenario` 同构（差距收口）。 */}
-            <header className="text-center">
-              <div className="flex items-center justify-center" style={{ marginBottom: '1rem' }}>
-                <img src="/scenario-shadow.webp" width={360} height={40} alt="箱庭物语" />
-              </div>
-              <p className="subtitle mt-2">情景生成器，创建独一无二的舞台，上演属于你的故事</p>
-              <EncyclopediaLinks
-                items={[
-                  { slug: 'scenario-generator', text: '百科：箱庭物语（情景生成器）' },
-                  { slug: 'scenario-advanced', text: '百科：情景卡进阶（继承与长线）' },
-                ]}
-                onNavigate={(href) => navigateByProductHref(router, href)}
-                resolveInternalHref={resolveInternalHrefForHashHistory}
-              />
-            </header>
+    <ScenarioPageLayout
+      onNavigate={(href) => navigateByProductHref(router, href)}
+      resolveInternalHref={resolveInternalHrefForHashHistory}
+      controls={(
+        <div className="space-y-6">
             <section aria-label="草稿" className="rounded-lg border border-(--app-border) p-4">
               <p>回答、生成方式与结果自动保存在本机页面草稿中，恢复草稿不会自动重新生成。</p>
               <p className="text-sm text-(--app-text-muted)">草稿不参与本地库整库备份或归档；保存到本地卡库的数据卡参与。草稿上限为序列化后 4 Mi 字符，超出或写入失败时请保留当前页面。</p>
@@ -240,6 +228,14 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
             {guard.message && <p role="alert">{guard.message}</p>}
             {profilesLoading && target.location === 'client' && <p role="status">正在读取本地 Provider 配置…</p>}
             {profilesError && <p role="alert">{target.location === 'server' ? '本地 Provider 配置加载失败，仅影响客户端执行。' : profilesError}</p>}
+            <fieldset disabled={busy || blockedDraft} className="min-w-0">
+              <legend className="sr-only">情景要素</legend>
+              <div className="space-y-6">
+                <ScenarioTitleField value={draft.scenarioTitleHint} onChange={(scenarioTitleHint) => updateDraft({ scenarioTitleHint })} />
+                <ScenarioQuestionFields answers={draft.answers} onChange={(label, value) => updateDraft({ answers: { ...draft.answers, [label]: value } })} />
+              </div>
+              <ScenarioBlankFields expanded={draft.isAdvancedVisible === true} onToggle={() => updateDraft({ isAdvancedVisible: !draft.isAdvancedVisible })} fields={draft.fieldsToKeepEmpty} onChange={toggleKeepEmpty} />
+            </fieldset>
             <fieldset disabled={busy || blockedDraft} className="flex min-w-0 flex-col gap-4">
               <legend className="mb-2 font-semibold">生成设置</legend>
               <DesktopAiProviderPanel
@@ -255,6 +251,7 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
                   payloadNoun: '情景回答',
                 }}
                 controlsSlot={
+                  <>
                   <div>
                     <GenerationModeSwitcher
                       // 客户端 Direct 固定走结构化通路：展示生效的「非流式」，
@@ -270,84 +267,18 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
                       </p>
                     )}
                   </div>
+                  <ScenarioLanguageField
+                    value={draft.selectedLanguage}
+                    languages={languages.length ? languages : [{ code: draft.selectedLanguage, name: draft.selectedLanguage }]}
+                    onChange={(selectedLanguage) => updateDraft({ selectedLanguage })}
+                  />
+                  </>
                 }
               />
             </fieldset>
-            <fieldset disabled={busy || blockedDraft} className="flex min-w-0 flex-col gap-4">
-              <legend className="mb-2 font-semibold">情景要素</legend>
-              {SCENARIO_QUESTIONS.map((question) => (
-                <label key={question.id} className="flex flex-col gap-1">{question.label}
-                  <textarea
-                    aria-label={question.label}
-                    value={draft.answers[question.label] ?? ''}
-                    onChange={(event) => updateDraft({ answers: { ...draft.answers, [question.label]: event.target.value } })}
-                    placeholder={question.placeholder}
-                    className="min-h-20 w-full resize-y rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)"
-                    rows={3}
-                  />
-                </label>
-              ))}
-              <div className="rounded-lg border border-(--app-border) p-3">
-                <button
-                  type="button"
-                  onClick={() => updateDraft({ isAdvancedVisible: !draft.isAdvancedVisible })}
-                  className="flex w-full items-center justify-between text-left font-medium text-(--app-text)"
-                >
-                  <span>高级选项</span>
-                  <span className="ml-2">{draft.isAdvancedVisible ? '▼' : '▶'}</span>
-                </button>
-                {draft.isAdvancedVisible && (
-                  <div className="mt-3 flex flex-col gap-3">
-                    <div>
-                      <p className="font-medium">指定留空字段</p>
-                      <p className="mt-1 text-sm text-(--app-text-muted)">勾选后，AI 必须为对应字段输出空值（字符串字段输出空字符串，数组字段输出空数组）。</p>
-                      <div className="mt-2 flex flex-wrap gap-3">
-                        {OPTIONAL_FIELDS.map((field) => (
-                          <label key={field.value} className="flex items-center gap-1 text-sm">
-                            <input
-                              type="checkbox"
-                              checked={draft.fieldsToKeepEmpty.includes(field.value)}
-                              onChange={() => toggleKeepEmpty(field.value)}
-                            />
-                            {field.label}
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                    {effectiveGenerationMode === 'stream' && (
-                      <label className="flex flex-col gap-1">期望的情景标题（可选）
-                        <input
-                          type="text"
-                          aria-label="期望的情景标题"
-                          value={draft.scenarioTitleHint}
-                          onChange={(event) => updateDraft({ scenarioTitleHint: event.target.value })}
-                          placeholder="留空则由 AI 自拟标题"
-                          className="rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)"
-                        />
-                      </label>
-                    )}
-                    <label className="flex flex-col gap-1">
-                      <span>
-                        <img src="/globe.svg" alt="Language" className="mr-2 inline-block h-4 w-4" />生成语言
-                      </span>
-                      <select
-                        aria-label="生成语言"
-                        className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)"
-                        value={draft.selectedLanguage}
-                        onChange={(event) => updateDraft({ selectedLanguage: event.target.value })}
-                      >
-                        {(languages.length ? languages : [{ code: draft.selectedLanguage, name: draft.selectedLanguage }]).map((lang) => (
-                          <option key={lang.code} value={lang.code}>{lang.name}</option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                )}
-              </div>
-            </fieldset>
             <TokenIndicator text={tokenEstimateText} />
             <div className="flex flex-wrap gap-2">
-              <button className={actionClass} disabled={!guard.ready || busy || !hasAnyAnswer(draft.answers) || !executionMode || (target.location === 'client' && !selected) || clientProfilesBlocked || blockedDraft} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '生成情景' : '重新生成'}</button>
+              <button className="generate-button" disabled={!guard.ready || busy || !hasAnyAnswer(draft.answers) || !executionMode || (target.location === 'client' && !selected) || clientProfilesBlocked || blockedDraft} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '生成情景' : '重新生成'}</button>
               {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}
             </div>
             <dialog ref={regenerateDialog} aria-labelledby="regenerate-title" aria-describedby="regenerate-description" className="m-auto max-w-lg rounded-lg border border-(--app-border) bg-(--app-surface) p-5 text-(--app-text) backdrop:bg-black/40" onCancel={(event) => { event.preventDefault(); if (!session.isBusy()) setConfirmRegenerate(false); }}>
@@ -363,6 +294,11 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
             {actionError && <p role="alert">{actionError}</p>}
             {actionInfo && <p role="status">{actionInfo}</p>}
             {state.message && <p role={state.phase === 'uncertain' ? 'alert' : 'status'}>{state.message}</p>}
+
+        </div>
+      )}
+      results={card || state.rawText || state.reasoning ? (
+        <div className="mt-6 space-y-6">
             {state.reasoning && <AiReasoningPanel reasoning={state.reasoning} />}
             <div ref={resultSectionRef}>
               {card && <section aria-label="生成结果" className="flex flex-col gap-3">
@@ -407,16 +343,17 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
               </section>}
             </div>
             {state.rawText && <details open={state.phase !== 'completed'}><summary>原始输出正文</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border p-3">{state.rawText}</pre></details>}
-          </div>
+        </div>
+      ) : null}
+      footer={(
           <ProductFooter
             assetSource={DESKTOP_ASSET_SOURCE}
             onNavigateInternal={(href) => navigateByProductHref(router, href)}
             resolveInternalHref={resolveInternalHrefForHashHistory}
             onNavigateExternal={openFixed}
           />
-        </div>
-      </section>
-    </div>
+      )}
+    />
   );
 }
 
