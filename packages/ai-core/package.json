@@ -54,6 +54,21 @@
       "types": "./src/canshou-generation.ts",
       "import": "./src/canshou-generation.ts",
       "default": "./src/canshou-generation.ts"
+    },
+    "./reference-attachments": {
+      "types": "./src/reference-attachments.ts",
+      "import": "./src/reference-attachments.ts",
+      "default": "./src/reference-attachments.ts"
+    },
+    "./free-generation": {
+      "types": "./src/free-generation.ts",
+      "import": "./src/free-generation.ts",
+      "default": "./src/free-generation.ts"
+    },
+    "./scenario-generation": {
+      "types": "./src/scenario-generation.ts",
+      "import": "./src/scenario-generation.ts",
+      "default": "./src/scenario-generation.ts"
     }
   },
   "scripts": {

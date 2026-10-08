@@ -1,7 +1,7 @@
+import { buildScenarioStreamPrompt } from '@mahoshojo/ai-core/scenario-generation';
 import {
   createGenerateScenarioStreamService,
   type GenerateScenarioService,
-  type GenerateScenarioStreamInput,
 } from '@mahoshojo/hosted-api/generate-scenario';
 import { completeStep, respondStep } from '@mahoshojo/hosted-api/regular-generation';
 
@@ -14,7 +14,6 @@ import {
   resolveScenarioProviderRuntime,
 } from './generate-scenario-runtime';
 import {
-  buildScenarioMarkdownRequirements,
   type GenerationAiTelemetry,
   type RawGenerationConfig,
   type ReasoningSseBridge,
@@ -59,40 +58,6 @@ type ScenarioStreamGeneration = {
   reasoningBridge: ReasoningSseBridge | null;
   aiTelemetry: GenerationAiTelemetry;
   customModelOverride?: string;
-};
-
-const buildScenarioStreamPrompt = (input: GenerateScenarioStreamInput): string => {
-  const normalizedEmptyFields = Array.isArray(input.fieldsToKeepEmpty)
-    ? input.fieldsToKeepEmpty
-      .filter((item: unknown): item is string => typeof item === 'string' && Boolean(item.trim()))
-      .slice(0, 32)
-    : [];
-  const answerText = Object.entries(input.answers)
-    .filter(([, value]) => typeof value === 'string' && value.trim())
-    .map(([key, value]) => `【${key}】\n${String(value).trim()}\n`)
-    .join('\n');
-  const emptyFieldsInstruction = normalizedEmptyFields.length > 0
-    ? `
-【强制留空指令】
-用户已指定以下内容必须排除：请勿输出对应内容，不要擅自补全。
-需要排除的内容列表：
-${normalizedEmptyFields.map((field) => `- ${field}`).join('\n')}
-`.trim()
-    : '';
-  const titleHintText = typeof input.titleHint === 'string' && input.titleHint.trim()
-    ? `\n【用户期望的情景标题（可参考）】\n${input.titleHint.trim().slice(0, 60)}\n`
-    : '';
-  return `
-你是一个富有想象力的故事场景设计师。你的任务是根据用户提供的要素，生成一份【情景】设定文本，用于后续故事。
-
-${buildScenarioMarkdownRequirements(input.language)}
-
-${emptyFieldsInstruction}
-${titleHintText}
-
-【用户的回答】
-${answerText}
-`.trim();
 };
 
 export const createGenerateScenarioStreamRuntime = (

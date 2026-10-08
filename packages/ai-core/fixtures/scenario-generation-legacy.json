@@ -1,0 +1,258 @@
+{
+  "cases": [
+    {
+      "input": {
+        "answers": {
+          "场景": "雨夜车站",
+          "事件": "决斗"
+        },
+        "language": "zh-CN",
+        "fieldsToKeepEmpty": [
+          "elements.roles"
+        ]
+      },
+      "systemPromptSha256": "c0ab6b87fa837b3385450a57fa1ab97c21c67bf6fa5d9ef81efaecd8418e29d6",
+      "temperature": 0.7,
+      "taskName": "生成情景",
+      "schema": {
+        "type": "ZodObject",
+        "description": "一个结构化的情景设定，用于后续故事。",
+        "shape": {
+          "title": {
+            "type": "ZodString",
+            "description": "情景的标题【必需】。根据用户回答，为这个情景取一个简洁而富有吸引力的标题。"
+          },
+          "scenario_type": {
+            "type": "ZodString",
+            "description": "情景类型【必需】。根据情景的核心内容，为其分类（例如：日常、互动、考试、竞技比赛、调查、采访等）。"
+          },
+          "description": {
+            "type": "ZodString",
+            "description": "情景的简短描述。"
+          },
+          "elements": {
+            "type": "ZodObject",
+            "shape": {
+              "scene": {
+                "type": "ZodObject",
+                "description": "场景描述。如果用户未提供，可留空或注明“未指定”。",
+                "shape": {
+                  "time": {
+                    "type": "ZodString",
+                    "optional": true,
+                    "description": "故事发生的时间。"
+                  },
+                  "place": {
+                    "type": "ZodString",
+                    "optional": true,
+                    "description": "故事发生的地点。"
+                  },
+                  "features": {
+                    "type": "ZodString",
+                    "optional": true,
+                    "description": "环境特征和陈设等。"
+                  }
+                }
+              },
+              "roles": {
+                "type": "ZodArray",
+                "optional": true,
+                "description": "预设的NPC角色信息，可留空。",
+                "element": {
+                  "type": "ZodObject",
+                  "shape": {
+                    "name": {
+                      "type": "ZodString",
+                      "description": "角色名称或身份。"
+                    },
+                    "description": {
+                      "type": "ZodString",
+                      "description": "该角色的设定、目标或行为准则。"
+                    }
+                  }
+                }
+              },
+              "events": {
+                "type": "ZodString",
+                "description": "核心事件描述 (角色需要做什么？会怎么互动？有什么冲突？)。"
+              },
+              "atmosphere": {
+                "type": "ZodString",
+                "description": "故事的情感基调和氛围。"
+              },
+              "development": {
+                "type": "ZodArray",
+                "description": "故事可能的多个发展方向。",
+                "element": {
+                  "type": "ZodString"
+                }
+              }
+            }
+          }
+        }
+      },
+      "structuredPromptSha256": "9dfe48f60183dce64baf936d45a4f6d85a75ebc0195ce73e6223f52c97f998c1",
+      "output": {
+        "title": "T",
+        "scenario_type": "x",
+        "description": "d",
+        "elements": {
+          "scene": {
+            "time": "",
+            "place": "",
+            "features": ""
+          },
+          "roles": [],
+          "events": "e",
+          "atmosphere": "a",
+          "development": []
+        },
+        "metadata": {
+          "created_at": "2026-10-06T00:00:00.000Z",
+          "signature": "sig-value"
+        }
+      }
+    },
+    {
+      "input": {
+        "answers": {
+          "Scene": "clock tower"
+        },
+        "language": "en-US",
+        "fieldsToKeepEmpty": []
+      },
+      "systemPromptSha256": "c0ab6b87fa837b3385450a57fa1ab97c21c67bf6fa5d9ef81efaecd8418e29d6",
+      "temperature": 0.7,
+      "taskName": "生成情景",
+      "schema": {
+        "type": "ZodObject",
+        "description": "一个结构化的情景设定，用于后续故事。",
+        "shape": {
+          "title": {
+            "type": "ZodString",
+            "description": "情景的标题【必需】。根据用户回答，为这个情景取一个简洁而富有吸引力的标题。"
+          },
+          "scenario_type": {
+            "type": "ZodString",
+            "description": "情景类型【必需】。根据情景的核心内容，为其分类（例如：日常、互动、考试、竞技比赛、调查、采访等）。"
+          },
+          "description": {
+            "type": "ZodString",
+            "description": "情景的简短描述。"
+          },
+          "elements": {
+            "type": "ZodObject",
+            "shape": {
+              "scene": {
+                "type": "ZodObject",
+                "description": "场景描述。如果用户未提供，可留空或注明“未指定”。",
+                "shape": {
+                  "time": {
+                    "type": "ZodString",
+                    "optional": true,
+                    "description": "故事发生的时间。"
+                  },
+                  "place": {
+                    "type": "ZodString",
+                    "optional": true,
+                    "description": "故事发生的地点。"
+                  },
+                  "features": {
+                    "type": "ZodString",
+                    "optional": true,
+                    "description": "环境特征和陈设等。"
+                  }
+                }
+              },
+              "roles": {
+                "type": "ZodArray",
+                "optional": true,
+                "description": "预设的NPC角色信息，可留空。",
+                "element": {
+                  "type": "ZodObject",
+                  "shape": {
+                    "name": {
+                      "type": "ZodString",
+                      "description": "角色名称或身份。"
+                    },
+                    "description": {
+                      "type": "ZodString",
+                      "description": "该角色的设定、目标或行为准则。"
+                    }
+                  }
+                }
+              },
+              "events": {
+                "type": "ZodString",
+                "description": "核心事件描述 (角色需要做什么？会怎么互动？有什么冲突？)。"
+              },
+              "atmosphere": {
+                "type": "ZodString",
+                "description": "故事的情感基调和氛围。"
+              },
+              "development": {
+                "type": "ZodArray",
+                "description": "故事可能的多个发展方向。",
+                "element": {
+                  "type": "ZodString"
+                }
+              }
+            }
+          }
+        }
+      },
+      "structuredPromptSha256": "8fecddcc1e3766253dcbd7ced4719c4ce83308975a151ebfd5b01d4a13674caa",
+      "output": {
+        "title": "T",
+        "scenario_type": "x",
+        "description": "d",
+        "elements": {
+          "scene": {
+            "time": "",
+            "place": "",
+            "features": ""
+          },
+          "roles": [],
+          "events": "e",
+          "atmosphere": "a",
+          "development": []
+        },
+        "metadata": {
+          "created_at": "2026-10-06T00:00:00.000Z",
+          "signature": "sig-value"
+        }
+      }
+    }
+  ],
+  "streamCases": [
+    {
+      "input": {
+        "answers": {
+          "场景": "雨夜车站",
+          "事件": "决斗"
+        },
+        "language": "zh-CN",
+        "fieldsToKeepEmpty": [
+          "elements.roles"
+        ],
+        "titleHint": "夜谈"
+      },
+      "streamPromptSha256": "f42ce13da7c803f2c0e18df3f26b75e44f0022411e3ab0ab1b6bf5b1e7220aaa",
+      "temperature": 0.75,
+      "prompt": "你是一个富有想象力的故事场景设计师。你的任务是根据用户提供的要素，生成一份【情景】设定文本，用于后续故事。\n\n【重要】输出要求：\n1) 必须使用【zh-CN】创作。\n2) 必须直接输出 Markdown 正文，不要输出“我将要/我不能”之类的解释。\n3) 第 1 行必须是一级标题（以 \"# \" 开头），写情景标题，不超过 30 字。\n4) 在开头 20 行内，尽量给出明确字段（若无法推断可写“未指定”）：\n   - 标题：...\n5) 正文建议包含：场景概览、时间、地点、环境特征、预设NPC（可选）、核心事件、整体氛围、发展方向（多条）。\n\n【强制留空指令】\n用户已指定以下内容必须排除：请勿输出对应内容，不要擅自补全。\n需要排除的内容列表：\n- elements.roles\n\n【用户期望的情景标题（可参考）】\n夜谈\n\n\n【用户的回答】\n【场景】\n雨夜车站\n\n【事件】\n决斗"
+    },
+    {
+      "input": {
+        "answers": {
+          "Scene": "clock tower"
+        },
+        "language": "en-US",
+        "fieldsToKeepEmpty": [],
+        "titleHint": ""
+      },
+      "streamPromptSha256": "8061c756da0f9218a535da16c2c0e1f2fc8eefc77668ffc7fbaf3a5e57bc671a",
+      "temperature": 0.75,
+      "prompt": "你是一个富有想象力的故事场景设计师。你的任务是根据用户提供的要素，生成一份【情景】设定文本，用于后续故事。\n\n【重要】输出要求：\n1) 必须使用【en-US】创作。\n2) 必须直接输出 Markdown 正文，不要输出“我将要/我不能”之类的解释。\n3) 第 1 行必须是一级标题（以 \"# \" 开头），写情景标题，不超过 30 字。\n4) 在开头 20 行内，尽量给出明确字段（若无法推断可写“未指定”）：\n   - 标题：...\n5) 正文建议包含：场景概览、时间、地点、环境特征、预设NPC（可选）、核心事件、整体氛围、发展方向（多条）。\n\n\n\n\n【用户的回答】\n【Scene】\nclock tower"
+    }
+  ]
+}
