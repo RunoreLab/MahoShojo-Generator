@@ -8,6 +8,7 @@ import Link from 'next/link';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
 import QuestionNavigator from '@/components/QuestionNavigator';
 import { isMobileFormFactor, recommendedSaveModes, SaveJsonButton as SharedSaveJsonButton } from '@mahoshojo/ui-web/details-controls';
+import { ImagePreviewModal } from '@mahoshojo/ui-web/modal';
 import { useAppRouterAdapter } from '@/lib/app-router-adapter';
 import { DETAILS_PREFERENCES_STORAGE_KEY } from '@/lib/settings/page-preferences';
 import BattleDataModal from '@/components/BattleDataModal';
@@ -2348,34 +2349,11 @@ export const CreatorPage: React.FC = () => {
         />
       )}
 
-      {showImageModal && savedImageUrl && (
-        <div
-          className="fixed inset-0 flex items-center justify-center bg-black"
-          style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)', paddingLeft: '2rem', paddingRight: '2rem', zIndex: 1000 }}
-        >
-          <div className="relative max-h-[80vh] w-full max-w-lg overflow-auto rounded-lg bg-white">
-            <div className="sticky top-0 z-10 flex justify-end bg-white/95 p-2 backdrop-blur">
-              <button
-                onClick={() => setShowImageModal(false)}
-                aria-label="关闭"
-                className="text-3xl leading-none text-gray-500 hover:text-gray-700"
-              >
-                ×
-              </button>
-            </div>
-            <div className="px-4 pb-4">
-              <p className="mt-2 text-center text-sm text-gray-600">💫 长按图片保存到相册</p>
-              <div className="flex flex-col items-center p-2">
-                <img
-                  src={savedImageUrl}
-                  alt="魔法少女详细档案"
-                  className="mx-auto h-auto w-1/2 rounded-lg"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <ImagePreviewModal
+        isOpen={showImageModal}
+        imageUrl={savedImageUrl}
+        onClose={() => setShowImageModal(false)}
+      />
     </>
   );
 

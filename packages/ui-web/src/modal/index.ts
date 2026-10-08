@@ -25,3 +25,4 @@ export type {
 } from './escape-stack';
 export { ModalTabs, modalTabIds } from './ModalTabs';
 export type { ModalTabItem, ModalTabsProps } from './ModalTabs';
+export { ImagePreviewModal } from './ImagePreviewModal';

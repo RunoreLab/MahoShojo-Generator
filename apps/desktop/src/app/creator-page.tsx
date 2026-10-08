@@ -100,7 +100,7 @@ import {
 } from '@mahoshojo/ui-web/creator';
 import { revokeBlobUrl } from '@mahoshojo/ui-web/client';
 import { CardLibraryModal, type BattleSelectionPayload, type CardLibrarySelectionContext } from '@mahoshojo/ui-web/card-library';
-import { useEscapeLayer } from '@mahoshojo/ui-web/modal';
+import { ImagePreviewModal, useEscapeLayer } from '@mahoshojo/ui-web/modal';
 import { ProductFooter } from '@mahoshojo/ui-web/shell';
 import type { HomeAssetSource } from '@mahoshojo/ui-web/home';
 import { CREATOR_DRAFT_DEFAULT_RULE_IDS, CreatorSession } from '../features/creator/session';
@@ -851,14 +851,6 @@ function CreatorForm({ session }: { session: CreatorSession }) {
       return true;
     },
   });
-  useEscapeLayer({
-    active: showImageModal && savedImageUrl !== null,
-    onEscape: () => {
-      setShowImageModal(false);
-      return true;
-    },
-  });
-
   const applyImportedAnswers = (next: Record<string, string>) => {
     updateDraft({ answers: next });
     setActionError(null);
@@ -1368,21 +1360,11 @@ function CreatorForm({ session }: { session: CreatorSession }) {
               <button autoFocus className={actionClass} onClick={() => setDetailsSelection(null)}>关闭</button>
             </div>
           </dialog>
-          {showImageModal && savedImageUrl && (
-            <div className="fixed inset-0 flex items-center justify-center" style={{ backgroundColor: 'rgba(0, 0, 0, 0.7)', paddingLeft: '2rem', paddingRight: '2rem', zIndex: 1000 }}>
-              <div className="bg-white rounded-lg max-w-lg w-full max-h-[80vh] overflow-auto relative">
-                <div className="sticky top-0 z-10 bg-white/95 backdrop-blur flex justify-end p-2">
-                  <button onClick={() => setShowImageModal(false)} aria-label="关闭" className="text-gray-500 hover:text-gray-700 text-3xl leading-none">×</button>
-                </div>
-                <div className="px-4 pb-4">
-                  <p className="text-center text-sm text-gray-600" style={{ marginTop: '0.5rem' }}>💫 长按图片保存到相册</p>
-                  <div className="items-center flex flex-col" style={{ padding: '0.5rem' }}>
-                    <img src={savedImageUrl} alt="生成结果长图" className="w-1/2 h-auto rounded-lg mx-auto" />
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+          <ImagePreviewModal
+            isOpen={showImageModal}
+            imageUrl={savedImageUrl}
+            onClose={() => setShowImageModal(false)}
+          />
           <CardLibraryModal
             host={cardLibraryHost}
             isOpen={pickerOpen}
