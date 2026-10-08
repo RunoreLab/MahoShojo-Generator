@@ -12,6 +12,7 @@ import {
   HomeFeatureGrid,
   HomeHero,
   HomePageView,
+  HomeAccountWelcome,
   getHomeFeatureAssets,
   homeAssetUrl,
   type HomeAssetSource,
@@ -234,4 +235,30 @@ describe('HomePageView', () => {
     expect(navigate).toHaveBeenCalledWith('/details');
     expect(card.querySelector('a[href="#/battle"]')).toBeNull();
   });
+});
+
+
+it.each(['/character-manager', '/me', '/encyclopedia', '/details'])('preserves native modified clicks for home link %s', (href) => {
+  const navigate = vi.fn();
+  render(<HomePageView
+    assetSource={ASSET_SOURCE}
+    capabilities={{ '/details': AVAILABLE }}
+    onNavigate={navigate}
+    account={<HomeAccountWelcome state="signed-in" name="用户" primaryHref="/character-manager" secondaryLinks={[{ href: '/me', label: '个人页' }]} onNavigate={navigate} />}
+  />);
+  const link = container.querySelector<HTMLAnchorElement>(`a[href="${href}"]`)!;
+  for (const options of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }]) {
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true, ...options });
+    act(() => { link.dispatchEvent(event); });
+    expect(event.defaultPrevented).toBe(false);
+    expect(navigate).not.toHaveBeenCalled();
+  }
+  const cancelled = new MouseEvent('click', { bubbles: true, cancelable: true });
+  cancelled.preventDefault();
+  act(() => { link.dispatchEvent(cancelled); });
+  expect(navigate).not.toHaveBeenCalled();
+  const ordinary = new MouseEvent('click', { bubbles: true, cancelable: true });
+  act(() => { link.dispatchEvent(ordinary); });
+  expect(ordinary.defaultPrevented).toBe(true);
+  expect(navigate).toHaveBeenCalledExactlyOnceWith(href);
 });

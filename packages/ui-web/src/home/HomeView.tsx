@@ -1,5 +1,7 @@
 import type { MouseEvent, ReactNode } from 'react';
 
+import { shouldInterceptInternalLinkClick } from '../link-click';
+
 import { readCapability, type CapabilitySnapshot } from '../capability/index';
 // 直接指向模块而不是 views 的 barrel：barrel 会把该 feature 下所有 hook 一起拖进来，而首页
 // 是 Server Component 会经过的路径（`app/page.tsx` 只需要目录数据与 preload 列表）。
@@ -100,6 +102,7 @@ export function HomeAccountWelcome({
   if (state === 'anonymous') return null;
 
   const navigate = (href: string) => (event: MouseEvent<HTMLAnchorElement>) => {
+    if (!shouldInterceptInternalLinkClick(event)) return;
     event.preventDefault();
     onNavigate(href);
   };
@@ -166,6 +169,7 @@ export function HomeEncyclopediaCard({ assetSource, onNavigate, resolveInternalH
         <a
           href={resolveInternalHref?.('/encyclopedia') ?? '/encyclopedia'}
           onClick={(event) => {
+            if (!shouldInterceptInternalLinkClick(event)) return;
             event.preventDefault();
             onNavigate('/encyclopedia');
           }}
@@ -254,6 +258,7 @@ export function HomeFeatureGrid({
         key={feature.id}
         href={resolveInternalHref?.(feature.href) ?? feature.href}
         onClick={(event) => {
+          if (!shouldInterceptInternalLinkClick(event)) return;
           event.preventDefault();
           onNavigate(feature.href);
         }}
