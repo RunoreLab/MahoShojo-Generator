@@ -24,3 +24,5 @@ export { FreePageLayout, type FreePageLayoutProps } from './FreePageLayout';
 export { FreeSchemaFields, type FreeSchemaFieldsProps } from './FreeSchemaFields';
 export { FreePromptField, type FreePromptFieldProps } from './FreePromptField';
 export { FreeLanguageField, type FreeLanguageFieldProps } from './FreeLanguageField';
+export { FreeAttachmentPanel, type FreeAttachmentPanelProps } from './FreeAttachmentPanel';
+export { FreeResultPanel, FreeResultActions, FreeJsonResult } from './FreeResultPanel';

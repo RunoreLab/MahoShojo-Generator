@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, createRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { FreePageLayout, FreeSchemaFields, FreePromptField, FreeLanguageField, freeSchemaOptionsForMode } from '../src/free/index';
+import { FreePageLayout, FreeSchemaFields, FreePromptField, FreeLanguageField, FreeAttachmentPanel, FreeResultPanel, FreeResultActions, FreeJsonResult, type UseFreeAttachmentsResult, type AttachmentReadResult, useFreeAttachments, freeSchemaOptionsForMode } from '../src/free/index';
 
 let container: HTMLDivElement;
 let root: Root;
@@ -58,4 +58,68 @@ it('keeps language choices controlled and the host-provided fallback intact', ()
   act(() => root.render(<FreeLanguageField value="zh-CN" languages={[]} expanded={false} onToggle={vi.fn()} onChange={change} />));
   expect(container.querySelector('select')).toBeNull();
   expect(change).not.toHaveBeenCalled();
+});
+
+
+it('renders the same attachment metadata and keeps discard actions available during a read', () => {
+  const state: UseFreeAttachmentsResult = {
+    items: [{ id: 'a', name: '参考.txt', type: 'text/plain', size: 20, includedBytes: 3, content: 'abc', truncated: true }],
+    isReading: true, error: null, inputRef: createRef<HTMLInputElement>(), totalChars: 3, totalBytes: 3,
+    addFiles: vi.fn(async () => {}), remove: vi.fn(), clear: vi.fn(),
+  };
+  act(() => root.render(<FreeAttachmentPanel state={state} />));
+  expect(container.querySelector<HTMLInputElement>('input[type="file"]')!.disabled).toBe(true);
+  expect(container.textContent).toContain('参考.txt');
+  expect(container.textContent).toContain('已截断');
+  expect(container.textContent).toContain('text/plain');
+  expect(container.textContent).toContain('正在读取附件');
+  const buttons = [...container.querySelectorAll('button')];
+  act(() => buttons.find((button) => button.textContent === '移除')!.click());
+  act(() => buttons.find((button) => button.textContent === '清空附件')!.click());
+  expect(state.remove).toHaveBeenCalledWith('a'); expect(state.clear).toHaveBeenCalledOnce();
+  act(() => root.render(<FreeAttachmentPanel state={{ ...state, error: '读取失败' }} disabled errorContent={<p role="alert">宿主错误帮助</p>} />));
+  expect([...container.querySelectorAll('button')].every((button) => button.disabled)).toBe(true);
+  expect(container.textContent).toContain('宿主错误帮助');
+});
+
+it('keeps result bytes and save destinations in host-controlled slots without dispatching on render', () => {
+  const save = vi.fn();
+  act(() => root.render(<FreeResultPanel title="情景" label="保存原始数据">
+    <FreeJsonResult data={{ title: '长夜', content: '保留原值' }} />
+    <FreeResultActions sizeIndicator={<p>本地记录上限 4 MiB</p>}><button disabled onClick={save}>本地保存</button></FreeResultActions>
+  </FreeResultPanel>));
+  expect(container.querySelector('section[aria-label="保存原始数据"]')).not.toBeNull();
+  expect(container.querySelector('pre')?.textContent).toBe(JSON.stringify({ title: '长夜', content: '保留原值' }, null, 2));
+  expect(container.textContent).toContain('本地记录上限 4 MiB');
+  expect(container.textContent).not.toContain('云端');
+  act(() => container.querySelector('button')!.click()); expect(save).not.toHaveBeenCalled();
+  act(() => root.render(<FreeResultActions sizeIndicator={<p>云端上限</p>}><button onClick={save}>保存到云端</button></FreeResultActions>));
+  act(() => container.querySelector('button')!.click()); expect(save).toHaveBeenCalledOnce();
+});
+
+
+it('can clear the first pending attachment read without accepting its late result', async () => {
+  let resolveRead!: (value: AttachmentReadResult) => void;
+  const pending = new Promise<AttachmentReadResult>((resolve) => { resolveRead = resolve; });
+  const read = vi.fn(() => pending);
+  function PendingAttachments() {
+    const state = useFreeAttachments(read);
+    return <><FreeAttachmentPanel state={state} /><button disabled={state.isReading}>生成</button></>;
+  }
+  act(() => root.render(<PendingAttachments />));
+  const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+  await act(async () => {
+    Object.defineProperty(input, 'files', { configurable: true, value: [new File(['正文'], 'first.txt')] });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  const clear = [...container.querySelectorAll('button')].find((button) => button.textContent === '清空附件')!;
+  expect(clear.disabled).toBe(false);
+  act(() => clear.click());
+  expect([...container.querySelectorAll('button')].find((button) => button.textContent === '生成')!.disabled).toBe(false);
+  await act(async () => {
+    resolveRead({ added: [{ id: 'late', name: 'late.txt', type: 'text/plain', size: 3, includedBytes: 3, content: 'abc' }], skipped: 0 });
+    await pending;
+  });
+  expect(container.textContent).not.toContain('late.txt');
+  expect(container.textContent).not.toContain('正在读取附件');
 });

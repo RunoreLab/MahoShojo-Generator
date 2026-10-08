@@ -26,7 +26,7 @@ import { buildGeneralCharacterCardFromMarkdown, buildGeneralScenarioCardFromMark
 import { readSafeTextAndReasoningStreamFromResponse } from '@/lib/stream/read-safe-text-and-reasoning-stream';
 import { USER_PROVIDED_KEY_COOLDOWN_MS, OFFICIAL_KEY_MAX_AI_COOLDOWN_MS } from '@/lib/ai/cooldowns';
 import { buildCustomProviderRequestPayload, isUsingUserProvidedKey } from '@/lib/ai/custom-provider';
-import { FREE_GENERATION_ATTACHMENT_LIMITS, formatReferenceAttachmentsForPrompt } from '@/lib/ai/attachments';
+import { formatReferenceAttachmentsForPrompt } from '@/lib/ai/attachments';
 import { GENERAL_SCENARIO_TEMPLATE_ID } from '@/lib/schemas/general-scenario';
 import { readJsonOrTextFromResponse, resolveApiErrorMessage } from '@/lib/client/apiError';
 import { AI_META_REQUEST_HEADER, AI_META_REQUEST_VALUE, readJsonWithAiMeta } from '@/lib/client/read-json-with-ai-meta';
@@ -41,11 +41,14 @@ import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
 // 流式白名单以 ai-core 为准，不再本地另存一份。
 import {
   FreePageLayout,
+  FreeResultActions,
+  FreeResultPanel,
+  FreeJsonResult,
+  FreeAttachmentPanel,
   FreeSchemaFields,
   FreePromptField,
   FreeLanguageField,
   FREE_SCHEMA_OPTIONS,
-  formatBytes,
   freeSchemaOptionsForMode,
   toPromptAttachments,
   useFreeAttachments,
@@ -54,10 +57,6 @@ import { isFreeStreamSchemaId, type FreeSchemaId } from '@mahoshojo/ai-core/free
 
 const LOCAL_STORAGE_KEY = 'mahoshojo.free-generator.draft.v1';
 
-const MAX_ATTACHMENT_BYTES_PER_FILE = FREE_GENERATION_ATTACHMENT_LIMITS.maxBytesPerFile;
-const MAX_ATTACHMENT_BYTES_TOTAL = FREE_GENERATION_ATTACHMENT_LIMITS.maxBytesTotal;
-const MAX_ATTACHMENT_CHARS_PER_FILE = FREE_GENERATION_ATTACHMENT_LIMITS.maxCharsPerFile;
-const MAX_ATTACHMENT_CHARS_TOTAL = FREE_GENERATION_ATTACHMENT_LIMITS.maxCharsTotal;
 const SENSITIVE_CHECK_MAX_CHARS = 50_000;
 
 type RateLimitError = Error & {
@@ -176,17 +175,8 @@ export function FreePage() {
   const router = useAppRouterAdapter();
   // 附件会话共源（ui-web/free）：读取代际失效、合并前预算复核、maxCount
   // 上限与 Desktop 同一实现；附件不写入草稿。
-  const {
-    items: attachments,
-    isReading: isReadingAttachments,
-    error: attachmentError,
-    inputRef: attachmentInputRef,
-    totalChars: totalAttachmentChars,
-    totalBytes: totalAttachmentBytes,
-    addFiles: addAttachmentFiles,
-    remove: removeAttachment,
-    clear: clearAttachments,
-  } = useFreeAttachments();
+  const attachmentState = useFreeAttachments();
+  const { items: attachments, isReading: isReadingAttachments, error: attachmentError, clear: clearAttachments } = attachmentState;
 
   const [schemaId, setSchemaId] = useState<FreeSchemaId>('general');
   const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
@@ -501,8 +491,9 @@ export function FreePage() {
     const fileName = `${kind === 'scenario' ? '数据卡_情景' : '数据卡_角色'}_${safeBase}.json`;
 
     return (
-      <div className="space-y-2">
-        <div className="flex flex-col sm:flex-row gap-3 justify-center">
+      <FreeResultActions sizeIndicator={(
+        <JsonSizeIndicator data={data} warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。" />
+      )}>
           <button
             onClick={() => downloadJson(data, fileName)}
             className="generate-button flex-1"
@@ -523,12 +514,7 @@ export function FreePage() {
           >
             复制到剪贴板
           </button>
-        </div>
-        <JsonSizeIndicator
-          data={data}
-          warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
-        />
-      </div>
+      </FreeResultActions>
     );
   };
 
@@ -719,17 +705,14 @@ export function FreePage() {
       return (
         <>
           {nonStreamReasoningNode}
-          <div className="card !max-w-none">
-            <h2 className="text-2xl font-bold text-center mb-4">{resultData.title || '通用情景卡'}</h2>
+          <FreeResultPanel title={resultData.title || '通用情景卡'}>
             <div className="rounded-lg bg-gray-50 p-4 border border-gray-200">
               <MarkdownBlock content={resultData.content || ''} variant="light" mode="article" />
             </div>
-          </div>
+          </FreeResultPanel>
           <div className="card !max-w-none">
             <h3 className="text-lg font-semibold text-gray-800 mb-3">通用情景卡 JSON</h3>
-            <div className="rounded-lg bg-gray-100 p-4 border border-gray-200 font-mono text-xs overflow-x-auto">
-              <pre>{JSON.stringify(resultData, null, 2)}</pre>
-            </div>
+            <FreeJsonResult data={resultData} />
             <div className="mt-4 text-center">
               {renderResultActions(resultData, 'scenario')}
             </div>
@@ -742,18 +725,15 @@ export function FreePage() {
     return (
       <>
         {nonStreamReasoningNode}
-        <div className="card !max-w-none">
-          <h2 className="text-2xl font-bold text-center mb-4">{resultData.title || '结构化情景'}</h2>
-          <div className="bg-gray-100 p-4 rounded-lg font-mono text-xs overflow-x-auto">
-            <pre>{JSON.stringify(resultData, null, 2)}</pre>
-          </div>
+        <FreeResultPanel title={resultData.title || '结构化情景'}>
+          <FreeJsonResult data={resultData} />
           <p className="mt-3 text-xs text-gray-500 text-center">
             提示：自由生成产物不会包含签名，因此会被视为非原生卡。
           </p>
           <div className="mt-4 text-center">
             {renderResultActions(resultData, kind)}
           </div>
-        </div>
+        </FreeResultPanel>
       </>
     );
   };
@@ -802,62 +782,11 @@ export function FreePage() {
             )}
           />
 
-          <div className="my-2 bg-gray-100 rounded-lg p-3">
-            <div className="input-group">
-              <label className="input-label" htmlFor="free-attachments-upload">参考附件（可选）</label>
-              <input
-                ref={attachmentInputRef}
-                id="free-attachments-upload"
-                type="file"
-                multiple
-                onChange={(e) => void addAttachmentFiles(e.target.files)}
-                disabled={submitting || isReadingAttachments}
-                className="cursor-pointer input-field file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-pink-50 file:text-pink-700 hover:file:bg-pink-100 disabled:opacity-50 disabled:cursor-not-allowed"
-              />
-              <div className="mt-2 flex items-center justify-between text-xs text-gray-600 flex-wrap gap-2">
-                <span>
-                  已添加 {attachments.length} 个附件｜累计 {totalAttachmentChars.toLocaleString()} 字符｜已读取大小 {formatBytes(totalAttachmentBytes)}
-                </span>
-                <button
-                  type="button"
-                  className="text-red-600 hover:underline"
-                  onClick={clearAttachments}
-                  disabled={submitting || (attachments.length === 0 && !isReadingAttachments)}
-                >
-                  清空附件
-                </button>
-              </div>
-              <p className="mt-2 text-xs text-gray-500">
-                说明：附件会按“文本”注入提示词供 AI 参考；单文件最多读取 {formatBytes(MAX_ATTACHMENT_BYTES_PER_FILE)} / {MAX_ATTACHMENT_CHARS_PER_FILE.toLocaleString()} 字符，总上限 {formatBytes(MAX_ATTACHMENT_BYTES_TOTAL)} / {MAX_ATTACHMENT_CHARS_TOTAL.toLocaleString()} 字符。
-              </p>
-              {attachments.length > 0 && (
-                <div className="mt-3 space-y-2">
-                  {attachments.map((item) => (
-                    <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg bg-white/80 border border-gray-200 px-3 py-2">
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium text-gray-800 truncate" title={item.name}>{item.name}</div>
-                        <div className="text-xs text-gray-500">
-                          {(item.includedBytes < item.size
-                            ? `${formatBytes(item.includedBytes)} / ${formatBytes(item.size)}`
-                            : formatBytes(item.size))}{' '}
-                          · {item.type} · {item.content.length.toLocaleString()} 字符{item.truncated ? ' · 已截断' : ''}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        className="text-xs text-red-600 hover:underline shrink-0"
-                        onClick={() => removeAttachment(item.id)}
-                        disabled={submitting}
-                      >
-                        移除
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {attachmentError && <div className="mt-3"><ErrorMessage message={attachmentError} /></div>}
-            </div>
-          </div>
+          <FreeAttachmentPanel
+            state={attachmentState}
+            disabled={submitting}
+            errorContent={attachmentError ? <ErrorMessage message={attachmentError} /> : undefined}
+          />
 
           <div className="my-2 bg-gray-100 rounded-lg p-3">
             <GenerationModeSwitcher

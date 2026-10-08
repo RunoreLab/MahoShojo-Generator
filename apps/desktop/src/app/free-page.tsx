@@ -3,7 +3,6 @@ import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from '@tanstack/react-router';
 import {
   formatReferenceAttachmentsForPrompt,
-  FREE_GENERATION_ATTACHMENT_LIMITS,
 } from '@mahoshojo/ai-core/reference-attachments';
 import { FREE_STREAM_SCHEMA_IDS, type FreeSchemaId } from '@mahoshojo/ai-core/free-generation';
 import { MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES } from '@mahoshojo/contracts/desktop-ipc';
@@ -29,6 +28,10 @@ import {
 } from '@mahoshojo/ui-web/character-card';
 import {
   FreePageLayout,
+  FreeResultActions,
+  FreeResultPanel,
+  FreeJsonResult,
+  FreeAttachmentPanel,
   FreeSchemaFields,
   FreePromptField,
   FreeLanguageField,
@@ -100,16 +103,8 @@ function FreeForm({ session }: { session: FreeSession }) {
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
   // 附件会话共源（ui-web/free）：读取代际失效、合并前预算复核、input 复位
   // 由 hook 统一承担——附件不写入草稿。
-  const {
-    items: attachments,
-    isReading: isReadingAttachments,
-    error: attachmentError,
-    inputRef: attachmentInputRef,
-    totalChars: totalAttachmentChars,
-    addFiles: addAttachmentFiles,
-    remove: removeAttachment,
-    clear: clearAttachments,
-  } = useFreeAttachments(readFreeAttachmentFiles);
+  const attachmentState = useFreeAttachments(readFreeAttachmentFiles);
+  const { items: attachments, isReading: isReadingAttachments, clear: clearAttachments } = attachmentState;
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionInfo, setActionInfo] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -260,41 +255,7 @@ function FreeForm({ session }: { session: FreeSession }) {
                   ? `服务器通路请求体（提示词 + 附件 + JSON 包装）上限 ${formatBytes(hostedGenerationBodyMaxBytes(draft.generationMode === 'stream' ? 'generate-free-stream' : 'generate-free'))}，超出会在派发前拦截`
                   : '客户端执行的输入上限由所连模型服务自身决定'}
               />
-              <section aria-label="参考附件" className="flex flex-col gap-2 rounded-lg border border-(--app-border) p-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium">参考附件（可选）</span>
-                  <span className="text-xs text-(--app-text-muted)">
-                    {attachments.length} 个 · {totalAttachmentChars.toLocaleString()} 字符
-                  </span>
-                </div>
-                <input
-                  ref={attachmentInputRef}
-                  type="file"
-                  multiple
-                  className="hidden"
-                  onChange={(event) => void addAttachmentFiles(event.target.files)}
-                />
-                <div className="flex flex-wrap gap-2">
-                  <button className={actionClass} disabled={isReadingAttachments} onClick={() => attachmentInputRef.current?.click()}>
-                    {isReadingAttachments ? '正在读取附件…' : '添加附件'}
-                  </button>
-                  {(attachments.length > 0 || isReadingAttachments) && <button className={actionClass} onClick={clearAttachments}>清空附件</button>}
-                </div>
-                <p className="text-xs text-(--app-text-muted)">
-                  仅文本内容会随提示词发送；单文件 {formatBytes(FREE_GENERATION_ATTACHMENT_LIMITS.maxBytesPerFile)} / 全部 {formatBytes(FREE_GENERATION_ATTACHMENT_LIMITS.maxBytesTotal)} 上限，超长部分截断后标记「已截断」。
-                </p>
-                {attachmentError && <p role="alert">{attachmentError}</p>}
-                {attachments.length > 0 && (
-                  <ul className="flex flex-col gap-1">
-                    {attachments.map((item) => (
-                      <li key={item.id} className="flex items-center justify-between gap-2 rounded border border-(--app-border) px-2 py-1 text-sm">
-                        <span className="min-w-0 truncate">{item.name}{item.truncated ? '（已截断）' : ''} · {formatBytes(item.includedBytes)}</span>
-                        <button className="text-(--app-accent-strong)" onClick={() => removeAttachment(item.id)}>移除</button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </section>
+              <FreeAttachmentPanel state={attachmentState} disabled={busy || blockedDraft} />
               <DesktopAiProviderPanel
                 generationMode={draft.generationMode}
                 copy={{
@@ -366,25 +327,22 @@ function FreeForm({ session }: { session: FreeSession }) {
                 {cardKind === 'canshou' && <CanshouCard canshou={card as unknown as CanshouDetails} />}
                 {cardKind === 'general' && <GeneralCharacterCard general={card as unknown as GeneralCharacterCardData} />}
                 {cardKind === 'general-scenario' && (
-                  <div className="rounded-lg border border-(--app-border) p-4">
-                    <h3 className="text-xl font-semibold text-center">{typeof card.title === 'string' && card.title ? card.title : '通用情景卡'}</h3>
-                    <div className="mt-3 rounded-lg bg-(--app-surface) p-4">
+                  <FreeResultPanel title={typeof card.title === 'string' && card.title ? card.title : '通用情景卡'}>
+                    <div className="rounded-lg bg-gray-50 p-4 border border-gray-200">
                       <MarkdownBlock content={typeof card.content === 'string' ? card.content : ''} variant="light" mode="article" />
                     </div>
-                  </div>
+                  </FreeResultPanel>
                 )}
                 {cardKind === 'scenario' && (
-                  <div className="rounded-lg border border-(--app-border) p-4">
-                    <h3 className="text-xl font-semibold text-center">{typeof card.title === 'string' && card.title ? card.title : '结构化情景'}</h3>
-                    <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border p-3 font-mono text-xs">{JSON.stringify(card, null, 2)}</pre>
-                  </div>
+                  <FreeResultPanel title={typeof card.title === 'string' && card.title ? card.title : '结构化情景'}>
+                    <FreeJsonResult data={card} />
+                  </FreeResultPanel>
                 )}
                 <button className={actionClass} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => { if (guard.ready) void session.saveResult(); }}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>
                 {state.saveStatus === 'saved' && <p role="status">已保存到本地卡库。</p>}
                 {state.saveStatus === 'already-present' && <p role="status">本地卡库已存在相同内容，原记录保持不变。</p>}
                 {state.saveError && <p role="alert">{state.saveError}</p>}
-                <section aria-label="保存原始数据" className="rounded-lg border border-(--app-border) p-4">
-                  <h3 className="text-lg font-medium">保存数据卡</h3>
+                <FreeResultPanel title="保存数据卡" label="保存原始数据">
                   <div className="mt-3 flex flex-col gap-3">
                     <SaveJsonButton
                       data={card}
@@ -392,16 +350,20 @@ function FreeForm({ session }: { session: FreeSession }) {
                       recommendedMode={recommended.jsonSaveMode}
                       resolveFileName={() => resultJsonName}
                     />
-                    <button className={actionClass} onClick={() => downloadTextFile(resultJsonName, JSON.stringify(card, null, 2))}>下载 JSON 文件</button>
-                    <button className={actionClass} onClick={() => { void navigator.clipboard?.writeText(JSON.stringify(card, null, 2)).then(() => setActionInfo('✅ 数据卡 JSON 已复制到剪贴板')).catch(() => setActionError('复制失败，请手动选择 JSON 内容后复制。')); }}>复制到剪贴板</button>
                   </div>
+                  <FreeResultActions sizeIndicator={(
                   <JsonSizeIndicator
                     data={card}
                     maxBytes={MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES}
                     hintText="按 UTF-8 字节估算，对照本地卡单条记录上限"
                     warningText="⚠️ 接近本地卡单条上限（4 MiB），保存到本地卡库可能失败，请先精简数据。"
                   />
-                </section>
+                  )}>
+
+                    <button className="generate-button flex-1" onClick={() => downloadTextFile(resultJsonName, JSON.stringify(card, null, 2))}>下载 JSON 文件</button>
+                    <button className="generate-button flex-1" onClick={() => { void navigator.clipboard?.writeText(JSON.stringify(card, null, 2)).then(() => setActionInfo('✅ 数据卡 JSON 已复制到剪贴板')).catch(() => setActionError('复制失败，请手动选择 JSON 内容后复制。')); }}>复制到剪贴板</button>
+                  </FreeResultActions>
+                </FreeResultPanel>
               </section>}
             </div>
             {state.rawText && <details open={state.phase !== 'completed'}><summary>原始输出正文</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border p-3">{state.rawText}</pre></details>}
