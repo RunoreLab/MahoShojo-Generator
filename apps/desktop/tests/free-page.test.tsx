@@ -98,18 +98,18 @@ describe('Desktop Free route and session UI (native adapter mock)', () => {
     expect(mocks.execute).toHaveBeenCalledTimes(2);
   });
 
-  it('client execution rewrites stream to non-stream without touching the chosen schema (G2-r1)', async () => {
+  it('client execution presents non-stream as effective without touching the chosen schema (G2-r1 / AIP-r1)', async () => {
     window.localStorage.setItem(FREE_DRAFT_KEY, JSON.stringify({
       version: 1, schemaId: 'magical-girl', generationMode: 'stream', prompt: 'x', selectedLanguage: 'zh-CN',
     }));
     await mount();
     await click('恢复草稿');
-    // 草稿 generationMode=stream 但执行位置为客户端：回写 non-stream；
-    // 已选结构化 Schema 不得顺带被改写（流式归并只对服务器通路成立）。
+    // D5.1-AIP-r1：草稿的流式偏好保留、切回服务器即恢复；客户端按生效的
+    // 「非流式」呈现，Schema 列表也按生效模式展开（流式归并只对服务器通路成立）。
     const stored = JSON.parse(window.localStorage.getItem(FREE_DRAFT_KEY)!);
-    expect(stored.generationMode).toBe('non-stream');
+    expect(stored.generationMode).toBe('stream');
     expect(stored.schemaId).toBe('magical-girl');
-    expect(container.textContent).toContain('客户端执行仅支持结构化（非流式）生成');
+    expect(container.textContent).toContain('客户端执行为结构化（非流式）直出');
     const schemaSelect = [...container.querySelectorAll('select')].find((el) => el.getAttribute('aria-label') === '选择 Schema')!;
     expect((schemaSelect as HTMLSelectElement).value).toBe('magical-girl');
     expect(schemaSelect.querySelectorAll('option').length).toBe(5);

@@ -1,7 +1,7 @@
 # ADR：Desktop AI Provider 选择器与多模型连接体验统一
 
 - 日期：2026-10-08
-- 状态：`accepted`（维护者已确认产品方案；功能实现与实机门禁仍未完成）
+- 状态：`accepted`（维护者已确认产品方案；AIP-1..4 + D5.1-AIP-r1 审查收口已实施，AIP-5 自动与实机验收保持 `PENDING`）
 - 决策标识：`ADR-desktop-ai-provider-parity`
 - 范围：`RunoreLab/MahoShojo-Generator`，`feat/desktop`；Web 侧只进行不改变业务的共源 UI 改进
 - 关联：[2026-10-04 Desktop 线上本地整合 ADR](https://github.com/RunoreLab/MahoShojo-Generator/blob/feat/desktop/docs/decisions/2026-10-04_202000_Desktop线上本地整合与AI配置共源决策.md)、`DESK-ONLINE-001..005`、`DESK-PARITY-001`、`DESK-SET-003`
@@ -56,3 +56,15 @@
 ## 交付与撤回
 
 实施时按共源组件、Desktop 控制器、状态迁移、页面接线和验收分原子提交；唯一阶段计划登记 AIP 切片，不创建平行计划。若 UI 切换不可接受，允许回滚到原 Profile 选择器；用户 Profile/Secret 不可因 UI 回滚而丢失。新增 overlay v3 的旧版兼容需明示：旧客户端不得误读新版配置，也不得静默用其他 Provider 替代。
+
+## 修订与实施状态记录
+
+### 2026-10-09（D5.1-AIP-r1 审查收口）
+
+不改变本 ADR 的冻结决策；以下为对决策 4/5 在实施层面的精确化说明与状态更新：
+
+- **hosted 系统通道精确化**：维护者确认服务器模式项与 Web 一致命名为「使用系统默认配置」，并可显式选择系统目录内模型（如 GLM 5.3 Flash）或跟随「默认策略」。为此 hosted IPC 新增**受检非秘密** `systemConfig`（`providerId` 固定 `'system'`、目录内 `modelId`、`generationOverrides`），由 native 翻译为服务器侧既有 `customProvider:{providerId:'system',...}` 语义。renderer 仍 **MUST NOT** 传任意 `customProvider`/Key/`secretRef`/Endpoint；`systemConfig` 对未知字段与凭据类字段 fail-closed。这是「系统默认通道」自身的非秘密偏好，不构成 Desktop Server BYOK（继续 deferred，决策 4 不变）。
+- **overlay v4**：新增 `selection.systemModelId` 非秘密偏好（与 `executionPreference`/`clientConnectionId` 正交）；v2→v3→v4 受检迁移，悬空系统模型保留诊断项不静默回落——与每连接多模型的既有语义一致。
+- **选择器取值空间**：Provider 下拉统一承载「使用系统默认配置」+ 内置可直连预设 + 我的连接；`system` 与 `preset:*` 为宿主保留值，连接 ID 恒为 `conn_*` 且 store 拒绝 `system` 草稿 ID，与真实 Profile 取值空间不冲突（DESK-ONLINE-002/004）。
+- **生成方式显示语义**：客户端 Direct 固定结构化通路时，三页（scenario/free/creator）显示生效的「非流式」并说明服务器流式偏好未被清除，不再让禁用的「流式」按钮看似仍在生效。
+- **状态**：r1 切片 A（Store 事务收口）、B（hosted systemConfig 契约）、C（面板共源闭合）已提交；AIP-5 实机/真端点验收继续 `PENDING`，不得以自动回归等价代替。

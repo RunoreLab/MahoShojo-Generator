@@ -3462,16 +3462,12 @@ mod tests {
             model_id: Some("default".to_string()),
             generation_overrides: None,
         });
-        assert!(
-            !build_hosted_request_body(&folded).unwrap()["customProvider"].is_object()
-        );
+        assert!(!build_hosted_request_body(&folded).unwrap()["customProvider"].is_object());
         folded.system_config = Some(CloudHostedSystemConfig {
             model_id: None,
             generation_overrides: Some(serde_json::json!({})),
         });
-        assert!(
-            !build_hosted_request_body(&folded).unwrap()["customProvider"].is_object()
-        );
+        assert!(!build_hosted_request_body(&folded).unwrap()["customProvider"].is_object());
 
         // 形状校验：控制字符/超长/非对象覆盖在 native 侧拒绝；
         // 模型是否在系统清单内由服务端裁决，native 不复制目录。

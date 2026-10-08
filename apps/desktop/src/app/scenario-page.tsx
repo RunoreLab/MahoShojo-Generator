@@ -128,11 +128,11 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
     session.updateDraft({ ...session.getSnapshot().draft, ...patch });
   };
   // 流式情景产物是「通用情景卡」（Markdown），与结构化卡不同型；客户端
-  // direct 通路永远结构化（DESK-ONLINE-009），切到客户端时回写非流式。
-  useEffect(() => {
-    if (target.location !== 'client' || draft.generationMode !== 'stream') return;
-    session.updateDraft({ ...session.getSnapshot().draft, generationMode: 'non-stream' });
-  }, [session, target.location, draft.generationMode]);
+  // direct 通路永远结构化（DESK-ONLINE-009）。D5.1-AIP-r1：不再改写草稿
+  // 里的流式偏好——`effectiveGenerationMode` 表达「实际生效」方式，
+  // 切回服务器后原偏好自动恢复。
+  const effectiveGenerationMode =
+    target.location === 'client' ? 'non-stream' : draft.generationMode;
   const selected = target.profile;
   const mode = target.mode;
   const busy = state.phase === 'generating' || state.saving;
@@ -177,8 +177,8 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
           answers: { ...draft.answers },
           language: draft.selectedLanguage,
           fieldsToKeepEmpty: [...draft.fieldsToKeepEmpty],
-          // titleHint 仅流式语义（本地卡兜底 + hosted 请求字段）。
-          titleHint: draft.generationMode === 'stream' ? draft.scenarioTitleHint : '',
+          // titleHint 仅流式语义（本地卡兜底 + hosted 请求字段），按生效方式门控。
+          titleHint: effectiveGenerationMode === 'stream' ? draft.scenarioTitleHint : '',
         },
         { mode: executionMode, modelId: target.modelId ?? undefined, overrides: target.generationOverrides },
         discardUnsavedResult,
@@ -259,7 +259,7 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
                     <GenerationModeSwitcher
                       // 客户端 Direct 固定走结构化通路：展示生效的「非流式」，
                       // 服务器侧的流式偏好不改写、切回服务器后恢复（D5.1-AIP-r1）。
-                      value={target.location === 'client' ? 'non-stream' : draft.generationMode}
+                      value={effectiveGenerationMode}
                       disabled={target.location === 'client'}
                       onChange={(next) => updateDraft({ generationMode: next })}
                       helper={false}
@@ -314,7 +314,7 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
                         ))}
                       </div>
                     </div>
-                    {draft.generationMode === 'stream' && (
+                    {effectiveGenerationMode === 'stream' && (
                       <label className="flex flex-col gap-1">期望的情景标题（可选）
                         <input
                           type="text"

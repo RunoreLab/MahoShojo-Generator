@@ -153,20 +153,19 @@ function FreeForm({ session }: { session: FreeSession }) {
     session.updateDraft({ ...session.getSnapshot().draft, ...patch });
   };
   // 流式产物只经 hosted 通路（Markdown 通用卡）；客户端 direct 通路永远
-  // 结构化（DESK-ONLINE-009），切到客户端时回写非流式（与 /scenario 同一口径）。
-  useEffect(() => {
-    if (target.location !== 'client' || draft.generationMode !== 'stream') return;
-    session.updateDraft({ ...session.getSnapshot().draft, generationMode: 'non-stream' });
-  }, [session, target.location, draft.generationMode]);
+  // 结构化（DESK-ONLINE-009）。D5.1-AIP-r1：不再改写草稿里的流式偏好——
+  // `effectiveGenerationMode` 表达「实际生效」方式，切回服务器后原偏好自动恢复。
+  const effectiveGenerationMode =
+    target.location === 'client' ? 'non-stream' : draft.generationMode;
   // 流式模式下只允许通用卡：必要时自动切换 schema（与 Web 同一效果，但作用于草稿字段）。
-  // 该归并只在服务器通路成立——客户端已在上一条 effect 回写非流式，
+  // 该归并只在服务器通路成立——客户端不走流式，
   // 切换执行位置不得顺带改写用户已选的结构化 Schema（G2-r1 复审）。
   useEffect(() => {
     if (target.location !== 'server' || draft.generationMode !== 'stream') return;
     if ((FREE_STREAM_SCHEMA_IDS as readonly string[]).includes(draft.schemaId)) return;
     session.updateDraft({ ...session.getSnapshot().draft, schemaId: 'general' });
   }, [session, target.location, draft.generationMode, draft.schemaId]);
-  const schemaOptionsForMode = freeSchemaOptionsForMode(draft.generationMode);
+  const schemaOptionsForMode = freeSchemaOptionsForMode(effectiveGenerationMode);
   const fieldGuideText = useMemo(() => buildFreeFieldGuide(draft.schemaId), [draft.schemaId]);
   const selected = target.profile;
   const mode = target.mode;
@@ -272,7 +271,7 @@ function FreeForm({ session }: { session: FreeSession }) {
                       <GenerationModeSwitcher
                         // 客户端 Direct 固定走结构化通路：展示生效的「非流式」，
                         // 服务器侧的流式偏好不改写、切回服务器后恢复（D5.1-AIP-r1）。
-                        value={target.location === 'client' ? 'non-stream' : draft.generationMode}
+                        value={effectiveGenerationMode}
                         disabled={target.location === 'client'}
                         onChange={(next) => updateDraft({ generationMode: next })}
                         helper={false}

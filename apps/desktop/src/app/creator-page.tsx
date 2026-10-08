@@ -441,11 +441,11 @@ function CreatorForm({ session }: { session: CreatorSession }) {
   }, [template, selectedRuleIds, primaryRuleId, updateDraft]);
 
   // direct 通路恒为结构化 JSON：执行位置切到客户端时归一为非流式（与 /free 同一效应）。
-  // 模板不随位置归一——direct 通路支持全部已接通模板；hosted 兼容性在提交时检查。
-  useEffect(() => {
-    if (target.location !== 'client' || generationMode !== 'stream') return;
-    updateDraft({ generationMode: 'non-stream' });
-  }, [session, target.location, generationMode, updateDraft]);
+  // 客户端 direct 通路永远结构化（DESK-ONLINE-009）。D5.1-AIP-r1：不再改写
+  // 草稿里的流式偏好——`effectiveGenerationMode` 表达「实际生效」方式，
+  // 切回服务器后原偏好自动恢复；模板不随位置归一，hosted 兼容性在提交时检查。
+  const effectiveGenerationMode: GenerationMode =
+    target.location === 'client' ? 'non-stream' : generationMode;
 
   // 单选口径：关掉多选时仅保留 1 份可作答问卷（纯设定卡可叠加）。
   useEffect(() => {
@@ -811,7 +811,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
       // 结果快照（与 Web `creatorResultSnapshot` 同义）：结果阶段的侧栏投影按
       // 「发起这次生成时」的模板/规则/题目数展示，而不是按当前编辑态。
       resultSnapshotRef.current = {
-        generationMode,
+        generationMode: effectiveGenerationMode,
         template,
         templateLabel,
         primaryRuleLabel,
@@ -987,7 +987,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
             <GenerationModeSwitcher
               // 客户端 Direct 固定走结构化通路：展示生效的「非流式」，
               // 服务器侧的流式偏好不改写、切回服务器后恢复（D5.1-AIP-r1）。
-              value={target.location === 'client' ? 'non-stream' : generationMode}
+              value={effectiveGenerationMode}
               disabled={target.location === 'client'}
               helper={false}
               onChange={(next: GenerationMode) => {

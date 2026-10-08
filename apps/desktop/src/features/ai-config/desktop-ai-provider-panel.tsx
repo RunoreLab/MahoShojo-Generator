@@ -94,6 +94,7 @@ export const DesktopAiProviderPanel = ({
   const { state, store } = useDesktopAiConfig();
   const router = useRouter();
   const [editing, setEditing] = useState<EditingState | null>(null);
+  const [editorDirty, setEditorDirty] = useState(false);
   const [modelDraft, setModelDraft] = useState('');
   const [modelError, setModelError] = useState<string | null>(null);
 
@@ -111,7 +112,19 @@ export const DesktopAiProviderPanel = ({
   const clientReady = target.location === 'client' && profile !== null && mode !== null;
   const presetEntries = listDesktopPresetEntries(state.hiddenPresetIds);
 
-  const openConnectionEditor = (editingState: EditingState) => setEditing(editingState);
+  /**
+   * DESK-AIP-003.7 / r1 离开保护：编辑器存在未保存修改（含易失 Key 输入）时，
+   * 另选编辑对象或跳转管理页等会丢弃草稿的路径须显式确认。连接编辑器的
+   * 「取消」键自带同款确认；此处覆盖父级触发的替换/离开路径。
+   */
+  const confirmDiscardEditing = () =>
+    !editorDirty ||
+    typeof window === 'undefined' ||
+    window.confirm('连接配置有未保存的更改（包括已输入的 API Key），确认放弃？');
+  const openConnectionEditor = (editingState: EditingState) => {
+    if (editing !== null && !confirmDiscardEditing()) return;
+    setEditing(editingState);
+  };
   const openNewConnection = () =>
     openConnectionEditor({
       draft: { id: newConnectionId(), name: '', baseUrl: '', modelId: '' },
@@ -191,6 +204,8 @@ export const DesktopAiProviderPanel = ({
     } else if (actionId === 'edit-current' && profile !== null) {
       openEditConnection(profile);
     } else if (actionId === 'manage') {
+      // 跳转设置页会卸载面板与编辑器：脏草稿先经离开确认（DESK-AIP-003.7）。
+      if (!confirmDiscardEditing()) return;
       navigateByProductHref(router, '/settings?section=generation');
     }
   };
@@ -484,6 +499,7 @@ export const DesktopAiProviderPanel = ({
           saving={state.savingConnection}
           saveLabel={editing.isExisting ? '保存连接' : '保存并使用'}
           onCancel={() => setEditing(null)}
+          onDirtyChange={setEditorDirty}
           onSave={async (draft) => {
             // 新建连接（含预设直配）保存后即作为当前连接启用（DESK-AIP-003.4）；
             // 编辑既有连接不改动激活状态。Profile+凭据持久化与激活分阶段

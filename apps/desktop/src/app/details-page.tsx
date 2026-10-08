@@ -434,6 +434,9 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   const isNativeSignatureEligible = isQuestionnaireSelectionNativeAllowed(effectiveSelections);
   const hasOverLimitAnswer = hasOverLimitQuestionnaireAnswers(flow, answersByKey);
   // 「客户端｜服务器」与「流式｜非流式」两个维度共同决定执行模式（DESK-ONLINE-009）。
+  // D5.1-AIP-r1：客户端 Direct 固定结构化——`effectiveGenerationMode` 表达实际
+  // 生效方式，用户的流式偏好保留、切回服务器后恢复（与 scenario/free/creator 同口径）。
+  const effectiveGenerationMode = target.location === 'client' ? 'non-stream' : generationMode;
   const hostedMode: DetailsExecutionMode = generationMode === 'stream' ? 'hosted-stream' : 'hosted-json';
   const executionMode: DetailsExecutionMode | null = target.location === 'server' ? hostedMode : mode;
   // 本地 Provider 配置只门禁客户端执行：server 偏好由 hosted System Default 解析、
@@ -764,7 +767,21 @@ function DetailsForm({ session }: { session: DetailsSession }) {
                       payloadNoun: '已填写的问卷回答',
                     }}
                     controlsSlot={
-                      <GenerationModeSwitcher value={generationMode} onChange={setGenerationMode} helper={false} />
+                      <div>
+                        <GenerationModeSwitcher
+                          // 客户端 Direct 固定走结构化通路：展示生效的「非流式」，
+                          // 服务器侧的流式偏好不改写、切回服务器后恢复（D5.1-AIP-r1）。
+                          value={effectiveGenerationMode}
+                          disabled={target.location === 'client'}
+                          onChange={setGenerationMode}
+                          helper={false}
+                        />
+                        {target.location === 'client' && (
+                          <p className="mt-1 text-sm text-(--app-text-muted)">
+                            客户端执行为结构化（非流式）直出；你的服务器生成方式偏好保留，切回服务器后恢复。
+                          </p>
+                        )}
+                      </div>
                     }
                   />
                   <label className="flex flex-col gap-1">生成语言

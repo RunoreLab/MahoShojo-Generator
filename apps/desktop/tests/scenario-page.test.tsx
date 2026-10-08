@@ -119,7 +119,7 @@ describe('Desktop Scenario route and session UI (native adapter mock)', () => {
     expect(mocks.execute).toHaveBeenCalledTimes(2);
   });
 
-  it('client execution disables the stream switch and rewrites a streamed draft back to non-stream', async () => {
+  it('client execution presents non-stream as effective while preserving the stream preference', async () => {
     window.localStorage.setItem(SCENARIO_DRAFT_KEY, JSON.stringify({
       ...storedDraft({ '故事发生的场景是怎样的？': '钟楼' }),
       generationMode: 'stream',
@@ -127,10 +127,12 @@ describe('Desktop Scenario route and session UI (native adapter mock)', () => {
     }));
     await mount();
     await click('恢复草稿');
-    // 草稿 generationMode=stream 但执行位置为客户端：effect 应回写 non-stream。
+    // D5.1-AIP-r1：草稿的流式偏好不改写、切回服务器即恢复；客户端只按
+    // 生效的「非流式」呈现，流式专属的标题输入也随之隐藏。
     const stored = JSON.parse(window.localStorage.getItem(SCENARIO_DRAFT_KEY)!);
-    expect(stored.generationMode).toBe('non-stream');
-    expect(container.textContent).toContain('客户端执行仅支持结构化（非流式）生成');
+    expect(stored.generationMode).toBe('stream');
+    expect(container.textContent).toContain('客户端执行为结构化（非流式）直出');
+    expect(container.querySelector('input[aria-label="期望的情景标题"]')).toBeNull();
   });
 
   it('restored signed card is labelled unverified, not official (G2-r1 信任标签)', async () => {

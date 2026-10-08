@@ -227,7 +227,19 @@ const newDraftFromPreset = (entry: DesktopPresetEntry, modelId: string): Profile
 const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult }) => {
   const { state, store } = aiConfig;
   const [editing, setEditing] = useState<EditingState | null>(null);
+  const [editorDirty, setEditorDirty] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
+
+  // DESK-AIP-003.7：编辑器存在未保存修改（含易失 Key 输入）时，另选编辑
+  // 对象须显式确认放弃；取消键在编辑器内已有同款确认。
+  const confirmDiscardEditing = () =>
+    !editorDirty ||
+    typeof window === 'undefined' ||
+    window.confirm('连接配置有未保存的更改（包括已输入的 API Key），确认放弃？');
+  const beginEditing = (next: EditingState) => {
+    if (editing !== null && !confirmDiscardEditing()) return;
+    setEditing(next);
+  };
 
   const target = resolveDesktopAiTarget(
     state.selection,
@@ -255,11 +267,11 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
   const startCopyPreset = (entry: DesktopPresetEntry, modelId: string) => {
     const draft = newDraftFromPreset(entry, modelId);
     if (!draft) return;
-    setEditing({ draft, presetModels: entry.directCapableModels, isExisting: false, hasKeyRef: false });
+    beginEditing({ draft, presetModels: entry.directCapableModels, isExisting: false, hasKeyRef: false });
   };
 
   const startNewConnection = (baseUrl = '') => {
-    setEditing({
+    beginEditing({
       draft: { id: newConnectionId(), name: '', baseUrl, modelId: '' },
       presetModels: null,
       isExisting: false,
@@ -499,7 +511,7 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
                 store.activateConnection(profile.id);
               }}
               onEdit={() =>
-                setEditing({
+                beginEditing({
                   draft: draftFromProfile(profile),
                   presetModels: null,
                   isExisting: true,
@@ -547,6 +559,7 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
           saving={state.savingConnection}
           saveLabel="保存连接"
           onCancel={() => setEditing(null)}
+          onDirtyChange={setEditorDirty}
           onSave={saveEditing}
         />
       )}

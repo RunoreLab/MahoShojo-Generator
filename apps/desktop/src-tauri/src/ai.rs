@@ -1268,3 +1268,102 @@ mod utf8_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod credential_snapshot_tests {
+    use super::build_headers;
+    use crate::provider_profile::{DirectProviderExecutionProfile, ProviderAdapter};
+    use crate::secret::{SecretStore, SecretStoreError};
+    use std::collections::BTreeMap;
+    use std::sync::Mutex;
+
+    /// 最小可控凭据存储：resolve 与 delete 之间可人为交错。
+    #[derive(Default)]
+    struct InterleavableSecrets {
+        values: Mutex<BTreeMap<String, String>>,
+    }
+
+    impl SecretStore for InterleavableSecrets {
+        fn set(&self, secret_ref: &str, value: &str) -> Result<(), SecretStoreError> {
+            self.values
+                .lock()
+                .map_err(|_| SecretStoreError::failure_for_test())?
+                .insert(secret_ref.to_string(), value.to_string());
+            Ok(())
+        }
+        fn exists(&self, secret_ref: &str) -> Result<bool, SecretStoreError> {
+            Ok(self
+                .values
+                .lock()
+                .map_err(|_| SecretStoreError::failure_for_test())?
+                .contains_key(secret_ref))
+        }
+        fn delete(&self, secret_ref: &str) -> Result<(), SecretStoreError> {
+            self.values
+                .lock()
+                .map_err(|_| SecretStoreError::failure_for_test())?
+                .remove(secret_ref);
+            Ok(())
+        }
+        fn resolve(&self, secret_ref: &str) -> Result<Option<String>, SecretStoreError> {
+            Ok(self
+                .values
+                .lock()
+                .map_err(|_| SecretStoreError::failure_for_test())?
+                .get(secret_ref)
+                .cloned())
+        }
+    }
+
+    fn execution_profile() -> DirectProviderExecutionProfile {
+        DirectProviderExecutionProfile {
+            id: "p1".to_string(),
+            name: "Loopback".to_string(),
+            adapter: ProviderAdapter::OpenaiCompatible,
+            base_url: "http://127.0.0.1:11434/v1".to_string(),
+            model_id: "test-model".to_string(),
+            api_key_ref: Some("provider:p1:api-key".to_string()),
+            secret_header_refs: None,
+            public_headers: None,
+            transport: None,
+        }
+    }
+
+    /// DESK-AIP-007.3 / D5.1-AIP-r1 P2：header 构造把 resolve 的明文快照进
+    /// `HeaderMap` 后再发出请求——构造返回点之后发生的凭据删除/轮换不得
+    /// 让在途请求丢失或换用其他 Key。Profile 读取与 secret resolve 之间的
+    /// 交错窗口按序覆盖：
+    /// - resolve 之前删除 → `MissingSecret` fail-closed（不拿错 Key 出站）；
+    /// - resolve 之后、send 之前删除 → header 仍携带旧值快照。
+    #[test]
+    fn resolved_secret_is_snapshotted_into_headers_before_dispatch() {
+        let secrets = InterleavableSecrets::default();
+        secrets
+            .set("provider:p1:api-key", "sk-old")
+            .expect("seed secret");
+
+        let headers = build_headers(&execution_profile(), &secrets).expect("headers resolve");
+
+        // 凭据在 resolve 之后、send 之前被轮换删除：已准备的 header 不受影响的证据。
+        secrets
+            .delete("provider:p1:api-key")
+            .expect("rotate secret away");
+        assert_eq!(
+            headers
+                .get(reqwest::header::AUTHORIZATION)
+                .expect("authorization header present"),
+            "Bearer sk-old"
+        );
+        assert!(!secrets.exists("provider:p1:api-key").unwrap());
+    }
+
+    /// 交错另一侧：secret 在 resolve 之前被删除，请求必须 fail-closed，
+    /// 不得静默回落无凭据请求或沿用陈旧 Key。
+    #[test]
+    fn deleting_secret_before_resolve_fails_closed() {
+        let secrets = InterleavableSecrets::default();
+        // 从未写入或先行删除同一 ref——两种情形都不得发出带凭据请求。
+        let error = build_headers(&execution_profile(), &secrets).unwrap_err();
+        assert_eq!(error.code, super::DirectAiErrorCode::MissingSecret);
+    }
+}

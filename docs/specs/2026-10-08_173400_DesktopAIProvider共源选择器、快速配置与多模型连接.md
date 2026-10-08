@@ -1,7 +1,7 @@
 # SPEC：Desktop AI Provider 共源选择器、快速配置与多模型连接
 
 - 日期：2026-10-08
-- 状态：`accepted`（产品/UX 目标与强制不变量已确认；实现、配置迁移和实机验收均待开展）
+- 状态：`accepted`（产品/UX 目标与强制不变量已确认；AIP-1..4 + D5.1-AIP-r1 审查收口已实施，AIP-5 自动与实机验收保持 `PENDING`）
 - 规范标识：`SPEC-desktop-ai-provider-parity`；配套 [ADR](../decisions/2026-10-08_173300_DesktopAIProvider选择器与多模型连接体验统一.md)
 - 仓库/基线：`RunoreLab/MahoShojo-Generator` / `feat/desktop`
 - 主属：已有 `D5.1` 阶段计划，建议登记非冲突子切片 `D5.1-AIP`（实际编号由唯一计划确定），不再新增平行项目计划
@@ -21,7 +21,7 @@
 ## DESK-AIP-001 执行位置与选择器分层
 
 1. **执行位置**（Desktop 专属）为 `client | server`，与流式/非流式、连接、模型选择互相正交。Web 不展示无实际能力的客户端按钮。
-2. Desktop `server` 只显示可执行的 System Default 说明与项目通路提示。不得出现可以选择但不能执行的“服务器 BYOK”空按钮；切至 server 不清除上次客户端连接或模型偏好，也不得上传客户端 Key。
+2. Desktop `server` 只显示可执行的「使用系统默认配置」通道（Provider 项标签与 Web 目录事实源 `SYSTEM_PROVIDER_OPTION.name` 一致）与项目通路提示，并允许在系统目录内选择具体模型或跟随「默认策略」——该选择作为非秘密 `systemConfig` 偏好经 hosted 通路上行（D5.1-AIP-r1，见 DESK-093 修订记录）。不得出现可以选择但不能执行的“服务器 BYOK”空按钮；切至 server 不清除上次客户端连接或模型偏好，也不得上传客户端 Key。
 3. Desktop `client` 显示统一供应商/连接选择器。无配置首次启动保留 `client` 偏好与**未选择**状态，不自动选择第一供应商/连接、不静默切服务器；表单仍可填写，生成操作禁用并给出可行动的配置提示。
 4. `System Default` 永不成为 Direct Profile。`direct-local` 或 `direct-remote` 根据 Native 验证后的目标地址判断；远端直连不标成离线。本轮 Direct 的产物与非流式结构化规则不变；不以底层 SSE 传输能力冒充支持用户可见的流式 Markdown 产物。
 5. 在服务器强制的 Strict/多人场景仍按现有约束解析，不能让统一选择器提供客户端绕过选项。
@@ -167,7 +167,7 @@
 2. **存量兼容**：overlay v2→v3、重复迁移、损坏/未知版本、配置过大、旧 Profile/secretRef、无 Key、重复名称、特殊模型 ID（含 `:`/`__proto__`）、切换/删除/重启全部覆盖。
 3. **请求真实性**：本地 mock 捕获 Native 实际端点和 `modelId`、确认 Key 不在 renderer 业务请求/日志/配置/普通云 API 中；未实现模型参数没有被 UI 伪装为已生效。
 4. **竞态与失败注入**：双击保存、Secret 写失败、Profile 写失败、刷新失败、overlay 写失败、并发轮换 Key、生成时修改连接、旧请求取消/未知终态、Store 多页面同步无串台。
-5. **安全与授权**：不扩展任意 URL/secretRef/header renderer 通路，不改 Direct 重定向和项目域名禁用策略；Hosted customProvider 注入仍拒绝；Strict/多人权威规则不变。
+5. **安全与授权**：不扩展任意 URL/secretRef/header renderer 通路，不改 Direct 重定向和项目域名禁用策略；renderer 直传的 `customProvider` 及凭据类字段仍拒绝——`systemConfig`（`providerId` 固定 `'system'` + 目录内 `modelId` + `generationOverrides`）是 hosted 系统通道的唯一受检非秘密入口，由 native 注入为服务器 `customProvider`，对未知/凭据字段 fail-closed（D5.1-AIP-r1）；Strict/多人权威规则不变。
 6. **Web 不回归**：用户 Key、系统默认、自定义模型、参数、渠道可用性及现有 BYOK Web 请求契约不变；shared UI 的 keyboard/focus/mode 文案可用。
 7. **记录状态**：文档与自动门禁分别记录，通过才关闭对应切片。Native 真机及付费模型实测若未执行必须保持 `PENDING`，不得以单元测试等价代替。
 
@@ -242,3 +242,4 @@
 ## 增补记录
 
 - **2026-10-08（D5.1-G3 审查决策）**：`/creator` 创作工房完成纵切后，AIP-4 的 Desktop 生成页面覆盖自四页扩为五页——`/creator` 同样使用统一连接选择器、客户端/服务器执行开关，以及共享的高级生成设置布局；Web 侧仍只共享适合共享的外观与组件，不改变其 Provider 持久化或 BYOK 能力。本增补对应审查报告「需要决策的两件事」第 1 项的采纳结论。
+- **2026-10-09（D5.1-AIP-r1 审查收口）**：按独立审查意见收口——生成页面板改由共源 `AiProviderSelectorForm` 装配（DESK-AIP-009.1/3 闭合）；Provider 下拉承载「使用系统默认配置」+ 内置可直连预设 + 我的连接，预设即选即配落入连接编辑器；服务器位置呈现系统模型行（含「默认策略」与 GLM 5.3 Flash 等目录模型）与按系统模型作用域保存的高级参数；overlay 升级 v4 追加 `selection.systemModelId`；hosted 契约新增受检非秘密 `systemConfig` 并由 native 注入为服务器 `customProvider`（DESK-093 修订）；`AiProviderCustomSelect` 补 `role="combobox"` 语义与裁切祖先内翻转/限高；三页生成方式在客户端显示生效的「非流式」并说明服务器偏好保留。AIP-5 实机验收继续 `PENDING`。

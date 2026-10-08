@@ -260,6 +260,46 @@ describe('DesktopAiProviderPanel', () => {
     expect(mocks.navigate).toHaveBeenCalled();
   });
 
+  it('asks before discarding a dirty editor when navigating away', async () => {
+    await mount();
+    const trigger = triggers()[0]!;
+    await act(async () => trigger.click());
+    await settle();
+    await act(async () => buttons().find((item) => item.textContent?.includes('新建自定义连接'))!.click());
+    await settle();
+    // 输入未保存内容 → 编辑器进入脏状态（含显示名与 Key 输入同样口径）。
+    // 首个 input.input-field 是模型行的自定义输入：先定位编辑器容器再取显示名输入。
+    const editorBox = [...container.querySelectorAll('h3')]
+      .find((item) => item.textContent === '新建连接')!
+      .closest('div')!;
+    const nameInput = editorBox.querySelector<HTMLInputElement>('input.input-field')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!
+        .set!.call(nameInput, '未保存连接');
+      nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await settle();
+
+    // 拒绝放弃 → 不跳转且草稿仍在表单中。
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    await act(async () => trigger.click());
+    await settle();
+    await act(async () => buttons().find((item) => item.textContent?.includes('管理连接'))!.click());
+    await settle();
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(mocks.navigate).not.toHaveBeenCalled();
+    expect(editorBox.querySelector<HTMLInputElement>('input.input-field')!.value).toBe('未保存连接');
+
+    // 确认放弃 → 正常跳转，草稿随面板卸载丢弃（不进入持久化）。
+    confirmSpy.mockReturnValue(true);
+    await act(async () => trigger.click());
+    await settle();
+    await act(async () => buttons().find((item) => item.textContent?.includes('管理连接'))!.click());
+    await settle();
+    expect(mocks.navigate).toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
   it('selects, adds and removes custom models on the effective-model row', async () => {
     await mount();
     // 生效模型 = 连接默认 m1（第二个自定义下拉）。
