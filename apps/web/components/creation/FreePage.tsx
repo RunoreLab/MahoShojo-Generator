@@ -37,18 +37,16 @@ import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-lat
 import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
-
-type FreeSchemaId = 'magical-girl' | 'canshou' | 'scenario' | 'general' | 'general-scenario';
-
-const SCHEMA_OPTIONS: Array<{ id: FreeSchemaId; label: string; description: string; kind: 'character' | 'scenario' }> = [
-  { id: 'magical-girl', label: '魔法少女（结构化）', description: '完整字段结构，适合后续升华/竞技场联动；自由生成产物为非原生。', kind: 'character' },
-  { id: 'canshou', label: '残兽（结构化）', description: '完整字段结构，适合后续升华/竞技场联动；自由生成产物为非原生。', kind: 'character' },
-  { id: 'general', label: '通用角色卡（Markdown）', description: '只有 name/content，适合自由发挥与长线维护。', kind: 'character' },
-  { id: 'scenario', label: '情景（结构化）', description: 'elements 结构化字段，适合与竞技场/进阶玩法联动。', kind: 'scenario' },
-  { id: 'general-scenario', label: '通用情景卡（Markdown）', description: '只有 title/content，适合自由发挥与长线维护。', kind: 'scenario' },
-];
-
-const STREAMABLE_SCHEMA_IDS: FreeSchemaId[] = ['general', 'general-scenario'];
+// Schema 目录 / 字段速览 / 提示词占位与 Desktop 共源（ui-web/free）；
+// 流式白名单以 ai-core 为准，不再本地另存一份。
+import {
+  FREE_PROMPT_PLACEHOLDER,
+  FREE_SCHEMA_OPTIONS,
+  buildFreeFieldGuide,
+  formatBytes,
+  freeSchemaOptionsForMode,
+} from '@mahoshojo/ui-web/free';
+import { isFreeStreamSchemaId, type FreeSchemaId } from '@mahoshojo/ai-core/free-generation';
 
 const LOCAL_STORAGE_KEY = 'mahoshojo.free-generator.draft.v1';
 
@@ -73,19 +71,6 @@ const SENSITIVE_CHECK_MAX_CHARS = 50_000;
 
 type RateLimitError = Error & {
   retryAfterSeconds?: number;
-};
-
-const formatBytes = (bytes: number): string => {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB'];
-  let value = bytes;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-  const digits = unitIndex === 0 ? 0 : value >= 100 ? 0 : value >= 10 ? 1 : 2;
-  return `${value.toFixed(digits)} ${units[unitIndex]}`;
 };
 
 const isPlainObject = (value: unknown): value is Record<string, any> =>
@@ -195,56 +180,6 @@ const buildCanshouPortraitPrompt = (input: Record<string, unknown>): string => {
   return parts.join(', ');
 };
 
-const buildFieldGuideForUi = (schemaId: FreeSchemaId): string => {
-  switch (schemaId) {
-    case 'magical-girl':
-      return [
-        '魔法少女（结构化）字段速览：',
-        '- codename：代号（建议花名/称号）',
-        '- appearance：外观（outfit/accessories/colorScheme/overallLook，可选）',
-        '- magicConstruct：魔装（name/form/basicAbilities/description，可选）',
-        '- wonderlandRule：奇境规则（name/description/tendency/activation，可选）',
-        '- blooming：繁开（name/evolvedAbilities/evolvedForm/evolvedOutfit/powerLevel，可选）',
-        '- analysis：分析（personalityAnalysis/abilityReasoning/coreTraits/predictionBasis/background，可选）',
-        '注意：自由生成不会生成 signature，因此会被视为非原生卡。',
-      ].join('\n');
-    case 'canshou':
-      return [
-        '残兽（结构化）字段速览：',
-        '- name：名称',
-        '- appearance/materialAndSkin/featuresAndAppendages/coreConcept/coreEmotion/evolutionStage/attackMethod/specialAbility/origin/birthEnvironment/researcherNotes（均可选）',
-        '注意：自由生成不会生成 signature，因此会被视为非原生卡。',
-      ].join('\n');
-    case 'scenario':
-      return [
-        '情景（结构化）字段速览：',
-        '- title：标题（必需）',
-        '- scenario_type/description（可选）',
-        '- elements：必需',
-        '  - scene.time/place/features（可选）',
-        '  - roles：可选数组，每项包含 name/description（可选）',
-        '  - events/atmosphere/development（可选）',
-        '注意：自由生成不会生成 signature，因此会被视为非原生卡。',
-      ].join('\n');
-    case 'general':
-      return [
-        '通用角色卡字段速览：',
-        '- templateId：固定为 通用角色',
-        '- name：角色名',
-        '- content：正文（建议 Markdown）',
-      ].join('\n');
-    case 'general-scenario':
-      return [
-        '通用情景卡字段速览：',
-        '- templateId：固定为 通用情景',
-        '- title：情景名',
-        '- content：正文（建议 Markdown）',
-      ].join('\n');
-    default:
-      return '';
-  }
-};
-
 export function FreePage() {
   const generationApiIntentLatch = useGenerationApiIntentLatch();
   const router = useAppRouterAdapter();
@@ -284,14 +219,9 @@ export function FreePage() {
     customDurationMs: USER_PROVIDED_KEY_COOLDOWN_MS,
   });
 
-  const schemaOptionsForMode = useMemo(() => {
-    if (generationMode === 'stream') {
-      return SCHEMA_OPTIONS.filter(item => STREAMABLE_SCHEMA_IDS.includes(item.id));
-    }
-    return SCHEMA_OPTIONS;
-  }, [generationMode]);
+  const schemaOptionsForMode = useMemo(() => freeSchemaOptionsForMode(generationMode), [generationMode]);
 
-  const fieldGuideText = useMemo(() => buildFieldGuideForUi(schemaId), [schemaId]);
+  const fieldGuideText = useMemo(() => buildFreeFieldGuide(schemaId), [schemaId]);
 
   // 多语言
   useEffect(() => {
@@ -304,7 +234,7 @@ export function FreePage() {
   // 流式模式下只允许通用卡：必要时自动切换 schema
   useEffect(() => {
     if (generationMode !== 'stream') return;
-    if (STREAMABLE_SCHEMA_IDS.includes(schemaId)) return;
+    if (isFreeStreamSchemaId(schemaId)) return;
     setSchemaId('general');
   }, [generationMode, schemaId]);
 
@@ -485,7 +415,7 @@ export function FreePage() {
       return;
     }
 
-    if (generationMode === 'stream' && !STREAMABLE_SCHEMA_IDS.includes(schemaId)) {
+    if (generationMode === 'stream' && !isFreeStreamSchemaId(schemaId)) {
       setError('⚠️ 流式生成仅支持通用角色/通用情景卡，请先切换 Schema。');
       return;
     }
@@ -787,7 +717,7 @@ export function FreePage() {
 
     if (!resultData) return null;
 
-    const selectedOption = SCHEMA_OPTIONS.find(item => item.id === schemaId) ?? null;
+    const selectedOption = FREE_SCHEMA_OPTIONS.find(item => item.id === schemaId) ?? null;
     const kind = selectedOption?.kind ?? 'character';
     const nonStreamReasoningNode = nonStreamReasoning ? (
       <AiReasoningPanel
@@ -958,7 +888,7 @@ export function FreePage() {
                     ))}
                   </select>
                   <p className="text-xs text-gray-500 mt-1">
-                    {SCHEMA_OPTIONS.find(item => item.id === schemaId)?.description}
+                    {FREE_SCHEMA_OPTIONS.find(item => item.id === schemaId)?.description}
                   </p>
                 </div>
 
@@ -982,7 +912,7 @@ export function FreePage() {
                   <textarea
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
-                    placeholder="在这里写你的完整提示词：你想要的风格、设定、限制、字段填充偏好等都由你决定。"
+                    placeholder={FREE_PROMPT_PLACEHOLDER}
                     className="input-field min-h-[10rem] resize-y"
                     rows={10}
                     disabled={submitting}

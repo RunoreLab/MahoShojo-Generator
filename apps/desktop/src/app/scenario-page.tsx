@@ -15,6 +15,12 @@ import {
   useResultAutoScroll,
 } from '@mahoshojo/ui-web/details-controls';
 import { MarkdownBlock } from '@mahoshojo/ui-web/markdown';
+import {
+  SCENARIO_OPTIONAL_FIELDS as OPTIONAL_FIELDS,
+  SCENARIO_QUESTIONS,
+  createInitialScenarioAnswers as createInitialAnswers,
+  hasAnyScenarioAnswer as hasAnyAnswer,
+} from '@mahoshojo/ui-web/scenario';
 import { ProductFooter } from '@mahoshojo/ui-web/shell';
 import type { HomeAssetSource } from '@mahoshojo/ui-web/home';
 import {
@@ -44,34 +50,6 @@ type DeviceType = 'mobile' | 'desktop' | 'unknown';
 const sanitizeFileNamePart = (value: string): string =>
   value.replace(/[^a-z0-9一-龥]/gi, '_').slice(0, 80) || 'data';
 
-/**
- * 引导性问题——与 Web `ScenarioPage.scenarioQuestions` 逐字一致；answers 以
- * label 为键直接进 prompt（`【label】` 块），双端口径必须相同。
- */
-const SCENARIO_QUESTIONS: ReadonlyArray<{ id: string; label: string; placeholder: string }> = [
-  { id: 'scene', label: '故事发生的场景是怎样的？', placeholder: '例如：黄昏时分的废弃钟楼顶端，晚风吹拂，可以俯瞰整座城市...' },
-  { id: 'roles', label: '场景中有需要出现的角色（NPC）吗？', placeholder: '【强烈建议】此项填写“未指定”，让AI不生成此项内容。如果需要添加场景固定角色，则在此处填写。' },
-  { id: 'events', label: '角色们在这里需要做什么核心事件？', placeholder: '例如：进行一场一对一的决斗；合作解开一个古老的谜题；接受一次特别的采访...' },
-  { id: 'atmosphere', label: '希望故事的整体氛围是怎样的？', placeholder: '例如：轻松愉快、紧张悬疑、悲伤感人、热血沸腾...' },
-  { id: 'development', label: '故事可能会有哪些有趣的发展方向？', placeholder: '例如：决斗中途有第三方介入；谜题的答案指向一个惊人的秘密；采访者突然问了一个尖锐的问题...' },
-];
-
-/**
- * 可选留空字段——与 Web `optionalFields` 逐字一致；`value` 精确对应
- * SCENARIO_GENERATION_SCHEMA 中的路径。
- */
-const OPTIONAL_FIELDS: ReadonlyArray<{ label: string; value: string }> = [
-  { label: '场景时间', value: 'elements.scene.time' },
-  { label: '场景地点', value: 'elements.scene.place' },
-  { label: '场景特征', value: 'elements.scene.features' },
-  { label: '预设NPC', value: 'elements.roles' },
-  { label: '故事氛围', value: 'elements.atmosphere' },
-  { label: '发展方向', value: 'elements.development' },
-];
-
-const createInitialAnswers = (): Record<string, string> =>
-  Object.fromEntries(SCENARIO_QUESTIONS.map((question) => [question.label, '']));
-
 const resolveResultJsonFileName = (card: Record<string, unknown>): string => {
   const label = typeof card.title === 'string' && card.title
     ? card.title
@@ -90,9 +68,6 @@ const describeRegenerateConfirm = (kind: ConfirmRegenerateKind): { title: string
     ? '当前结果尚未保存到本地卡库。重新生成将替换当前结果；即使新生成失败或取消，也无法恢复。可以先保存当前结果再生成。'
     : '无法确认上次请求是否在服务器执行——它可能已经完成并计费。再次生成会发起新的请求，可能产生重复调用与费用。',
 });
-
-const hasAnyAnswer = (answers: Record<string, string>): boolean =>
-  Object.values(answers).some((value) => value.trim() !== '');
 
 function ScenarioForm({ session }: { session: ScenarioSession }) {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);

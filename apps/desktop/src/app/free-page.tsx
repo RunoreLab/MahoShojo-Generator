@@ -28,6 +28,13 @@ import {
   type GeneralCharacterCardData,
   type MagicalGirlCardData,
 } from '@mahoshojo/ui-web/character-card';
+import {
+  FREE_PROMPT_PLACEHOLDER,
+  FREE_SCHEMA_OPTIONS,
+  buildFreeFieldGuide,
+  formatBytes,
+  freeSchemaOptionsForMode,
+} from '@mahoshojo/ui-web/free';
 import { MarkdownBlock } from '@mahoshojo/ui-web/markdown';
 import { ProductFooter } from '@mahoshojo/ui-web/shell';
 import type { HomeAssetSource } from '@mahoshojo/ui-web/home';
@@ -59,78 +66,6 @@ type DeviceType = 'mobile' | 'desktop' | 'unknown';
 
 const sanitizeFileNamePart = (value: string): string =>
   value.replace(/[^a-z0-9一-龥]/gi, '_').slice(0, 80) || 'data';
-
-const SCHEMA_OPTIONS: ReadonlyArray<{ id: FreeSchemaId; label: string; description: string; kind: 'character' | 'scenario' }> = [
-  { id: 'magical-girl', label: '魔法少女（结构化）', description: '完整字段结构，适合后续升华/竞技场联动；自由生成产物为非原生。', kind: 'character' },
-  { id: 'canshou', label: '残兽（结构化）', description: '完整字段结构，适合后续升华/竞技场联动；自由生成产物为非原生。', kind: 'character' },
-  { id: 'general', label: '通用角色卡（Markdown）', description: '只有 name/content，适合自由发挥与长线维护。', kind: 'character' },
-  { id: 'scenario', label: '情景（结构化）', description: 'elements 结构化字段，适合与竞技场/进阶玩法联动。', kind: 'scenario' },
-  { id: 'general-scenario', label: '通用情景卡（Markdown）', description: '只有 title/content，适合自由发挥与长线维护。', kind: 'scenario' },
-];
-
-/** UI 用字段速览——与 Web `FreePage.buildFieldGuideForUi` 同一文案。 */
-const buildFieldGuideForUi = (schemaId: FreeSchemaId): string => {
-  switch (schemaId) {
-    case 'magical-girl':
-      return [
-        '魔法少女（结构化）字段速览：',
-        '- codename：代号（建议花名/称号）',
-        '- appearance：外观（outfit/accessories/colorScheme/overallLook，可选）',
-        '- magicConstruct：魔装（name/form/basicAbilities/description，可选）',
-        '- wonderlandRule：奇境规则（name/description/tendency/activation，可选）',
-        '- blooming：繁开（name/evolvedAbilities/evolvedForm/evolvedOutfit/powerLevel，可选）',
-        '- analysis：分析（personalityAnalysis/abilityReasoning/coreTraits/predictionBasis/background，可选）',
-        '注意：自由生成不会生成 signature，因此会被视为非原生卡。',
-      ].join('\n');
-    case 'canshou':
-      return [
-        '残兽（结构化）字段速览：',
-        '- name：名称',
-        '- appearance/materialAndSkin/featuresAndAppendages/coreConcept/coreEmotion/evolutionStage/attackMethod/specialAbility/origin/birthEnvironment/researcherNotes（均可选）',
-        '注意：自由生成不会生成 signature，因此会被视为非原生卡。',
-      ].join('\n');
-    case 'scenario':
-      return [
-        '情景（结构化）字段速览：',
-        '- title：标题（必需）',
-        '- scenario_type/description（可选）',
-        '- elements：必需',
-        '  - scene.time/place/features（可选）',
-        '  - roles：可选数组，每项包含 name/description（可选）',
-        '  - events/atmosphere/development（可选）',
-        '注意：自由生成不会生成 signature，因此会被视为非原生卡。',
-      ].join('\n');
-    case 'general':
-      return [
-        '通用角色卡字段速览：',
-        '- templateId：固定为 通用角色',
-        '- name：角色名',
-        '- content：正文（建议 Markdown）',
-      ].join('\n');
-    case 'general-scenario':
-      return [
-        '通用情景卡字段速览：',
-        '- templateId：固定为 通用情景',
-        '- title：情景名',
-        '- content：正文（建议 Markdown）',
-      ].join('\n');
-    default:
-      return '';
-  }
-};
-
-const formatBytes = (bytes: number): string => {
-  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB'];
-  let value = bytes;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-  const digits = unitIndex === 0 ? 0 : value >= 100 ? 0 : value >= 10 ? 1 : 2;
-  return `${value.toFixed(digits)} ${units[unitIndex]}`;
-};
 
 const resolveResultJsonFileName = (card: Record<string, unknown>, cardKind: FreeSchemaId): string => {
   const scenario = cardKind === 'scenario' || cardKind === 'general-scenario';
@@ -236,10 +171,8 @@ function FreeForm({ session }: { session: FreeSession }) {
     if ((FREE_STREAM_SCHEMA_IDS as readonly string[]).includes(draft.schemaId)) return;
     session.updateDraft({ ...session.getSnapshot().draft, schemaId: 'general' });
   }, [session, target.location, draft.generationMode, draft.schemaId]);
-  const schemaOptionsForMode = draft.generationMode === 'stream'
-    ? SCHEMA_OPTIONS.filter((item) => (FREE_STREAM_SCHEMA_IDS as readonly string[]).includes(item.id))
-    : SCHEMA_OPTIONS;
-  const fieldGuideText = useMemo(() => buildFieldGuideForUi(draft.schemaId), [draft.schemaId]);
+  const schemaOptionsForMode = freeSchemaOptionsForMode(draft.generationMode);
+  const fieldGuideText = useMemo(() => buildFreeFieldGuide(draft.schemaId), [draft.schemaId]);
   const selected = target.profile;
   const mode = target.mode;
   const busy = state.phase === 'generating' || state.saving;
@@ -393,7 +326,7 @@ function FreeForm({ session }: { session: FreeSession }) {
                   ))}
                 </select>
                 <span className="text-sm text-(--app-text-muted)">
-                  {SCHEMA_OPTIONS.find((item) => item.id === draft.schemaId)?.description}
+                  {FREE_SCHEMA_OPTIONS.find((item) => item.id === draft.schemaId)?.description}
                 </span>
               </label>
               <div className="rounded-lg border border-(--app-border) p-3">
@@ -470,7 +403,7 @@ function FreeForm({ session }: { session: FreeSession }) {
                   aria-label="提示词"
                   value={draft.prompt}
                   onChange={(event) => updateDraft({ prompt: event.target.value })}
-                  placeholder="在这里写你的完整提示词：你想要的风格、设定、限制、字段填充偏好等都由你决定。"
+                  placeholder={FREE_PROMPT_PLACEHOLDER}
                   className="min-h-40 w-full resize-y rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)"
                   rows={10}
                 />
