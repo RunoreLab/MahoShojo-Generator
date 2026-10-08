@@ -109,10 +109,10 @@ import {
   type StructuredCreatorTemplateId,
 } from '@/lib/creator/result-follow-up';
 import { buildCreatorStreamCardFromMarkdown, finalizeCreatorStreamCard } from '@/lib/creator/stream-result';
+import { buildWebCreatorGenerationRequestBody } from '@/lib/creator/request-body';
 import {
   applyQuestionnaireSelection,
   buildQuestionnaireContextItems,
-  buildQuestionnaireGenerationRequestFields,
   buildQuestionnaireSelectionLoreText,
   createStoredQuestionnaireSelectionNormalizer,
   ensureQuestionnaireSelectionId,
@@ -1701,17 +1701,17 @@ export const CreatorPage: React.FC = () => {
       const response = await generationIntent.dispatch(endpoint, {
         method: 'POST',
         headers: requestHeaders,
-        body: JSON.stringify({
+        body: JSON.stringify(buildWebCreatorGenerationRequestBody({
           template: creatorTemplate,
           freeformBrief,
           answers: finalAnswerItems,
-          ...buildQuestionnaireGenerationRequestFields(selectedQuestionnaires),
+          selections: selectedQuestionnaires,
           allowNativeSignature: allowNativeSignatureForSubmit,
           language: selectedLanguage,
-          customProvider: customProviderPayload,
           buildRules: buildRuleRequestPayload,
           primaryRuleId: primaryBuildRuleId,
-        }),
+          customProvider: customProviderPayload,
+        })),
         ...(streamController ? { signal: streamController.signal } : {}),
       });
 
