@@ -680,8 +680,8 @@ function CanshouForm({ session }: { session: CanshouSession }) {
     <div>
       <section data-testid="page-canshou" className="magic-background-dark">
         <div className="container">
-          <QuestionnairePageCard variant="canshou" description={primaryQuestionnaire?.description} className="flex flex-col gap-5">
-            <p className="text-xs leading-relaxed text-(--app-text-muted)">填写问卷后，可选择客户端连接或项目服务器生成残兽档案；签名状态以实际生成结果为准。问卷可以是内置预设，也可以从本地库或云端数据卡选择。</p>
+          <QuestionnairePageCard variant="canshou" description={primaryQuestionnaire?.description}>
+            <p className="mb-4 text-xs leading-relaxed text-(--app-text-muted)">填写问卷后，可选择客户端连接或项目服务器生成残兽档案；签名状态以实际生成结果为准。问卷可以是内置预设，也可以从本地库或云端数据卡选择。</p>
             <QuestionnaireDraftPanel
               pendingRestore={state.pendingRestore}
               draftSaved={state.draftSaved}
@@ -711,14 +711,18 @@ function CanshouForm({ session }: { session: CanshouSession }) {
                 <button className={actionClass} onClick={() => setConfirmClear(false)}>保留草稿</button>
               </div>}
             />
-            {!guard.ready && !guard.message && <p role="status">正在初始化窗口关闭保护…</p>}
-            {guard.message && <p role="alert">{guard.message}</p>}
-            {questionnaireLoading && <p role="status">正在读取内置问卷…</p>}
-            {questionnaireError && <p role="alert">{questionnaireError}</p>}
-            {/* 本地 Provider 状态只与客户端执行相关：服务器模式照常可生成，加载中提示收窄、
-                失败提示改为如实说明影响范围，避免被读成「服务器生成也被封死」（D5.1-P2-r4）。 */}
-            {profilesLoading && target.location === 'client' && <p role="status">正在读取本地 Provider 配置…</p>}
-            {profilesError && <p role="alert">{target.location === 'server' ? '本地 Provider 配置加载失败，仅影响客户端执行。' : profilesError}</p>}
+            {(!guard.ready || guard.message || questionnaireLoading || questionnaireError || (profilesLoading && target.location === 'client') || profilesError) && (
+              <div className="my-4 space-y-2">
+                {!guard.ready && !guard.message && <p role="status">正在初始化窗口关闭保护…</p>}
+                {guard.message && <p role="alert">{guard.message}</p>}
+                {questionnaireLoading && <p role="status">正在读取内置问卷…</p>}
+                {questionnaireError && <p role="alert">{questionnaireError}</p>}
+                {/* 本地 Provider 状态只与客户端执行相关：服务器模式照常可生成，加载中提示收窄、
+                    失败提示改为如实说明影响范围，避免被读成「服务器生成也被封死」（D5.1-P2-r4）。 */}
+                {profilesLoading && target.location === 'client' && <p role="status">正在读取本地 Provider 配置…</p>}
+                {profilesError && <p role="alert">{target.location === 'server' ? '本地 Provider 配置加载失败，仅影响客户端执行。' : profilesError}</p>}
+              </div>
+            )}
             {showIntroduction && !state.pendingRestore ? (
               <section aria-label="介绍">
                 <DetailsIntroSection
@@ -742,7 +746,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
               </section>
             ) : (
               <>
-                <fieldset disabled={busy || blockedDraft || questionnaireLoading || !guard.ready} className="flex min-w-0 flex-col gap-4">
+                <fieldset disabled={busy || blockedDraft || questionnaireLoading || !guard.ready} className="min-w-0">
                   {flow.length > 0 && <QuestionNavigator
                     theme="app"
                     items={flow.map((item) => ({ id: item.key, label: item.question.question }))}
@@ -794,7 +798,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
                     </p>
                   )}
                 </section>
-                <fieldset disabled={busy || blockedDraft || questionnaireLoading || !guard.ready} className="flex min-w-0 flex-col gap-4">
+                <fieldset disabled={busy || blockedDraft || questionnaireLoading || !guard.ready} className="min-w-0">
                   {flowItem && question && <QuestionnaireQuestionPanel
                     theme={CANSHOU_QUESTIONNAIRE_THEME} progressLabel={`第 ${currentIndex + 1} / ${flow.length} 题`} progressPercent={Math.round((currentIndex + 1) / flow.length * 100)}
                     questionText={question.question} questionnaireTitle={flowItem.questionnaireTitle} noticeText="请基于您构想的虚拟档案回答，并确保内容符合公序良俗，请勿使用任何真实信息。" helperText={question.helperText}
@@ -815,7 +819,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
                     onChange={(language) => updateDraft({ language })}
                   />
                 </fieldset>
-                <fieldset disabled={busy || blockedDraft || questionnaireLoading || !guard.ready} className="flex min-w-0 flex-col gap-4">
+                <fieldset disabled={busy || blockedDraft || questionnaireLoading || !guard.ready} className="min-w-0">
                   <legend className="mb-2 font-semibold">生成设置</legend>
                   <DesktopAiProviderPanel
                     generationMode={generationMode}
@@ -917,10 +921,14 @@ function CanshouForm({ session }: { session: CanshouSession }) {
                 <button autoFocus className={actionClass} onClick={() => setDetailsSelection(null)}>关闭</button>
               </div>
             </dialog>
-            {actionError && <p role="alert">{actionError}</p>}
-            {actionInfo && <p role="status">{actionInfo}</p>}
-            {state.message && <p role={state.phase === 'uncertain' ? 'alert' : 'status'}>{state.message}</p>}
-            {state.reasoning && <AiReasoningPanel reasoning={state.reasoning} />}
+            {(actionError || actionInfo || state.message || state.reasoning) && (
+              <div className="mt-4 space-y-2">
+                {actionError && <p role="alert">{actionError}</p>}
+                {actionInfo && <p role="status">{actionInfo}</p>}
+                {state.message && <p role={state.phase === 'uncertain' ? 'alert' : 'status'}>{state.message}</p>}
+                {state.reasoning && <AiReasoningPanel reasoning={state.reasoning} />}
+              </div>
+            )}
             <div ref={resultSectionRef}>
               {state.card && <section aria-label="生成结果" className="flex flex-col gap-3">
                 <h2 className="text-xl font-semibold">
@@ -988,7 +996,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
                 </section>}
               </section>}
             </div>
-            {state.rawText && <details open={state.phase !== 'completed'}><summary>原始输出正文</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border p-3">{state.rawText}</pre></details>}
+            {state.rawText && <details className="mt-4" open={state.phase !== 'completed'}><summary>原始输出正文</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border p-3">{state.rawText}</pre></details>}
           </QuestionnairePageCard>
           {/* 页脚与 Web /canshou 同一共享组件；站外链接走受控外链确认。 */}
           <ProductFooter
