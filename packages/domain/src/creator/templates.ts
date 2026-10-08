@@ -69,6 +69,17 @@ export const isCreatorTemplateSupportedInGenerationMode = (
   return templateId === 'magical-girl' || templateId === 'canshou';
 };
 
+/**
+ * 模板是否已接通任一生成通路（stream/non-stream 任一支持即视为已接通）。
+ * 'scenario' 结构化模板当前不接任何通路：选择器展示但禁用（G3-r1 决策），
+ * 提交侧仍保留显式拒绝——两条防线同一事实来源，接通后只需移除本清单项。
+ */
+export const isCreatorTemplateGeneratable = (
+  templateId: CreatorTemplateId | string
+): boolean =>
+  isCreatorTemplateSupportedInGenerationMode('stream', templateId)
+  || isCreatorTemplateSupportedInGenerationMode('non-stream', templateId);
+
 export const getDefaultCreatorTemplateForGenerationMode = (
   generationMode: CreatorGenerationMode
 ): CreatorTemplateId => {

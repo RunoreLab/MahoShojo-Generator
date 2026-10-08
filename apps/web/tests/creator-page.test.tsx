@@ -37,6 +37,18 @@ test('TemplateSelector 显示 5 个模板并标出流式边界', () => {
   expect(html).toContain('data-creator-surface="subpanel"');
 });
 
+test('scenario 模板在 TemplateSelector 中展示但禁用并附说明（G3-r1 决策）', () => {
+  const html = renderToStaticMarkup(
+    <TemplateSelector value="general" onChange={() => {}} />
+  );
+
+  // 未接通的模板仍展示，但渲染为禁用态并如实说明，而非允许选择后提交时失败。
+  expect(html).toContain('情景（结构化）');
+  expect(html).toContain('暂未接通');
+  expect(html).toContain('暂未接入生成通路');
+  expect(html).toContain('disabled=""');
+});
+
 test('FreeformBriefPanel 渲染自由补充说明输入区', () => {
   const html = renderToStaticMarkup(
     <FreeformBriefPanel value="" onChange={() => {}} />

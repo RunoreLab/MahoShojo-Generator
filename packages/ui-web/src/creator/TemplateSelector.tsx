@@ -1,4 +1,4 @@
-import { CREATOR_TEMPLATE_OPTIONS, isCreatorStreamTemplate, type CreatorTemplateId } from '@mahoshojo/domain/creator/templates';
+import { CREATOR_TEMPLATE_OPTIONS, isCreatorStreamTemplate, isCreatorTemplateGeneratable, type CreatorTemplateId } from '@mahoshojo/domain/creator/templates';
 import {
   CREATOR_PANEL_SURFACE_CLASS,
   CREATOR_SUBPANEL_ACTIVE_CLASS,
@@ -28,18 +28,22 @@ export function TemplateSelector({ value, onChange, disabled = false }: Template
         {CREATOR_TEMPLATE_OPTIONS.map((option) => {
           const isActive = option.id === value;
           const isStreamable = isCreatorStreamTemplate(option.id);
+          // 未接通的模板展示但禁用（G3-r1 决策）：'scenario' 结构化模板目前
+          // 不接任何生成通路，禁用态附说明而非允许选择后提交时失败。
+          const isGeneratable = isCreatorTemplateGeneratable(option.id);
+          const optionDisabled = disabled || !isGeneratable;
           return (
             <button
               key={option.id}
               type="button"
               data-creator-surface="subpanel"
-              disabled={disabled}
+              disabled={optionDisabled}
               onClick={() => onChange(option.id)}
               className={joinCreatorClassNames(
                 isActive ? CREATOR_SUBPANEL_ACTIVE_CLASS : CREATOR_SUBPANEL_SURFACE_CLASS,
                 isActive ? 'border-sky-400' : 'hover:border-sky-300 hover:bg-[var(--creator-subpanel-emphasis-bg)]',
                 'px-4 py-3 text-left transition',
-                disabled && 'cursor-not-allowed opacity-60'
+                optionDisabled && 'cursor-not-allowed opacity-60'
               )}
             >
               <div className="flex items-center justify-between gap-3">
@@ -47,15 +51,20 @@ export function TemplateSelector({ value, onChange, disabled = false }: Template
                 <span
                   className={joinCreatorClassNames(
                     'rounded-full border px-2 py-0.5 text-[11px] font-medium',
-                    isStreamable
-                      ? 'border-emerald-200 bg-emerald-100 text-emerald-700'
-                      : 'border-[var(--creator-subpanel-border)] bg-[var(--creator-subpanel-muted-bg)] text-[color:var(--app-text-subtle)]'
+                    !isGeneratable
+                      ? 'border-amber-200 bg-amber-100 text-amber-700'
+                      : isStreamable
+                        ? 'border-emerald-200 bg-emerald-100 text-emerald-700'
+                        : 'border-[var(--creator-subpanel-border)] bg-[var(--creator-subpanel-muted-bg)] text-[color:var(--app-text-subtle)]'
                   )}
                 >
-                  {isStreamable ? '支持流式' : '仅非流式'}
+                  {isGeneratable ? (isStreamable ? '支持流式' : '仅非流式') : '暂未接通'}
                 </span>
               </div>
               <p className="mt-2 text-xs leading-5 text-slate-600">{option.description}</p>
+              {!isGeneratable && (
+                <p className="mt-1 text-xs leading-5 text-amber-700">该模板暂未接入生成通路，接入前不可选择。</p>
+              )}
             </button>
           );
         })}
