@@ -34,17 +34,14 @@ import {
   buildFreeFieldGuide,
   formatBytes,
   freeSchemaOptionsForMode,
+  readFreeAttachmentFiles,
+  toPromptAttachments,
+  useFreeAttachments,
 } from '@mahoshojo/ui-web/free';
 import { MarkdownBlock } from '@mahoshojo/ui-web/markdown';
 import { ProductFooter } from '@mahoshojo/ui-web/shell';
 import type { HomeAssetSource } from '@mahoshojo/ui-web/home';
 import { FreeSession, FREE_DRAFT_DEFAULT_LANGUAGE, type FreeDraft } from '../features/free/session';
-import {
-  acceptAttachmentsWithinBudget,
-  readFreeAttachmentFiles,
-  toPromptAttachments,
-  type FreeAttachmentState,
-} from '../features/free/attachments';
 import type { FreeExecutionMode } from '../features/free/generation';
 import { resolveDesktopAiTarget } from '../features/ai-config/desktop-ai-config';
 import { useDesktopAiConfig } from '../features/ai-config/use-desktop-ai-config';
@@ -99,21 +96,18 @@ function FreeForm({ session }: { session: FreeSession }) {
   const profilesLoading = aiState.profilesState === 'idle' || aiState.profilesState === 'loading';
   const profilesError = aiState.profilesState === 'failed' ? aiState.profilesError : null;
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
-  const [attachments, setAttachments] = useState<FreeAttachmentState[]>([]);
-  const [isReadingAttachments, setIsReadingAttachments] = useState(false);
-  const [attachmentError, setAttachmentError] = useState<string | null>(null);
-  const attachmentInputRef = useRef<HTMLInputElement>(null);
-  // 附件读取代际与最新清单镜像：清空/移除/丢弃草稿/离开页面都会失效在途
-  // 读取——迟到结果不得重新加回用户已显式放弃的内容；合并前再按真实余量
-  // 复核总量预算（读取按开始时快照计费，G2-r1）。
-  const attachmentReadEpoch = useRef(0);
-  const attachmentsRef = useRef<FreeAttachmentState[]>([]);
-  useEffect(() => { attachmentsRef.current = attachments; }, [attachments]);
-  useEffect(() => () => { attachmentReadEpoch.current += 1; }, []);
-  const invalidateAttachmentReads = () => {
-    attachmentReadEpoch.current += 1;
-    setIsReadingAttachments(false);
-  };
+  // 附件会话共源（ui-web/free）：读取代际失效、合并前预算复核、input 复位
+  // 由 hook 统一承担——附件不写入草稿。
+  const {
+    items: attachments,
+    isReading: isReadingAttachments,
+    error: attachmentError,
+    inputRef: attachmentInputRef,
+    totalChars: totalAttachmentChars,
+    addFiles: addAttachmentFiles,
+    remove: removeAttachment,
+    clear: clearAttachments,
+  } = useFreeAttachments(readFreeAttachmentFiles);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionInfo, setActionInfo] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -190,10 +184,6 @@ function FreeForm({ session }: { session: FreeSession }) {
     : undefined;
   const recommended = recommendedSaveModes(deviceType === 'mobile');
   const jsonSaveMode = recommended.jsonSaveMode;
-  const totalAttachmentChars = useMemo(
-    () => attachments.reduce((sum, item) => sum + item.content.length, 0),
-    [attachments],
-  );
   const tokenEstimateText = useMemo(() => {
     const blocks: string[] = [];
     if (draft.prompt.trim()) blocks.push(draft.prompt);
@@ -201,36 +191,6 @@ function FreeForm({ session }: { session: FreeSession }) {
     if (attachmentsText.trim()) blocks.push(attachmentsText);
     return blocks.join('\n\n');
   }, [attachments, draft.prompt]);
-
-  const handleAddAttachments = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    const epoch = attachmentReadEpoch.current;
-    setIsReadingAttachments(true);
-    setAttachmentError(null);
-    try {
-      const { added, skipped } = await readFreeAttachmentFiles(files, attachmentsRef.current);
-      // 读取期间清单被用户改动过（清空/移除/丢弃草稿/离开页面）：
-      // 迟到结果一律丢弃，不得重新加回用户已显式放弃的内容。
-      if (attachmentReadEpoch.current !== epoch) return;
-      // 合并前复核总量预算：读取按开始时的快照计费，此间余量可能已变。
-      const { dropped } = acceptAttachmentsWithinBudget(attachmentsRef.current, added);
-      if (skipped + dropped > 0) {
-        setAttachmentError(`⚠️ 附件总量超过限制：已忽略 ${skipped + dropped} 个文件（总上限 ${formatBytes(FREE_GENERATION_ATTACHMENT_LIMITS.maxBytesTotal)} / ${FREE_GENERATION_ATTACHMENT_LIMITS.maxCharsTotal.toLocaleString()} 字符）。`);
-      }
-      if (added.length > 0) {
-        setAttachments((prev) => {
-          const { accepted } = acceptAttachmentsWithinBudget(prev, added);
-          return accepted.length > 0 ? [...prev, ...accepted] : prev;
-        });
-      }
-    } catch (error) {
-      if (attachmentReadEpoch.current !== epoch) return;
-      setAttachmentError(`⚠️ 附件读取失败：${error instanceof Error ? error.message : '读取失败'}`);
-    } finally {
-      if (attachmentReadEpoch.current === epoch) setIsReadingAttachments(false);
-      if (attachmentInputRef.current) attachmentInputRef.current.value = '';
-    }
-  };
 
   const generate = (discardUnsavedResult = false) => {
     if (!guard.ready || busy || !executionMode || isReadingAttachments || blockedDraft) return;
@@ -286,7 +246,7 @@ function FreeForm({ session }: { session: FreeSession }) {
               </div>
               {confirmClear && <div role="group" aria-label="确认清除草稿" className="mt-3 rounded border p-3">
                 <p>确认清除本页提示词、生成结果和中断正文？已保存的本地卡不受影响。此操作无法撤销。</p>
-                <button className={actionClass} disabled={busy} onClick={() => { session.discardDraft(); invalidateAttachmentReads(); setAttachments([]); setAttachmentError(null); setConfirmClear(false); }}>确认清除</button>
+                <button className={actionClass} disabled={busy} onClick={() => { session.discardDraft(); clearAttachments(); setConfirmClear(false); }}>确认清除</button>
                 <button className={actionClass} onClick={() => setConfirmClear(false)}>保留草稿</button>
               </div>}
             </section>
@@ -426,13 +386,13 @@ function FreeForm({ session }: { session: FreeSession }) {
                   type="file"
                   multiple
                   className="hidden"
-                  onChange={(event) => void handleAddAttachments(event.target.files)}
+                  onChange={(event) => void addAttachmentFiles(event.target.files)}
                 />
                 <div className="flex flex-wrap gap-2">
                   <button className={actionClass} disabled={isReadingAttachments} onClick={() => attachmentInputRef.current?.click()}>
                     {isReadingAttachments ? '正在读取附件…' : '添加附件'}
                   </button>
-                  {attachments.length > 0 && <button className={actionClass} onClick={() => { invalidateAttachmentReads(); setAttachments([]); setAttachmentError(null); if (attachmentInputRef.current) attachmentInputRef.current.value = ''; }}>清空附件</button>}
+                  {attachments.length > 0 && <button className={actionClass} onClick={clearAttachments}>清空附件</button>}
                 </div>
                 <p className="text-xs text-(--app-text-muted)">
                   仅文本内容会随提示词发送；单文件 {formatBytes(FREE_GENERATION_ATTACHMENT_LIMITS.maxBytesPerFile)} / 全部 {formatBytes(FREE_GENERATION_ATTACHMENT_LIMITS.maxBytesTotal)} 上限，超长部分截断后标记「已截断」。
@@ -443,7 +403,7 @@ function FreeForm({ session }: { session: FreeSession }) {
                     {attachments.map((item) => (
                       <li key={item.id} className="flex items-center justify-between gap-2 rounded border border-(--app-border) px-2 py-1 text-sm">
                         <span className="min-w-0 truncate">{item.name}{item.truncated ? '（已截断）' : ''} · {formatBytes(item.includedBytes)}</span>
-                        <button className="text-(--app-accent-strong)" onClick={() => { invalidateAttachmentReads(); setAttachments((prev) => prev.filter((entry) => entry.id !== item.id)); }}>移除</button>
+                        <button className="text-(--app-accent-strong)" onClick={() => removeAttachment(item.id)}>移除</button>
                       </li>
                     ))}
                   </ul>

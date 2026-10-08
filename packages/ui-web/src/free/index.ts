@@ -6,3 +6,16 @@ export {
   type FreeSchemaOption,
 } from './product';
 export { formatBytes } from './format-bytes';
+export {
+  acceptAttachmentsWithinBudget,
+  formatFreeAttachmentOverflowError,
+  formatFreeAttachmentReadError,
+  readFreeAttachmentFiles,
+  toPromptAttachments,
+  type AttachmentReadResult,
+  type FreeAttachmentState,
+} from './attachments';
+export {
+  useFreeAttachments,
+  type UseFreeAttachmentsResult,
+} from './use-free-attachments';

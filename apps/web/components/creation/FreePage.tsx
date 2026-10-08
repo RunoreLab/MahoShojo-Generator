@@ -45,23 +45,12 @@ import {
   buildFreeFieldGuide,
   formatBytes,
   freeSchemaOptionsForMode,
+  toPromptAttachments,
+  useFreeAttachments,
 } from '@mahoshojo/ui-web/free';
 import { isFreeStreamSchemaId, type FreeSchemaId } from '@mahoshojo/ai-core/free-generation';
 
 const LOCAL_STORAGE_KEY = 'mahoshojo.free-generator.draft.v1';
-
-type FreeAttachmentInput = {
-  name: string;
-  type: string;
-  size: number;
-  content: string;
-  truncated?: boolean;
-};
-
-type FreeAttachmentState = FreeAttachmentInput & {
-  id: string;
-  includedBytes: number;
-};
 
 const MAX_ATTACHMENT_BYTES_PER_FILE = FREE_GENERATION_ATTACHMENT_LIMITS.maxBytesPerFile;
 const MAX_ATTACHMENT_BYTES_TOTAL = FREE_GENERATION_ATTACHMENT_LIMITS.maxBytesTotal;
@@ -183,15 +172,25 @@ const buildCanshouPortraitPrompt = (input: Record<string, unknown>): string => {
 export function FreePage() {
   const generationApiIntentLatch = useGenerationApiIntentLatch();
   const router = useAppRouterAdapter();
-  const attachmentInputRef = useRef<HTMLInputElement>(null);
+  // 附件会话共源（ui-web/free）：读取代际失效、合并前预算复核、maxCount
+  // 上限与 Desktop 同一实现；附件不写入草稿。
+  const {
+    items: attachments,
+    isReading: isReadingAttachments,
+    error: attachmentError,
+    inputRef: attachmentInputRef,
+    totalChars: totalAttachmentChars,
+    totalBytes: totalAttachmentBytes,
+    addFiles: addAttachmentFiles,
+    remove: removeAttachment,
+    clear: clearAttachments,
+  } = useFreeAttachments();
 
   const [schemaId, setSchemaId] = useState<FreeSchemaId>('general');
   const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
   const [prompt, setPrompt] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
-  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [isReadingAttachments, setIsReadingAttachments] = useState(false);
 
   const [resultData, setResultData] = useState<any | null>(null);
   const [nonStreamReasoning, setNonStreamReasoning] = useState<AIReasoningEnvelope | null>(null);
@@ -279,21 +278,8 @@ export function FreePage() {
     }
     setPrompt('');
     setError(null);
-    setAttachmentError(null);
-    setAttachments([]);
+    clearAttachments();
   };
-
-  const [attachments, setAttachments] = useState<FreeAttachmentState[]>([]);
-
-  const totalAttachmentChars = useMemo(
-    () => attachments.reduce((sum, attachment) => sum + attachment.content.length, 0),
-    [attachments]
-  );
-
-  const totalAttachmentBytes = useMemo(
-    () => attachments.reduce((sum, attachment) => sum + attachment.includedBytes, 0),
-    [attachments]
-  );
 
   const tokenEstimateText = useMemo(() => {
     const blocks: string[] = [];
@@ -302,86 +288,6 @@ export function FreePage() {
     if (attachmentsText.trim()) blocks.push(attachmentsText);
     return blocks.join('\n\n');
   }, [attachments, prompt]);
-
-  const handleAddAttachments = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    setIsReadingAttachments(true);
-    setAttachmentError(null);
-
-    const currentChars = totalAttachmentChars;
-    const currentBytes = totalAttachmentBytes;
-    let remainingChars = Math.max(0, MAX_ATTACHMENT_CHARS_TOTAL - currentChars);
-    let remainingBytes = Math.max(0, MAX_ATTACHMENT_BYTES_TOTAL - currentBytes);
-
-    const next: FreeAttachmentState[] = [];
-    let skipped = 0;
-
-    try {
-      for (const file of Array.from(files)) {
-        if (remainingChars <= 0 || remainingBytes <= 0) {
-          skipped += 1;
-          continue;
-        }
-
-        const sliceBytes = Math.min(file.size, MAX_ATTACHMENT_BYTES_PER_FILE, remainingBytes);
-        if (sliceBytes <= 0) {
-          skipped += 1;
-          continue;
-        }
-
-        const blob = file.slice(0, sliceBytes);
-        let text = await blob.text();
-        let truncated = blob.size < file.size;
-
-        if (text.length > MAX_ATTACHMENT_CHARS_PER_FILE) {
-          text = text.slice(0, MAX_ATTACHMENT_CHARS_PER_FILE);
-          truncated = true;
-        }
-
-        if (text.length > remainingChars) {
-          text = text.slice(0, remainingChars);
-          truncated = true;
-        }
-
-        remainingChars -= text.length;
-        remainingBytes -= sliceBytes;
-
-        next.push({
-          id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-          name: file.name || 'untitled',
-          type: file.type || 'application/octet-stream',
-          size: file.size,
-          includedBytes: sliceBytes,
-          content: text,
-          ...(truncated ? { truncated: true } : {}),
-        });
-      }
-
-      if (skipped > 0) {
-        setAttachmentError(`⚠️ 附件总量超过限制：已忽略 ${skipped} 个文件（总上限 ${formatBytes(MAX_ATTACHMENT_BYTES_TOTAL)} / ${MAX_ATTACHMENT_CHARS_TOTAL.toLocaleString()} 字符）。`);
-      }
-
-      if (next.length > 0) {
-        setAttachments((prev) => [...prev, ...next]);
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '读取附件失败';
-      setAttachmentError(`⚠️ 附件读取失败：${message}`);
-    } finally {
-      setIsReadingAttachments(false);
-      if (attachmentInputRef.current) attachmentInputRef.current.value = '';
-    }
-  };
-
-  const handleRemoveAttachment = (id: string) => {
-    setAttachments((prev) => prev.filter((item) => item.id !== id));
-  };
-
-  const handleClearAttachments = () => {
-    setAttachments([]);
-    setAttachmentError(null);
-    if (attachmentInputRef.current) attachmentInputRef.current.value = '';
-  };
 
   const downloadJson = (data: any, suggestedName: string) => {
     const jsonData = JSON.stringify(data, null, 2);
@@ -455,13 +361,7 @@ export function FreePage() {
       };
 
       if (attachments.length > 0) {
-        requestBody.attachments = attachments.map<FreeAttachmentInput>((item) => ({
-          name: item.name,
-          type: item.type,
-          size: item.size,
-          content: item.content,
-          ...(item.truncated ? { truncated: true } : {}),
-        }));
+        requestBody.attachments = toPromptAttachments(attachments);
       }
 
       const customProviderPayload = buildCustomProviderRequestPayload(userProviderConfig);
@@ -950,7 +850,7 @@ export function FreePage() {
                       id="free-attachments-upload"
                       type="file"
                       multiple
-                      onChange={(e) => void handleAddAttachments(e.target.files)}
+                      onChange={(e) => void addAttachmentFiles(e.target.files)}
                       disabled={submitting || isReadingAttachments}
                       className="cursor-pointer input-field file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-pink-50 file:text-pink-700 hover:file:bg-pink-100 disabled:opacity-50 disabled:cursor-not-allowed"
                     />
@@ -961,7 +861,7 @@ export function FreePage() {
                       <button
                         type="button"
                         className="text-red-600 hover:underline"
-                        onClick={handleClearAttachments}
+                        onClick={clearAttachments}
                         disabled={attachments.length === 0 || submitting || isReadingAttachments}
                       >
                         清空附件
@@ -986,7 +886,7 @@ export function FreePage() {
                             <button
                               type="button"
                               className="text-xs text-red-600 hover:underline shrink-0"
-                              onClick={() => handleRemoveAttachment(item.id)}
+                              onClick={() => removeAttachment(item.id)}
                               disabled={submitting || isReadingAttachments}
                             >
                               移除

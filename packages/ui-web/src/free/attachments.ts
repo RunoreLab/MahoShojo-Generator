@@ -2,10 +2,13 @@ import {
   FREE_GENERATION_ATTACHMENT_LIMITS,
   type AITextAttachment,
 } from '@mahoshojo/ai-core/reference-attachments';
+import { formatBytes } from './format-bytes';
 
 /**
- * /free 附件读取（D5.1-G2）：与 Web `FreePage.handleAddAttachments` 同一预算
- * 语义——单文件/总量字节与字符截断、超预算即跳过并计数。UI 无关，可单测。
+ * /free 附件读取与预算（D5.1-G2-r1 收口后上移）：单文件/总量字节与字符
+ * 截断、maxCount 上限、超预算即跳过并计数。原 Web `handleAddAttachments`
+ * 与 Desktop `features/free/attachments` 两份实现合并为一份；Web 侧此前
+ * 未执行 maxCount，共源后与 ai-core 限额一致。UI 无关，可单测。
  */
 
 export interface FreeAttachmentState extends AITextAttachment {
@@ -121,3 +124,10 @@ export const toPromptAttachments = (items: readonly FreeAttachmentState[]): AITe
     content: item.content,
     ...(item.truncated ? { truncated: true } : {}),
   }));
+
+/** 附件预算文案（双端同一措辞）。 */
+export const formatFreeAttachmentOverflowError = (ignoredCount: number): string =>
+  `⚠️ 附件总量超过限制：已忽略 ${ignoredCount} 个文件（总上限 ${formatBytes(FREE_GENERATION_ATTACHMENT_LIMITS.maxBytesTotal)} / ${FREE_GENERATION_ATTACHMENT_LIMITS.maxCharsTotal.toLocaleString()} 字符）。`;
+
+export const formatFreeAttachmentReadError = (message: string): string =>
+  `⚠️ 附件读取失败：${message}`;

@@ -5,14 +5,14 @@ import {
   readFreeAttachmentFiles,
   toPromptAttachments,
   type FreeAttachmentState,
-} from '../src/features/free/attachments';
+} from '../src/free';
 
 const file = (name: string, content: string, type = 'text/plain'): File =>
   new File([content], name, { type });
 
 const limits = FREE_GENERATION_ATTACHMENT_LIMITS;
 
-describe('free attachments reading (D5.1-G2)', () => {
+describe('free attachments reading（双端共源，D5.1-G2/P3）', () => {
   it('读取文本并保留元数据；空文件跳过预算', async () => {
     const { added, skipped } = await readFreeAttachmentFiles(
       [file('a.txt', 'alpha'), file('b.md', 'beta')],
@@ -43,6 +43,19 @@ describe('free attachments reading (D5.1-G2)', () => {
     expect(added).toHaveLength(1);
     expect(added[0]!.content).toHaveLength(10);
     expect(added[0]!.truncated).toBe(true);
+    expect(skipped).toBe(1);
+  });
+
+  it('数量上限 maxCount 生效（含存量）', async () => {
+    const existing = Array.from({ length: limits.maxCount - 1 }, (_, index) => ({
+      id: `e${index}`, name: `e${index}.txt`, type: 'text/plain',
+      size: 1, includedBytes: 1, content: 'x',
+    }));
+    const { added, skipped } = await readFreeAttachmentFiles(
+      [file('n1.txt', 'a'), file('n2.txt', 'b')],
+      existing,
+    );
+    expect(added).toHaveLength(1);
     expect(skipped).toBe(1);
   });
 
