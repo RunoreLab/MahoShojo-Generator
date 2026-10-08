@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import type { CharacterCurrentState, CurrentStateField } from '@mahoshojo/domain/arena-types';
 
 export interface CharacterManagerCurrentStateSectionProps {
@@ -45,6 +46,8 @@ export function CharacterManagerCurrentStateSection({
   createId = defaultCreateId,
   summaryHint = '修改当前状态将使原生签名失效。请尽量统一使用状态摘要，避免随意增加自定义字段。',
 }: CharacterManagerCurrentStateSectionProps) {
+  const controlId = useId();
+
   // 仅保护安全读取，沿用原字段对象；不按最终 schema 拦截输入中间态。
   if (!hasEditableStateShape(state)) {
     return <fieldset className="border border-gray-300 p-4 rounded-lg mt-4">
@@ -55,6 +58,7 @@ export function CharacterManagerCurrentStateSection({
   }
 
   const snapshot: CharacterCurrentState = {
+    ...state,
     summary: state?.summary ?? '',
     fields: Array.isArray(state?.fields) ? state.fields : [],
     updated_at: state?.updated_at ?? null,
@@ -79,8 +83,9 @@ export function CharacterManagerCurrentStateSection({
       <legend className="text-sm font-semibold px-2 text-gray-600">当前状态</legend>
       <div className="space-y-4">
         <div>
-          <label className="block text-xs font-semibold text-gray-600 mb-1">状态摘要</label>
+          <label htmlFor={`${controlId}-summary`} className="block text-xs font-semibold text-gray-600 mb-1">状态摘要</label>
           <textarea
+            id={`${controlId}-summary`}
             value={snapshot.summary ?? ''}
             onChange={(event) => commit({ ...snapshot, summary: event.target.value })}
             className="input-field"
@@ -107,17 +112,21 @@ export function CharacterManagerCurrentStateSection({
           </div>
           {fields.length > 0 ? (
             <div className="space-y-3">
-              {fields.map((field) => (
+              {fields.map((field, index) => (
                 <div key={field.id} className="border border-gray-200 rounded-md p-3 space-y-2">
                   <div className="flex flex-col gap-2 md:flex-row">
+                    <label className="sr-only" htmlFor={`${controlId}-field-${index}-label`}>字段名称</label>
                     <input
+                      id={`${controlId}-field-${index}-label`}
                       type="text"
                       className="input-field flex-1"
                       value={field.label}
                       onChange={(event) => updateField(field.id, (current) => ({ ...current, label: event.target.value }))}
                       placeholder="字段名称"
                     />
+                    <label className="sr-only" htmlFor={`${controlId}-field-${index}-type`}>字段类型</label>
                     <select
+                      id={`${controlId}-field-${index}-type`}
                       className="input-field md:w-32"
                       value={field.type}
                       onChange={(event) => {
@@ -142,8 +151,10 @@ export function CharacterManagerCurrentStateSection({
                     </select>
                   </div>
                   <div className="flex items-center gap-2">
+                    <label className="sr-only" htmlFor={`${controlId}-field-${index}-value`}>字段值</label>
                     {field.type === 'boolean' ? (
                       <select
+                        id={`${controlId}-field-${index}-value`}
                         className="input-field"
                         value={String(field.value)}
                         onChange={(event) => updateField(field.id, (current) => ({ ...current, value: event.target.value === 'true' }))}
@@ -153,6 +164,7 @@ export function CharacterManagerCurrentStateSection({
                       </select>
                     ) : (
                       <input
+                        id={`${controlId}-field-${index}-value`}
                         type={field.type === 'number' ? 'number' : 'text'}
                         className="input-field"
                         value={field.value?.toString() ?? ''}

@@ -168,7 +168,7 @@ export function PortraitBlock({ portraitAsset, subjectName }: {
 
 // 只验证展示真正读取的字段，不因未展示的旧 metadata 阻断正文预览。
 const PreviewArenaHistoryEntrySchema = ArenaHistoryEntrySchema.pick({
-  id: true, type: true, title: true, winner: true, impact: true,
+  type: true, title: true, winner: true, impact: true,
 });
 
 export function ArenaHistoryBlock({
@@ -192,7 +192,11 @@ export function ArenaHistoryBlock({
 
   const entries = history.entries.flatMap((entry, index) => {
     const parsed = PreviewArenaHistoryEntrySchema.safeParse(entry);
-    return parsed.success ? [{ ...parsed.data, previewKey: `${parsed.data.id ?? 'entry'}:${index}` }] : [];
+    if (!parsed.success) return [];
+    // 旧档案可用字符串 id；只读兼容不改变规范写入 schema，也不改写原记录。
+    const id = entry.id;
+    if (id !== undefined && typeof id !== 'string' && !(typeof id === 'number' && Number.isFinite(id))) return [];
+    return [{ ...parsed.data, previewKey: `${id ?? 'entry'}:${index}` }];
   }).reverse();
   const unsupportedCount = history.entries.length - entries.length;
 
