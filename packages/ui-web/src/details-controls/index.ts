@@ -86,3 +86,7 @@ export {
   DetailsIntroSection,
   type DetailsIntroSectionProps,
 } from './DetailsIntroSection';
+export {
+  QuestionnairePageCard,
+  type QuestionnairePageCardProps,
+} from './QuestionnairePageCard';

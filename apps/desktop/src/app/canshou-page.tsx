@@ -1,3 +1,4 @@
+import { QuestionnaireDraftPanel } from './questionnaire-draft-panel';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from '@tanstack/react-router';
@@ -47,6 +48,7 @@ import {
   GenerationModeSwitcher,
   JsonSizeIndicator,
   QuestionnaireAnswerExportPanel,
+  QuestionnairePageCard,
   QuestionNavigator,
   isMobileFormFactor,
   recommendedSaveModes,
@@ -61,7 +63,6 @@ import {
   QuestionnaireSelectionPanel,
 } from '@mahoshojo/ui-web/questionnaire';
 import { CanshouCard, GeneralCharacterCard, type CanshouDetails, type GeneralCharacterCardData } from '@mahoshojo/ui-web/character-card';
-import { ThemeImage } from '@mahoshojo/ui-web/media';
 import { revokeBlobUrl } from '@mahoshojo/ui-web/client';
 import { CardLibraryModal, type BattleSelectionPayload, type CardLibrarySelectionContext } from '@mahoshojo/ui-web/card-library';
 import { useEscapeLayer } from '@mahoshojo/ui-web/modal';
@@ -643,36 +644,27 @@ function CanshouForm({ session }: { session: CanshouSession }) {
     <div>
       <section data-testid="page-canshou" className="magic-background-dark">
         <div className="container">
-          <div className="card flex flex-col gap-5">
-            <header>
-              {/* 残兽品牌 logo：桌面恒暗色界面，ThemeImage 在本端总是命中 darkSrc。 */}
-              <div className="text-center mb-4">
-                <ThemeImage lightSrc="/beast-logo.svg" darkSrc="/beast-logo-white.svg" className="w-full px-8" alt="残兽调查" />
-                {primaryQuestionnaire?.description && (
-                  <p className="mt-2 text-sm text-(--app-text-muted)">{primaryQuestionnaire.description}</p>
-                )}
-              </div>
-              <h1 className="text-2xl font-semibold">残兽问卷生成</h1>
-              <p className="mt-2 text-sm text-(--app-text-muted)">填写问卷后，可选择客户端连接或项目服务器生成残兽档案；签名状态以实际生成结果为准。问卷可以是内置预设，也可以从本地库或云端数据卡选择。</p>
-            </header>
-            <section aria-label="草稿" className="rounded-lg border border-(--app-border) p-4">
-              <p>问卷、结果与中断正文自动保存在本机页面草稿中，恢复草稿不会自动重新生成。</p>
-              <p className="text-sm text-(--app-text-muted)">草稿不参与本地库整库备份或归档；保存到本地卡库的角色卡参与。草稿上限为序列化后 4 Mi 字符，超出或写入失败时请保留当前页面。</p>
-              {state.pendingRestore && <div role="status" className="mt-2 flex flex-wrap items-center gap-2"><span>发现上次草稿，请选择恢复或清除。</span><button className={actionClass} onClick={() => {
+          <QuestionnairePageCard variant="canshou" description={primaryQuestionnaire?.description} className="flex flex-col gap-5">
+            <p className="text-xs leading-relaxed text-(--app-text-muted)">填写问卷后，可选择客户端连接或项目服务器生成残兽档案；签名状态以实际生成结果为准。问卷可以是内置预设，也可以从本地库或云端数据卡选择。</p>
+            <QuestionnaireDraftPanel
+              pendingRestore={state.pendingRestore}
+              draftSaved={state.draftSaved}
+              draftError={state.draftError}
+              draftBlocked={session.isDraftBlocked()}
+              busy={busy}
+              actionClass={actionClass}
+              onRestore={() => {
                 // 恢复的选择集取代待恢复期的内置预览：重置答案重映射基线，让恢复后的
                 // 题目集成为首个观测基线——否则 effect 会拿预览的 targets 去「映射掉」
                 // 刚恢复的回答并立即落盘为空（不可逆丢失，P2-r1）。
                 previousTargetsRef.current = null;
                 previousSignatureRef.current = null;
                 session.restoreDraft(); setShowIntroduction(false); setSelectionReady(true);
-              }}>恢复草稿</button></div>}
-              {state.draftError && <p role="alert">{state.draftError}</p>}
-              {!state.pendingRestore && <p role="status">{state.draftSaved ? '当前内容已保存或无待保存变更。' : '当前内容尚未保存到草稿。'}</p>}
-              <div className="mt-2 flex flex-wrap gap-2">
-                {state.draftError && !session.isDraftBlocked() && <button className={actionClass} disabled={busy || state.pendingRestore} onClick={() => session.retryDraftSave()}>重试保存草稿</button>}
-                <button className={actionClass} disabled={busy} onClick={() => setConfirmClear(true)}>清除草稿</button>
-              </div>
-              {confirmClear && <div role="group" aria-label="确认清除草稿" className="mt-3 rounded border p-3">
+              }}
+              onRetrySave={() => session.retryDraftSave()}
+              onRequestClear={() => setConfirmClear(true)}
+              onReload={() => { setReload((value) => value + 1); void aiStore.refreshProfiles(); }}
+              confirmation={confirmClear && <div role="group" aria-label="确认清除草稿" className="mt-3 rounded border p-3">
                 <p>确认清除本页回答、生成结果和中断正文？已保存的本地卡不受影响。此操作无法撤销。</p>
                 <button className={actionClass} disabled={busy} onClick={() => {
                   // 同「恢复草稿」：清空后重新注入的默认选择不应拿旧基线做重映射。
@@ -682,7 +674,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
                 }}>确认清除</button>
                 <button className={actionClass} onClick={() => setConfirmClear(false)}>保留草稿</button>
               </div>}
-            </section>
+            />
             {!guard.ready && !guard.message && <p role="status">正在初始化窗口关闭保护…</p>}
             {guard.message && <p role="alert">{guard.message}</p>}
             {questionnaireLoading && <p role="status">正在读取内置问卷…</p>}
@@ -691,9 +683,8 @@ function CanshouForm({ session }: { session: CanshouSession }) {
                 失败提示改为如实说明影响范围，避免被读成「服务器生成也被封死」（D5.1-P2-r4）。 */}
             {profilesLoading && target.location === 'client' && <p role="status">正在读取本地 Provider 配置…</p>}
             {profilesError && <p role="alert">{target.location === 'server' ? '本地 Provider 配置加载失败，仅影响客户端执行。' : profilesError}</p>}
-            <button className={`${actionClass} self-start`} disabled={busy} onClick={() => { setReload((value) => value + 1); void aiStore.refreshProfiles(); }}>重新加载问卷与配置</button>
             {showIntroduction && !state.pendingRestore ? (
-              <section aria-label="介绍" className="rounded-lg border border-(--app-border) p-4">
+              <section aria-label="介绍">
                 <DetailsIntroSection
                   description={null}
                   startLabel="开始调查"
@@ -967,7 +958,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
               </section>}
             </div>
             {state.rawText && <details open={state.phase !== 'completed'}><summary>原始输出正文</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border p-3">{state.rawText}</pre></details>}
-          </div>
+          </QuestionnairePageCard>
           {/* 页脚与 Web /canshou 同一共享组件；站外链接走受控外链确认。 */}
           <ProductFooter
             textWhite

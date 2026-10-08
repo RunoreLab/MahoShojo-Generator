@@ -16,6 +16,7 @@ import {
   CanshouLorePanel,
   DetailsSavePreferencesPanel,
   isMobileFormFactor,
+  QuestionnairePageCard,
   recommendedSaveModes,
   SaveJsonButton,
 } from '@mahoshojo/ui-web/details-controls';
@@ -35,7 +36,6 @@ import { ErrorMessage } from '@/components/ErrorMessage';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
-import { ThemeImage } from '@/components/shared/ThemeImage';
 import {
   CANSHOU_QUESTIONNAIRE_THEME,
   QuestionnaireQuestionPanel,
@@ -1350,14 +1350,7 @@ export const CanshouPage: React.FC = () => {
     <>
       <div className="magic-background-dark">
         <div className="container">
-          <div className="card">
-            <div className="text-center mb-4">
-              <ThemeImage lightSrc="/beast-logo.svg" darkSrc="/beast-logo-white.svg" className="w-full px-8" alt="残兽调查" />
-              {primaryQuestionnaire?.description && (
-                <p className="text-gray-600 mt-2">{primaryQuestionnaire.description}</p>
-              )}
-            </div>
-
+          <QuestionnairePageCard variant="canshou" description={primaryQuestionnaire?.description}>
             {showIntroduction ? (
               <DetailsIntroSection
                 description={null}
@@ -1757,7 +1750,7 @@ export const CanshouPage: React.FC = () => {
                 </div>
               </>
             )}
-          </div>
+          </QuestionnairePageCard>
 
           <Footer textWhite={true} />
         </div>

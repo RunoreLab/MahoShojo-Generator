@@ -290,10 +290,13 @@ describe('Web CanshouPage 页面级行为契约（真实共享控件）', () => 
     }));
 
     await mountPage();
+    const logo = container.querySelector('img[alt="残兽调查"]');
+    expect(logo).toBeTruthy();
+    expect(logo?.closest('.card')?.firstElementChild?.contains(logo)).toBe(true);
     await startQuestionnaire();
 
     // 残兽特有锚点：logo 图与默认问卷描述文案。
-    expect(container.querySelector('img[alt="残兽调查"]')).toBeTruthy();
+    expect(container.querySelector('img[alt="残兽调查"]')).toBe(logo);
     expect(container.textContent).toContain('前进吧，残兽！');
     expect(progressText()).toBe('问题 1 / 10');
 

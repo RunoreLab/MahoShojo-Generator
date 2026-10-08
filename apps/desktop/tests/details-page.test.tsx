@@ -67,6 +67,20 @@ const mount = async () => {
 };
 
 describe('Desktop Details real route and session UI (native adapter mock)', () => {
+  it('keeps the brand at the top when starting the questionnaire', async () => {
+    await mount();
+    const logo = container.querySelector('img[alt="Questionnaire Logo"]');
+    expect(logo).toBeTruthy();
+    expect(logo?.closest('.card')?.firstElementChild?.contains(logo)).toBe(true);
+    expect(container.querySelector('[aria-label="介绍"]')?.contains(logo)).toBe(false);
+    expect(container.querySelector('h1')?.textContent).toBe('魔法少女问卷生成');
+    await click('开始回答问卷');
+    expect(container.querySelector('[aria-label="介绍"]')).toBeNull();
+    expect(container.querySelector('img[alt="Questionnaire Logo"]')).toBe(logo);
+    expect(container.querySelector('textarea')).toBeTruthy();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
   it('shows rounded progress, effective soft limits and skip guidance only for optional questions', async () => {
     const custom = {
       id: 'answer-hints', kind: 'magical-girl', title: '作答提示问卷', description: 'd',
@@ -163,7 +177,10 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     expect(container.textContent).toContain('第 1 / 16 题');
     expect(mocks.execute).not.toHaveBeenCalled();
     expect(button('发送问卷并生成').disabled).toBe(true);
+    const logo = container.querySelector('img[alt="Questionnaire Logo"]');
+    expect(logo).toBeTruthy();
     await click('恢复草稿');
+    expect(container.querySelector('img[alt="Questionnaire Logo"]')).toBe(logo);
     expect(container.querySelector('textarea')?.value).toBe('善良');
     await click('发送问卷并生成');
     expect(mocks.execute).toHaveBeenCalledTimes(1);

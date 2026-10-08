@@ -10,7 +10,7 @@ import {
  * 「开始回答问卷 / 快速随机生成」两个 CTA 与可选的补充链接位。
  *
  * 自 Web `DetailsPage` 上移（DESK-PARITY-004）：
- * - 卡片顶部的 Logo 图不属于本区段（问卷页全程显示），由页面自绘；
+ * - 卡片顶部的 Logo 图不属于本区段，由 QuestionnairePageCard 全程显示；
  * - 百科链接走宿主 `onNavigate`——Web 是 router.push，Desktop 是
  *   hash 路由导航；
  * - 「创作工坊入口」「返回首页」等宿主差异位以 slot 注入；

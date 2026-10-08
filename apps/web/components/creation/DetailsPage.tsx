@@ -10,7 +10,7 @@ import { generateRandomMagicalGirl } from '@/lib/random-character-generator';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
 import Footer from '@/components/Footer';
 import QuestionNavigator from '@/components/QuestionNavigator';
-import { AnswerReviewList, BulkAnswerTools, isMobileFormFactor, recommendedSaveModes, SaveJsonButton } from '@mahoshojo/ui-web/details-controls';
+import { AnswerReviewList, BulkAnswerTools, isMobileFormFactor, QuestionnairePageCard, recommendedSaveModes, SaveJsonButton } from '@mahoshojo/ui-web/details-controls';
 import {
   buildQuestionnaireAnswerExportText,
   collectQuestionnaireAnswerExportItems,
@@ -1547,12 +1547,7 @@ export const DetailsPage: React.FC = () => {
     <>
       <div className="magic-background">
         <div className="container">
-          <div className="card">
-            {/* Logo */}
-            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', marginBottom: '1rem' }}>
-              <img src="/questionnaire-logo.svg" width={250} height={160} alt="Questionnaire Logo" />
-            </div>
-
+          <QuestionnairePageCard variant="details">
             {showIntroduction ? (
               // 介绍部分
               <DetailsIntroSection
@@ -1809,7 +1804,7 @@ export const DetailsPage: React.FC = () => {
                 </div>
               </>
             )}
-          </div>
+          </QuestionnairePageCard>
 
           <div ref={resultSectionRef}>
 

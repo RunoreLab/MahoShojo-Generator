@@ -71,6 +71,22 @@ const mount = async () => {
 };
 
 describe('Desktop Canshou real route and session UI (native adapter mock)', () => {
+  it('keeps the themed brand and description when starting the questionnaire', async () => {
+    await mount();
+    const logo = container.querySelector('img[alt="残兽调查"]');
+    expect(logo).toBeTruthy();
+    expect(logo?.closest('.card')?.firstElementChild?.contains(logo)).toBe(true);
+    expect(container.querySelector('[aria-label="介绍"]')?.contains(logo)).toBe(false);
+    expect(logo?.closest('header')?.textContent).toContain(questionnaire.description);
+    await click('开始调查');
+    expect(container.querySelector('[aria-label="介绍"]')).toBeNull();
+    expect(container.querySelector('img[alt="残兽调查"]')).toBe(logo);
+    expect(container.querySelector('.theme-image-light')?.getAttribute('src')).toBe('/beast-logo.svg');
+    expect(container.querySelector('.theme-image-dark')?.getAttribute('src')).toBe('/beast-logo-white.svg');
+    expect(container.querySelector('textarea')).toBeTruthy();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
   it('shows rounded progress, effective soft limits and skip guidance only for optional questions', async () => {
     const custom = {
       id: 'answer-hints', kind: 'canshou', title: '作答提示问卷', description: 'd',
@@ -114,7 +130,10 @@ describe('Desktop Canshou real route and session UI (native adapter mock)', () =
     expect(container.querySelector('[data-testid="page-canshou"]')).toBeTruthy();
     expect(mocks.execute).not.toHaveBeenCalled();
     expect(button('发送问卷并生成').disabled).toBe(true);
+    const logo = container.querySelector('img[alt="残兽调查"]');
+    expect(logo).toBeTruthy();
     await click('恢复草稿');
+    expect(container.querySelector('img[alt="残兽调查"]')).toBe(logo);
     expect(container.querySelector('textarea')?.value).toBe('巢穴');
     await click('发送问卷并生成');
     expect(mocks.execute).toHaveBeenCalledTimes(1);
