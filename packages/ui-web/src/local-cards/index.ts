@@ -18,3 +18,5 @@ export {
   previewLocalCardData,
 } from './presentation';
 export type { LocalCardFilter, LocalCardType } from './presentation';
+
+export { LocalLibraryPageLayout, type LocalLibraryPageLayoutProps } from './LocalLibraryPageLayout';

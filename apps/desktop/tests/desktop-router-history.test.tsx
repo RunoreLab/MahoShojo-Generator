@@ -174,15 +174,16 @@ describe('desktop router keeps the product path inside the hash', () => {
       ['/details', 'page-details', true],
       ['/canshou', 'page-canshou', true],
       ['/character-manager', 'page-character-manager', true],
-      ['/local-library', 'page-local-library', false],
-      ['/settings', 'page-settings', false],
+      ['/local-library', 'page-local-library', true],
+      ['/settings', 'page-settings', true],
+      ['/me', 'page-me', true],
     ] as const) {
       await act(async () => {
         await router.navigate({ to });
       });
       await settle();
       expect(pageTestId(), `${to} 应当渲染 ${expected}`).toBe(expected);
-      // 自带 magic-background* 的产品页 full-bleed；无背景裸 section 页面留在限宽 main。
+      // 自带背景或页级宽度/内边距的产品页 full-bleed，避免第二层壳宽度覆盖。
       const mainClass = container.querySelector('main')?.className ?? '';
       if (fullBleed) {
         expect(mainClass, `${to} 应为全幅 bleed 容器`).toBe('flex-1');

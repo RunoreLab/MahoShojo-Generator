@@ -80,8 +80,8 @@ const CAPABILITIES = buildCapabilitySnapshot();
  * 这些页面与 Web 同构的骨架是 `magic-background* > .container > .card`（百科为共源
  * `EncyclopediaPageFrame` 的 `magic-background-white > max-w-6xl > 白卡`）：页面背景必须
  * 横向铺满，`main` 再套一层限宽内边距只是把背景裁进栏盒（渐变同源时肉眼看不出接缝，
- * 但骨架不同构）。`bleedContent` 让壳的 `main` 退化为 `flex-1` 全宽容器；无背景的
- * 裸 section 页面（本地库、设置）继续走受限宽 `main`（D5.1-P2-r4；百科骨架见 D5.1
+ * 但骨架不同构）。`bleedContent` 让壳的 `main` 退化为 `flex-1` 全宽容器；设置、个人页与本地库也已拥有自己的页级宽度/内边距，不能再被壳重复约束；
+ * 未来真正没有页框的裸 section 才走受限宽 `main`（D5.1-P2-r4；百科骨架见 D5.1
  * 百科 UI compatibility 收口）。
  */
 /**
@@ -100,7 +100,7 @@ const ESCAPE_MENU_ENTRIES: readonly ShellEscapeMenuEntry[] = (
   ] as const
 ).filter((entry) => readCapability(CAPABILITIES, entry.href).kind === 'available');
 
-const FULL_BLEED_PATHS = new Set(['/', '/details', '/canshou', '/free', '/scenario', '/creator', '/character-manager', '/encyclopedia', '/messages']);
+const FULL_BLEED_PATHS = new Set(['/', '/details', '/canshou', '/free', '/scenario', '/creator', '/character-manager', '/encyclopedia', '/messages', '/settings', '/me', '/local-library']);
 
 /** 条目页是前缀而不是字面路径：`/encyclopedia/<slug>`。 */
 const isFullBleedPath = (pathname: string) =>

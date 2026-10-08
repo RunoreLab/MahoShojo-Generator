@@ -10,6 +10,9 @@ import {
   SettingsPage,
 } from '@mahoshojo/ui-web/settings';
 
+import { ProductFooter } from '@mahoshojo/ui-web/shell';
+import { useExternalLinks } from '../features/external-links/external-links-provider';
+
 import { DESKTOP_PAGE_PREFERENCE_SOURCES } from './settings-page-preferences';
 import { AccountPanel } from '../features/account/AccountPanel';
 import { AiConnectionsPanel } from '../features/ai-config/AiConnectionsPanel';
@@ -147,6 +150,8 @@ const DataSection = () => (
  * 诊断归「数据与存储」组的 `DesktopConfigFileCard`（D5.1-N1-r1）。
  */
 export const DesktopSettings = () => {
+  const router = useRouter();
+  const { openFixed } = useExternalLinks();
   const search = useSearch({ strict: false }) as { section?: string };
   const section = isSettingsGroupId(search.section) ? search.section : undefined;
 
@@ -155,6 +160,12 @@ export const DesktopSettings = () => {
       <DesktopConfigFeedback />
       <SettingsPage
       section={section}
+      footer={<ProductFooter
+        assetSource={{ baseUrl: '/' }}
+        onNavigateInternal={(href) => navigateByProductHref(router, href)}
+        resolveInternalHref={resolveInternalHrefForHashHistory}
+        onNavigateExternal={openFixed}
+      />}
       intro="设备级设置即时生效并保存在本机；账号与云端设置需要登录。"
       groups={[
         {

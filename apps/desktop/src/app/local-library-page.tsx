@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from '@tanstack/react-router';
 import { LocalArchivePanel, createLocalArchiveController } from '@mahoshojo/ui-web/local-archive';
-import { LocalCardsPanel, useLocalCardsController, type LocalCardsActions, type LocalCardsHost } from '@mahoshojo/ui-web/local-cards';
+import { LocalLibraryPageLayout, LocalCardsPanel, useLocalCardsController, type LocalCardsActions, type LocalCardsHost } from '@mahoshojo/ui-web/local-cards';
 
 import { useLeaveGuard } from './useLeaveGuard';
 import { LocalLibraryAuditPanel } from '../features/audit/LocalLibraryAuditPanel';
@@ -122,16 +122,11 @@ export function DesktopLocalLibrary() {
   };
 
   return (
-    <section data-testid="page-local-library" className="mx-auto flex w-full max-w-4xl flex-col gap-4">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-lg font-semibold">本地库</h1>
-        <p className="text-sm text-(--app-text-muted)">
-          本机保存的数据卡与 Web 包，只存在于这台设备。不需要账号，也不会访问项目服务器。
-        </p>
+    <LocalLibraryPageLayout notes={(
         <p className="text-sm text-(--app-text-muted)">
           问卷中已保存到本地卡库的角色会参与归档与备份；问卷草稿、未保存结果和部分生成正文不在其中，仅保留在当前应用的草稿存储中。
         </p>
-      </header>
+    )}>
       {!guard.ready && !guard.message && <p role="status">正在初始化窗口关闭保护…</p>}
       {guard.message && <p role="alert">{guard.message}</p>}
       <LocalCardsPanel
@@ -154,6 +149,6 @@ export function DesktopLocalLibrary() {
           </li>
         </ul>
       </section>
-    </section>
+    </LocalLibraryPageLayout>
   );
 }

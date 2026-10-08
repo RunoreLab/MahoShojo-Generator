@@ -35,10 +35,12 @@ export interface SettingsPageProps {
   /** 页头标题/导语可按宿主口径覆盖。 */
   heading?: ReactNode;
   intro?: ReactNode;
+  /** 共用页尾位置；链接与原生打开动作由宿主注入。 */
+  footer?: ReactNode;
   groups: ReadonlyArray<SettingsGroupSection>;
 }
 
-export const SettingsPage = ({ section, heading = '设置', intro, groups }: SettingsPageProps) => {
+export const SettingsPage = ({ section, heading = '设置', intro, footer, groups }: SettingsPageProps) => {
   const orderedGroups = useMemo(() => {
     const provided = new Map(groups.map((group) => [group.id, group]));
     return SETTINGS_GROUPS.filter((group) => provided.has(group.id)).map((group) => ({
@@ -56,6 +58,7 @@ export const SettingsPage = ({ section, heading = '设置', intro, groups }: Set
   }, [section]);
 
   return (
+    <>
     <div data-testid="settings-page" className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-4 py-6">
       <header>
         <h1 className="text-lg font-semibold text-(--app-text)">{heading}</h1>
@@ -96,5 +99,7 @@ export const SettingsPage = ({ section, heading = '设置', intro, groups }: Set
         </section>
       ))}
     </div>
+    {footer ? <div className="mx-auto w-full max-w-3xl px-4 pb-6">{footer}</div> : null}
+    </>
   );
 };

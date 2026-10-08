@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo } from 'react';
 import { LocalArchivePanel, useLocalArchiveView } from '@mahoshojo/ui-web/local-archive';
-import { LocalCardsPanel, useLocalCardsController, type LocalCardsHost } from '@mahoshojo/ui-web/local-cards';
+import { LocalLibraryPageLayout, LocalCardsPanel, useLocalCardsController, type LocalCardsHost } from '@mahoshojo/ui-web/local-cards';
 
 import { LocalLibraryStatusNote } from '@/components/shared/LocalLibraryStatusNote';
 import { createWebArchiveHost, WEB_LIBRARY_ARCHIVE_LIMITS } from '@/lib/local-library/archive-host';
@@ -40,14 +40,7 @@ export function LocalLibraryPage() {
   }, [archive.model.report, reload]);
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-10">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-xl font-semibold">本地库</h1>
-        <p className="text-sm text-(--app-text-muted)">
-          本机保存的数据卡与 Web 包。它们只存在于这台设备，不会跨设备同步，也不需要登录。
-        </p>
-      </header>
-
+    <LocalLibraryPageLayout>
       <LocalLibraryStatusNote />
 
       <LocalCardsPanel model={cards.model} actions={cards.controller.actions} disabled={archiveBusy} />
@@ -70,6 +63,6 @@ export function LocalLibraryPage() {
           </li>
         </ul>
       </section>
-    </div>
+    </LocalLibraryPageLayout>
   );
 }

@@ -61,6 +61,7 @@ export function WebSettingsPage() {
     <div className="magic-background-white">
       <SettingsPage
         section={section}
+        footer={<Footer />}
         intro="设备级设置即时生效并保存在本机浏览器；账号设置在登录后可改。"
         groups={[
           { id: 'account', content: accountContent },
@@ -107,9 +108,6 @@ export function WebSettingsPage() {
           },
         ]}
       />
-      <div className="mx-auto w-full max-w-3xl px-4 pb-6">
-        <Footer />
-      </div>
     </div>
   );
 }
