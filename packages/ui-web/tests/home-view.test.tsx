@@ -11,6 +11,7 @@ import {
   HomeEncyclopediaCard,
   HomeFeatureGrid,
   HomeHero,
+  HomePageView,
   getHomeFeatureAssets,
   homeAssetUrl,
   type HomeAssetSource,
@@ -202,5 +203,35 @@ describe('HOME_FEATURE_CATEGORIES', () => {
     for (const entry of HOME_RECOMMENDED_ENTRIES) {
       expect(known.has(entry.slug)).toBe(true);
     }
+  });
+});
+
+
+describe('HomePageView', () => {
+  it('keeps the Web layout and places platform notes after the common product sections', () => {
+    const navigate = vi.fn();
+    render(<HomePageView
+      assetSource={ASSET_SOURCE}
+      capabilities={{ '/details': AVAILABLE, '/encyclopedia': AVAILABLE }}
+      onNavigate={navigate}
+      resolveInternalHref={(href) => `#${href}`}
+      account={<div data-testid="account-slot">账号欢迎</div>}
+      platformNotice="平台说明"
+      platformTools={<button>本机工具</button>}
+      footer={<footer>页脚</footer>}
+    />);
+    const card = container.querySelector('.container > .card')!;
+    expect(card.className).toBe('card');
+    expect(card.querySelector('[data-testid="home-logo-light"]')).not.toBeNull();
+    expect(card.querySelector('[data-testid="account-slot"]')).not.toBeNull();
+    const grid = card.querySelector('[data-testid="home-feature-grid"]')!;
+    expect(grid.parentElement?.className).toBe('mt-4');
+    expect(card.textContent!.indexOf('平台说明')).toBeGreaterThan(card.textContent!.indexOf('设定来源'));
+    expect(card.textContent!.indexOf('本机工具')).toBeGreaterThan(card.textContent!.indexOf('平台说明'));
+    expect(container.querySelector('.container > footer')?.textContent).toBe('页脚');
+    const link = card.querySelector<HTMLAnchorElement>('a[href="#/details"]')!;
+    act(() => link.click());
+    expect(navigate).toHaveBeenCalledWith('/details');
+    expect(card.querySelector('a[href="#/battle"]')).toBeNull();
   });
 });

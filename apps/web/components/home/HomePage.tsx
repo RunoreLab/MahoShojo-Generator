@@ -4,11 +4,8 @@ import { useRouter } from 'next/navigation';
 
 import {
   HOME_FEATURE_CATEGORIES,
-  HOME_RECOMMENDED_ENTRIES,
   HomeAccountWelcome,
-  HomeEncyclopediaCard,
-  HomeFeatureGrid,
-  HomeHero,
+  HomePageView,
   type HomeAssetSource,
 } from '@mahoshojo/ui-web/home';
 
@@ -21,7 +18,7 @@ import { AVAILABLE } from '@mahoshojo/ui-web/capability';
 /**
  * Web 的首页。
  *
- * 共享部分是品牌 Hero、功能分组网格与百科入口卡（`@mahoshojo/ui-web/home`）；本文件负责 Web 特有的
+ * 共享部分是首页布局、品牌 Hero、功能分组网格与百科入口卡（`@mahoshojo/ui-web/home`）；本文件负责 Web 特有的
  * 东西：账号欢迎语与 Footer。把它们一起搬进共享包会把 Web 在线 bootstrap 带进 Desktop
  * （`DESK-PROD-004`），因此这里刻意保持组装者的角色。
  *
@@ -41,16 +38,11 @@ export function HomePage() {
   const { user, userBadges, isAuthenticated, loading } = useAuth();
 
   return (
-    <>
-      <div className="magic-background-white">
-        <div className="container">
-          <div className="card">
-            <HomeHero
-              assetSource={WEB_ASSET_SOURCE}
-              subtitle="欢迎来到魔法国度！选择一个项目开始玩耍吧！"
-            />
-
-            {/* 已验证才渲染用户名，未验证的凭据不冒称已注销 */}
+    <HomePageView
+      assetSource={WEB_ASSET_SOURCE}
+      capabilities={WEB_CAPABILITIES}
+      onNavigate={(href) => { void router.push(href); }}
+      account={(
             <HomeAccountWelcome
               state={loading ? 'loading' : isAuthenticated ? 'signed-in' : 'anonymous'}
               name={
@@ -68,34 +60,8 @@ export function HomePage() {
                 void router.push(href);
               }}
             />
-
-            <HomeEncyclopediaCard
-              assetSource={WEB_ASSET_SOURCE}
-              onNavigate={(href) => {
-                void router.push(href);
-              }}
-              recommended={[...HOME_RECOMMENDED_ENTRIES]}
-            />
-
-            <div className="mt-4">
-              <HomeFeatureGrid
-                categories={HOME_FEATURE_CATEGORIES}
-                assetSource={WEB_ASSET_SOURCE}
-                capabilities={WEB_CAPABILITIES}
-                onNavigate={(href) => {
-                  void router.push(href);
-                }}
-              />
-            </div>
-
-            <div className="mt-8 text-center">
-              <p className="text-sm italic text-gray-500">设定来源于小说《下班，然后变成魔法少女》</p>
-            </div>
-          </div>
-
-          <Footer className="footer" />
-        </div>
-      </div>
-    </>
+      )}
+      footer={<Footer className="footer" />}
+    />
   );
 }

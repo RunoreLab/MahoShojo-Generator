@@ -38,3 +38,5 @@ export {
   type HomeFeature,
   type HomeFeatureCategory,
 } from './feature-catalog';
+
+export { HomePageView, type HomePageViewProps } from './HomePageView';

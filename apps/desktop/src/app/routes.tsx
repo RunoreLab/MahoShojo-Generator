@@ -10,12 +10,8 @@ import {
   type ShellEscapeMenuEntry,
 } from '@mahoshojo/ui-web/shell';
 import {
-  HOME_FEATURE_CATEGORIES,
-  HOME_RECOMMENDED_ENTRIES,
   HomeAccountWelcome,
-  HomeEncyclopediaCard,
-  HomeFeatureGrid,
-  HomeHero,
+  HomePageView,
   type HomeAssetSource,
 } from '@mahoshojo/ui-web/home';
 
@@ -276,16 +272,13 @@ const indexRoute = createRoute({
           : { state: 'anonymous' };
 
     return (
-      <div data-testid="page-home" className="magic-background-white">
-        <div className="container">
-          <div className="card flex flex-col gap-6">
-            <HomeHero
-              assetSource={DESKTOP_ASSET_SOURCE}
-              subtitle="欢迎来到魔法国度！选择一个项目开始玩耍吧！"
-            />
-            <p className="text-center text-sm text-(--app-text-muted)">
-              桌面版的功能与网页版存在差异，各项功能预计将逐步开放。
-            </p>
+      <HomePageView
+        assetSource={DESKTOP_ASSET_SOURCE}
+        capabilities={CAPABILITIES}
+        onNavigate={navigate}
+        resolveInternalHref={resolveInternalHrefForHashHistory}
+        unavailable="hide"
+        account={(
             <HomeAccountWelcome
               state={welcome.state}
               name={welcome.name}
@@ -293,23 +286,9 @@ const indexRoute = createRoute({
               onNavigate={navigate}
               resolveInternalHref={resolveInternalHrefForHashHistory}
             />
-            <HomeEncyclopediaCard
-              assetSource={DESKTOP_ASSET_SOURCE}
-              onNavigate={navigate}
-              resolveInternalHref={resolveInternalHrefForHashHistory}
-              recommended={HOME_RECOMMENDED_ENTRIES}
-            />
-            <HomeFeatureGrid
-              assetSource={DESKTOP_ASSET_SOURCE}
-              categories={HOME_FEATURE_CATEGORIES}
-              capabilities={CAPABILITIES}
-              onNavigate={navigate}
-              resolveInternalHref={resolveInternalHrefForHashHistory}
-              unavailable="hide"
-            />
-            <div className="mt-8 text-center">
-              <p className="text-sm italic text-gray-500">设定来源于小说《下班，然后变成魔法少女》</p>
-            </div>
+        )}
+        platformNotice="桌面版的功能与网页版存在差异，各项功能预计将逐步开放。"
+        platformTools={(
             <section className="rounded-lg border border-(--app-border) bg-(--app-surface) p-4">
               <h2 className="mb-1 text-sm font-medium text-(--app-text-muted)">本机工具</h2>
               <ul className="flex flex-col gap-1 text-sm">
@@ -341,15 +320,16 @@ const indexRoute = createRoute({
                 </li>
               </ul>
             </section>
-          </div>
+        )}
+        footer={(
           <ProductFooter
             assetSource={DESKTOP_ASSET_SOURCE}
             onNavigateInternal={navigate}
             resolveInternalHref={resolveInternalHrefForHashHistory}
             onNavigateExternal={openFixed}
           />
-        </div>
-      </div>
+        )}
+      />
     );
   },
 });
