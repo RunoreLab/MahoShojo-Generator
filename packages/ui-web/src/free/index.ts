@@ -19,3 +19,8 @@ export {
   useFreeAttachments,
   type UseFreeAttachmentsResult,
 } from './use-free-attachments';
+
+export { FreePageLayout, type FreePageLayoutProps } from './FreePageLayout';
+export { FreeSchemaFields, type FreeSchemaFieldsProps } from './FreeSchemaFields';
+export { FreePromptField, type FreePromptFieldProps } from './FreePromptField';
+export { FreeLanguageField, type FreeLanguageFieldProps } from './FreeLanguageField';

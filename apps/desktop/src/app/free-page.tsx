@@ -28,9 +28,10 @@ import {
   type MagicalGirlCardData,
 } from '@mahoshojo/ui-web/character-card';
 import {
-  FREE_PROMPT_PLACEHOLDER,
-  FREE_SCHEMA_OPTIONS,
-  buildFreeFieldGuide,
+  FreePageLayout,
+  FreeSchemaFields,
+  FreePromptField,
+  FreeLanguageField,
   formatBytes,
   freeSchemaOptionsForMode,
   readFreeAttachmentFiles,
@@ -166,7 +167,6 @@ function FreeForm({ session }: { session: FreeSession }) {
     session.updateDraft({ ...session.getSnapshot().draft, schemaId: 'general' });
   }, [session, target.location, draft.generationMode, draft.schemaId]);
   const schemaOptionsForMode = freeSchemaOptionsForMode(effectiveGenerationMode);
-  const fieldGuideText = useMemo(() => buildFreeFieldGuide(draft.schemaId), [draft.schemaId]);
   const selected = target.profile;
   const mode = target.mode;
   const busy = state.phase === 'generating' || state.saving;
@@ -221,16 +221,9 @@ function FreeForm({ session }: { session: FreeSession }) {
   const resultJsonName = card ? resolveResultJsonFileName(card, cardKind) : 'data.json';
   const confirmCopy = confirmRegenerate === false ? null : describeRegenerateConfirm(confirmRegenerate);
   return (
-    <div>
-      <section data-testid="page-free" className="magic-background-white">
-        <div className="container">
-          <div className="card flex flex-col gap-5">
-            <header>
-              <h1 className="text-2xl font-semibold">自由生成</h1>
-              <p className="mt-2 text-sm text-(--app-text-muted)">
-                自由输入任意提示词，选择 Schema 后生成数据卡（角色 / 情景）。自由生成产物将被视为非原生卡（不生成签名）。
-              </p>
-            </header>
+    <FreePageLayout
+      controls={(
+        <div className="space-y-4">
             <section aria-label="草稿" className="rounded-lg border border-(--app-border) p-4">
               <p>提示词、schema、生成方式与结果自动保存在本机页面草稿中，恢复草稿不会自动重新生成。</p>
               <p className="text-sm text-(--app-text-muted)">草稿不参与本地库整库备份或归档；保存到本地卡库的数据卡参与。附件不写入草稿。草稿上限为序列化后 4 Mi 字符，超出或写入失败时请保留当前页面。</p>
@@ -253,96 +246,20 @@ function FreeForm({ session }: { session: FreeSession }) {
             {profilesError && <p role="alert">{target.location === 'server' ? '本地 Provider 配置加载失败，仅影响客户端执行。' : profilesError}</p>}
             <fieldset disabled={busy || blockedDraft} className="flex min-w-0 flex-col gap-4">
               <legend className="mb-2 font-semibold">生成设置</legend>
-              <DesktopAiProviderPanel
-                generationMode={draft.generationMode}
-                copy={{
-                  serverOutput: {
-                    stream: 'Markdown 流式输出（仅通用角色/通用情景卡，未签名）',
-                    nonStream: '结构化 JSON 输出（无签名）',
-                  },
-                  emptyProfilesHint: '提示词可以先填写，配置加载后再生成。',
-                  serverFootnote:
-                    '不使用客户端连接与凭据（由服务器侧系统默认配置解析）。切换执行位置不会丢失已填写的提示词。',
-                  payloadNoun: '提示词与附件',
-                }}
-                controlsSlot={
-                  <>
-                    <div>
-                      <GenerationModeSwitcher
-                        // 客户端 Direct 固定走结构化通路：展示生效的「非流式」，
-                        // 服务器侧的流式偏好不改写、切回服务器后恢复（D5.1-AIP-r1）。
-                        value={effectiveGenerationMode}
-                        disabled={target.location === 'client'}
-                        onChange={(next) => updateDraft({ generationMode: next })}
-                        helper={false}
-                      />
-                      {target.location === 'client' && (
-                        <p className="mt-1 text-sm text-(--app-text-muted)">
-                          客户端执行为结构化（非流式）直出；你的服务器生成方式偏好保留，切回服务器后恢复。
-                        </p>
-                      )}
-                    </div>
-                    <label className="flex flex-col gap-1">选择 Schema
-                      <select
-                        aria-label="选择 Schema"
-                        className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)"
-                        value={draft.schemaId}
-                        onChange={(event) => updateDraft({ schemaId: event.target.value as FreeSchemaId })}
-                      >
-                        {schemaOptionsForMode.map((option) => (
-                          <option key={option.id} value={option.id}>{option.label}</option>
-                        ))}
-                      </select>
-                      <span className="text-sm text-(--app-text-muted)">
-                        {FREE_SCHEMA_OPTIONS.find((item) => item.id === draft.schemaId)?.description}
-                      </span>
-                    </label>
-                    <div className="rounded-lg border border-(--app-border) p-3">
-                      <button
-                        type="button"
-                        onClick={() => updateDraft({ showFieldGuide: !draft.showFieldGuide })}
-                        className="flex w-full items-center justify-between text-left font-medium text-(--app-text)"
-                      >
-                        <span>Schema 字段说明（系统提示词）</span>
-                        <span className="ml-2">{draft.showFieldGuide ? '▼' : '▶'}</span>
-                      </button>
-                      {draft.showFieldGuide && (
-                        <div className="mt-3 rounded-lg border border-(--app-border) bg-(--app-surface) p-3 text-xs whitespace-pre-wrap">
-                          {fieldGuideText}
-                        </div>
-                      )}
-                    </div>
-                  </>
-                }
+              <FreeSchemaFields
+                schemaId={draft.schemaId}
+                options={schemaOptionsForMode}
+                onChange={(schemaId) => updateDraft({ schemaId })}
+                showFieldGuide={draft.showFieldGuide === true}
+                onToggleFieldGuide={() => updateDraft({ showFieldGuide: !draft.showFieldGuide })}
               />
-              <div className="flex flex-col gap-1">
-                <button type="button" className="flex items-center justify-between text-left font-medium" onClick={() => updateDraft({ showLanguageSection: !draft.showLanguageSection })}>
-                  <span>生成语言</span><span className="ml-2">{draft.showLanguageSection ? '▼' : '▶'}</span>
-                </button>
-                {draft.showLanguageSection && (
-                  <select aria-label="生成语言" className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)" value={draft.selectedLanguage} onChange={(event) => updateDraft({ selectedLanguage: event.target.value })}>
-                    {(languages.length ? languages : [{ code: draft.selectedLanguage, name: draft.selectedLanguage }]).map((lang) => (
-                      <option key={lang.code} value={lang.code}>{lang.name}</option>
-                    ))}
-                  </select>
-                )}
-              </div>
-              <label className="flex flex-col gap-1">提示词
-                <textarea
-                  aria-label="提示词"
-                  value={draft.prompt}
-                  onChange={(event) => updateDraft({ prompt: event.target.value })}
-                  placeholder={FREE_PROMPT_PLACEHOLDER}
-                  className="min-h-40 w-full resize-y rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)"
-                  rows={10}
-                />
-                <span className="text-xs text-(--app-text-muted)">
-                  字符数：{draft.prompt.length}
-                  {target.location === 'server'
-                    ? `；服务器通路请求体（提示词 + 附件 + JSON 包装）上限 ${formatBytes(hostedGenerationBodyMaxBytes(draft.generationMode === 'stream' ? 'generate-free-stream' : 'generate-free'))}，超出会在派发前拦截`
-                    : '；客户端执行的输入上限由所连模型服务自身决定'}
-                </span>
-              </label>
+              <FreePromptField
+                value={draft.prompt}
+                onChange={(prompt) => updateDraft({ prompt })}
+                hint={target.location === 'server'
+                  ? `服务器通路请求体（提示词 + 附件 + JSON 包装）上限 ${formatBytes(hostedGenerationBodyMaxBytes(draft.generationMode === 'stream' ? 'generate-free-stream' : 'generate-free'))}，超出会在派发前拦截`
+                  : '客户端执行的输入上限由所连模型服务自身决定'}
+              />
               <section aria-label="参考附件" className="flex flex-col gap-2 rounded-lg border border-(--app-border) p-3">
                 <div className="flex items-center justify-between">
                   <span className="font-medium">参考附件（可选）</span>
@@ -378,10 +295,49 @@ function FreeForm({ session }: { session: FreeSession }) {
                   </ul>
                 )}
               </section>
+              <DesktopAiProviderPanel
+                generationMode={draft.generationMode}
+                copy={{
+                  serverOutput: {
+                    stream: 'Markdown 流式输出（仅通用角色/通用情景卡，未签名）',
+                    nonStream: '结构化 JSON 输出（无签名）',
+                  },
+                  emptyProfilesHint: '提示词可以先填写，配置加载后再生成。',
+                  serverFootnote:
+                    '不使用客户端连接与凭据（由服务器侧系统默认配置解析）。切换执行位置不会丢失已填写的提示词。',
+                  payloadNoun: '提示词与附件',
+                }}
+                controlsSlot={
+                  <>
+                    <div>
+                      <GenerationModeSwitcher
+                        // 客户端 Direct 固定走结构化通路：展示生效的「非流式」，
+                        // 服务器侧的流式偏好不改写、切回服务器后恢复（D5.1-AIP-r1）。
+                        value={effectiveGenerationMode}
+                        disabled={target.location === 'client'}
+                        onChange={(next) => updateDraft({ generationMode: next })}
+                        helper={false}
+                      />
+                      {target.location === 'client' && (
+                        <p className="mt-1 text-sm text-(--app-text-muted)">
+                          客户端执行为结构化（非流式）直出；你的服务器生成方式偏好保留，切回服务器后恢复。
+                        </p>
+                      )}
+                    </div>
+                    <FreeLanguageField
+                      value={draft.selectedLanguage}
+                      languages={languages.length ? languages : [{ code: draft.selectedLanguage, name: draft.selectedLanguage }]}
+                      expanded={draft.showLanguageSection === true}
+                      onToggle={() => updateDraft({ showLanguageSection: !draft.showLanguageSection })}
+                      onChange={(selectedLanguage) => updateDraft({ selectedLanguage })}
+                    />
+                  </>
+                }
+              />
             </fieldset>
             <TokenIndicator text={tokenEstimateText} />
             <div className="flex flex-wrap gap-2">
-              <button className={actionClass} disabled={!guard.ready || busy || !draft.prompt.trim() || !executionMode || isReadingAttachments || (target.location === 'client' && !selected) || clientProfilesBlocked || blockedDraft} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '生成数据卡' : '重新生成'}</button>
+              <button className="generate-button" disabled={!guard.ready || busy || !draft.prompt.trim() || !executionMode || isReadingAttachments || (target.location === 'client' && !selected) || clientProfilesBlocked || blockedDraft} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '生成数据卡' : '重新生成'}</button>
               {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}
             </div>
             <dialog ref={regenerateDialog} aria-labelledby="regenerate-title" aria-describedby="regenerate-description" className="m-auto max-w-lg rounded-lg border border-(--app-border) bg-(--app-surface) p-5 text-(--app-text) backdrop:bg-black/40" onCancel={(event) => { event.preventDefault(); if (!session.isBusy()) setConfirmRegenerate(false); }}>
@@ -397,6 +353,11 @@ function FreeForm({ session }: { session: FreeSession }) {
             {actionError && <p role="alert">{actionError}</p>}
             {actionInfo && <p role="status">{actionInfo}</p>}
             {state.message && <p role={state.phase === 'uncertain' ? 'alert' : 'status'}>{state.message}</p>}
+
+        </div>
+      )}
+      result={card || state.rawText || state.reasoning ? (
+        <>
             {state.reasoning && <AiReasoningPanel reasoning={state.reasoning} />}
             <div ref={resultSectionRef}>
               {card && <section aria-label="生成结果" className="flex flex-col gap-3">
@@ -444,16 +405,17 @@ function FreeForm({ session }: { session: FreeSession }) {
               </section>}
             </div>
             {state.rawText && <details open={state.phase !== 'completed'}><summary>原始输出正文</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border p-3">{state.rawText}</pre></details>}
-          </div>
+        </>
+      ) : null}
+      footer={(
           <ProductFooter
             assetSource={DESKTOP_ASSET_SOURCE}
             onNavigateInternal={(href) => navigateByProductHref(router, href)}
             resolveInternalHref={resolveInternalHrefForHashHistory}
             onNavigateExternal={openFixed}
           />
-        </div>
-      </section>
-    </div>
+      )}
+    />
   );
 }
 
