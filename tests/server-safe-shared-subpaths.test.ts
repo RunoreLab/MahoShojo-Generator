@@ -29,6 +29,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { build } from 'esbuild';
 
 const PACKAGE_ROOT = path.resolve(import.meta.dirname, '..', 'packages', 'ui-web');
 const SRC = path.join(PACKAGE_ROOT, 'src');
@@ -68,6 +69,8 @@ const SERVER_SAFE_ENTRYPOINTS: Readonly<Record<string, string>> = {
   './color-mode-init': 'color-mode/init.ts',
   './device-preferences-init': 'device-preferences/init.ts',
   './card-library-visibility': 'card-library/visibility.ts',
+  // Web /creator metadata 经由 lib/creator/page-copy 读取的纯文案叶子。
+  './creator-copy': 'creator/page-copy.ts',
 };
 
 /**
@@ -166,6 +169,20 @@ describe('server-safe shared entrypoints stay free of React hooks', () => {
     });
   }
 
+  it('keeps the actual Web Creator metadata adapter free of client hook imports', async () => {
+    const bundled = await build({
+      entryPoints: [path.resolve(PACKAGE_ROOT, '../../apps/web/lib/creator/page-copy.ts')],
+      bundle: true,
+      platform: 'node',
+      format: 'esm',
+      write: false,
+      metafile: true,
+      logLevel: 'silent',
+    });
+    expect(Object.keys(bundled.metafile!.inputs).some((file) => file.endsWith('src/creator/page-copy.ts'))).toBe(true);
+    expect(findHookCalls(bundled.outputFiles[0].text)).toEqual([]);
+  });
+
   it('lists every shared entrypoint so a new one is a deliberate decision', () => {
     // 新增 subpath 时如果忘了判断它是否 RSC 安全，这条会提醒你。刻意不在这里自动推断——推断需要
     // 知道 RSC 消费者，而那是仓库里另一处的事实。
@@ -208,9 +225,11 @@ describe('server-safe shared entrypoints stay free of React hooks', () => {
       './client',
       './color-mode',
       './community',
+      './creator',
       './details-controls',
       './device-preferences',
       './encyclopedia-views',
+      './free',
       './local-archive',
       './local-cards',
       './markdown',
@@ -218,6 +237,7 @@ describe('server-safe shared entrypoints stay free of React hooks', () => {
       './messages',
       './modal',
       './questionnaire',
+      './scenario',
       './settings',
       './shell',
     ]);

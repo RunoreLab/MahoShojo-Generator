@@ -105,6 +105,11 @@
       "import": "./src/character-card/index.ts",
       "default": "./src/character-card/index.ts"
     },
+    "./creator-copy": {
+      "types": "./src/creator/page-copy.ts",
+      "import": "./src/creator/page-copy.ts",
+      "default": "./src/creator/page-copy.ts"
+    },
     "./creator": {
       "types": "./src/creator/index.ts",
       "import": "./src/creator/index.ts",
