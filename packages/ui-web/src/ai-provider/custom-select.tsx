@@ -37,6 +37,48 @@ type NavItem =
   | { type: 'option'; option: AiProviderSelectOption; id: string }
   | { type: 'action'; action: AiProviderSelectAction; id: string };
 
+/**
+ * 弹层可见区域上界：视口 ∩ 各滚动/裁切祖先。
+ * 弹层仍渲染在组件 DOM 内（保 scoped 主题变量与 scroll 跟随），裁切祖先的
+ * 可视框决定翻开方向与最大高度——「被滚动祖先裁掉一半」变成「在祖先
+ * 可视框内翻转/限高」（P2 裁切收口）。
+ */
+const computeVisibleBoundary = (element: HTMLElement): { top: number; bottom: number } => {
+  let top = 0;
+  let bottom = typeof window === 'undefined' ? 0 : window.innerHeight;
+  let node = element.parentElement;
+  while (node) {
+    const style = window.getComputedStyle(node);
+    if (/(auto|scroll|hidden|clip)/u.test(style.overflowY)) {
+      const rect = node.getBoundingClientRect();
+      top = Math.max(top, rect.top);
+      bottom = Math.min(bottom, rect.bottom);
+    }
+    node = node.parentElement;
+  }
+  return { top, bottom };
+};
+
+const MENU_MAX_HEIGHT = 256;
+const MENU_GAP = 8;
+const MENU_MIN_HEIGHT = 96;
+
+const computeMenuPlacement = (
+  trigger: HTMLElement,
+): { openUpward: boolean; maxHeight: number } => {
+  const rect = trigger.getBoundingClientRect();
+  const boundary = computeVisibleBoundary(trigger);
+  const below = boundary.bottom - rect.bottom - MENU_GAP;
+  const above = rect.top - boundary.top - MENU_GAP;
+  // 下方放不下完整菜单且上方更宽裕时翻到上方；两侧都不够时取空间大的一侧。
+  const openUpward = below < MENU_MAX_HEIGHT + MENU_GAP && above > below;
+  const space = openUpward ? above : below;
+  return {
+    openUpward,
+    maxHeight: Math.max(MENU_MIN_HEIGHT, Math.min(MENU_MAX_HEIGHT, space)),
+  };
+};
+
 const navItemEnabled = (item: NavItem): boolean =>
   item.type === 'option' ? item.option.disabled !== true : item.action.disabled !== true;
 
@@ -52,7 +94,8 @@ const groupOptions = (
       last.items.push({ option, index, id: itemId(index) });
     } else {
       groups.push({
-        key: option.group ?? `__ungrouped_${index}`,
+        // key 含首项位置：同名 group 的非连续两段不撞 key。
+        key: `${option.group ?? '__ungrouped'}_${index}`,
         ...(option.group !== undefined ? { group: option.group } : {}),
         items: [{ option, index, id: itemId(index) }],
       });
@@ -77,8 +120,10 @@ export const AiProviderCustomSelect = ({
   const menuRef = useRef<HTMLDivElement>(null);
   const listId = useId();
   const [activeIndex, setActiveIndex] = useState(-1);
-  // 视口下方空间不足时向上展开（DESK-AIP-002：窄窗/缩放不裁切弹层）。
+  // 裁切边界内空间不足时向上展开并按可见高度限高
+  //（DESK-AIP-002：窄窗/缩放/滚动祖先不裁切弹层）。
   const [openUpward, setOpenUpward] = useState(false);
+  const [menuMaxHeight, setMenuMaxHeight] = useState(MENU_MAX_HEIGHT);
 
   const selectedOption = options.find((option) => option.value === value) ?? null;
 
@@ -110,11 +155,11 @@ export const AiProviderCustomSelect = ({
 
   const openMenu = useCallback(
     (preferredIndex?: number) => {
-      const rect = triggerRef.current?.getBoundingClientRect();
-      if (rect && typeof window !== 'undefined') {
-        const below = window.innerHeight - rect.bottom;
-        // 菜单限高 256px（max-h-64）；下方放不下且上方更宽裕时翻转到上方。
-        setOpenUpward(below < 264 && rect.top > below);
+      const trigger = triggerRef.current;
+      if (trigger && typeof window !== 'undefined') {
+        const placement = computeMenuPlacement(trigger);
+        setOpenUpward(placement.openUpward);
+        setMenuMaxHeight(placement.maxHeight);
       }
       setIsOpen(true);
       setActiveIndex(() => {
@@ -195,6 +240,21 @@ export const AiProviderCustomSelect = ({
       navItems.length === 0 ? -1 : Math.min(current, navItems.length - 1),
     );
   }, [isOpen, navItems.length]);
+
+  // 窗口尺寸变化时重算翻开方向与限高；祖先 scroll 不需要处理——
+  // 弹层渲染在组件 DOM 内，随内容一起滚动，天然不脱节。
+  useEffect(() => {
+    if (!isOpen || typeof window === 'undefined') return;
+    const recompute = () => {
+      const trigger = triggerRef.current;
+      if (!trigger) return;
+      const placement = computeMenuPlacement(trigger);
+      setOpenUpward(placement.openUpward);
+      setMenuMaxHeight(placement.maxHeight);
+    };
+    window.addEventListener('resize', recompute);
+    return () => window.removeEventListener('resize', recompute);
+  }, [isOpen]);
 
   const handleTriggerKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
     if (disabled) return;
@@ -317,6 +377,9 @@ export const AiProviderCustomSelect = ({
           }
         }}
         onKeyDown={handleTriggerKeyDown}
+        // APG Select-Only Combobox 语义：role=combobox + listbox 弹层 +
+        // aria-activedescendant 表达「键盘活动项 ≠ 选中值」。
+        role="combobox"
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         aria-controls={isOpen ? `${listId}-menu` : undefined}
@@ -330,7 +393,8 @@ export const AiProviderCustomSelect = ({
         <div
           id={`${listId}-menu`}
           ref={menuRef}
-          className={`battle-lite-select-menu absolute z-30 max-h-64 w-full overflow-y-auto rounded-lg ${
+          style={{ maxHeight: `${menuMaxHeight}px` }}
+          className={`battle-lite-select-menu absolute z-30 w-full overflow-y-auto rounded-lg ${
             openUpward ? 'bottom-full mb-2' : 'mt-2'
           }`}
         >

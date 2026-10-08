@@ -7,8 +7,10 @@
 import { useMemo, useState } from 'react';
 
 import { getModelGenerationCapabilities } from '@mahoshojo/ai-core/generation-settings';
+import { SYSTEM_PROVIDER_OPTION } from '@mahoshojo/ai-core/provider-catalog';
 import {
   AiExecutionLocationField,
+  AiProviderCustomSelect,
   AdvancedGenerationSettings,
   describeAiDirectUnsupportedReason,
 } from '@mahoshojo/ui-web/ai-provider';
@@ -18,6 +20,7 @@ import { PROVIDER_PRESETS, type ProfileDraft } from '../providers/profile-draft'
 
 import {
   DESKTOP_EDITABLE_PROFILE_ADAPTERS,
+  DESKTOP_SYSTEM_OVERRIDES_SCOPE,
   describeDesktopPresetModelSupport,
   listDesktopPresetEntries,
   resolveDesktopAiTarget,
@@ -239,9 +242,15 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
   const visiblePresets = presetEntries.filter((entry) => !entry.hidden);
   const hiddenPresets = presetEntries.filter((entry) => entry.hidden);
 
-  const targetCapabilities = target.profile
-    ? getModelGenerationCapabilities(target.profile.id, target.modelId ?? '')
-    : undefined;
+  const targetCapabilities =
+    target.location === 'server'
+      ? getModelGenerationCapabilities(
+          DESKTOP_SYSTEM_OVERRIDES_SCOPE,
+          target.modelId ?? 'default',
+        )
+      : target.profile
+        ? getModelGenerationCapabilities(target.profile.id, target.modelId ?? '')
+        : undefined;
 
   const startCopyPreset = (entry: DesktopPresetEntry, modelId: string) => {
     const draft = newDraftFromPreset(entry, modelId);
@@ -299,31 +308,52 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
       />
 
       <div className="flex flex-col gap-2">
-        <label className="flex flex-col gap-1 text-xs">
-          <span className="battle-lite-muted-text">当前连接</span>
-          <select
-            aria-label="当前 AI 连接"
-            className="input-field"
-            disabled={blockedOverlay}
-            value={state.selection.clientConnectionId ?? ''}
-            onChange={(event) => {
-              // 「当前连接」下拉=立即用它执行：连接、执行位置与模型作为
-              // 同一次受检 overlay 更新原子落盘（DESK-AIP-003.3）。
-              if (event.target.value) {
-                store.activateConnection(event.target.value);
-              }
-            }}
-          >
-            {state.selection.clientConnectionId === null && (
-              <option value="">未选择连接</option>
-            )}
-            {state.profiles.map((profile) => (
-              <option key={profile.id} value={profile.id}>
-                {profile.name} · {profile.modelId}
-              </option>
-            ))}
-          </select>
-        </label>
+        {target.location === 'server' ? (
+          <label className="flex flex-col gap-1 text-xs">
+            {/* 服务器位置 = 「使用系统默认配置」通道：系统模型与高级参数
+                按系统作用域保存，与生成页面板同一份 overlay/目录事实源
+                （D5.1-AIP-r1，与 Web system+modelId 语义一致）。 */}
+            <span className="battle-lite-muted-text">使用系统默认配置 · 系统模型</span>
+            <AiProviderCustomSelect
+              options={SYSTEM_PROVIDER_OPTION.models.map((model) => ({
+                value: model.value,
+                label: model.label,
+                description: model.description,
+                kind: 'model',
+              }))}
+              value={state.selection.systemModelId ?? 'default'}
+              onChange={(id) => store.selectSystemModel(id)}
+              placeholder="选择系统模型"
+              disabled={blockedOverlay}
+            />
+          </label>
+        ) : (
+          <label className="flex flex-col gap-1 text-xs">
+            <span className="battle-lite-muted-text">当前连接</span>
+            <select
+              aria-label="当前 AI 连接"
+              className="input-field"
+              disabled={blockedOverlay}
+              value={state.selection.clientConnectionId ?? ''}
+              onChange={(event) => {
+                // 「当前连接」下拉=立即用它执行：连接、执行位置与模型作为
+                // 同一次受检 overlay 更新原子落盘（DESK-AIP-003.3）。
+                if (event.target.value) {
+                  store.activateConnection(event.target.value);
+                }
+              }}
+            >
+              {state.selection.clientConnectionId === null && (
+                <option value="">未选择连接</option>
+              )}
+              {state.profiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.name} · {profile.modelId}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         {state.profilesState === 'loading' && (
           <p className="battle-lite-subtle-text text-xs">正在读取连接列表…</p>
         )}
@@ -349,13 +379,17 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
       </div>
 
       {/* 未实现 adapter 的连接不展示高级参数——不显示无实际发送效果的控件
-          （DESK-ONLINE-004）。 */}
-      {target.profile && target.mode && (
+          （DESK-ONLINE-004）。服务器位置则展示「使用系统默认配置」作用域的
+          高级参数，经 hosted systemConfig 非秘密偏好下发（D5.1-AIP-r1）。 */}
+      {target.location === 'server' ? (
         <AdvancedGenerationSettings
           value={target.generationOverrides}
           onChange={(next) =>
-            target.profile &&
-            store.setGenerationOverrides(target.profile.id, target.modelId ?? target.profile.modelId, next)
+            store.setGenerationOverrides(
+              DESKTOP_SYSTEM_OVERRIDES_SCOPE,
+              target.modelId ?? 'default',
+              next,
+            )
           }
           temperatureSupported={
             targetCapabilities ? targetCapabilities.temperature.support !== 'unsupported' : true
@@ -371,6 +405,30 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
               : true
           }
         />
+      ) : (
+        target.profile &&
+        target.mode && (
+          <AdvancedGenerationSettings
+            value={target.generationOverrides}
+            onChange={(next) =>
+              target.profile &&
+              store.setGenerationOverrides(target.profile.id, target.modelId ?? target.profile.modelId, next)
+            }
+            temperatureSupported={
+              targetCapabilities ? targetCapabilities.temperature.support !== 'unsupported' : true
+            }
+            temperatureMax={targetCapabilities?.temperature.max}
+            maxOutputTokensMax={targetCapabilities?.maxOutputTokens.max}
+            thinkingSupport={targetCapabilities?.thinking.support ?? 'unknown'}
+            thinkingEfforts={targetCapabilities?.thinking.efforts}
+            canDisableThinking={
+              targetCapabilities
+                ? targetCapabilities.thinking.support === 'supported' &&
+                  targetCapabilities.thinking.canDisable !== false
+                : true
+            }
+          />
+        )
       )}
 
       <div className="flex flex-col gap-2 border-t border-(--app-border) pt-3">

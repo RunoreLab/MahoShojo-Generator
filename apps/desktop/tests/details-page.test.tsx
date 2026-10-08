@@ -284,7 +284,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     expect(textarea.value).toBe('尚未保存的回答');
   });
 
-  it('dispatches hosted System Default while signed out, hiding direct-only advanced settings', async () => {
+  it('dispatches hosted system config while signed out, with system-scoped advanced settings', async () => {
     window.localStorage.setItem(DESKTOP_AI_CONFIG_STORAGE_KEY, JSON.stringify({
       version: 2,
       // 服务器偏好与已选客户端连接正交共存；hosted dispatch 不消费 profile。
@@ -294,7 +294,10 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify(draft()));
     await mount(); await click('恢复草稿');
     expect(container.textContent).toContain('服务器 · 云端');
-    expect(container.textContent).not.toContain('高级生成设置');
+    // D5.1-AIP-r1：服务器模式呈现系统模型行与按系统模型保存的高级参数
+    // （经 hosted systemConfig 非秘密偏好下发，与 Web 同语义）。
+    expect(container.textContent).toContain('使用系统默认配置');
+    expect(container.textContent).toContain('高级生成设置');
     expect(container.textContent).not.toContain('服务器执行需要先登录');
     expect(button('发送问卷并生成').disabled).toBe(false);
     await click('发送问卷并生成');

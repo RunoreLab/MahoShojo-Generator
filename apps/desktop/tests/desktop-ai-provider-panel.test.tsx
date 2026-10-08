@@ -15,6 +15,7 @@ import {
   resetDesktopAiConfigStoreForTests,
 } from '../src/features/ai-config/use-desktop-ai-config';
 import { DesktopAiProviderPanel } from '../src/features/ai-config/desktop-ai-provider-panel';
+import { listDesktopPresetEntries } from '../src/features/ai-config/desktop-ai-config';
 
 const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
@@ -91,7 +92,7 @@ const triggers = () =>
 const copy = {
   serverOutput: { stream: 'Markdown 流式输出（未签名）', nonStream: '结构化 JSON 输出（服务器签名）' },
   emptyProfilesHint: '回答可以先填写，配置加载后再生成。',
-  serverFootnote: '不使用客户端连接与高级模型参数（由服务器侧 System Default 解析）。',
+  serverFootnote: '不使用客户端连接与凭据（由服务器侧系统默认配置解析）。',
   payloadNoun: '情景回答',
 };
 
@@ -159,18 +160,67 @@ describe('DesktopAiProviderPanel', () => {
     expect(container.textContent).toContain('高级生成设置');
   });
 
-  it('switches to server via the System Default option and back to a connection', async () => {
+  it('switches to server via the shared system option and back to a connection', async () => {
     await mount();
-    await pickConnectionOption('服务器 · System Default');
+    // 与 Web 同一目录事实源：hosted 项标签为「使用系统默认配置」。
+    await pickConnectionOption('使用系统默认配置');
     expect(getDesktopAiConfigStore().getSnapshot().selection.executionPreference).toBe('server');
     expect(container.textContent).toContain('结构化 JSON 输出（服务器签名）');
     expect(container.textContent).not.toContain('接收方：');
+    // 服务器位置生效时系统模型行与高级参数照常呈现（systemConfig 下发）。
+    const modelTrigger = triggers()[1]!;
+    expect(modelTrigger.textContent).toContain('默认策略');
+    expect(container.textContent).toContain('高级生成设置');
+
+    // 系统模型选择：显式选取 GLM 5.3 Flash 落入 overlay（不静默回落默认）。
+    await act(async () => modelTrigger.click());
+    await settle();
+    // 按 label 精确匹配——「默认策略」选项描述也提到 GLM 5.3 Flash。
+    const glmOption = [...container.querySelectorAll('[role="option"]')].find(
+      (item) => item.querySelector('.battle-lite-strong-text')?.textContent === 'GLM 5.3 Flash',
+    )!;
+    expect(glmOption).toBeTruthy();
+    await act(async () => (glmOption as HTMLElement).click());
+    await settle();
+    expect(getDesktopAiConfigStore().getSnapshot().selection.systemModelId).toBe(
+      'glm-5.3-flash',
+    );
 
     await pickConnectionOption('二号');
     const selection = getDesktopAiConfigStore().getSnapshot().selection;
-    expect(selection).toEqual({ executionPreference: 'client', clientConnectionId: 'p2' });
+    expect(selection).toEqual({
+      executionPreference: 'client',
+      clientConnectionId: 'p2',
+      systemModelId: 'glm-5.3-flash',
+    });
     expect(container.textContent).toContain('接收方：http://127.0.0.1:1234/v1');
     expect(container.textContent).toContain('模型：m2');
+  });
+
+  it('opens the preset-seeded connection editor from the provider dropdown', async () => {
+    await mount();
+    const trigger = triggers()[0]!;
+    await act(async () => trigger.click());
+    await settle();
+    // 「内置供应商」分组列出已核验可直连预设；选预设=打开带默认值的编辑器，
+    // 不直接写入 Profile、不改动激活状态（预设直配旅程）。
+    expect(container.textContent).toContain('内置供应商');
+    const firstCapable = listDesktopPresetEntries(new Set()).find(
+      (entry) => entry.directCapableModels.length > 0,
+    )!;
+    expect(firstCapable, '目录中至少一个可直连预设').toBeTruthy();
+    const presetOption = [...container.querySelectorAll('[role="option"]')].find((item) =>
+      item.textContent?.includes(firstCapable.preset.name),
+    )!;
+    expect(presetOption).toBeTruthy();
+    await act(async () => (presetOption as HTMLElement).click());
+    await settle();
+
+    expect(container.textContent).toContain('新建连接');
+    expect(button('保存并使用')).toBeTruthy();
+    // 打开编辑器即预填 Endpoint 与可直连模型；未保存前激活状态不变。
+    const selection = getDesktopAiConfigStore().getSnapshot().selection;
+    expect(selection).toEqual({ executionPreference: 'client', clientConnectionId: 'p1' });
   });
 
   it('shows the unavailable reason for an unimplemented adapter without hiding the connection', async () => {

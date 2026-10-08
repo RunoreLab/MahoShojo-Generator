@@ -263,21 +263,23 @@ function FreeForm({ session }: { session: FreeSession }) {
                   },
                   emptyProfilesHint: '提示词可以先填写，配置加载后再生成。',
                   serverFootnote:
-                    '不使用客户端连接与高级模型参数（由服务器侧 System Default 解析）。切换执行位置不会丢失已填写的提示词。',
+                    '不使用客户端连接与凭据（由服务器侧系统默认配置解析）。切换执行位置不会丢失已填写的提示词。',
                   payloadNoun: '提示词与附件',
                 }}
                 controlsSlot={
                   <>
                     <div>
                       <GenerationModeSwitcher
-                        value={draft.generationMode}
+                        // 客户端 Direct 固定走结构化通路：展示生效的「非流式」，
+                        // 服务器侧的流式偏好不改写、切回服务器后恢复（D5.1-AIP-r1）。
+                        value={target.location === 'client' ? 'non-stream' : draft.generationMode}
                         disabled={target.location === 'client'}
                         onChange={(next) => updateDraft({ generationMode: next })}
                         helper={false}
                       />
                       {target.location === 'client' && (
                         <p className="mt-1 text-sm text-(--app-text-muted)">
-                          客户端执行仅支持结构化（非流式）生成；流式通用卡需经服务器通路。
+                          客户端执行为结构化（非流式）直出；你的服务器生成方式偏好保留，切回服务器后恢复。
                         </p>
                       )}
                     </div>

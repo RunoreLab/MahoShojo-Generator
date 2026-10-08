@@ -110,7 +110,7 @@ export const AiExecutionLocationField = ({
       label: '服务器',
       icon: <Cloud />,
       description:
-        '由项目服务器代为生成（System Default / 云端通路），不使用客户端连接与本地凭据。',
+        '由项目服务器代为生成（使用系统默认配置 / 云端通路），不使用客户端连接与本地凭据。',
       disabled: !server.enabled,
       ...(server.reason !== undefined ? { reason: server.reason } : {}),
     },

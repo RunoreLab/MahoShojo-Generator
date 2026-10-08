@@ -766,7 +766,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
                       },
                       emptyProfilesHint: '问卷可以先填写，配置加载后再生成。',
                       serverFootnote:
-                        '不使用客户端连接与高级模型参数（由服务器侧 System Default 解析）。切换执行位置不会丢失已填写的问卷回答。',
+                        '不使用客户端连接与凭据（由服务器侧系统默认配置解析）。切换执行位置不会丢失已填写的问卷回答。',
                       payloadNoun: '已填写的问卷回答',
                     }}
                     controlsSlot={
