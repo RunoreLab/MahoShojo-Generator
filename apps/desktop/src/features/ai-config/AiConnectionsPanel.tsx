@@ -402,6 +402,7 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
     state.selection,
     state.profiles,
     state.generationOverrides,
+    state.modelsByProfileId,
   );
   const presetEntries = useMemo(
     () => listDesktopPresetEntries(state.hiddenPresetIds),
@@ -452,7 +453,7 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
           requestId: `conn-test-${crypto.randomUUID()}`,
           contractVersion: 1,
           mode,
-          modelId: profile.modelId,
+          modelId: target.modelId ?? profile.modelId,
           messages: [{ role: 'user', content: '用一句话介绍你自己。' }],
         },
         controller.signal,
@@ -493,7 +494,7 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
   // 硬超时，挂着没人收会一直占流）。用字段值做依赖而不是拼字符串，id/modelId 含
   // 分隔符也不会误判。
   const testTargetId = target.profile?.id ?? null;
-  const testTargetModel = target.profile?.modelId ?? null;
+  const testTargetModel = target.modelId;
   useEffect(() => {
     testRevisionRef.current += 1;
     testAbortRef.current?.abort();
@@ -581,7 +582,7 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
           <div className="battle-lite-info-box rounded-lg p-3 text-xs">
             <p>{modeLabel(target.mode)}</p>
             <p className="break-all font-mono">接收方：{target.profile.baseUrl}</p>
-            <p>模型：{target.profile.modelId}</p>
+            <p>模型：{target.modelId ?? target.profile.modelId}</p>
             {target.mode === 'direct-remote' && (
               <p className="battle-lite-subtle-text">远端生成需要联网；本功能不构成离线路径。</p>
             )}
@@ -628,7 +629,7 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
           value={target.generationOverrides}
           onChange={(next) =>
             target.profile &&
-            store.setGenerationOverrides(target.profile.id, target.profile.modelId, next)
+            store.setGenerationOverrides(target.profile.id, target.modelId ?? target.profile.modelId, next)
           }
           temperatureSupported={
             targetCapabilities ? targetCapabilities.temperature.support !== 'unsupported' : true

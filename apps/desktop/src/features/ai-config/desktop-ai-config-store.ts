@@ -34,10 +34,12 @@ import {
 import {
   DESKTOP_AI_CONFIG_DEFAULT_OVERLAY,
   DESKTOP_EDITABLE_PROFILE_ADAPTERS,
+  isValidDesktopModelId,
   parseDesktopAiConfigOverlay,
   serializeDesktopAiConfigOverlay,
   type DesktopAiConfigOverlay,
   type DesktopAiSelection,
+  type DesktopProfileModelSelection,
   type DesktopSecretPresence,
 } from './desktop-ai-config';
 
@@ -72,6 +74,8 @@ export interface DesktopAiConfigState {
   selection: DesktopAiSelection;
   hiddenPresetIds: ReadonlySet<string>;
   generationOverrides: Readonly<Record<string, Readonly<Record<string, UserGenerationOverrides>>>>;
+  /** profileId → 模型选择/自定义清单（DESK-AIP-006）；值不可变。 */
+  modelsByProfileId: Readonly<Record<string, DesktopProfileModelSelection>>;
   profiles: readonly DirectProviderProfileV1[];
   profilesState: DesktopAiProfilesState;
   profilesError: string | null;
@@ -86,6 +90,7 @@ const INITIAL_STATE: DesktopAiConfigState = {
   selection: DESKTOP_AI_CONFIG_DEFAULT_OVERLAY.selection,
   hiddenPresetIds: new Set(),
   generationOverrides: {},
+  modelsByProfileId: {},
   profiles: [],
   profilesState: 'idle',
   profilesError: null,
@@ -123,6 +128,10 @@ export class DesktopAiConfigStore {
       generationOverrides: Object.assign(
         Object.create(null) as Record<string, Record<string, UserGenerationOverrides>>,
         this.overlay.generationOverrides,
+      ),
+      modelsByProfileId: Object.assign(
+        Object.create(null) as Record<string, DesktopProfileModelSelection>,
+        this.overlay.modelsByProfileId,
       ),
     });
   }
@@ -212,9 +221,15 @@ export class DesktopAiConfigStore {
             knownIds.has(profileId),
           ),
         );
+        const modelsByProfileId = Object.fromEntries(
+          Object.entries(this.overlay.modelsByProfileId).filter(([profileId]) =>
+            knownIds.has(profileId),
+          ),
+        );
         this.overlay = {
           ...this.overlay,
           generationOverrides,
+          modelsByProfileId,
         };
         this.persistOverlay();
         this.publishOverlay();
@@ -329,6 +344,95 @@ export class DesktopAiConfigStore {
     this.overlay = { ...this.overlay, generationOverrides: next };
     this.persistOverlay();
     this.publishOverlay();
+  };
+
+  /** 写某连接的模型选择条目；entry 为 undefined 时删除整条（null-proto 字典）。 */
+  private writeModelSelection(
+    profileId: string,
+    entry: DesktopProfileModelSelection | undefined,
+  ): void {
+    const next = Object.assign(
+      Object.create(null) as Record<string, DesktopProfileModelSelection>,
+      this.overlay.modelsByProfileId,
+    );
+    if (entry === undefined) {
+      delete next[profileId];
+    } else {
+      next[profileId] = entry;
+    }
+    this.overlay = { ...this.overlay, modelsByProfileId: next };
+    this.persistOverlay();
+    this.publishOverlay();
+  }
+
+  /**
+   * 切换连接的当前模型（DESK-AIP-006）。
+   * 只写选择偏好，不改 Profile 默认模型；选择保持显式值——之后默认模型被
+   * 编辑改走属于「显式选择悬空」，由解析层提示重新选择而非静默跟进。
+   * 未加载的 Profile 或不在候选清单里的模型一律不写入。
+   */
+  selectModel = (profileId: string, modelId: string): void => {
+    if (!this.overlayWritable) return;
+    const profile = this.state.profiles.find((item) => item.id === profileId);
+    if (!profile) return;
+    const entry = this.overlay.modelsByProfileId[profileId];
+    const available = new Set([profile.modelId, ...(entry?.customModelIds ?? [])]);
+    if (!available.has(modelId)) return;
+    this.writeModelSelection(profileId, {
+      customModelIds: entry?.customModelIds ?? [],
+      selectedModelId: modelId,
+    });
+  };
+
+  /**
+   * 为连接补充自定义模型 ID（DESK-AIP-005 边界校验）。
+   * 返回规范化后的模型 ID；非法/重复输入抛错，由 UI 展示。
+   * 不自动切换当前模型——「添加模型」与「选它执行」是两个显式操作。
+   */
+  addCustomModel = (profileId: string, modelId: string): string => {
+    if (!this.overlayWritable) {
+      throw new Error('AI 配置当前不可写入');
+    }
+    const trimmed = modelId.trim();
+    if (!isValidDesktopModelId(trimmed)) {
+      throw new Error('模型 ID 无效：需非空、不超过 256 字符且不含控制字符');
+    }
+    const profile = this.state.profiles.find((item) => item.id === profileId);
+    const entry = this.overlay.modelsByProfileId[profileId];
+    if (trimmed === profile?.modelId || (entry?.customModelIds ?? []).includes(trimmed)) {
+      throw new Error('该模型已在当前连接的模型列表中');
+    }
+    this.writeModelSelection(profileId, {
+      ...(entry?.selectedModelId === undefined
+        ? {}
+        : { selectedModelId: entry.selectedModelId }),
+      customModelIds: [...(entry?.customModelIds ?? []), trimmed],
+    });
+    return trimmed;
+  };
+
+  /**
+   * 从连接的自定义模型清单移除一项。
+   * 若它正是当前选中模型，选择保留为悬空值——解析层据此提示重新选择，
+   * 绝不静默回落到默认模型（DESK-AIP-006）。该模型的生成覆盖同时保留：
+   * 重新添加同名模型即恢复，不隐式清空参数。
+   */
+  removeCustomModel = (profileId: string, modelId: string): void => {
+    if (!this.overlayWritable) return;
+    const entry = this.overlay.modelsByProfileId[profileId];
+    if (entry === undefined || !entry.customModelIds.includes(modelId)) return;
+    const customModelIds = entry.customModelIds.filter((id) => id !== modelId);
+    this.writeModelSelection(
+      profileId,
+      customModelIds.length === 0 && entry.selectedModelId === undefined
+        ? undefined
+        : {
+            ...(entry.selectedModelId === undefined
+              ? {}
+              : { selectedModelId: entry.selectedModelId }),
+            customModelIds,
+          },
+    );
   };
 
   /**

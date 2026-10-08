@@ -162,7 +162,7 @@ describe('parseDesktopAiConfigOverlay', () => {
 
   it('fails closed on unsupported version, corrupt selection and non-schema overrides', () => {
     expect(() => parseDesktopAiConfigOverlay('{"version":1}')).toThrow('版本');
-    expect(() => parseDesktopAiConfigOverlay('{"version":3}')).toThrow('版本');
+    expect(() => parseDesktopAiConfigOverlay('{"version":4}')).toThrow('版本');
     expect(() =>
       parseDesktopAiConfigOverlay(
         JSON.stringify({
@@ -202,6 +202,63 @@ describe('parseDesktopAiConfigOverlay', () => {
       ),
     ).toThrow('隐藏');
   });
+
+  it('migrates v2 without modelsByProfileId and writes back as v3', () => {
+    const parsed = parseDesktopAiConfigOverlay(
+      JSON.stringify({
+        version: 2,
+        selection: clientSelection('p1'),
+        hiddenPresetIds: ['deepseek'],
+        generationOverrides: { p1: { m1: { temperature: 0.4 } } },
+      }),
+    );
+    expect(parsed.modelsByProfileId).toEqual({});
+    expect(parsed.generationOverrides).toEqual({ p1: { m1: { temperature: 0.4 } } });
+    // 下一次落盘即以 v3 写回（受检、幂等）。
+    expect(serializeDesktopAiConfigOverlay(parsed)).toContain('"version":3');
+    expect(JSON.parse(serializeDesktopAiConfigOverlay(parsed)).modelsByProfileId).toEqual({});
+  });
+
+  it('round-trips v3 modelsByProfileId and rejects corrupt model selection entries', () => {
+    const overlay = parseDesktopAiConfigOverlay(
+      JSON.stringify({
+        version: 3,
+        selection: clientSelection('p1'),
+        hiddenPresetIds: [],
+        generationOverrides: {},
+        modelsByProfileId: {
+          p1: { selectedModelId: 'm2', customModelIds: ['m2', 'm3'] },
+          p2: { customModelIds: [] },
+        },
+      }),
+    );
+    expect(overlay.modelsByProfileId).toEqual({
+      p1: { selectedModelId: 'm2', customModelIds: ['m2', 'm3'] },
+      p2: { customModelIds: [] },
+    });
+
+    const corruptEntries = [
+      { p1: { selectedModelId: 42, customModelIds: [] } },
+      { p1: { selectedModelId: 'm1' } },
+      { p1: { customModelIds: ['m1', '  '] } },
+      { p1: { customModelIds: 'm1' } },
+      { p1: { customModelIds: [], futureField: true } },
+      'not-an-object',
+    ];
+    for (const modelsByProfileId of corruptEntries) {
+      expect(() =>
+        parseDesktopAiConfigOverlay(
+          JSON.stringify({
+            version: 3,
+            selection: clientSelection(null),
+            hiddenPresetIds: [],
+            generationOverrides: {},
+            modelsByProfileId,
+          }),
+        ),
+      ).toThrow('模型选择');
+    }
+  });
 });
 
 describe('resolveDesktopAiTarget', () => {
@@ -212,6 +269,7 @@ describe('resolveDesktopAiTarget', () => {
       { executionPreference: 'server', clientConnectionId: 'p_local' },
       [profile],
       {},
+      {},
     );
     expect(target.location).toBe('server');
     // hosted 通路不消费客户端连接；可执行性由 dispatch 时 DESK-094 门禁裁决。
@@ -221,24 +279,24 @@ describe('resolveDesktopAiTarget', () => {
   });
 
   it('guides configuration when no client connection is selected', () => {
-    const target = resolveDesktopAiTarget(clientSelection(null), [profile], {});
+    const target = resolveDesktopAiTarget(clientSelection(null), [profile], {}, {});
     expect(target.location).toBe('client');
     expect(target.profile).toBeNull();
     expect(target.unavailableReason).toContain('尚未选择客户端连接');
   });
 
   it('reports a dangling selection instead of crashing or switching providers', () => {
-    const target = resolveDesktopAiTarget(clientSelection('gone'), [profile], {});
+    const target = resolveDesktopAiTarget(clientSelection('gone'), [profile], {}, {});
     expect(target.profile).toBeNull();
     expect(target.unavailableReason).toContain('已不存在');
   });
 
   it('derives direct-local for loopback and direct-remote otherwise', () => {
-    expect(resolveDesktopAiTarget(clientSelection('p_local'), [profile], {}).mode).toBe(
+    expect(resolveDesktopAiTarget(clientSelection('p_local'), [profile], {}, {}).mode).toBe(
       'direct-local',
     );
     const remote = profileFixture({ baseUrl: 'https://api.example.com/v1' });
-    expect(resolveDesktopAiTarget(clientSelection('p_local'), [remote], {}).mode).toBe(
+    expect(resolveDesktopAiTarget(clientSelection('p_local'), [remote], {}, {}).mode).toBe(
       'direct-remote',
     );
   });
@@ -248,7 +306,7 @@ describe('resolveDesktopAiTarget', () => {
       adapter: 'anthropic',
       baseUrl: 'https://api.anthropic.com/v1',
     });
-    const target = resolveDesktopAiTarget(clientSelection('p_local'), [anthropic], {});
+    const target = resolveDesktopAiTarget(clientSelection('p_local'), [anthropic], {}, {});
     expect(target.mode).toBeNull();
     expect(target.unavailableReason).toContain('anthropic');
   });
@@ -258,11 +316,11 @@ describe('resolveDesktopAiTarget', () => {
       p_local: { 'qwen3:8b': { temperature: 0.2 } },
       other: { m: { temperature: 1 } },
     };
-    const target = resolveDesktopAiTarget(clientSelection('p_local'), [profile], overrides);
+    const target = resolveDesktopAiTarget(clientSelection('p_local'), [profile], overrides, {});
     expect(target.generationOverrides).toEqual({ temperature: 0.2 });
     const renamed = profileFixture({ modelId: 'other-model' });
     expect(
-      resolveDesktopAiTarget(clientSelection('p_local'), [renamed], overrides)
+      resolveDesktopAiTarget(clientSelection('p_local'), [renamed], overrides, {})
         .generationOverrides,
     ).toBeUndefined();
   });
@@ -277,11 +335,50 @@ describe('resolveDesktopAiTarget', () => {
     const first = profileFixture({ id: 'a::b', modelId: 'c' });
     const second = profileFixture({ id: 'a', modelId: 'b::c' });
     expect(
-      resolveDesktopAiTarget(clientSelection('a::b'), [first], overrides).generationOverrides,
+      resolveDesktopAiTarget(clientSelection('a::b'), [first], overrides, {}).generationOverrides,
     ).toEqual({ temperature: 0.1 });
     expect(
-      resolveDesktopAiTarget(clientSelection('a'), [second], overrides).generationOverrides,
+      resolveDesktopAiTarget(clientSelection('a'), [second], overrides, {}).generationOverrides,
     ).toEqual({ temperature: 0.9 });
+  });
+
+  it('defaults the effective model to profile.modelId and lists deduped candidates', () => {
+    const target = resolveDesktopAiTarget(clientSelection('p_local'), [profile], {}, {});
+    expect(target.modelId).toBe('qwen3:8b');
+    expect(target.availableModelIds).toEqual(['qwen3:8b']);
+
+    const withCustom = resolveDesktopAiTarget(clientSelection('p_local'), [profile], {}, {
+      p_local: { customModelIds: ['qwen3:8b', 'qwen3:14b', 'qwen3:14b'] },
+    });
+    expect(withCustom.availableModelIds).toEqual(['qwen3:8b', 'qwen3:14b']);
+    // 缺省选择跟随默认模型。
+    expect(withCustom.modelId).toBe('qwen3:8b');
+  });
+
+  it('uses the explicit selectedModelId and scopes overrides by the effective model', () => {
+    const overrides = {
+      p_local: {
+        'qwen3:8b': { temperature: 0.2 },
+        'qwen3:14b': { temperature: 0.9 },
+      },
+    };
+    const models = {
+      p_local: { selectedModelId: 'qwen3:14b', customModelIds: ['qwen3:14b'] },
+    };
+    const target = resolveDesktopAiTarget(clientSelection('p_local'), [profile], overrides, models);
+    expect(target.modelId).toBe('qwen3:14b');
+    expect(target.generationOverrides).toEqual({ temperature: 0.9 });
+  });
+
+  it('marks a dangling selectedModelId as reselection-required instead of falling back', () => {
+    const overrides = { p_local: { 'gone-model': { temperature: 0.3 } } };
+    const models = { p_local: { selectedModelId: 'gone-model', customModelIds: [] } };
+    const target = resolveDesktopAiTarget(clientSelection('p_local'), [profile], overrides, models);
+    // 悬空选择保留原值供诊断、请求重新选择；mode=null 阻断执行，不静默回落。
+    expect(target.mode).toBeNull();
+    expect(target.modelId).toBe('gone-model');
+    expect(target.generationOverrides).toEqual({ temperature: 0.3 });
+    expect(target.unavailableReason).toContain('重新选择');
   });
 });
 
@@ -339,6 +436,7 @@ describe('DesktopAiConfigStore', () => {
         store.getSnapshot().selection,
         store.getSnapshot().profiles,
         store.getSnapshot().generationOverrides,
+        store.getSnapshot().modelsByProfileId,
       ).unavailableReason,
     ).toContain('尚未选择客户端连接');
   });
@@ -420,7 +518,7 @@ describe('DesktopAiConfigStore', () => {
     store.resetBlockedOverlay();
     await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
     expect(store.getSnapshot().overlayState).toBe('ready');
-    expect(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)).toContain('"version":2');
+    expect(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)).toContain('"version":3');
   });
 
   it('persists hide/restore of presets', async () => {
@@ -438,6 +536,124 @@ describe('DesktopAiConfigStore', () => {
     store.restoreAllPresets();
     expect(store.getSnapshot().hiddenPresetIds.size).toBe(0);
     expect(JSON.parse(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)!).hiddenPresetIds).toEqual([]);
+  });
+
+  it('persists model selection per profile without touching execution preference', async () => {
+    const storage = createStorage();
+    const native = createNativeStub([profileFixture()]);
+    const store = createStore(storage, native.invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
+    store.selectClientConnection('p_local');
+
+    store.addCustomModel('p_local', 'qwen3:14b');
+    store.selectModel('p_local', 'qwen3:14b');
+
+    expect(store.getSnapshot().modelsByProfileId['p_local']).toEqual({
+      selectedModelId: 'qwen3:14b',
+      customModelIds: ['qwen3:14b'],
+    });
+    // 执行位置与连接选择不因模型切换被改写。
+    expect(store.getSnapshot().selection).toEqual(clientSelection('p_local'));
+    const persisted = JSON.parse(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)!);
+    expect(persisted.version).toBe(3);
+    expect(persisted.modelsByProfileId.p_local).toEqual({
+      selectedModelId: 'qwen3:14b',
+      customModelIds: ['qwen3:14b'],
+    });
+    // 重启后生效模型为显式选择。
+    const reopened = createStore(storage, createNativeStub([profileFixture()]).invoke);
+    reopened.init();
+    await vi.waitFor(() => expect(reopened.getSnapshot().profilesState).toBe('ready'));
+    expect(
+      resolveDesktopAiTarget(
+        reopened.getSnapshot().selection,
+        reopened.getSnapshot().profiles,
+        reopened.getSnapshot().generationOverrides,
+        reopened.getSnapshot().modelsByProfileId,
+      ).modelId,
+    ).toBe('qwen3:14b');
+  });
+
+  it('rejects invalid/duplicate custom model ids and refuses unknown candidates', async () => {
+    const storage = createStorage();
+    const native = createNativeStub([profileFixture()]);
+    const store = createStore(storage, native.invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
+
+    expect(() => store.addCustomModel('p_local', '   ')).toThrow('无效');
+    expect(() => store.addCustomModel('p_local', `m${'x'.repeat(256)}`)).toThrow('无效');
+    expect(() => store.addCustomModel('p_local', 'm\n1')).toThrow('无效');
+    expect(() => store.addCustomModel('p_local', 'qwen3:8b')).toThrow('已在');
+    store.addCustomModel('p_local', '  qwen3:14b  ');
+    expect(() => store.addCustomModel('p_local', 'qwen3:14b')).toThrow('已在');
+    expect(store.getSnapshot().modelsByProfileId['p_local']?.customModelIds).toEqual(['qwen3:14b']);
+
+    // 不在候选清单里的模型不得写入选择偏好；未知 Profile 同样拒绝。
+    store.selectModel('p_local', 'unlisted-model');
+    store.selectModel('missing', 'qwen3:14b');
+    expect(store.getSnapshot().modelsByProfileId['p_local']?.selectedModelId).toBeUndefined();
+    expect(store.getSnapshot().modelsByProfileId['missing']).toBeUndefined();
+  });
+
+  it('keeps a dangling model selection diagnosable after removing the selected model', async () => {
+    const storage = createStorage();
+    const native = createNativeStub([profileFixture()]);
+    const store = createStore(storage, native.invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
+    store.selectClientConnection('p_local');
+    store.addCustomModel('p_local', 'qwen3:14b');
+    store.selectModel('p_local', 'qwen3:14b');
+    store.setGenerationOverrides('p_local', 'qwen3:14b', { temperature: 0.3 });
+
+    store.removeCustomModel('p_local', 'qwen3:14b');
+    // 选中模型被删 → 悬空，解析层提示重新选择而非静默回落；
+    // 该模型的生成覆盖保留（重加同名模型即恢复）。
+    const entry = store.getSnapshot().modelsByProfileId['p_local'];
+    expect(entry?.selectedModelId).toBe('qwen3:14b');
+    expect(entry?.customModelIds).toEqual([]);
+    const target = resolveDesktopAiTarget(
+      store.getSnapshot().selection,
+      store.getSnapshot().profiles,
+      store.getSnapshot().generationOverrides,
+      store.getSnapshot().modelsByProfileId,
+    );
+    expect(target.mode).toBeNull();
+    expect(target.unavailableReason).toContain('重新选择');
+    expect(store.getSnapshot().generationOverrides['p_local']).toEqual({
+      'qwen3:14b': { temperature: 0.3 },
+    });
+
+    // 重新选择默认模型后恢复可执行；自定义清单清空+无选择时整条回收。
+    store.selectModel('p_local', 'qwen3:8b');
+    expect(
+      resolveDesktopAiTarget(
+        store.getSnapshot().selection,
+        store.getSnapshot().profiles,
+        store.getSnapshot().generationOverrides,
+        store.getSnapshot().modelsByProfileId,
+      ).unavailableReason,
+    ).toBeNull();
+    store.removeCustomModel('p_local', 'never-added');
+    expect(store.getSnapshot().modelsByProfileId['p_local']?.selectedModelId).toBe('qwen3:8b');
+  });
+
+  it('cleans modelsByProfileId entries of deleted profiles on refresh', async () => {
+    const storage = createStorage();
+    const native = createNativeStub([profileFixture(), profileFixture({ id: 'p_two', name: '二号' })]);
+    const store = createStore(storage, native.invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
+
+    store.addCustomModel('p_local', 'qwen3:14b');
+    store.addCustomModel('p_two', 'other-model');
+    expect(store.getSnapshot().modelsByProfileId['p_two']).toBeDefined();
+
+    await store.deleteConnection('p_two');
+    expect(store.getSnapshot().modelsByProfileId['p_two']).toBeUndefined();
+    expect(store.getSnapshot().modelsByProfileId['p_local']).toBeDefined();
   });
 
   it('validates the profile natively before writing the credential, and never persists plaintext', async () => {
@@ -717,6 +933,7 @@ describe('DesktopAiConfigStore', () => {
         clientSelection('__proto__'),
         reopened.getSnapshot().profiles,
         reopened.getSnapshot().generationOverrides,
+        reopened.getSnapshot().modelsByProfileId,
       ).generationOverrides,
     ).toEqual({ temperature: 0.7 });
   });

@@ -92,6 +92,7 @@ function FreeForm({ session }: { session: FreeSession }) {
     aiState.selection,
     aiState.profiles,
     aiState.generationOverrides,
+    aiState.modelsByProfileId,
   );
   const profilesLoading = aiState.profilesState === 'idle' || aiState.profilesState === 'loading';
   const profilesError = aiState.profilesState === 'failed' ? aiState.profilesError : null;
@@ -180,7 +181,7 @@ function FreeForm({ session }: { session: FreeSession }) {
   const clientProfilesBlocked =
     target.location === 'client' && (profilesLoading || profilesError !== null);
   const targetCapabilities = selected
-    ? getModelGenerationCapabilities(selected.id, selected.modelId)
+    ? getModelGenerationCapabilities(selected.id, target.modelId ?? selected.modelId)
     : undefined;
   const recommended = recommendedSaveModes(deviceType === 'mobile');
   const jsonSaveMode = recommended.jsonSaveMode;
@@ -211,7 +212,7 @@ function FreeForm({ session }: { session: FreeSession }) {
           language: draft.selectedLanguage,
           attachments: toPromptAttachments(attachments),
         },
-        { mode: executionMode, modelId: selected?.modelId, overrides: target.generationOverrides },
+        { mode: executionMode, modelId: target.modelId ?? undefined, overrides: target.generationOverrides },
         discardUnsavedResult,
       );
     } catch (error) {
@@ -332,12 +333,12 @@ function FreeForm({ session }: { session: FreeSession }) {
               {target.location === 'client' && selected && mode && <div className="rounded border border-(--app-border) p-3">
                 <p>{mode === 'direct-local' ? '客户端 · 本机：发送到本机模型服务' : '客户端 · 远端：发送到你指定的外部模型服务'}</p>
                 <p className="break-all">接收方：{selected.baseUrl}</p>
-                <p>模型：{selected.modelId}。点击生成会发送提示词与附件；结果不带官方签名。</p>
+                <p>模型：{target.modelId ?? selected.modelId}。点击生成会发送提示词与附件；结果不带官方签名。</p>
               </div>}
               {/* 高级参数只随 direct 通路下发（hosted 在服务器侧解析）：仅客户端执行时展示。 */}
               {target.location === 'client' && selected && mode && <AdvancedGenerationSettings
                 value={target.generationOverrides}
-                onChange={(next) => aiStore.setGenerationOverrides(selected.id, selected.modelId, next)}
+                onChange={(next) => aiStore.setGenerationOverrides(selected.id, target.modelId ?? selected.modelId, next)}
                 temperatureSupported={targetCapabilities ? targetCapabilities.temperature.support !== 'unsupported' : true}
                 temperatureMax={targetCapabilities?.temperature.max}
                 maxOutputTokensMax={targetCapabilities?.maxOutputTokens.max}

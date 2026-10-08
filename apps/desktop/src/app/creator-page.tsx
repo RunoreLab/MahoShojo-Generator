@@ -178,6 +178,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
     aiState.selection,
     aiState.profiles,
     aiState.generationOverrides,
+    aiState.modelsByProfileId,
   );
   const profilesLoading = aiState.profilesState === 'idle' || aiState.profilesState === 'loading';
   const profilesError = aiState.profilesState === 'failed' ? aiState.profilesError : null;
@@ -545,7 +546,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
   // 本地 Provider 配置只门禁客户端执行：server 偏好由 hosted System Default 解析。
   const clientProfilesBlocked = target.location === 'client' && (profilesLoading || profilesError !== null);
   const targetCapabilities = selected
-    ? getModelGenerationCapabilities(selected.id, selected.modelId)
+    ? getModelGenerationCapabilities(selected.id, target.modelId ?? selected.modelId)
     : undefined;
   const recommendedImageMode = recommendedSaveModes(deviceType === 'mobile').imageSaveMode;
   const recommendedJsonMode = recommendedSaveModes(deviceType === 'mobile').jsonSaveMode;
@@ -850,7 +851,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
             ),
           },
         },
-        { mode: executionMode, modelId: selected?.modelId, flowers: getRandomFlowers(), overrides: target.generationOverrides },
+        { mode: executionMode, modelId: target.modelId ?? undefined, flowers: getRandomFlowers(), overrides: target.generationOverrides },
         discardUnsavedResult,
       );
     } catch (error) { setActionError(error instanceof Error ? error.message : '创作请求无法生成。'); }
@@ -1020,11 +1021,11 @@ function CreatorForm({ session }: { session: CreatorSession }) {
       {target.location === 'client' && selected && mode && <div className="rounded border border-(--app-border) p-3">
         <p>{mode === 'direct-local' ? '客户端 · 本机：发送到本机模型服务' : '客户端 · 远端：发送到你指定的外部模型服务'}</p>
         <p className="break-all">接收方：{selected.baseUrl}</p>
-        <p>模型：{selected.modelId}。点击生成会发送已填写的创作输入；结果不带官方签名。</p>
+        <p>模型：{target.modelId ?? selected.modelId}。点击生成会发送已填写的创作输入；结果不带官方签名。</p>
       </div>}
       {target.location === 'client' && selected && mode && <AdvancedGenerationSettings
         value={target.generationOverrides}
-        onChange={(next) => aiStore.setGenerationOverrides(selected.id, selected.modelId, next)}
+        onChange={(next) => aiStore.setGenerationOverrides(selected.id, target.modelId ?? selected.modelId, next)}
         temperatureSupported={targetCapabilities ? targetCapabilities.temperature.support !== 'unsupported' : true}
         temperatureMax={targetCapabilities?.temperature.max}
         maxOutputTokensMax={targetCapabilities?.maxOutputTokens.max}

@@ -63,18 +63,51 @@ export interface DesktopAiSelection {
   clientConnectionId: string | null;
 }
 
+/**
+ * 单个连接的模型选择状态（DESK-AIP-006）。
+ * `profile.modelId` 是默认模型；本结构只承载「当前选择 + 自定义补充模型」，
+ * 不复制、不改写 Profile 自身字段。
+ */
+export interface DesktopProfileModelSelection {
+  /**
+   * 显式选中的模型；缺省时生效模型跟随 `profile.modelId`。
+   * 显式值之后若因删除/Profile 编辑而不再可用，解析层提示重新选择，
+   * 不做静默回落。
+   */
+  selectedModelId?: string;
+  /** 该连接附加的可选模型 ID（去重、保持添加顺序）。 */
+  customModelIds: readonly string[];
+}
+
+const DESKTOP_MODEL_ID_MAX_LENGTH = 256;
+const DANGEROUS_MODEL_ID_CHAR_PATTERN = /[\u0000-\u001F\u007F-\u009F]/u;
+
+/**
+ * servedModelId 边界（DESK-AIP-005）：与 Profile 默认模型同口径
+ * （`nonBlankString(256)`：trim 后非空、≤256 字符），另拒 C0/C1/DEL
+ * 危险控制字符——模型 ID 会直接进入 wire 请求与 overlay 持久化键。
+ */
+export const isValidDesktopModelId = (value: unknown): value is string =>
+  typeof value === 'string' &&
+  value.trim().length > 0 &&
+  value.trim().length <= DESKTOP_MODEL_ID_MAX_LENGTH &&
+  !DANGEROUS_MODEL_ID_CHAR_PATTERN.test(value);
+
 /** 持久化 overlay：只含非敏感偏好，secret 永远不进这份文档。 */
 export interface DesktopAiConfigOverlay {
   selection: DesktopAiSelection;
   hiddenPresetIds: readonly string[];
   /** profileId → modelId → 覆盖项；嵌套结构，不做字符串复合键（id/modelId 均可含 `:`）。 */
   generationOverrides: Record<string, Record<string, UserGenerationOverrides>>;
+  /** profileId → 该连接的模型选择/自定义模型清单（overlay v3 起持久化）。 */
+  modelsByProfileId: Record<string, DesktopProfileModelSelection>;
 }
 
 export const DESKTOP_AI_CONFIG_DEFAULT_OVERLAY: DesktopAiConfigOverlay = {
   selection: { executionPreference: 'client', clientConnectionId: null },
   hiddenPresetIds: [],
   generationOverrides: {},
+  modelsByProfileId: {},
 };
 
 /**
@@ -102,7 +135,9 @@ const isValidSelection = (value: unknown): value is DesktopAiSelection =>
  */
 export const parseDesktopAiConfigOverlay = (raw: string): DesktopAiConfigOverlay => {
   const value: unknown = JSON.parse(raw);
-  if (!isObject(value) || value.version !== 2) {
+  // v2 → v3 迁移：v2 文档缺省 `modelsByProfileId`，解析后初始化为空表；
+  // 下一次落盘即以 v3 写回（受检、幂等——只在整体解析成功后写）。
+  if (!isObject(value) || (value.version !== 2 && value.version !== 3)) {
     throw new Error('AI 配置版本不受支持');
   }
   if (!isValidSelection(value.selection)) {
@@ -138,15 +173,44 @@ export const parseDesktopAiConfigOverlay = (raw: string): DesktopAiConfigOverlay
       overrides[profileId] = entries;
     }
   }
+  const modelsByProfileId: Record<string, DesktopProfileModelSelection> =
+    Object.create(null) as Record<string, DesktopProfileModelSelection>;
+  if (value.modelsByProfileId !== undefined) {
+    if (!isObject(value.modelsByProfileId)) {
+      throw new Error('AI 配置的模型选择损坏');
+    }
+    for (const [profileId, entry] of Object.entries(value.modelsByProfileId)) {
+      const keys = isObject(entry) ? Object.keys(entry) : [];
+      if (
+        profileId.trim().length === 0 ||
+        !isObject(entry) ||
+        !keys.every((key) => key === 'selectedModelId' || key === 'customModelIds') ||
+        (entry.selectedModelId !== undefined && !isValidDesktopModelId(entry.selectedModelId)) ||
+        !Array.isArray(entry.customModelIds) ||
+        !entry.customModelIds.every((id) => isValidDesktopModelId(id))
+      ) {
+        throw new Error('AI 配置的模型选择损坏');
+      }
+      // trim 归一：与 schema 的 `.trim()` 语义一致，保证 selectedModelId 与
+      // customModelIds 之间的相等性不受持久化空白影响。
+      modelsByProfileId[profileId] = {
+        ...(entry.selectedModelId === undefined
+          ? {}
+          : { selectedModelId: (entry.selectedModelId as string).trim() }),
+        customModelIds: entry.customModelIds.map((id) => (id as string).trim()),
+      };
+    }
+  }
   return {
     selection: value.selection,
     hiddenPresetIds: value.hiddenPresetIds,
     generationOverrides: overrides,
+    modelsByProfileId,
   };
 };
 
 export const serializeDesktopAiConfigOverlay = (overlay: DesktopAiConfigOverlay): string =>
-  JSON.stringify({ version: 2, ...overlay });
+  JSON.stringify({ version: 3, ...overlay });
 
 /** 预设展示行：整条支持度 + 该宿主上已核验可直连的模型清单。 */
 export interface DesktopPresetEntry {
@@ -185,7 +249,10 @@ export interface ResolvedDesktopAiTarget {
   profile: DirectProviderProfileV1 | null;
   /** 客户端连接的执行模式；server/不可用时为 null。 */
   mode: 'direct-local' | 'direct-remote' | null;
+  /** 生效模型：`selectedModelId ?? profile.modelId`（悬空选择时保留原值供诊断）。 */
   modelId: string | null;
+  /** 当前连接的候选模型清单：默认模型 + 自定义模型去重；非客户端目标为空。 */
+  availableModelIds: readonly string[];
   generationOverrides: UserGenerationOverrides | undefined;
   /** 当前不可执行时的用户可读原因；null 表示可以执行。 */
   unavailableReason: string | null;
@@ -195,6 +262,7 @@ export const resolveDesktopAiTarget = (
   selection: DesktopAiSelection,
   profiles: readonly DirectProviderProfileV1[],
   generationOverrides: Readonly<Record<string, Readonly<Record<string, UserGenerationOverrides>>>>,
+  modelsByProfileId: Readonly<Record<string, DesktopProfileModelSelection>>,
 ): ResolvedDesktopAiTarget => {
   if (selection.executionPreference === 'server') {
     return {
@@ -202,6 +270,7 @@ export const resolveDesktopAiTarget = (
       profile: null,
       mode: null,
       modelId: null,
+      availableModelIds: [],
       generationOverrides: undefined,
       // hosted 通路已接入：可执行性由 dispatch 时 DESK-094 兼容/可达性门禁裁决，
       // 登录与否只影响会话 cookie 是否附带，不是前置条件。
@@ -215,6 +284,7 @@ export const resolveDesktopAiTarget = (
       profile: null,
       mode: null,
       modelId: null,
+      availableModelIds: [],
       generationOverrides: undefined,
       // 新安装默认客户端但未选连接：引导配置，而不是静默切服务器。
       unavailableReason: '尚未选择客户端连接：请新增、复制预设或选择一条已有连接',
@@ -228,19 +298,43 @@ export const resolveDesktopAiTarget = (
       profile: null,
       mode: null,
       modelId: null,
+      availableModelIds: [],
       generationOverrides: undefined,
       unavailableReason: '所选连接已不存在，请在设置中重新选择或新建连接',
     };
   }
+
+  // 生效模型（DESK-AIP-005/006）：清单 = 默认模型 + 自定义模型去重；
+  // 显式 selectedModelId 优先，缺省时跟随 profile.modelId。
+  const modelSelection = modelsByProfileId[profile.id];
+  const availableModelIds = [
+    ...new Set([profile.modelId, ...(modelSelection?.customModelIds ?? [])]),
+  ];
+  const effectiveModelId = modelSelection?.selectedModelId ?? profile.modelId;
 
   if (!DESKTOP_DIRECT_ADAPTERS.has(profile.adapter)) {
     return {
       location: 'client',
       profile,
       mode: null,
-      modelId: profile.modelId,
+      modelId: effectiveModelId,
+      availableModelIds,
       generationOverrides: undefined,
       unavailableReason: `当前客户端尚未实现 ${profile.adapter} 适配器，请改用 OpenAI-compatible 连接`,
+    };
+  }
+
+  // 显式选择过的模型被删除或随 Profile 编辑失效：fail-closed 要求重新选择，
+  // 不静默回落默认模型，也不允许拿悬空 ID 去执行。
+  if (!availableModelIds.includes(effectiveModelId)) {
+    return {
+      location: 'client',
+      profile,
+      mode: null,
+      modelId: effectiveModelId,
+      availableModelIds,
+      generationOverrides: generationOverrides[profile.id]?.[effectiveModelId],
+      unavailableReason: '所选模型已不在连接模型列表中，请重新选择模型',
     };
   }
 
@@ -255,8 +349,9 @@ export const resolveDesktopAiTarget = (
     location: 'client',
     profile,
     mode,
-    modelId: profile.modelId,
-    generationOverrides: generationOverrides[profile.id]?.[profile.modelId],
+    modelId: effectiveModelId,
+    availableModelIds,
+    generationOverrides: generationOverrides[profile.id]?.[effectiveModelId],
     unavailableReason: null,
   };
 };
