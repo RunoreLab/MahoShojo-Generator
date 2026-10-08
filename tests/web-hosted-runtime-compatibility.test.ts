@@ -63,11 +63,11 @@ const g25h2RouteHandlers = [
 ] as const;
 
 const assetMirrors = [
-  ['apps/web/public/build-rules/presets/index.json', 'packages/hosted-runtime/src/assets/build-rules/presets/index.json'],
-  ['apps/web/public/build-rules/presets/arena-trpg-lite.json', 'packages/hosted-runtime/src/assets/build-rules/presets/arena-trpg-lite.json'],
-  ['apps/web/public/build-rules/presets/dnd-5e-lite.json', 'packages/hosted-runtime/src/assets/build-rules/presets/dnd-5e-lite.json'],
-  ['apps/web/public/build-rules/presets/coc-7e-lite.json', 'packages/hosted-runtime/src/assets/build-rules/presets/coc-7e-lite.json'],
-  ['apps/web/public/build-rules/presets/terrorinfinity-fx-v137.json', 'packages/hosted-runtime/src/assets/build-rules/presets/terrorinfinity-fx-v137.json'],
+  ['apps/web/public/build-rules/presets/index.json', 'packages/domain/src/assets/build-rules/presets/index.json'],
+  ['apps/web/public/build-rules/presets/arena-trpg-lite.json', 'packages/domain/src/assets/build-rules/presets/arena-trpg-lite.json'],
+  ['apps/web/public/build-rules/presets/dnd-5e-lite.json', 'packages/domain/src/assets/build-rules/presets/dnd-5e-lite.json'],
+  ['apps/web/public/build-rules/presets/coc-7e-lite.json', 'packages/domain/src/assets/build-rules/presets/coc-7e-lite.json'],
+  ['apps/web/public/build-rules/presets/terrorinfinity-fx-v137.json', 'packages/domain/src/assets/build-rules/presets/terrorinfinity-fx-v137.json'],
 ] as const;
 
 describe('apps/web 与 hosted-runtime compatibility 边界', () => {

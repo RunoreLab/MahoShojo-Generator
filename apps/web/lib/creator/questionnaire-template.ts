@@ -1,51 +1,7 @@
-import type { QuestionnairePresetEntry } from '@/lib/questionnaires';
-import { pickDefaultQuestionnairePresetEntry } from '@mahoshojo/domain/questionnaire-selection';
-
-import type { CreatorTemplateId } from './templates';
-
-type QuestionnaireSelectionLike = {
-  questionnaire: {
-    questions: unknown[];
-  };
-};
-
-const usesAllQuestionnairePresets = (template: CreatorTemplateId): boolean =>
-  template === 'general' || template === 'general-scenario';
-
-export function filterCreatorQuestionnairePresetEntries(
-  template: CreatorTemplateId,
-  presetEntries: QuestionnairePresetEntry[]
-): QuestionnairePresetEntry[] {
-  if (usesAllQuestionnairePresets(template)) {
-    return [...presetEntries];
-  }
-
-  const expectedKind = template === 'canshou' ? 'canshou' : 'magical-girl';
-  return presetEntries.filter((entry) => entry.kind === expectedKind);
-}
-
-export function pickDefaultCreatorQuestionnairePresetEntry(
-  template: CreatorTemplateId,
-  presetEntries: QuestionnairePresetEntry[]
-): QuestionnairePresetEntry | null {
-  return pickDefaultQuestionnairePresetEntry(
-    filterCreatorQuestionnairePresetEntries(template, presetEntries),
-  );
-}
-
-export function reconcileQuestionnaireSelectionsForTemplate<T extends QuestionnaireSelectionLike>({
-  template,
-  selections,
-  replacementSelection,
-}: {
-  template: CreatorTemplateId;
-  selections: T[];
-  replacementSelection: T | null;
-}): T[] {
-  if (template !== 'canshou' || !replacementSelection) {
-    return selections;
-  }
-
-  const loreOnlySelections = selections.filter((selection) => selection.questionnaire.questions.length === 0);
-  return [replacementSelection, ...loreOnlySelections];
-}
+// canonical 实现已上移至 `@mahoshojo/domain/creator/selection`（D5.1-G3）；
+// 保留本 re-export 以兼容既有 `@/lib/creator/questionnaire-template` 引用与测试。
+export {
+  filterCreatorQuestionnairePresetEntries,
+  pickDefaultCreatorQuestionnairePresetEntry,
+  reconcileQuestionnaireSelectionsForTemplate,
+} from '@mahoshojo/domain/creator/selection';

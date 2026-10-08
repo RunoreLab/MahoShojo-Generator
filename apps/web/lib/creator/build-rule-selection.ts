@@ -1,31 +1,3 @@
-import { tryLoadBuildRulePresetById } from './build-rules';
-
-import type { CreatorTemplateId } from './templates';
-
-type ReconcileCreatorBuildRuleSelectionInput = {
-  template: CreatorTemplateId;
-  selectedRuleIds: string[];
-  primaryRuleId: string | null;
-};
-
-export function reconcileCreatorBuildRuleSelection({
-  template,
-  selectedRuleIds,
-  primaryRuleId,
-}: ReconcileCreatorBuildRuleSelectionInput): {
-  selectedRuleIds: string[];
-  primaryRuleId: string | null;
-} {
-  const compatibleRuleIds = selectedRuleIds.filter((ruleId) => {
-    const preset = tryLoadBuildRulePresetById(ruleId);
-    return Boolean(preset?.supportedTemplates.includes(template));
-  });
-
-  return {
-    selectedRuleIds: compatibleRuleIds,
-    primaryRuleId:
-      primaryRuleId && compatibleRuleIds.includes(primaryRuleId)
-        ? primaryRuleId
-        : compatibleRuleIds[0] ?? null,
-  };
-}
+// canonical 实现已上移至 `@mahoshojo/domain/creator/selection`（D5.1-G3）；
+// 保留本 re-export 以兼容既有 `@/lib/creator/build-rule-selection` 引用与测试。
+export { reconcileCreatorBuildRuleSelection } from '@mahoshojo/domain/creator/selection';
