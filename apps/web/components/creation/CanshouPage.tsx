@@ -17,6 +17,7 @@ import {
   DetailsSavePreferencesPanel,
   isMobileFormFactor,
   QuestionnairePageCard,
+  QuestionnaireLanguageSection,
   recommendedSaveModes,
   SaveJsonButton,
 } from '@mahoshojo/ui-web/details-controls';
@@ -1497,34 +1498,15 @@ export const CanshouPage: React.FC = () => {
                   </div>
                 )}
 
-                {/* 多语言支持 */}
-                <div className="my-4 bg-gray-100 rounded-lg p-3">
-                  <button
-                    onClick={() => setShowLanguageSection(!showLanguageSection)}
-                    className="flex items-center justify-between w-full text-left font-medium text-gray-700 hover:text-blue-600"
-                  >
-                    <span>
-                      <img src="/globe.svg" alt="Language" className="inline-block w-4 h-4 mr-2" />
-                      生成语言
-                    </span>
-                    <span className="ml-2">{showLanguageSection ? '▼' : '▶'}</span>
-                  </button>
-                  {showLanguageSection && (
-                    <div className="mt-3">
-                      <select
-                        id="language-select"
-                        value={selectedLanguage}
-                        onChange={(e) => setSelectedLanguage(e.target.value)}
-                        className="input-field"
-                        disabled={submitting}
-                      >
-                        {languages.map(lang => (
-                          <option key={lang.code} value={lang.code}>{lang.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                </div>
+                <QuestionnaireLanguageSection
+                  variant="canshou"
+                  expanded={showLanguageSection}
+                  onToggle={() => setShowLanguageSection(!showLanguageSection)}
+                  languages={languages}
+                  value={selectedLanguage}
+                  onChange={setSelectedLanguage}
+                  disabled={submitting}
+                />
 
                 {/* 生成方式：非流式 / 流式 */}
                 <div className="my-4 bg-gray-100 rounded-lg p-3">

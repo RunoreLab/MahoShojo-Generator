@@ -90,3 +90,5 @@ export {
   QuestionnairePageCard,
   type QuestionnairePageCardProps,
 } from './QuestionnairePageCard';
+
+export { QuestionnaireLanguageSection, type QuestionnaireLanguageSectionProps } from './QuestionnaireLanguageSection';

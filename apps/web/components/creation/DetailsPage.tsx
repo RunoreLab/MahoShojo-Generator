@@ -10,7 +10,7 @@ import { generateRandomMagicalGirl } from '@/lib/random-character-generator';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
 import Footer from '@/components/Footer';
 import QuestionNavigator from '@/components/QuestionNavigator';
-import { AnswerReviewList, BulkAnswerTools, isMobileFormFactor, QuestionnairePageCard, recommendedSaveModes, SaveJsonButton } from '@mahoshojo/ui-web/details-controls';
+import { AnswerReviewList, BulkAnswerTools, isMobileFormFactor, QuestionnaireLanguageSection, QuestionnairePageCard, recommendedSaveModes, SaveJsonButton } from '@mahoshojo/ui-web/details-controls';
 import {
   buildQuestionnaireAnswerExportText,
   collectQuestionnaireAnswerExportItems,
@@ -1684,31 +1684,15 @@ export const DetailsPage: React.FC = () => {
                   warningText="⚠️ 预计问卷回答较长，可能更易超时/失败。可尝试精简答案或减少问卷数量。"
                 />
 
-                {/* 多语言支持 */}
-                <div className="my-4 bg-gray-100 rounded-lg p-3">
-                  <button
-                    onClick={() => setShowLanguageSection(!showLanguageSection)}
-                    className="flex items-center justify-between w-full text-left font-medium text-gray-700 hover:text-gray-900"
-                  >
-                    <span>生成语言</span>
-                    <span className="ml-2">{showLanguageSection ? '▼' : '▶'}</span>
-                  </button>
-                  {showLanguageSection && (
-                    <div className="mt-3">
-                      <select
-                        id="language-select"
-                        value={selectedLanguage}
-                        onChange={(e) => setSelectedLanguage(e.target.value)}
-                        className="input-field"
-                        disabled={submitting}
-                      >
-                        {languages.map(lang => (
-                          <option key={lang.code} value={lang.code}>{lang.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                </div>
+                <QuestionnaireLanguageSection
+                  variant="details"
+                  expanded={showLanguageSection}
+                  onToggle={() => setShowLanguageSection(!showLanguageSection)}
+                  languages={languages}
+                  value={selectedLanguage}
+                  onChange={setSelectedLanguage}
+                  disabled={submitting}
+                />
 
                 {/* 生成方式：非流式 / 流式 */}
                 <div className="my-4 bg-gray-100 rounded-lg p-3">
