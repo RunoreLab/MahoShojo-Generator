@@ -82,17 +82,37 @@ const HOSTED_GENERATE_CANSHOU_STREAM_PATH: &str = "/api/generate-canshou-stream"
 const HOSTED_ROUTE_CANSHOU_STREAM: &str = "generate-canshou-stream";
 const HOSTED_GENERATE_CANSHOU_PATH: &str = "/api/generate-canshou";
 const HOSTED_ROUTE_CANSHOU: &str = "generate-canshou";
+const HOSTED_GENERATE_FREE_STREAM_PATH: &str = "/api/generate-free-stream";
+const HOSTED_ROUTE_FREE_STREAM: &str = "generate-free-stream";
+const HOSTED_GENERATE_FREE_PATH: &str = "/api/generate-free";
+const HOSTED_ROUTE_FREE: &str = "generate-free";
+const HOSTED_GENERATE_SCENARIO_STREAM_PATH: &str = "/api/generate-scenario-stream";
+const HOSTED_ROUTE_SCENARIO_STREAM: &str = "generate-scenario-stream";
+const HOSTED_GENERATE_SCENARIO_PATH: &str = "/api/generate-scenario";
+const HOSTED_ROUTE_SCENARIO: &str = "generate-scenario";
 
 /// hosted 流式生成命令开放的 routeId 集合（renderer 传入，native 校验）。
-const HOSTED_STREAM_ROUTES: &[&str] = &[HOSTED_ROUTE_DETAILS_STREAM, HOSTED_ROUTE_CANSHOU_STREAM];
+const HOSTED_STREAM_ROUTES: &[&str] = &[
+    HOSTED_ROUTE_DETAILS_STREAM,
+    HOSTED_ROUTE_CANSHOU_STREAM,
+    HOSTED_ROUTE_FREE_STREAM,
+    HOSTED_ROUTE_SCENARIO_STREAM,
+];
 /// hosted 非流式 JSON 生成命令开放的 routeId 集合。
-const HOSTED_JSON_ROUTES: &[&str] = &[HOSTED_ROUTE_DETAILS, HOSTED_ROUTE_CANSHOU];
+const HOSTED_JSON_ROUTES: &[&str] = &[
+    HOSTED_ROUTE_DETAILS,
+    HOSTED_ROUTE_CANSHOU,
+    HOSTED_ROUTE_FREE,
+    HOSTED_ROUTE_SCENARIO,
+];
 
 /// routeId → 固定上游路径（仅流式生成；`?format=sse` 由调用方追加）。
 fn hosted_stream_path(route_id: &str) -> Option<&'static str> {
     match route_id {
         HOSTED_ROUTE_DETAILS_STREAM => Some(HOSTED_GENERATE_DETAILS_STREAM_PATH),
         HOSTED_ROUTE_CANSHOU_STREAM => Some(HOSTED_GENERATE_CANSHOU_STREAM_PATH),
+        HOSTED_ROUTE_FREE_STREAM => Some(HOSTED_GENERATE_FREE_STREAM_PATH),
+        HOSTED_ROUTE_SCENARIO_STREAM => Some(HOSTED_GENERATE_SCENARIO_STREAM_PATH),
         _ => None,
     }
 }
@@ -102,6 +122,8 @@ fn hosted_json_path(route_id: &str) -> Option<&'static str> {
     match route_id {
         HOSTED_ROUTE_DETAILS => Some(HOSTED_GENERATE_DETAILS_PATH),
         HOSTED_ROUTE_CANSHOU => Some(HOSTED_GENERATE_CANSHOU_PATH),
+        HOSTED_ROUTE_FREE => Some(HOSTED_GENERATE_FREE_PATH),
+        HOSTED_ROUTE_SCENARIO => Some(HOSTED_GENERATE_SCENARIO_PATH),
         _ => None,
     }
 }
@@ -1205,7 +1227,10 @@ pub async fn cloud_online_status(
  */
 
 /// hosted 生成请求 body 序列化后的字节上限（bounded input）。
-const HOSTED_BODY_MAX_BYTES: usize = 256 * 1024;
+/// 上限须容纳 free 路由的附件预算：wire 侧附件正文合计 ≤200k 字符，
+/// CJK 文本按 UTF-8 最坏 ~4 字节/字符估算约 800KB，外加 prompt 与
+/// JSON 包装余量后取整 1 MiB——仍是有界输入，不放开成无限。
+const HOSTED_BODY_MAX_BYTES: usize = 1024 * 1024;
 /// hosted SSE 单帧上限：帧超过即视为上游协议异常。
 const HOSTED_SSE_MAX_FRAME_BYTES: usize = 512 * 1024;
 /// hosted SSE 待解析缓冲上限（未闭合残帧不得无限堆积）。
@@ -2970,6 +2995,22 @@ mod tests {
         assert_eq!(
             fixture["paths"]["hostedGenerateCanshou"].as_str(),
             Some(HOSTED_GENERATE_CANSHOU_PATH)
+        );
+        assert_eq!(
+            fixture["paths"]["hostedGenerateFreeStream"].as_str(),
+            Some(HOSTED_GENERATE_FREE_STREAM_PATH)
+        );
+        assert_eq!(
+            fixture["paths"]["hostedGenerateFree"].as_str(),
+            Some(HOSTED_GENERATE_FREE_PATH)
+        );
+        assert_eq!(
+            fixture["paths"]["hostedGenerateScenarioStream"].as_str(),
+            Some(HOSTED_GENERATE_SCENARIO_STREAM_PATH)
+        );
+        assert_eq!(
+            fixture["paths"]["hostedGenerateScenario"].as_str(),
+            Some(HOSTED_GENERATE_SCENARIO_PATH)
         );
         let event_names: Vec<&str> = fixture["hostedGenerationEventNames"]
             .as_array()

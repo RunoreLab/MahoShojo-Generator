@@ -16,6 +16,10 @@
     "hostedGenerateDetails": "/api/generate-magical-girl-details",
     "hostedGenerateCanshouStream": "/api/generate-canshou-stream",
     "hostedGenerateCanshou": "/api/generate-canshou",
+    "hostedGenerateFreeStream": "/api/generate-free-stream",
+    "hostedGenerateFree": "/api/generate-free",
+    "hostedGenerateScenarioStream": "/api/generate-scenario-stream",
+    "hostedGenerateScenario": "/api/generate-scenario",
     "loopbackCallback": "/callback"
   },
   "limits": {
@@ -60,11 +64,15 @@
   ],
   "hostedGenerationRouteIds": [
     "generate-magical-girl-details-stream",
-    "generate-canshou-stream"
+    "generate-canshou-stream",
+    "generate-free-stream",
+    "generate-scenario-stream"
   ],
   "hostedJsonRouteIds": [
     "generate-magical-girl-details",
-    "generate-canshou"
+    "generate-canshou",
+    "generate-free",
+    "generate-scenario"
   ],
   "cardLibrary": {
     "routes": {
