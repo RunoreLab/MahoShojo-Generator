@@ -132,4 +132,39 @@ describe('Desktop Scenario route and session UI (native adapter mock)', () => {
     expect(stored.generationMode).toBe('non-stream');
     expect(container.textContent).toContain('客户端执行仅支持结构化（非流式）生成');
   });
+
+  it('restored signed card is labelled unverified, not official (G2-r1 信任标签)', async () => {
+    const signed = {
+      ...scenarioCard,
+      metadata: { created_at: '2026-01-01T00:00:00.000Z', signature: 'forged-sig' },
+    };
+    window.localStorage.setItem(SCENARIO_DRAFT_KEY, JSON.stringify({
+      ...storedDraft({ '故事发生的场景是怎样的？': '钟楼' }),
+      output: { mode: 'hosted-json', cardKind: 'scenario', card: signed, rawText: 'x', phase: 'completed' },
+    }));
+    await mount();
+    await click('恢复草稿');
+    // 可编辑 localStorage 恢复的签名卡：本机未验证，不得宣称官方签名（G2-r1）。
+    expect(container.textContent).toContain('含签名字段（本机未验证）');
+    expect(container.textContent).not.toContain('官方签名（服务器生成）');
+  });
+
+  it('fresh hosted-json signed card is labelled official signature', async () => {
+    const signed = {
+      ...scenarioCard,
+      metadata: { created_at: '2026-01-01T00:00:00.000Z', signature: 'sig-1' },
+    };
+    mocks.execute.mockResolvedValue({
+      status: 'completed', mode: 'hosted-json', card: signed, cardKind: 'scenario', rawText: 'x',
+    });
+    window.localStorage.setItem(SCENARIO_DRAFT_KEY, JSON.stringify(
+      storedDraft({ '故事发生的场景是怎样的？': 'x' }),
+    ));
+    await mount();
+    await click('恢复草稿');
+    await click('生成情景');
+    // 本会话内的新鲜 hosted-json 响应：如实显示服务器签名来源。
+    expect(container.textContent).toContain('官方签名（服务器生成）');
+    expect(container.textContent).not.toContain('本机未验证');
+  });
 });

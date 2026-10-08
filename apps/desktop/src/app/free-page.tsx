@@ -8,6 +8,7 @@ import {
 } from '@mahoshojo/ai-core/reference-attachments';
 import { FREE_STREAM_SCHEMA_IDS, type FreeSchemaId } from '@mahoshojo/ai-core/free-generation';
 import { MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES } from '@mahoshojo/contracts/desktop-ipc';
+import { hostedGenerationBodyMaxBytes } from '@mahoshojo/contracts/desktop-cloud';
 import { AiExecutionLocationField, AdvancedGenerationSettings } from '@mahoshojo/ui-web/ai-provider';
 import {
   AiReasoningPanel,
@@ -32,6 +33,7 @@ import { ProductFooter } from '@mahoshojo/ui-web/shell';
 import type { HomeAssetSource } from '@mahoshojo/ui-web/home';
 import { FreeSession, FREE_DRAFT_DEFAULT_LANGUAGE, type FreeDraft } from '../features/free/session';
 import {
+  acceptAttachmentsWithinBudget,
   readFreeAttachmentFiles,
   toPromptAttachments,
   type FreeAttachmentState,
@@ -166,6 +168,17 @@ function FreeForm({ session }: { session: FreeSession }) {
   const [isReadingAttachments, setIsReadingAttachments] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
+  // 附件读取代际与最新清单镜像：清空/移除/丢弃草稿/离开页面都会失效在途
+  // 读取——迟到结果不得重新加回用户已显式放弃的内容；合并前再按真实余量
+  // 复核总量预算（读取按开始时快照计费，G2-r1）。
+  const attachmentReadEpoch = useRef(0);
+  const attachmentsRef = useRef<FreeAttachmentState[]>([]);
+  useEffect(() => { attachmentsRef.current = attachments; }, [attachments]);
+  useEffect(() => () => { attachmentReadEpoch.current += 1; }, []);
+  const invalidateAttachmentReads = () => {
+    attachmentReadEpoch.current += 1;
+    setIsReadingAttachments(false);
+  };
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionInfo, setActionInfo] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -209,12 +222,20 @@ function FreeForm({ session }: { session: FreeSession }) {
   const updateDraft = (patch: Partial<FreeDraft>) => {
     session.updateDraft({ ...session.getSnapshot().draft, ...patch });
   };
-  // 流式模式下只允许通用卡：必要时自动切换 schema（与 Web 同一效果，但作用于草稿字段）。
+  // 流式产物只经 hosted 通路（Markdown 通用卡）；客户端 direct 通路永远
+  // 结构化（DESK-ONLINE-009），切到客户端时回写非流式（与 /scenario 同一口径）。
   useEffect(() => {
-    if (draft.generationMode !== 'stream') return;
+    if (target.location !== 'client' || draft.generationMode !== 'stream') return;
+    session.updateDraft({ ...session.getSnapshot().draft, generationMode: 'non-stream' });
+  }, [session, target.location, draft.generationMode]);
+  // 流式模式下只允许通用卡：必要时自动切换 schema（与 Web 同一效果，但作用于草稿字段）。
+  // 该归并只在服务器通路成立——客户端已在上一条 effect 回写非流式，
+  // 切换执行位置不得顺带改写用户已选的结构化 Schema（G2-r1 复审）。
+  useEffect(() => {
+    if (target.location !== 'server' || draft.generationMode !== 'stream') return;
     if ((FREE_STREAM_SCHEMA_IDS as readonly string[]).includes(draft.schemaId)) return;
     session.updateDraft({ ...session.getSnapshot().draft, schemaId: 'general' });
-  }, [session, draft.generationMode, draft.schemaId]);
+  }, [session, target.location, draft.generationMode, draft.schemaId]);
   const schemaOptionsForMode = draft.generationMode === 'stream'
     ? SCHEMA_OPTIONS.filter((item) => (FREE_STREAM_SCHEMA_IDS as readonly string[]).includes(item.id))
     : SCHEMA_OPTIONS;
@@ -250,18 +271,30 @@ function FreeForm({ session }: { session: FreeSession }) {
 
   const handleAddAttachments = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
+    const epoch = attachmentReadEpoch.current;
     setIsReadingAttachments(true);
     setAttachmentError(null);
     try {
-      const { added, skipped } = await readFreeAttachmentFiles(files, attachments);
-      if (skipped > 0) {
-        setAttachmentError(`⚠️ 附件总量超过限制：已忽略 ${skipped} 个文件（总上限 ${formatBytes(FREE_GENERATION_ATTACHMENT_LIMITS.maxBytesTotal)} / ${FREE_GENERATION_ATTACHMENT_LIMITS.maxCharsTotal.toLocaleString()} 字符）。`);
+      const { added, skipped } = await readFreeAttachmentFiles(files, attachmentsRef.current);
+      // 读取期间清单被用户改动过（清空/移除/丢弃草稿/离开页面）：
+      // 迟到结果一律丢弃，不得重新加回用户已显式放弃的内容。
+      if (attachmentReadEpoch.current !== epoch) return;
+      // 合并前复核总量预算：读取按开始时的快照计费，此间余量可能已变。
+      const { dropped } = acceptAttachmentsWithinBudget(attachmentsRef.current, added);
+      if (skipped + dropped > 0) {
+        setAttachmentError(`⚠️ 附件总量超过限制：已忽略 ${skipped + dropped} 个文件（总上限 ${formatBytes(FREE_GENERATION_ATTACHMENT_LIMITS.maxBytesTotal)} / ${FREE_GENERATION_ATTACHMENT_LIMITS.maxCharsTotal.toLocaleString()} 字符）。`);
       }
-      if (added.length > 0) setAttachments((prev) => [...prev, ...added]);
+      if (added.length > 0) {
+        setAttachments((prev) => {
+          const { accepted } = acceptAttachmentsWithinBudget(prev, added);
+          return accepted.length > 0 ? [...prev, ...accepted] : prev;
+        });
+      }
     } catch (error) {
+      if (attachmentReadEpoch.current !== epoch) return;
       setAttachmentError(`⚠️ 附件读取失败：${error instanceof Error ? error.message : '读取失败'}`);
     } finally {
-      setIsReadingAttachments(false);
+      if (attachmentReadEpoch.current === epoch) setIsReadingAttachments(false);
       if (attachmentInputRef.current) attachmentInputRef.current.value = '';
     }
   };
@@ -320,7 +353,7 @@ function FreeForm({ session }: { session: FreeSession }) {
               </div>
               {confirmClear && <div role="group" aria-label="确认清除草稿" className="mt-3 rounded border p-3">
                 <p>确认清除本页提示词、生成结果和中断正文？已保存的本地卡不受影响。此操作无法撤销。</p>
-                <button className={actionClass} disabled={busy} onClick={() => { session.discardDraft(); setAttachments([]); setAttachmentError(null); setConfirmClear(false); }}>确认清除</button>
+                <button className={actionClass} disabled={busy} onClick={() => { session.discardDraft(); invalidateAttachmentReads(); setAttachments([]); setAttachmentError(null); setConfirmClear(false); }}>确认清除</button>
                 <button className={actionClass} onClick={() => setConfirmClear(false)}>保留草稿</button>
               </div>}
             </section>
@@ -336,7 +369,18 @@ function FreeForm({ session }: { session: FreeSession }) {
                 server={{ enabled: true }}
                 onChange={(location) => aiStore.selectExecutionLocation(location)}
               />
-              <GenerationModeSwitcher value={draft.generationMode} onChange={(next) => updateDraft({ generationMode: next })} />
+              <div>
+                <GenerationModeSwitcher
+                  value={draft.generationMode}
+                  disabled={target.location === 'client'}
+                  onChange={(next) => updateDraft({ generationMode: next })}
+                />
+                {target.location === 'client' && (
+                  <p className="mt-1 text-sm text-(--app-text-muted)">
+                    客户端执行仅支持结构化（非流式）生成；流式通用卡需经服务器通路。
+                  </p>
+                )}
+              </div>
               <label className="flex flex-col gap-1">选择 Schema
                 <select
                   aria-label="选择 Schema"
@@ -421,7 +465,7 @@ function FreeForm({ session }: { session: FreeSession }) {
                   </select>
                 )}
               </div>
-              <label className="flex flex-col gap-1">提示词（任意长度）
+              <label className="flex flex-col gap-1">提示词
                 <textarea
                   aria-label="提示词"
                   value={draft.prompt}
@@ -430,7 +474,12 @@ function FreeForm({ session }: { session: FreeSession }) {
                   className="min-h-40 w-full resize-y rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)"
                   rows={10}
                 />
-                <span className="text-xs text-(--app-text-muted)">字符数：{draft.prompt.length}</span>
+                <span className="text-xs text-(--app-text-muted)">
+                  字符数：{draft.prompt.length}
+                  {target.location === 'server'
+                    ? `；服务器通路请求体（提示词 + 附件 + JSON 包装）上限 ${formatBytes(hostedGenerationBodyMaxBytes(draft.generationMode === 'stream' ? 'generate-free-stream' : 'generate-free'))}，超出会在派发前拦截`
+                    : '；客户端执行的输入上限由所连模型服务自身决定'}
+                </span>
               </label>
               <section aria-label="参考附件" className="flex flex-col gap-2 rounded-lg border border-(--app-border) p-3">
                 <div className="flex items-center justify-between">
@@ -450,7 +499,7 @@ function FreeForm({ session }: { session: FreeSession }) {
                   <button className={actionClass} disabled={isReadingAttachments} onClick={() => attachmentInputRef.current?.click()}>
                     {isReadingAttachments ? '正在读取附件…' : '添加附件'}
                   </button>
-                  {attachments.length > 0 && <button className={actionClass} onClick={() => { setAttachments([]); setAttachmentError(null); if (attachmentInputRef.current) attachmentInputRef.current.value = ''; }}>清空附件</button>}
+                  {attachments.length > 0 && <button className={actionClass} onClick={() => { invalidateAttachmentReads(); setAttachments([]); setAttachmentError(null); if (attachmentInputRef.current) attachmentInputRef.current.value = ''; }}>清空附件</button>}
                 </div>
                 <p className="text-xs text-(--app-text-muted)">
                   仅文本内容会随提示词发送；单文件 {formatBytes(FREE_GENERATION_ATTACHMENT_LIMITS.maxBytesPerFile)} / 全部 {formatBytes(FREE_GENERATION_ATTACHMENT_LIMITS.maxBytesTotal)} 上限，超长部分截断后标记「已截断」。
@@ -461,7 +510,7 @@ function FreeForm({ session }: { session: FreeSession }) {
                     {attachments.map((item) => (
                       <li key={item.id} className="flex items-center justify-between gap-2 rounded border border-(--app-border) px-2 py-1 text-sm">
                         <span className="min-w-0 truncate">{item.name}{item.truncated ? '（已截断）' : ''} · {formatBytes(item.includedBytes)}</span>
-                        <button className="text-(--app-accent-strong)" onClick={() => setAttachments((prev) => prev.filter((entry) => entry.id !== item.id))}>移除</button>
+                        <button className="text-(--app-accent-strong)" onClick={() => { invalidateAttachmentReads(); setAttachments((prev) => prev.filter((entry) => entry.id !== item.id)); }}>移除</button>
                       </li>
                     ))}
                   </ul>

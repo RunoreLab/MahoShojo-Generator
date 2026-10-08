@@ -84,11 +84,16 @@ describe('Desktop Scenario session', () => {
     s2.map.set(SCENARIO_DRAFT_KEY, JSON.stringify({
       version: 1, answers: { '故事发生的场景是怎样的？': '钟楼' }, fieldsToKeepEmpty: [],
       scenarioTitleHint: '', generationMode: 'non-stream', selectedLanguage: 'zh-CN',
-      output: { mode: 'direct-local', cardKind: 'bogus', card: { title: 't', content: 'c' }, rawText: '', phase: 'completed' },
+      // 完整合法的情景卡 + 非法 cardKind：回退后卡片须真正通过校验恢复，
+      // 不能靠残缺卡让整份草稿判损坏来「碰巧」得到默认 cardKind。
+      output: { mode: 'direct-local', cardKind: 'bogus', card: scenarioCard, rawText: '', phase: 'completed' },
     }));
-    const restored = new ScenarioSession({ storage: s2, repository: repo(), initialDraft });
-    restored.restoreDraft();
-    expect(restored.getSnapshot().cardKind).toBe('scenario');
+    const pending = new ScenarioSession({ storage: s2, repository: repo(), initialDraft });
+    expect(pending.isDraftBlocked()).toBe(false);
+    expect(pending.getSnapshot().pendingRestore).toBe(true);
+    pending.restoreDraft();
+    expect(pending.getSnapshot().cardKind).toBe('scenario');
+    expect(pending.getSnapshot().card).not.toBeNull();
   });
 
   it('hosted-json 服务器签名卡保存记 official-signed provenance', async () => {

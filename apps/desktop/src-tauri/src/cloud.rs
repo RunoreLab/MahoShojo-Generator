@@ -1226,11 +1226,23 @@ pub async fn cloud_online_status(
  * - native 不依赖 renderer 侧的 schema 校验，输入在 Rust 侧独立 fail-closed。
  */
 
-/// hosted 生成请求 body 序列化后的字节上限（bounded input）。
-/// 上限须容纳 free 路由的附件预算：wire 侧附件正文合计 ≤200k 字符，
-/// CJK 文本按 UTF-8 最坏 ~4 字节/字符估算约 800KB，外加 prompt 与
-/// JSON 包装余量后取整 1 MiB——仍是有界输入，不放开成无限。
-const HOSTED_BODY_MAX_BYTES: usize = 1024 * 1024;
+/// hosted 生成请求 body 序列化后的字节上限（bounded input），按路由区分。
+/// free 两路由须容纳附件预算：wire 侧附件正文合计 ≤200k 字符，CJK 文本按
+/// UTF-8 最坏 ~4 字节/字符估算约 800KB，外加 prompt 与 JSON 包装余量后
+/// 取整 1 MiB——仍是有界输入，不放开成无限。
+const HOSTED_BODY_FREE_MAX_BYTES: usize = 1024 * 1024;
+/// 其余生成路由沿用 256 KiB：问卷/情景回答体量远小于附件场景，
+/// 不随 free 的配额自动放宽（G2-r1 分路由预算）。
+const HOSTED_BODY_DEFAULT_MAX_BYTES: usize = 256 * 1024;
+
+/// routeId → 请求体字节上限；未列入放宽表的路由一律回落默认值。
+/// 与 `fixtures/desktop-cloud.json` 的 `hostedBodyLimits` 同源。
+fn hosted_body_max_bytes(route_id: &str) -> usize {
+    match route_id {
+        HOSTED_ROUTE_FREE | HOSTED_ROUTE_FREE_STREAM => HOSTED_BODY_FREE_MAX_BYTES,
+        _ => HOSTED_BODY_DEFAULT_MAX_BYTES,
+    }
+}
 /// hosted SSE 单帧上限：帧超过即视为上游协议异常。
 const HOSTED_SSE_MAX_FRAME_BYTES: usize = 512 * 1024;
 /// hosted SSE 待解析缓冲上限（未闭合残帧不得无限堆积）。
@@ -1284,7 +1296,7 @@ fn build_hosted_request_body(
     let size = serde_json::to_vec(&request.body)
         .map_err(|_| invalid_request("生成请求 body 无法序列化"))?
         .len();
-    if size > HOSTED_BODY_MAX_BYTES {
+    if size > hosted_body_max_bytes(&request.route_id) {
         return Err(invalid_request("生成请求 body 超出大小上限"));
     }
     Ok(request.body.clone())
@@ -3041,6 +3053,32 @@ mod tests {
             .collect();
         assert_eq!(json_routes, HOSTED_JSON_ROUTES);
 
+        // 按路由请求体预算与 fixture `hostedBodyLimits` 同源对拍（G2-r1）。
+        let body_limits = &fixture["hostedBodyLimits"];
+        assert_eq!(
+            body_limits["defaultMaxBytes"].as_u64(),
+            Some(HOSTED_BODY_DEFAULT_MAX_BYTES as u64)
+        );
+        let route_limits = body_limits["routeMaxBytes"]
+            .as_object()
+            .expect("fixture hostedBodyLimits.routeMaxBytes must be an object");
+        for (route_id, limit) in route_limits {
+            assert_eq!(
+                hosted_body_max_bytes(route_id) as u64,
+                limit.as_u64().unwrap(),
+                "路由 {route_id} 的请求体上限与 fixture 不一致"
+            );
+        }
+        // 未列入放宽表的路由一律回落默认值。
+        assert_eq!(
+            hosted_body_max_bytes(HOSTED_ROUTE_DETAILS),
+            HOSTED_BODY_DEFAULT_MAX_BYTES
+        );
+        assert_eq!(
+            hosted_body_max_bytes(HOSTED_ROUTE_SCENARIO_STREAM),
+            HOSTED_BODY_DEFAULT_MAX_BYTES
+        );
+
         // Rust `CloudErrorCode` 全量序列化值与共享 contract 错误码枚举逐一相等——
         // 防止两侧各自手抄一份列表发生漂移。
         let rust_codes: Vec<String> = [
@@ -3281,9 +3319,23 @@ mod tests {
 
         // body 序列化超限 → 拒绝（bounded input，不依赖 renderer schema）。
         let mut oversized = hosted_request();
-        oversized.body = serde_json::json!({"pad": "x".repeat(HOSTED_BODY_MAX_BYTES)});
+        oversized.body = serde_json::json!({"pad": "x".repeat(HOSTED_BODY_DEFAULT_MAX_BYTES)});
         assert_eq!(
             build_hosted_request_body(&oversized).unwrap_err().code,
+            CloudErrorCode::InvalidRequest
+        );
+
+        // 分路由预算（G2-r1）：free 附件路由获 1 MiB，其余路由保持 256 KiB。
+        let mut free_request = hosted_request();
+        free_request.route_id = HOSTED_ROUTE_FREE.to_string();
+        free_request.body = serde_json::json!({"pad": "x".repeat(300 * 1024)});
+        assert!(build_hosted_request_body(&free_request).is_ok());
+
+        let mut free_oversized = hosted_request();
+        free_oversized.route_id = HOSTED_ROUTE_FREE_STREAM.to_string();
+        free_oversized.body = serde_json::json!({"pad": "x".repeat(HOSTED_BODY_FREE_MAX_BYTES)});
+        assert_eq!(
+            build_hosted_request_body(&free_oversized).unwrap_err().code,
             CloudErrorCode::InvalidRequest
         );
 

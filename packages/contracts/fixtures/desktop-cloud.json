@@ -74,6 +74,13 @@
     "generate-free",
     "generate-scenario"
   ],
+  "hostedBodyLimits": {
+    "defaultMaxBytes": 262144,
+    "routeMaxBytes": {
+      "generate-free": 1048576,
+      "generate-free-stream": 1048576
+    }
+  },
   "cardLibrary": {
     "routes": {
       "data-cards.query": { "method": "GET", "path": "/api/data-cards", "auth": "required" },

@@ -120,8 +120,38 @@ describe('通用生成执行器（家族无关语义）', () => {
       new AbortController().signal,
     );
     expect(jsonOutcome).toMatchObject({ status: 'invalid-output', mode: 'hosted-json', message: '服务器返回的数据卡未通过校验。' });
+    // 已收到的服务器响应正文必须保留（有界透传），供导出诊断（G2-r1）。
+    expect((jsonOutcome as { rawText: string }).rawText).toContain('bogus');
     expect(jsonInvoke).toHaveBeenCalledTimes(1);
     expect(jsonInvoke).toHaveBeenCalledWith(HOSTED_AI_REQUEST_COMMAND, expect.anything());
+  });
+
+  it('hosted 请求体按路由预算在派发前拦截：超限不发起 native 调用', async () => {
+    const invoke = vi.fn(async () => ({ status: 200, body: { data: { title: 'x' }, aiMeta: null } }));
+    // scenario 路由预算 256 KiB：300KB prompt + JSON 包装必然超限。
+    const family = { ...fakeExecutorFamily(), jsonRouteId: 'generate-scenario' as const };
+    const outcome = await executeDesktopGeneration(
+      family,
+      { invoke, profileId: '' },
+      { prompt: 'x'.repeat(300 * 1024) },
+      { requestId: 'g-4', mode: 'hosted-json' },
+      new AbortController().signal,
+    );
+    expect(outcome).toMatchObject({ status: 'failed', mode: 'hosted-json', code: 'invalid-request' });
+    expect((outcome as { message: string }).message).toContain('上限');
+    expect(invoke).not.toHaveBeenCalled();
+
+    // 对照：free 路由 1 MiB 配额放行同体量请求（附件预算场景，G2-r1 分路由）。
+    const freeInvoke = vi.fn(async () => ({ status: 200, body: { data: { title: 'ok' }, aiMeta: null } }));
+    const okOutcome = await executeDesktopGeneration(
+      fakeExecutorFamily(),
+      { invoke: freeInvoke, profileId: '' },
+      { prompt: 'x'.repeat(300 * 1024) },
+      { requestId: 'g-5', mode: 'hosted-json' },
+      new AbortController().signal,
+    );
+    expect(okOutcome.status).toBe('completed');
+    expect(freeInvoke).toHaveBeenCalledTimes(1);
   });
 });
 

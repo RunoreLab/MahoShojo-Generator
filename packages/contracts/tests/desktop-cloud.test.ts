@@ -34,6 +34,9 @@ import {
   DesktopHostedGenerateRequestSchema,
   DesktopHostedJsonRequestSchema,
   DesktopHostedJsonResponseSchema,
+  HOSTED_GENERATION_BODY_DEFAULT_MAX_BYTES,
+  HOSTED_GENERATION_BODY_ROUTE_MAX_BYTES,
+  hostedGenerationBodyMaxBytes,
   HostedGenerationEventNameSchema,
   HostedGenerationRouteIdSchema,
   HostedJsonGenerationRouteIdSchema,
@@ -42,6 +45,8 @@ import {
   MIN_DESKTOP_AUTH_CODE_VERIFIER_LENGTH,
   PUBLIC_DATA_CARD_NOT_FOUND_CODE,
   isDesktopLoopbackRedirectUri,
+  type HostedGenerationRouteId,
+  type HostedJsonGenerationRouteId,
 } from '../src/desktop-cloud';
 import { DataCardSummarySchema } from '../src/data-cards';
 
@@ -58,6 +63,10 @@ type DesktopCloudFixture = {
   hostedGenerationEventNames: string[];
   hostedGenerationRouteIds: string[];
   hostedJsonRouteIds: string[];
+  hostedBodyLimits: {
+    defaultMaxBytes: number;
+    routeMaxBytes: Record<string, number>;
+  };
   validRedirectUris: string[];
   invalidRedirectUris: string[];
   validAuthorizeQuery: Record<string, unknown>;
@@ -110,6 +119,24 @@ describe('desktop-cloud 协议常量与 fixture 同步', () => {
     expect(HostedGenerationEventNameSchema.options).toEqual(fixture.hostedGenerationEventNames);
     expect(HostedGenerationRouteIdSchema.options).toEqual(fixture.hostedGenerationRouteIds);
     expect(HostedJsonGenerationRouteIdSchema.options).toEqual(fixture.hostedJsonRouteIds);
+  });
+
+  it('hosted 请求体预算与 fixture 同源（G2-r1 按路由区分）', () => {
+    expect(HOSTED_GENERATION_BODY_DEFAULT_MAX_BYTES).toBe(fixture.hostedBodyLimits.defaultMaxBytes);
+    expect(HOSTED_GENERATION_BODY_ROUTE_MAX_BYTES).toEqual(fixture.hostedBodyLimits.routeMaxBytes);
+    for (const routeId of [...fixture.hostedGenerationRouteIds, ...fixture.hostedJsonRouteIds]) {
+      const expected = fixture.hostedBodyLimits.routeMaxBytes[routeId]
+        ?? fixture.hostedBodyLimits.defaultMaxBytes;
+      expect(
+        hostedGenerationBodyMaxBytes(routeId as HostedGenerationRouteId | HostedJsonGenerationRouteId),
+        `routeId ${routeId} 的预算应与 fixture 一致`,
+      ).toBe(expected);
+    }
+    // free 附件路由获得 1 MiB 配额；其余生成路由保持默认 256 KiB。
+    expect(hostedGenerationBodyMaxBytes('generate-free')).toBe(1024 * 1024);
+    expect(hostedGenerationBodyMaxBytes('generate-free-stream')).toBe(1024 * 1024);
+    expect(hostedGenerationBodyMaxBytes('generate-scenario')).toBe(256 * 1024);
+    expect(hostedGenerationBodyMaxBytes('generate-canshou-stream')).toBe(256 * 1024);
   });
 });
 

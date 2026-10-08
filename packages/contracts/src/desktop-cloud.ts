@@ -381,6 +381,29 @@ export const DesktopHostedJsonResponseSchema = z.object({
 }).strict();
 export type DesktopHostedJsonResponse = z.infer<typeof DesktopHostedJsonResponseSchema>;
 
+/* ── hosted 生成请求体预算（bounded input） ──────────────────────────────
+ *
+ * `body` 序列化后的 UTF-8 字节上限按路由区分，与 `fixtures/desktop-cloud.json`
+ * 的 `hostedBodyLimits` 同源；native `build_hosted_request_body` 做最终检查，
+ * renderer 用同一份数值在派发前预检并如实提示。
+ */
+export const HOSTED_GENERATION_BODY_DEFAULT_MAX_BYTES = 256 * 1024;
+/**
+ * 按路由放宽的请求体上限：free 两路由须容纳附件预算（wire 侧附件正文合计
+ * ≤200k 字符，CJK 按 UTF-8 最坏 ~4B/字符约 800KB，加 prompt 与 JSON 包装
+ * 余量取整 1 MiB）；其余生成路由不随 free 的配额自动放宽。
+ */
+export const HOSTED_GENERATION_BODY_ROUTE_MAX_BYTES: Readonly<Record<string, number>> = {
+  'generate-free': 1024 * 1024,
+  'generate-free-stream': 1024 * 1024,
+};
+
+/** routeId → 请求体字节上限；未列入放宽表的路由一律回落默认值。 */
+export const hostedGenerationBodyMaxBytes = (
+  routeId: HostedGenerationRouteId | HostedJsonGenerationRouteId,
+): number =>
+  HOSTED_GENERATION_BODY_ROUTE_MAX_BYTES[routeId] ?? HOSTED_GENERATION_BODY_DEFAULT_MAX_BYTES;
+
 /* ── 数据卡库云端通路（D5.0e，`DESK-ONLINE-010`） ────────────────────────
  *
  * 与 hosted 生成同一套边界：renderer 只能给「路由标识 + 业务参数」，method、

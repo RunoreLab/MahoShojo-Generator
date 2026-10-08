@@ -78,6 +78,40 @@ export const readFreeAttachmentFiles = async (
   return { added, skipped };
 };
 
+/**
+ * 合并前预算复核（G2-r1）：`readFreeAttachmentFiles` 按读取开始时的快照
+ * 计费，异步读取完成时清单余量可能已经变化（清空/移除/另一次读取合并）。
+ * 合并前以当前真实清单重算额度，只接纳仍放得下的候选，其余如实丢弃计数。
+ */
+export const acceptAttachmentsWithinBudget = (
+  existing: readonly FreeAttachmentState[],
+  candidates: readonly FreeAttachmentState[],
+): { accepted: FreeAttachmentState[]; dropped: number } => {
+  const limits = FREE_GENERATION_ATTACHMENT_LIMITS;
+  let remainingChars = limits.maxCharsTotal
+    - existing.reduce((sum, item) => sum + item.content.length, 0);
+  let remainingBytes = limits.maxBytesTotal
+    - existing.reduce((sum, item) => sum + item.includedBytes, 0);
+  let remainingCount = limits.maxCount - existing.length;
+  const accepted: FreeAttachmentState[] = [];
+  let dropped = 0;
+  for (const item of candidates) {
+    if (
+      remainingCount <= 0
+      || item.content.length > remainingChars
+      || item.includedBytes > remainingBytes
+    ) {
+      dropped += 1;
+      continue;
+    }
+    accepted.push(item);
+    remainingCount -= 1;
+    remainingChars -= item.content.length;
+    remainingBytes -= item.includedBytes;
+  }
+  return { accepted, dropped };
+};
+
 /** 附件 → hosted/direct 请求体的公共投影（去掉 UI 附加字段）。 */
 export const toPromptAttachments = (items: readonly FreeAttachmentState[]): AITextAttachment[] =>
   items.map((item) => ({

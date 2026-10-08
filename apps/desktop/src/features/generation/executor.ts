@@ -8,10 +8,12 @@ import type {
   AiExecutionResult,
 } from '@mahoshojo/contracts/ai-execution';
 import type { AIReasoningEnvelope } from '@mahoshojo/contracts/ai-reasoning';
-import type {
-  HostedGenerationRouteId,
-  HostedJsonGenerationRouteId,
+import {
+  hostedGenerationBodyMaxBytes,
+  type HostedGenerationRouteId,
+  type HostedJsonGenerationRouteId,
 } from '@mahoshojo/contracts/desktop-cloud';
+import { exceedsUtf8ByteLimit } from '@mahoshojo/domain/data-card-size';
 import type { JsonValue } from '@mahoshojo/contracts/json-value';
 import type { UserGenerationOverrides } from '@mahoshojo/ai-core/generation-settings';
 import { collectAiStreamResult, type AiStreamEvent } from '@mahoshojo/ai-core/stream-events';
@@ -269,9 +271,9 @@ const executeHostedStreamGeneration = async <
   input: TInput,
   intent: TIntent,
   signal: AbortSignal,
+  body: Record<string, JsonValue>,
   onPartialText?: (text: string) => void,
 ): Promise<DesktopGenerationOutcome<TCardKind>> => {
-  const body = family.buildHostedBody(input);
   let markdown = '';
   let reasoningText = '';
   let reasoningDone: 'done' | 'unavailable' | null = null;
@@ -417,8 +419,8 @@ const executeHostedJsonGeneration = async <
   input: TInput,
   intent: TIntent,
   signal: AbortSignal,
+  body: Record<string, JsonValue>,
 ): Promise<DesktopGenerationOutcome<TCardKind>> => {
-  const body = family.buildHostedBody(input);
   const cancel = createHostedCancellation(options.invoke, intent.requestId);
   const onAbort = () => cancel();
   signal.addEventListener('abort', onAbort, { once: true });
@@ -453,7 +455,9 @@ const executeHostedJsonGeneration = async <
       return {
         status: 'invalid-output',
         mode: intent.mode,
-        rawText: '',
+        // 保留原始响应正文供导出诊断：native 已将 2xx 正文限在
+        // HOSTED_JSON_RESPONSE_MAX_BYTES 内，此序列化天然有界（G2-r1）。
+        rawText: JSON.stringify(payload),
         message: `服务器返回的${family.cardNoun}未通过校验。`,
       };
     }
@@ -497,6 +501,21 @@ const executeHostedJsonGeneration = async <
   }
 };
 
+/**
+ * hosted 请求体的 renderer 侧预算预检：按完整 JSON 正文的 UTF-8 字节数
+ * 对比路由配额（与 native `hosted_body_max_bytes` 同一 fixture 来源）。
+ * 超限返回用户可读文案；未超限返回 null。
+ */
+const hostedBodyOversizeMessage = (
+  body: Record<string, JsonValue>,
+  routeId: HostedGenerationRouteId | HostedJsonGenerationRouteId,
+): string | null => {
+  const limit = hostedGenerationBodyMaxBytes(routeId);
+  if (!exceedsUtf8ByteLimit(JSON.stringify(body), limit)) return null;
+  const limitText = limit >= 1024 * 1024 ? `${limit / (1024 * 1024)} MiB` : `${limit / 1024} KiB`;
+  return `生成请求体超出当前服务器通路上限（${limitText}），请精简输入后重试。`;
+};
+
 /** 单次显式意图：冻结输入，只执行一次；解析修复仅在本地进行。 */
 export const executeDesktopGeneration = async <
   TInput,
@@ -516,11 +535,19 @@ export const executeDesktopGeneration = async <
     return { status: 'cancelled', mode: intent.mode, rawText: '', reason: 'aborted' };
   }
   family.validateInput?.(input);
-  if (intent.mode === 'hosted-stream') {
-    return executeHostedStreamGeneration(family, options, input, intent, signal, onPartialText);
-  }
-  if (intent.mode === 'hosted-json') {
-    return executeHostedJsonGeneration(family, options, input, intent, signal);
+  if (intent.mode === 'hosted-stream' || intent.mode === 'hosted-json') {
+    const routeId = intent.mode === 'hosted-stream' ? family.streamRouteId : family.jsonRouteId;
+    const body = family.buildHostedBody(input);
+    // 派发前按完整 JSON 正文的 UTF-8 字节数预检：native 在 dispatch 门禁内做
+    // 最终检查，这里用同一份路由配额提前如实失败——不让超限请求先过兼容
+    // 探测再死在 native 边界（G2-r1）。
+    const oversize = hostedBodyOversizeMessage(body, routeId);
+    if (oversize !== null) {
+      return { status: 'failed', mode: intent.mode, rawText: '', message: oversize, code: 'invalid-request' };
+    }
+    return intent.mode === 'hosted-stream'
+      ? executeHostedStreamGeneration(family, options, input, intent, signal, body, onPartialText)
+      : executeHostedJsonGeneration(family, options, input, intent, signal, body);
   }
   return executeDirectGeneration(family, options, input, intent, signal, onPartialText);
 };

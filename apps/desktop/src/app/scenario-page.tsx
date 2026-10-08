@@ -223,8 +223,11 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
   const cardSignature = card && cardKind === 'scenario' && typeof card.metadata === 'object' && card.metadata !== null
     ? (card.metadata as Record<string, unknown>).signature
     : undefined;
+  // 签名标签统一按会话层 provenance 判定：含签名字段只陈述「字符串存在」——
+  // 新鲜 hosted-json 响应才可称服务器签名来源；从可编辑 localStorage 恢复的
+  // 卡一律记本机未验证（与 details/canshou 同一口径，G2-r1 复审）。
   const resultSignatureLabel = typeof cardSignature === 'string' && cardSignature.trim()
-    ? '官方签名（服务器生成）'
+    ? (state.resultRestored ? '含签名字段（本机未验证）' : '官方签名（服务器生成）')
     : '未签名（非原生卡）';
   return (
     <div>

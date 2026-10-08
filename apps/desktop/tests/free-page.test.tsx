@@ -9,10 +9,11 @@ import { resetDesktopAiConfigStoreForTests } from '../src/features/ai-config/use
 import { DESKTOP_AI_CONFIG_STORAGE_KEY } from '../src/features/ai-config/desktop-ai-config-store';
 import { createDesktopRouter } from '../src/app/router';
 
-const mocks = vi.hoisted(() => ({ execute: vi.fn(), save: vi.fn(), listen: vi.fn(), profiles: vi.fn() }));
+const mocks = vi.hoisted(() => ({ execute: vi.fn(), save: vi.fn(), listen: vi.fn(), profiles: vi.fn(), readAttachments: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), isTauri: () => true }));
 vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ onCloseRequested: mocks.listen }) }));
 vi.mock('../src/features/free/generation', async (original) => ({ ...await original<object>(), executeFreeGeneration: mocks.execute }));
+vi.mock('../src/features/free/attachments', async (original) => ({ ...await original<object>(), readFreeAttachmentFiles: mocks.readAttachments }));
 vi.mock('../src/platform/provider-profile-bridge', () => ({ listProviderProfileIds: async () => ['local'], getProviderProfile: mocks.profiles }));
 vi.mock('../src/platform/local-card-bridge', () => ({ IpcLocalCardRepository: class { putIfAbsent = mocks.save; } }));
 
@@ -44,6 +45,7 @@ beforeEach(() => {
   resetDesktopAiConfigStoreForTests();
   mocks.profiles.mockResolvedValue({ id: 'local', name: '本地模型', adapter: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', modelId: 'model' });
   mocks.execute.mockResolvedValue(completed); mocks.save.mockResolvedValue({ written: true });
+  mocks.readAttachments.mockResolvedValue({ added: [], skipped: 0 });
   mocks.listen.mockImplementation(async () => vi.fn());
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => [{ code: 'zh-CN', name: '简体中文' }] })));
   vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
@@ -96,17 +98,78 @@ describe('Desktop Free route and session UI (native adapter mock)', () => {
     expect(mocks.execute).toHaveBeenCalledTimes(2);
   });
 
-  it('stream generation mode restricts schema to streamable ids and rewrites a structured pick', async () => {
+  it('client execution rewrites stream to non-stream without touching the chosen schema (G2-r1)', async () => {
     window.localStorage.setItem(FREE_DRAFT_KEY, JSON.stringify({
       version: 1, schemaId: 'magical-girl', generationMode: 'stream', prompt: 'x', selectedLanguage: 'zh-CN',
     }));
     await mount();
     await click('恢复草稿');
-    // 草稿里 schemaId=magical-girl 但 generationMode=stream：effect 应回写为 general。
+    // 草稿 generationMode=stream 但执行位置为客户端：回写 non-stream；
+    // 已选结构化 Schema 不得顺带被改写（流式归并只对服务器通路成立）。
     const stored = JSON.parse(window.localStorage.getItem(FREE_DRAFT_KEY)!);
+    expect(stored.generationMode).toBe('non-stream');
+    expect(stored.schemaId).toBe('magical-girl');
+    expect(container.textContent).toContain('客户端执行仅支持结构化（非流式）生成');
+    const schemaSelect = [...container.querySelectorAll('select')].find((el) => el.getAttribute('aria-label') === '选择 Schema')!;
+    expect((schemaSelect as HTMLSelectElement).value).toBe('magical-girl');
+    expect(schemaSelect.querySelectorAll('option').length).toBe(5);
+  });
+
+  it('server stream mode keeps the switch and narrows schema to streamable ids', async () => {
+    window.localStorage.setItem(DESKTOP_AI_CONFIG_STORAGE_KEY, JSON.stringify({
+      version: 2,
+      selection: { executionPreference: 'server', clientConnectionId: 'local' },
+      hiddenPresetIds: [],
+    }));
+    resetDesktopAiConfigStoreForTests();
+    window.localStorage.setItem(FREE_DRAFT_KEY, JSON.stringify({
+      version: 1, schemaId: 'magical-girl', generationMode: 'stream', prompt: 'x', selectedLanguage: 'zh-CN',
+    }));
+    await mount();
+    await click('恢复草稿');
+    // 服务器通路的流式归并照旧：结构化 Schema 回写为 general。
+    const stored = JSON.parse(window.localStorage.getItem(FREE_DRAFT_KEY)!);
+    expect(stored.generationMode).toBe('stream');
     expect(stored.schemaId).toBe('general');
     const schemaSelect = [...container.querySelectorAll('select')].find((el) => el.getAttribute('aria-label') === '选择 Schema')!;
     expect((schemaSelect as HTMLSelectElement).value).toBe('general');
     expect(schemaSelect.querySelectorAll('option').length).toBe(2);
+  });
+
+  it('clearing attachments while a read is in flight discards the late merge (G2-r1)', async () => {
+    const mkAttachment = (id: string) => ({
+      id, name: `${id}.txt`, type: 'text/plain', size: 3, includedBytes: 3, content: 'abc',
+    });
+    let resolveLate: (value: { added: unknown[]; skipped: number }) => void = () => undefined;
+    const late = new Promise<{ added: unknown[]; skipped: number }>((resolve) => { resolveLate = resolve; });
+    mocks.readAttachments
+      .mockImplementationOnce(async () => ({ added: [mkAttachment('a')], skipped: 0 }))
+      .mockImplementationOnce(() => late);
+    window.localStorage.setItem(FREE_DRAFT_KEY, JSON.stringify(storedDraft('x')));
+    await mount();
+    await click('恢复草稿');
+
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const pick = async () => {
+      await act(async () => {
+        Object.defineProperty(fileInput, 'files', { configurable: true, value: [new File(['x'], 'pick.txt')] });
+        fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      await settle();
+    };
+
+    // 第一次读取正常落地。
+    await pick();
+    expect(container.textContent).toContain('a.txt');
+
+    // 第二次读取在途：用户先清空附件，再落地迟到的读取结果。
+    await pick();
+    await click('清空附件');
+    expect(container.textContent).not.toContain('a.txt');
+    await act(async () => { resolveLate({ added: [mkAttachment('late')], skipped: 0 }); });
+    await settle();
+    // 迟到结果必须按代际丢弃——不得把已清空的清单复活。
+    expect(container.textContent).not.toContain('late.txt');
+    expect(container.textContent).toContain('0 个');
   });
 });
