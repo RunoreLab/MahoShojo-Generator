@@ -80,6 +80,49 @@ const aiConfig = (executionPreference: 'client' | 'server') => window.localStora
   hiddenPresetIds: [],
 }));
 
+// 预设竞态夹具：a/b 两个预设请求挂起，由用例控制完成次序（G3-r1/G3-r1-r1）。
+const stubPresetRaceFetch = (deferreds: Map<string, () => void>, payloads: { a: unknown; b: unknown }) => {
+  const racingIndex = {
+    version: 1,
+    presets: [
+      { id: 'preset-a', kind: 'magical-girl', title: '预设A', path: '/questionnaires/presets/a.json' },
+      { id: 'preset-b', kind: 'magical-girl', title: '预设B', path: '/questionnaires/presets/b.json' },
+      presetIndex.presets[0],
+    ],
+  };
+  vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input.url;
+    if (url === '/languages.json') return Promise.resolve({ ok: true, json: async () => [] });
+    if (url === '/questionnaires/presets/index.json') return Promise.resolve({ ok: true, json: async () => racingIndex });
+    if (url === '/questionnaires/presets/a.json') {
+      return new Promise((resolve) => deferreds.set('a', () => resolve({ ok: true, json: async () => payloads.a })));
+    }
+    if (url === '/questionnaires/presets/b.json') {
+      return new Promise((resolve) => deferreds.set('b', () => resolve({ ok: true, json: async () => payloads.b })));
+    }
+    return Promise.resolve({ ok: true, json: async () => questionnaire });
+  }));
+};
+const presetSelect = () => [...container.querySelectorAll('select')].find((item) =>
+  [...item.options].some((option) => option.value === 'preset-a'))! as HTMLSelectElement;
+const pickPreset = async (presetId: string) => {
+  const select = presetSelect();
+  await act(async () => {
+    select.value = presetId;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+};
+const setNativeValue = (element: HTMLElement, value: string) => {
+  const proto = element instanceof HTMLTextAreaElement
+    ? HTMLTextAreaElement.prototype
+    : HTMLInputElement.prototype;
+  Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(element, value);
+  element.dispatchEvent(new Event('input', { bubbles: true }));
+};
+const storedSelectionIds = () => (JSON.parse(window.localStorage.getItem(CREATOR_DRAFT_KEY)!) as {
+  questionnaireSelections?: { questionnaire: { id: string } }[];
+}).questionnaireSelections?.map((item) => item.questionnaire.id) ?? [];
+
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.clearAllMocks(); window.localStorage.clear();
@@ -284,51 +327,103 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     const questionnaireA = { ...questionnaire, id: 'preset-a-questionnaire', title: '预设问卷A' };
     const questionnaireB = { ...questionnaire, id: 'preset-b-questionnaire', title: '预设问卷B' };
     const deferreds = new Map<string, () => void>();
-    const racingIndex = {
-      version: 1,
-      presets: [
-        { id: 'preset-a', kind: 'magical-girl', title: '预设A', path: '/questionnaires/presets/a.json' },
-        { id: 'preset-b', kind: 'magical-girl', title: '预设B', path: '/questionnaires/presets/b.json' },
-        presetIndex.presets[0],
-      ],
-    };
-    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
-      const url = typeof input === 'string' ? input : input.url;
-      if (url === '/languages.json') return Promise.resolve({ ok: true, json: async () => [] });
-      if (url === '/questionnaires/presets/index.json') return Promise.resolve({ ok: true, json: async () => racingIndex });
-      if (url === '/questionnaires/presets/a.json') {
-        return new Promise((resolve) => deferreds.set('a', () => resolve({ ok: true, json: async () => questionnaireA })));
-      }
-      if (url === '/questionnaires/presets/b.json') {
-        return new Promise((resolve) => deferreds.set('b', () => resolve({ ok: true, json: async () => questionnaireB })));
-      }
-      return Promise.resolve({ ok: true, json: async () => questionnaire });
-    }));
+    stubPresetRaceFetch(deferreds, { a: questionnaireA, b: questionnaireB });
     await mount();
     await click('开始回答问卷');
     await clickText('问卷设置');
-    const select = [...container.querySelectorAll('select')].find((item) =>
-      [...item.options].some((option) => option.value === 'preset-a'))! as HTMLSelectElement;
-    const pick = async (presetId: string) => {
-      await act(async () => {
-        select.value = presetId;
-        select.dispatchEvent(new Event('change', { bubbles: true }));
-      });
-    };
-    await pick('preset-a');
-    await pick('preset-b');
+    await pickPreset('preset-a');
+    await pickPreset('preset-b');
     // 后到期的 B 是较新意图：先应用。
     await act(async () => deferreds.get('b')!());
     await settle();
-    const stored = () => (JSON.parse(window.localStorage.getItem(CREATOR_DRAFT_KEY)!) as {
-      questionnaireSelections?: { questionnaire: { id: string } }[];
-    }).questionnaireSelections ?? [];
-    expect(stored().some((item) => item.questionnaire.id === 'preset-b-questionnaire')).toBe(true);
+    expect(storedSelectionIds()).toContain('preset-b-questionnaire');
     // 旧请求 A 晚到：已被 B 作废，不得覆盖/追加进当前选择集。
     await act(async () => deferreds.get('a')!());
     await settle();
-    expect(stored().some((item) => item.questionnaire.id === 'preset-a-questionnaire')).toBe(false);
-    expect(stored().some((item) => item.questionnaire.id === 'preset-b-questionnaire')).toBe(true);
+    expect(storedSelectionIds()).not.toContain('preset-a-questionnaire');
+    expect(storedSelectionIds()).toContain('preset-b-questionnaire');
+  });
+
+  it('appends every concurrent preset add under multi-questionnaire mode (G3-r1-r1)', async () => {
+    // 多选追加保留每次有效的添加意图：A 未加载完再选 B 不取消 A，
+    // 两请求各自生效、按完成序并入最新选择集（修复前 B 直接 abort A）。
+    const questionnaireA = { ...questionnaire, id: 'preset-a-questionnaire', title: '预设问卷A' };
+    const questionnaireB = { ...questionnaire, id: 'preset-b-questionnaire', title: '预设问卷B' };
+    const deferreds = new Map<string, () => void>();
+    stubPresetRaceFetch(deferreds, { a: questionnaireA, b: questionnaireB });
+    window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft({ allowMultipleQuestionnaires: true })));
+    await mount();
+    await click('恢复草稿');
+    await clickText('问卷设置');
+    await pickPreset('preset-a');
+    await pickPreset('preset-b');
+    // 与发起序相反的完成序：B 先落地、A 后落地，两者都必须保留。
+    await act(async () => deferreds.get('b')!());
+    await settle();
+    await act(async () => deferreds.get('a')!());
+    await settle();
+    expect(storedSelectionIds()).toContain('preset-a-questionnaire');
+    expect(storedSelectionIds()).toContain('preset-b-questionnaire');
+    expect(storedSelectionIds()).toContain('magical-girl-default');
+  });
+
+  it('drops a pending preset load once the draft is cleared mid-flight (G3-r1-r1)', async () => {
+    // 加载途中清除草稿：该请求不再适用，响应落地也不得把问卷加回来。
+    const questionnaireA = { ...questionnaire, id: 'preset-a-questionnaire', title: '预设问卷A' };
+    const deferreds = new Map<string, () => void>();
+    stubPresetRaceFetch(deferreds, { a: questionnaireA, b: questionnaire });
+    window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft()));
+    await mount();
+    await click('恢复草稿');
+    await clickText('问卷设置');
+    await pickPreset('preset-a');
+    await click('清除草稿');
+    await click('确认清除');
+    await act(async () => deferreds.get('a')!());
+    await settle();
+    expect(storedSelectionIds()).not.toContain('preset-a-questionnaire');
+  });
+
+  it('drops a pending preset load across template switches, including switch-back (G3-r1-r1)', async () => {
+    // 加载途中切模板再切回：往返两次推进世代，响应回到原模板时同样失效。
+    const questionnaireA = { ...questionnaire, id: 'preset-a-questionnaire', title: '预设问卷A' };
+    const deferreds = new Map<string, () => void>();
+    stubPresetRaceFetch(deferreds, { a: questionnaireA, b: questionnaire });
+    window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft()));
+    await mount();
+    await click('恢复草稿');
+    await clickText('问卷设置');
+    await pickPreset('preset-a');
+    await clickText('残兽（结构化）');
+    await clickText('魔法少女（结构化）');
+    await act(async () => deferreds.get('a')!());
+    await settle();
+    expect(storedSelectionIds()).not.toContain('preset-a-questionnaire');
+  });
+
+  it('keeps a newer local-questionnaire pick over a stale preset response in single mode (G3-r1-r1)', async () => {
+    // 单选下改选本地问卷是更新的替换意图：迟到的预设响应不得把它顶回。
+    const questionnaireA = { ...questionnaire, id: 'preset-a-questionnaire', title: '预设问卷A' };
+    const localQuestionnaire = { ...questionnaire, id: 'local-upload-questionnaire', title: '本地问卷' };
+    const deferreds = new Map<string, () => void>();
+    stubPresetRaceFetch(deferreds, { a: questionnaireA, b: questionnaire });
+    window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft()));
+    await mount();
+    await click('恢复草稿');
+    await clickText('问卷设置');
+    await pickPreset('preset-a');
+    await clickText('粘贴导入 JSON');
+    const textarea = [...container.querySelectorAll('textarea')].find(
+      (item) => item.placeholder === '在此粘贴问卷 JSON',
+    )!;
+    await act(async () => {
+      setNativeValue(textarea, JSON.stringify(localQuestionnaire));
+    });
+    await click('解析并载入');
+    await act(async () => deferreds.get('a')!());
+    await settle();
+    expect(storedSelectionIds()).toContain('local-upload-questionnaire');
+    expect(storedSelectionIds()).not.toContain('preset-a-questionnaire');
   });
 
   it('refuses the un-wired scenario template with an explanatory error instead of dispatching', async () => {

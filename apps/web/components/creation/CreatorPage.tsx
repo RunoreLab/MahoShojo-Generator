@@ -1004,10 +1004,34 @@ export const CreatorPage: React.FC = () => {
     );
   }, [allQuestionTargets, questionAnswerLookup, questionTargetSignature]);
 
-  const applySelection = (selection: QuestionnaireSelection) => {
+  // 预设加载竞态防护（G3-r1-r1，与 Desktop 同口径）：按用户操作意图而非
+  // 单纯按网络请求次序处理——
+  // - 单选替换 latest-wins：新的预设请求作废上一个未决请求；
+  // - 多选追加保留意图：并发的预设请求各自生效、追加到最新选择集；
+  // - 清空存档/恢复默认问卷/模板切换、以及单选下改选其它来源问卷，都让
+  //   发起时语境失效（世代推进+中止），迟到的响应不得再写入选择集。
+  const creatorTemplateRef = useRef(creatorTemplate);
+  creatorTemplateRef.current = creatorTemplate;
+  const allowMultipleRef = useRef(allowMultipleQuestionnaires);
+  allowMultipleRef.current = allowMultipleQuestionnaires;
+  const presetLoadGenerationRef = useRef(0);
+  const presetLoadControllersRef = useRef<Set<AbortController>>(new Set());
+  const presetLoadEpochRef = useRef(0);
+  const invalidatePresetLoads = () => {
+    presetLoadEpochRef.current += 1;
+    presetLoadControllersRef.current.forEach((controller) => controller.abort());
+    presetLoadControllersRef.current.clear();
+  };
+  const changeCreatorTemplate = (next: CreatorTemplateId) => {
+    if (next !== creatorTemplateRef.current) invalidatePresetLoads();
+    setCreatorTemplate(next);
+  };
+
+  const applySelection = (selection: QuestionnaireSelection, options?: { presetRequest?: boolean }) => {
+    if (!options?.presetRequest && !allowMultipleRef.current) invalidatePresetLoads();
     setSelectedQuestionnaires((prev) =>
       applyQuestionnaireSelection(prev, selection, {
-        allowMultiple: allowMultipleQuestionnaires,
+        allowMultiple: allowMultipleRef.current,
         createSuffix: createSelectionSuffix,
       }),
     );
@@ -1121,23 +1145,24 @@ export const CreatorPage: React.FC = () => {
     }
   };
 
-  // 预设手动加载竞态防护（G3-r1，与 Desktop 同口径）：新一代请求作废
-  // 旧请求的未完成回调；应用前核对模板未切换，快速连点/切模板时先到期
-  // 的响应不得污染当前选择集。
-  const creatorTemplateRef = useRef(creatorTemplate);
-  creatorTemplateRef.current = creatorTemplate;
-  const presetLoadGenerationRef = useRef(0);
-  const presetLoadControllerRef = useRef<AbortController | null>(null);
+  // 预设手动加载按模式分流：单选下发新请求即作废旧请求（latest-wins）；
+  // 多选下各请求互不取消，完成时各自追加。失效判定=中止信号 ∪ 世代
+  // （清空/重置/切模板推进）∪ 单选下已有更新的预设请求 ∪ 模板已切换。
   const handleAddPreset = async (presetId: string) => {
     const preset = visiblePresetEntries.find((item) => item.id === presetId);
     if (!preset) return;
+    if (!allowMultipleRef.current) {
+      presetLoadControllersRef.current.forEach((controller) => controller.abort());
+      presetLoadControllersRef.current.clear();
+    }
+    const epochAtRequest = presetLoadEpochRef.current;
     const generation = ++presetLoadGenerationRef.current;
-    presetLoadControllerRef.current?.abort();
     const controller = new AbortController();
-    presetLoadControllerRef.current = controller;
+    presetLoadControllersRef.current.add(controller);
     const templateAtRequest = creatorTemplate;
     const isStale = () => controller.signal.aborted
-      || generation !== presetLoadGenerationRef.current
+      || presetLoadEpochRef.current !== epochAtRequest
+      || (!allowMultipleRef.current && generation !== presetLoadGenerationRef.current)
       || creatorTemplateRef.current !== templateAtRequest;
     try {
       const response = await fetch(preset.path, { signal: controller.signal });
@@ -1152,10 +1177,12 @@ export const CreatorPage: React.FC = () => {
         nativeAllowed,
       });
       if (!normalized) throw new Error('预设问卷解析失败');
-      applySelection({ source: 'preset', questionnaire: normalized });
+      applySelection({ source: 'preset', questionnaire: normalized }, { presetRequest: true });
     } catch (error) {
       if (isStale()) return;
       setError(error instanceof Error ? error.message : '加载预设问卷失败');
+    } finally {
+      presetLoadControllersRef.current.delete(controller);
     }
   };
 
@@ -1502,6 +1529,7 @@ export const CreatorPage: React.FC = () => {
 
   const handleClearDraft = () => {
     if (window.confirm('确定要清空所有已保存的问卷答案吗？此操作不可撤销。')) {
+      invalidatePresetLoads();
       localStorage.removeItem(LOCAL_STORAGE_KEY);
       setAnswersByKey({});
       setCurrentAnswer('');
@@ -1936,7 +1964,7 @@ export const CreatorPage: React.FC = () => {
     <div className="space-y-4">
       <TemplateSelector
         value={creatorTemplate}
-        onChange={setCreatorTemplate}
+        onChange={changeCreatorTemplate}
       />
       <FreeformBriefPanel
         value={freeformBrief}
@@ -2273,8 +2301,8 @@ export const CreatorPage: React.FC = () => {
         submitting={submitting}
         onChangeGenerationMode={(mode) => {
           setGenerationMode(mode);
-          setCreatorTemplate((currentTemplate) =>
-            normalizeCreatorTemplateForGenerationMode(mode, currentTemplate)
+          changeCreatorTemplate(
+            normalizeCreatorTemplateForGenerationMode(mode, creatorTemplateRef.current)
           );
         }}
         generationHint={
@@ -2441,6 +2469,7 @@ export const CreatorPage: React.FC = () => {
                 type="button"
                 className="generate-button"
                 onClick={() => {
+                  invalidatePresetLoads();
                   setSelectedQuestionnaires([]);
                   setSelectionReady(false);
                   setLoading(true);

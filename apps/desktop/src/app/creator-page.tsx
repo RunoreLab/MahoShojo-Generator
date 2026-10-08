@@ -579,9 +579,28 @@ function CreatorForm({ session }: { session: CreatorSession }) {
   const hasLoreOnly = effectiveSelections.length > 0 && flow.length === 0
     && effectiveSelections.some((selection) => Boolean(selection.questionnaire.loreMarkdown?.trim()));
 
-  const applySelection = (selection: QuestionnaireSelection) => {
-    updateSelections(applyQuestionnaireSelection(selections, selection, {
-      allowMultiple,
+  // 预设加载竞态防护（G3-r1-r1，与 Web 同口径）：按用户操作意图而非
+  // 单纯按网络请求次序处理——
+  // - 单选替换 latest-wins：新的预设请求作废上一个未决请求；
+  // - 多选追加保留意图：并发的预设请求各自生效、追加到最新选择集；
+  // - 清除/恢复草稿、模板切换、以及单选下改选其它来源问卷，都让发起时
+  //   语境失效（世代推进+中止），迟到的响应不得再写入选择集。
+  const presetLoadGenerationRef = useRef(0);
+  const presetLoadControllersRef = useRef<Set<AbortController>>(new Set());
+  const presetLoadEpochRef = useRef(0);
+  const invalidatePresetLoads = () => {
+    presetLoadEpochRef.current += 1;
+    presetLoadControllersRef.current.forEach((controller) => controller.abort());
+    presetLoadControllersRef.current.clear();
+  };
+  const applySelection = (selection: QuestionnaireSelection, options?: { presetRequest?: boolean }) => {
+    // 提交前读会话最新快照：异步回调不得用旧渲染闭包中的 selections
+    // 覆盖较新的选择集（G3-r1-r1）。
+    const draftNow = session.getSnapshot().draft;
+    const multi = draftNow.allowMultipleQuestionnaires === true;
+    if (!options?.presetRequest && !multi) invalidatePresetLoads();
+    updateSelections(applyQuestionnaireSelection(draftNow.questionnaireSelections ?? [], selection, {
+      allowMultiple: multi,
       createSuffix: createSelectionSuffix,
     }));
     setSelectionReady(true);
@@ -635,22 +654,29 @@ function CreatorForm({ session }: { session: CreatorSession }) {
     setPickerError(null);
     setPickerOpen(false);
   };
-  // 预设手动加载竞态防护（G3-r1）：每一次发起都作废旧请求的未完成回调
-  // （世代 + abort 双保险——响应已返回但尚未应用的情形世代检查兜底）；
-  // 应用前再核对模板未切换，快速连点/切模板时先到期的响应不得污染当前选择集。
-  const presetLoadGenerationRef = useRef(0);
-  const presetLoadControllerRef = useRef<AbortController | null>(null);
+  // 预设手动加载按模式分流：单选下发新请求即作废旧请求（latest-wins）；
+  // 多选下各请求互不取消，完成时各自追加。失效判定=中止信号 ∪ 世代
+  // （清除/恢复草稿/切模板推进）∪ 单选下已有更新的预设请求 ∪ 模板已切换。
   const handleAddPreset = async (presetId: string) => {
     const preset = presetEntries.find((item) => item.id === presetId);
     if (!preset) return;
+    const draftAtRequest = session.getSnapshot().draft;
+    if (draftAtRequest.allowMultipleQuestionnaires !== true) {
+      presetLoadControllersRef.current.forEach((controller) => controller.abort());
+      presetLoadControllersRef.current.clear();
+    }
+    const epochAtRequest = presetLoadEpochRef.current;
     const generation = ++presetLoadGenerationRef.current;
-    presetLoadControllerRef.current?.abort();
     const controller = new AbortController();
-    presetLoadControllerRef.current = controller;
-    const templateAtRequest = template;
-    const isStale = () => controller.signal.aborted
-      || generation !== presetLoadGenerationRef.current
-      || session.getSnapshot().draft.template !== templateAtRequest;
+    presetLoadControllersRef.current.add(controller);
+    const templateAtRequest = draftAtRequest.template;
+    const isStale = () => {
+      const draftNow = session.getSnapshot().draft;
+      return controller.signal.aborted
+        || presetLoadEpochRef.current !== epochAtRequest
+        || (draftNow.allowMultipleQuestionnaires !== true && generation !== presetLoadGenerationRef.current)
+        || draftNow.template !== templateAtRequest;
+    };
     try {
       const response = await fetch(preset.path, { signal: controller.signal, credentials: 'omit', redirect: 'error' });
       if (!response.ok) throw new Error('加载预设问卷失败');
@@ -664,10 +690,15 @@ function CreatorForm({ session }: { session: CreatorSession }) {
       });
       if (!normalized) throw new Error('预设问卷解析失败');
       const used = new Set<string>();
-      applySelection(ensureQuestionnaireSelectionId({ source: 'preset', questionnaire: normalized }, used, createSelectionSuffix));
+      applySelection(
+        ensureQuestionnaireSelectionId({ source: 'preset', questionnaire: normalized }, used, createSelectionSuffix),
+        { presetRequest: true },
+      );
     } catch (error) {
       if (isStale()) return;
       setPresetError(error instanceof Error ? error.message : '加载预设问卷失败');
+    } finally {
+      presetLoadControllersRef.current.delete(controller);
     }
   };
   const normalizeUpload = (parsed: unknown, fallbackTitle: string) => {
@@ -900,7 +931,10 @@ function CreatorForm({ session }: { session: CreatorSession }) {
       <TemplateSelector
         value={template}
         disabled={busy || blockedDraft}
-        onChange={(next: CreatorTemplateId) => updateDraft({ template: next })}
+        onChange={(next: CreatorTemplateId) => {
+          if (next !== session.getSnapshot().draft.template) invalidatePresetLoads();
+          updateDraft({ template: next });
+        }}
       />
       <FreeformBriefPanel
         value={freeformBrief}
@@ -948,9 +982,11 @@ function CreatorForm({ session }: { session: CreatorSession }) {
         value={generationMode}
         disabled={target.location === 'client'}
         onChange={(next: GenerationMode) => {
+          const normalizedTemplate = normalizeCreatorTemplateForGenerationMode(next, template);
+          if (normalizedTemplate !== session.getSnapshot().draft.template) invalidatePresetLoads();
           updateDraft({
             generationMode: next,
-            template: normalizeCreatorTemplateForGenerationMode(next, template),
+            template: normalizedTemplate,
           });
         }}
       />
@@ -1285,6 +1321,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
             {state.pendingRestore && <div role="status" className="flex flex-wrap items-center gap-2"><span>发现上次草稿，请选择恢复或清除。</span><button className={actionClass} onClick={() => {
               previousTargetsRef.current = null;
               previousSignatureRef.current = null;
+              invalidatePresetLoads();
               session.restoreDraft(); setShowIntroduction(false); setSelectionReady(true);
             }}>恢复草稿</button></div>}
             {state.draftError && <p role="alert">{state.draftError}</p>}
@@ -1298,6 +1335,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
               <button className={actionClass} disabled={busy} onClick={() => {
                 previousTargetsRef.current = null;
                 previousSignatureRef.current = null;
+                invalidatePresetLoads();
                 session.discardDraft(); setConfirmClear(false); setQuestionIndex(0); setShowIntroduction(true); setSelectionReady(false); setProvisionalDefault(null);
               }}>确认清除</button>
               <button className={actionClass} onClick={() => setConfirmClear(false)}>保留草稿</button>
