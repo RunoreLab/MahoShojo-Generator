@@ -123,3 +123,38 @@ it('can clear the first pending attachment read without accepting its late resul
   expect(container.textContent).not.toContain('late.txt');
   expect(container.textContent).not.toContain('正在读取附件');
 });
+
+// W3C APG Disclosure: native buttons retain Enter/Space activation; no custom key handler.
+it.each(['language', 'schema'] as const)('exposes stable disclosure semantics and focus for %s without changing disabled fields', (kind) => {
+  const toggle = vi.fn(); const change = vi.fn();
+  const render = (expanded: boolean) => act(() => root.render(kind === 'language'
+    ? <FreeLanguageField value="zh-CN" languages={[{ code: 'zh-CN', name: '中文' }]} expanded={expanded} onToggle={toggle} onChange={change} disabled />
+    : <FreeSchemaFields schemaId="general" options={freeSchemaOptionsForMode('stream')} showFieldGuide={expanded} onToggleFieldGuide={toggle} onChange={change} disabled />));
+  render(false);
+  const button = container.querySelector('button')!;
+  const panelId = button.getAttribute('aria-controls')!;
+  expect(button.tagName).toBe('BUTTON');
+  expect(button.type).toBe('button');
+  expect(button.getAttribute('aria-expanded')).toBe('false');
+  expect(document.getElementById(panelId)?.hidden).toBe(true);
+  expect(button.className).toContain('focus-visible:outline-2');
+  button.focus();
+  act(() => button.click());
+  expect(toggle).toHaveBeenCalledOnce();
+  render(true);
+  expect(button.getAttribute('aria-expanded')).toBe('true');
+  expect(button.getAttribute('aria-controls')).toBe(panelId);
+  expect(document.getElementById(panelId)?.hidden).toBe(false);
+  expect(document.activeElement).toBe(button);
+  expect(container.querySelector('select')!.disabled).toBe(true);
+  render(false); render(true);
+  expect(button.getAttribute('aria-controls')).toBe(panelId);
+  expect(change).not.toHaveBeenCalled();
+});
+
+it('does not duplicate panel ids across disclosure instances', () => {
+  act(() => root.render(<>{[0, 1].map((key) => <FreeLanguageField key={key} value="zh-CN" languages={[]} expanded={false} onToggle={vi.fn()} onChange={vi.fn()} />)}</>));
+  const ids = [...container.querySelectorAll('button')].map((button) => button.getAttribute('aria-controls'));
+  expect(new Set(ids).size).toBe(2);
+  expect(ids.every((id) => id && document.getElementById(id))).toBe(true);
+});
