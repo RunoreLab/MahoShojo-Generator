@@ -579,6 +579,12 @@ impl CloudState {
         }
     }
 
+    /// 公开缓存的来源 scope 与云 origin 同源——命令面经它把读取限定在
+    /// 「当前这个云端来源」的缓存行，renderer 不提供 scope。
+    pub(crate) fn origin(&self) -> &str {
+        &self.origin
+    }
+
     fn lookup_flow(&self, flow_id: &str) -> Result<Arc<LoginFlow>, CloudError> {
         self.flows
             .lock()

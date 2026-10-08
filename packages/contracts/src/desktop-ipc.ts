@@ -1,6 +1,7 @@
 import { z } from './zod';
 
 import { AnnouncementListSchema } from './announcements';
+import { OnlineDataCardTypeSchema } from './data-cards';
 import {
   DESKTOP_PUBLIC_CACHE_MAX_BUDGET_BYTES,
   DESKTOP_PUBLIC_CACHE_MIN_BUDGET_BYTES,
@@ -1190,6 +1191,116 @@ export const DesktopPublicCacheClearResultSchema = z
   })
   .strict();
 export type DesktopPublicCacheClearResult = z.infer<typeof DesktopPublicCacheClearResultSchema>;
+
+/* ── 公开库持久缓存读取（D5.1-K2，DESK-CACHE-004/005）────────────── */
+
+/**
+ * `public_read_cache_query` 的摘要查询请求。
+ *
+ * 字段刻意对齐公开 summary 查询的可筛选面（`public-data-cards.query`），但作用域
+ * 是本机已捕获集合而不是线上库：renderer 不得把结果说成「线上还有/没有」。
+ *
+ * - `nativeOnly` 刻意缺席：摘要投影不携带 isNative（来自 meta 侧表），诚实口径
+ *   是禁用该筛选并说明，而不是猜零或真（DESK-CACHE-004）。
+ * - `nativeAllowedOnly` 可用：白名单投影含 `nativeAllowed`，但只代表抓取时的
+ *   筛选元数据，不是当前资格证明（Strict/权威玩法仍须线上重新物化）。
+ * - 数值筛选沿用 Web 的字符串参数形态，native 解析失败按 invalid-request 拒绝。
+ */
+export const DesktopPublicCacheQueryRequestSchema = z
+  .object({
+    type: OnlineDataCardTypeSchema.optional(),
+    limit: z.number().int().min(1).max(100),
+    offset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    sortBy: z.enum(['likes', 'usage', 'favorites', 'created_at']),
+    search: z.string().trim().min(1).max(200).optional(),
+    tagIds: z.array(z.string().trim().min(1).max(200)).min(1).max(32).optional(),
+    tagMatch: z.enum(['any', 'all']).optional(),
+    author: z.string().trim().min(1).max(200).optional(),
+    minLikes: z.string().trim().min(1).max(32).optional(),
+    maxLikes: z.string().trim().min(1).max(32).optional(),
+    minUsage: z.string().trim().min(1).max(32).optional(),
+    maxUsage: z.string().trim().min(1).max(32).optional(),
+    minFavorites: z.string().trim().min(1).max(32).optional(),
+    maxFavorites: z.string().trim().min(1).max(32).optional(),
+    roleType: z.enum(['magical-girl', 'canshou', 'general']).optional(),
+    recommendedOnly: z.boolean().optional(),
+    nativeAllowedOnly: z.boolean().optional(),
+  })
+  .strict();
+export type DesktopPublicCacheQueryRequest = z.infer<typeof DesktopPublicCacheQueryRequestSchema>;
+
+/**
+ * `public_read_cache_query` 的单条命中。
+ * `card` 是抓取时的受控摘要投影（公开白名单字段），不是正式本地库记录；
+ * `hasBody` 为 true 时才可用 `public_read_cache_card` 取到正文。
+ */
+export const DesktopPublicCacheEntrySchema = z
+  .object({
+    card: z.record(z.string(), z.unknown()),
+    hasBody: z.boolean(),
+    /** 该摘要最近一次被线上成功确认的 UTC 时间；无正文/摘要时按可得的抓取时刻。 */
+    lastSuccessAt: z.string().trim().min(1).nullable(),
+    summaryUpdatedAt: z.string().trim().min(1).nullable(),
+    bodyUpdatedAt: z.string().trim().min(1).nullable(),
+  })
+  .strict();
+export type DesktopPublicCacheEntry = z.infer<typeof DesktopPublicCacheEntrySchema>;
+
+export const DesktopPublicCacheQueryResultSchema = z
+  .object({
+    status: DesktopPublicCacheStatusSchema,
+    entries: z.array(DesktopPublicCacheEntrySchema).max(100),
+    /** 匹配本机缓存的行数——不是线上 total（DESK-CACHE-004）。 */
+    total: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    /** 匹配行中持有完整正文快照的数量。 */
+    bodyCount: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  })
+  .strict();
+export type DesktopPublicCacheQueryResult = z.infer<typeof DesktopPublicCacheQueryResultSchema>;
+
+export const DesktopPublicCacheCardRequestSchema = z
+  .object({
+    cardId: z.string().trim().min(1).max(200),
+  })
+  .strict();
+export type DesktopPublicCacheCardRequest = z.infer<typeof DesktopPublicCacheCardRequestSchema>;
+
+/**
+ * `public_read_cache_card` 的正文命中。
+ * `card` 是抓取时该卡的公开完整投影（含 `data` 正文 JSON 字符串）。
+ */
+export const DesktopPublicCacheCardEntrySchema = z
+  .object({
+    card: z.record(z.string(), z.unknown()),
+    bodyUpdatedAt: z.string().trim().min(1).nullable(),
+    lastSuccessAt: z.string().trim().min(1).nullable(),
+  })
+  .strict();
+export type DesktopPublicCacheCardEntry = z.infer<typeof DesktopPublicCacheCardEntrySchema>;
+
+export const DesktopPublicCacheCardAvailabilitySchema = z.enum([
+  /** 缓存内存在完整正文快照。 */
+  'full',
+  /** 只有摘要，正文需联网获取。 */
+  'summary-only',
+  /** 本机缓存无此卡。 */
+  'absent',
+  /** 该卡已被确认撤回；不得再作为公开库替代品展示。 */
+  'withdrawn',
+]);
+export type DesktopPublicCacheCardAvailability = z.infer<
+  typeof DesktopPublicCacheCardAvailabilitySchema
+>;
+
+export const DesktopPublicCacheCardResultSchema = z
+  .object({
+    status: DesktopPublicCacheStatusSchema,
+    availability: DesktopPublicCacheCardAvailabilitySchema,
+    /** 仅 `availability: 'full'` 时携带正文。 */
+    entry: DesktopPublicCacheCardEntrySchema.nullable(),
+  })
+  .strict();
+export type DesktopPublicCacheCardResult = z.infer<typeof DesktopPublicCacheCardResultSchema>;
 
 export const DesktopPublicCacheErrorCodeSchema = z.enum([
   'invalid-request',

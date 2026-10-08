@@ -38,7 +38,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
+use rusqlite::{params, params_from_iter, types::ToSql, Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 /// 与正式库同目录的独立缓存文件。备份/恢复/manifest 只认 `library.sqlite`
@@ -253,13 +253,105 @@ pub struct PublicCacheClearResult {
     pub freed_bytes: u64,
 }
 
+/* ── 读取 DTO（D5.1-K2，DESK-CACHE-004/005）────────────────────────────── */
+
+/// `public_read_cache_query` 的入参——字段面刻意对齐公开 summary 查询中、
+/// 且受控投影确实携带的筛选；`nativeOnly` 没有位置（摘要投影不含
+/// isNative，诚实口径是禁用该筛选并说明，而不是猜零或真）。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PublicCacheQueryDto {
+    #[serde(default)]
+    pub r#type: Option<String>,
+    pub limit: u32,
+    #[serde(default)]
+    pub offset: u32,
+    pub sort_by: String,
+    #[serde(default)]
+    pub search: Option<String>,
+    #[serde(default)]
+    pub tag_ids: Option<Vec<String>>,
+    #[serde(default)]
+    pub tag_match: Option<String>,
+    #[serde(default)]
+    pub author: Option<String>,
+    #[serde(default)]
+    pub min_likes: Option<String>,
+    #[serde(default)]
+    pub max_likes: Option<String>,
+    #[serde(default)]
+    pub min_usage: Option<String>,
+    #[serde(default)]
+    pub max_usage: Option<String>,
+    #[serde(default)]
+    pub min_favorites: Option<String>,
+    #[serde(default)]
+    pub max_favorites: Option<String>,
+    #[serde(default)]
+    pub role_type: Option<String>,
+    #[serde(default)]
+    pub recommended_only: Option<bool>,
+    #[serde(default)]
+    pub native_allowed_only: Option<bool>,
+}
+
+/// `public_read_cache_query` 的单条命中：抓取时的受控摘要投影
+/// （`card`），外加正文可得性与最近一次线上成功确认时刻。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicCacheEntryDto {
+    pub card: serde_json::Value,
+    pub has_body: bool,
+    pub last_success_at: Option<String>,
+    pub summary_updated_at: Option<String>,
+    pub body_updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicCacheQueryResult {
+    /// 'empty' | 'ready' | 'unavailable' | 'unsupported-schema'——与
+    /// `public_read_cache_stats` 同口径；非 ready 时其余字段为零值，
+    /// renderer 不得把 `empty`/`unavailable` 说成「缓存里没有这张卡」。
+    pub status: &'static str,
+    pub entries: Vec<PublicCacheEntryDto>,
+    /// 匹配本机缓存的行数——不是线上 total（DESK-CACHE-004）。
+    pub total: u64,
+    /// 匹配行中持有完整正文快照的数量。
+    pub body_count: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PublicCacheCardRequestDto {
+    pub card_id: String,
+}
+
+/// `public_read_cache_card` 的正文命中：`card` 是抓取时该卡的公开完整
+/// 投影（含 `data` 正文 JSON 字符串）。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicCacheCardEntryDto {
+    pub card: serde_json::Value,
+    pub body_updated_at: Option<String>,
+    pub last_success_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicCacheCardResult {
+    pub status: &'static str,
+    /// 'full' | 'summary-only' | 'absent' | 'withdrawn'。
+    /// 撤回条目绝不返回正文：撤回后任何迟到成功都不再复活旧投影。
+    pub availability: &'static str,
+    pub entry: Option<PublicCacheCardEntryDto>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PublicCacheErrorCode {
     /// 契约错误码全集（与 contracts/desktop-ipc 一致）。`invalid-request`
-    /// 目前仅由 serde `deny_unknown_fields`/域校验在参数层拒绝——Rust 侧
-    /// 到达这里的入参已合法，因此该变体暂不构造；保留它是为 wire 契约
-    /// 与后续命令语义留完整枚举面。
-    #[allow(dead_code)]
+    /// 由读取命令的参数域校验构造——renderer 传参不可信，native 侧仍按
+    /// 固定枚举域重校验，而不是把任意字符串拼进 SQL。
     InvalidRequest,
     StorageUnavailable,
     InternalError,
@@ -325,6 +417,10 @@ struct CacheInner {
     /// 最近一次写盘失败的熔断截止时刻；窗口内需要写盘的捕获/撤回直接
     /// 报告 `unavailable` 而不重撞同一磁盘错误。`clear` 成功后复位。
     write_cooldown_until: Option<std::time::Instant>,
+    /// 本次进程内已触碰过 `last_used_at` 的 `scope\0card_id` 键——
+    /// LRU 证据只需要粗粒度事实，同一进程内每卡触碰一次足够表达
+    /// 「最近被用过」，避免把每次正文读取都变成一次写事务。
+    touched_keys: BTreeSet<String>,
 }
 
 /// native 侧共享状态本体：`Mutex` 保证单连接单写者。
@@ -359,6 +455,7 @@ impl PublicReadCache {
                     conn: ConnState::Closed,
                     policy: PublicCachePolicyDto::default(),
                     write_cooldown_until: None,
+                    touched_keys: BTreeSet::new(),
                 }),
             }),
         }
@@ -599,6 +696,194 @@ impl PublicReadCache {
             freed_bytes: freed,
         })
     }
+
+    /// `public_read_cache_query`：在本机已捕获集合上复用公开 summary
+    /// 查询语义做离线搜索/筛选/排序/分页。只读 `availability='known'`
+    /// 且 `scope` 等于当前云 origin 的行；`total`/`body_count` 是匹配
+    /// 缓存数，renderer 不得把它说成线上范围（`DESK-CACHE-004`）。
+    pub fn query(
+        &self,
+        scope: &str,
+        dto: &PublicCacheQueryDto,
+    ) -> Result<PublicCacheQueryResult, PublicCacheError> {
+        // 参数域先校验：契约 schema 已挡一道，native 侧对 renderer 不
+        // 授信——非法值必须是 invalid-request，而不是被静默拼进 SQL。
+        let plan = build_query_plan(scope, dto)?;
+        let mut inner = self.lock()?;
+        let empty = |status: &'static str| PublicCacheQueryResult {
+            status,
+            entries: Vec::new(),
+            total: 0,
+            body_count: 0,
+        };
+        match read_gate(&mut inner, &self.shared.path) {
+            ReadGate::Empty => return Ok(empty("empty")),
+            ReadGate::Unavailable => return Ok(empty("unavailable")),
+            ReadGate::UnsupportedSchema => return Ok(empty("unsupported-schema")),
+            ReadGate::Open => {}
+        }
+        let inner_ref = &mut *inner;
+        let ConnState::Open(conn) = &mut inner_ref.conn else {
+            return Ok(empty("unavailable"));
+        };
+        let count_sql = format!(
+            "SELECT COUNT(*), COALESCE(SUM(card_json IS NOT NULL), 0) FROM cards WHERE {}",
+            plan.where_sql
+        );
+        let (total, body_count): (u64, u64) = conn
+            .query_row(&count_sql, params_from_iter(bind_refs(&plan.binds)), |row| {
+                Ok((
+                    row.get::<_, i64>(0)? as u64,
+                    row.get::<_, i64>(1)? as u64,
+                ))
+            })
+            .map_err(|_| {
+                PublicCacheError::new(PublicCacheErrorCode::StorageUnavailable, "缓存计数查询失败")
+            })?;
+        let list_sql = format!(
+            "SELECT summary_json, card_json IS NOT NULL, summary_updated_at, body_updated_at, \
+             last_success_at FROM cards WHERE {} ORDER BY {} LIMIT ? OFFSET ?",
+            plan.where_sql, plan.order_sql
+        );
+        let mut page_binds = plan.binds;
+        page_binds.push(Box::new(i64::from(plan.limit)));
+        page_binds.push(Box::new(i64::from(plan.offset)));
+        let mut stmt = conn.prepare(&list_sql).map_err(|_| {
+            PublicCacheError::new(PublicCacheErrorCode::StorageUnavailable, "缓存读取准备失败")
+        })?;
+        let rows = stmt
+            .query_map(params_from_iter(bind_refs(&page_binds)), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)? != 0,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            })
+            .map_err(|_| {
+                PublicCacheError::new(PublicCacheErrorCode::StorageUnavailable, "缓存读取失败")
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| {
+                PublicCacheError::new(PublicCacheErrorCode::StorageUnavailable, "缓存行读取失败")
+            })?;
+        let mut entries = Vec::with_capacity(rows.len());
+        for (summary, has_body, summary_updated_at, body_updated_at, last_success_at) in rows {
+            let card = serde_json::from_str(&summary).map_err(|_| {
+                PublicCacheError::new(PublicCacheErrorCode::StorageUnavailable, "缓存摘要损坏")
+            })?;
+            entries.push(PublicCacheEntryDto {
+                card,
+                has_body,
+                last_success_at,
+                summary_updated_at,
+                body_updated_at,
+            });
+        }
+        Ok(PublicCacheQueryResult {
+            status: "ready",
+            entries,
+            total,
+            body_count,
+        })
+    }
+
+    /// `public_read_cache_card`：按 card_id 取单卡。只读当前 scope 的行；
+    /// `availability` 如实区分「有正文/仅摘要/没有/已撤回」，撤回占位
+    /// 绝不返回正文——撤回后任何迟到成功都不再复活旧投影。
+    ///
+    /// 正文确实交付给 renderer 时记录 `last_used_at`（本次进程内每卡
+    /// 一次的粗粒度触碰）；触碰写失败只损失 LRU 精度，不让已读到的
+    /// 正文失败。
+    pub fn card(
+        &self,
+        scope: &str,
+        request: &PublicCacheCardRequestDto,
+    ) -> Result<PublicCacheCardResult, PublicCacheError> {
+        let card_id = request.card_id.trim();
+        if card_id.is_empty() || card_id.len() > 200 {
+            return Err(PublicCacheError::new(
+                PublicCacheErrorCode::InvalidRequest,
+                "cardId 非法",
+            ));
+        }
+        let mut inner = self.lock()?;
+        let empty = |status: &'static str| PublicCacheCardResult {
+            status,
+            availability: "absent",
+            entry: None,
+        };
+        match read_gate(&mut inner, &self.shared.path) {
+            ReadGate::Empty => return Ok(empty("empty")),
+            ReadGate::Unavailable => return Ok(empty("unavailable")),
+            ReadGate::UnsupportedSchema => return Ok(empty("unsupported-schema")),
+            ReadGate::Open => {}
+        }
+        let inner_ref = &mut *inner;
+        let ConnState::Open(conn) = &mut inner_ref.conn else {
+            return Ok(empty("unavailable"));
+        };
+        let row = conn
+            .query_row(
+                "SELECT availability, card_json, body_updated_at, last_success_at FROM cards \
+                 WHERE card_id = ? AND source_scope = ?",
+                params![card_id, scope],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|_| {
+                PublicCacheError::new(PublicCacheErrorCode::StorageUnavailable, "缓存单卡读取失败")
+            })?;
+        let Some((availability, card_json, body_updated_at, last_success_at)) = row else {
+            return Ok(PublicCacheCardResult {
+                status: "ready",
+                availability: "absent",
+                entry: None,
+            });
+        };
+        if availability != "known" {
+            // 已确认撤回——占位标记本身就是「该卡不可再作为公开替代」的证据。
+            return Ok(PublicCacheCardResult {
+                status: "ready",
+                availability: "withdrawn",
+                entry: None,
+            });
+        }
+        let Some(card_json) = card_json else {
+            return Ok(PublicCacheCardResult {
+                status: "ready",
+                availability: "summary-only",
+                entry: None,
+            });
+        };
+        let card: serde_json::Value = serde_json::from_str(&card_json).map_err(|_| {
+            PublicCacheError::new(PublicCacheErrorCode::StorageUnavailable, "缓存正文损坏")
+        })?;
+        let touch_key = format!("{scope}\u{0}{card_id}");
+        if inner_ref.touched_keys.insert(touch_key) {
+            let _ = conn.execute(
+                "UPDATE cards SET last_used_at = ? WHERE card_id = ? AND source_scope = ?",
+                params![now_rfc3339(), card_id, scope],
+            );
+        }
+        Ok(PublicCacheCardResult {
+            status: "ready",
+            availability: "full",
+            entry: Some(PublicCacheCardEntryDto {
+                card,
+                body_updated_at,
+                last_success_at,
+            }),
+        })
+    }
 }
 
 impl PublicCacheStats {
@@ -607,6 +892,236 @@ impl PublicCacheStats {
         self.applied_policy = policy;
         self
     }
+}
+
+/* ── 读路径（K2）───────────────────────────────────────────────────────── */
+
+/// 读路径的入口分流（与 `stats` 同口径）：文件还没建过就是 `empty`，
+/// 失败态如实回显而不是伪装成空结果；文件存在但连接未开则惰性打开，
+/// 未知 schema 照旧落到 `UnsupportedSchema`。
+enum ReadGate {
+    Empty,
+    Unavailable,
+    UnsupportedSchema,
+    Open,
+}
+
+fn read_gate(inner: &mut CacheInner, path: &Path) -> ReadGate {
+    match &inner.conn {
+        ConnState::Failed(OpenFailure::UnsupportedSchema) => return ReadGate::UnsupportedSchema,
+        ConnState::Failed(OpenFailure::Storage) => return ReadGate::Unavailable,
+        _ => {}
+    }
+    if matches!(inner.conn, ConnState::Closed) && !path.exists() {
+        return ReadGate::Empty;
+    }
+    if matches!(inner.conn, ConnState::Closed) {
+        let _ = ensure_open(inner, path);
+    }
+    match &inner.conn {
+        ConnState::Open(_) => ReadGate::Open,
+        ConnState::Failed(OpenFailure::UnsupportedSchema) => ReadGate::UnsupportedSchema,
+        _ => ReadGate::Unavailable,
+    }
+}
+
+fn invalid_request(message: &'static str) -> PublicCacheError {
+    PublicCacheError::new(PublicCacheErrorCode::InvalidRequest, message)
+}
+
+/// Web 侧数值筛选沿用字符串参数形态（`minLikes='10'`）；缓存读路径解析
+/// 失败是 invalid-request，不静默当零。
+fn parse_counter_param(value: Option<&String>) -> Result<Option<i64>, PublicCacheError> {
+    let Some(raw) = value else {
+        return Ok(None);
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    trimmed
+        .parse::<u64>()
+        .map(|n| Some(n.min(i64::MAX as u64) as i64))
+        .map_err(|_| invalid_request("数值筛选必须是数字"))
+}
+
+fn bind_refs(binds: &[Box<dyn ToSql>]) -> Vec<&dyn ToSql> {
+    binds.iter().map(|b| b.as_ref()).collect()
+}
+
+const CACHE_QUERY_TYPES: &[&str] = &["character", "scenario", "history", "questionnaire"];
+const CACHE_QUERY_SORTS: &[&str] = &["likes", "usage", "favorites", "created_at"];
+const CACHE_QUERY_ROLE_TYPES: &[&str] = &["magical-girl", "canshou", "general"];
+
+struct QueryPlan {
+    where_sql: String,
+    binds: Vec<Box<dyn ToSql>>,
+    order_sql: String,
+    limit: u32,
+    offset: u32,
+}
+
+/// 把公开 summary 查询参数翻译成固定形态的参数化 SQL。所有谓词都出自
+/// 下面的字面量模板，renderer 字段只进 bind——没有可注入面。
+/// 排序与 `data-card-summaries` 对齐：metric → `COALESCE(updated_at,
+/// created_at)` → `card_id`，全部 DESC。
+fn build_query_plan(scope: &str, dto: &PublicCacheQueryDto) -> Result<QueryPlan, PublicCacheError> {
+    if dto.limit == 0 || dto.limit > 100 {
+        return Err(invalid_request("limit 超出 1..=100"));
+    }
+    if let Some(t) = &dto.r#type {
+        if !CACHE_QUERY_TYPES.contains(&t.as_str()) {
+            return Err(invalid_request("未知数据卡类型"));
+        }
+    }
+    if !CACHE_QUERY_SORTS.contains(&dto.sort_by.as_str()) {
+        return Err(invalid_request("未知排序"));
+    }
+    if let Some(rt) = &dto.role_type {
+        if !CACHE_QUERY_ROLE_TYPES.contains(&rt.as_str()) {
+            return Err(invalid_request("未知角色类型"));
+        }
+    }
+    if let Some(tm) = &dto.tag_match {
+        if tm != "any" && tm != "all" {
+            return Err(invalid_request("未知 tagMatch"));
+        }
+    }
+    if let Some(search) = &dto.search {
+        if search.trim().chars().count() > 200 {
+            return Err(invalid_request("搜索词过长"));
+        }
+    }
+    if let Some(author) = &dto.author {
+        if author.trim().is_empty() || author.len() > 200 {
+            return Err(invalid_request("作者筛选非法"));
+        }
+    }
+    if let Some(tag_ids) = &dto.tag_ids {
+        if tag_ids.is_empty() || tag_ids.len() > 32 {
+            return Err(invalid_request("标签数量超界"));
+        }
+        for id in tag_ids {
+            if id.trim().is_empty() || id.len() > 200 {
+                return Err(invalid_request("标签 id 非法"));
+            }
+        }
+    }
+    let min_likes = parse_counter_param(dto.min_likes.as_ref())?;
+    let max_likes = parse_counter_param(dto.max_likes.as_ref())?;
+    let min_usage = parse_counter_param(dto.min_usage.as_ref())?;
+    let max_usage = parse_counter_param(dto.max_usage.as_ref())?;
+    let min_favorites = parse_counter_param(dto.min_favorites.as_ref())?;
+    let max_favorites = parse_counter_param(dto.max_favorites.as_ref())?;
+
+    let mut wheres: Vec<String> = vec![
+        "source_scope = ?".to_string(),
+        "availability = 'known'".to_string(),
+        "json_valid(summary_json)".to_string(),
+    ];
+    let mut binds: Vec<Box<dyn ToSql>> = vec![Box::new(scope.to_string())];
+    if let Some(t) = &dto.r#type {
+        wheres.push("json_extract(summary_json, '$.type') = ?".to_string());
+        binds.push(Box::new(t.clone()));
+    }
+    if let Some(search) = &dto.search {
+        let term = search.trim();
+        if !term.is_empty() {
+            // 与服务端 `like` 同语义：不带 ESCAPE 的 %term% 模糊匹配。
+            let kw = format!("%{term}%");
+            wheres.push(
+                "(card_id LIKE ? OR json_extract(summary_json, '$.name') LIKE ? \
+                 OR json_extract(summary_json, '$.description') LIKE ?)"
+                    .to_string(),
+            );
+            binds.push(Box::new(kw.clone()));
+            binds.push(Box::new(kw.clone()));
+            binds.push(Box::new(kw));
+        }
+    }
+    if let Some(author) = &dto.author {
+        wheres.push("json_extract(summary_json, '$.username') = ?".to_string());
+        binds.push(Box::new(author.trim().to_string()));
+    }
+    for (field, bound, op) in [
+        ("like_count", min_likes, ">="),
+        ("like_count", max_likes, "<="),
+        ("usage_count", min_usage, ">="),
+        ("usage_count", max_usage, "<="),
+        ("favorite_count", min_favorites, ">="),
+        ("favorite_count", max_favorites, "<="),
+    ] {
+        if let Some(value) = bound {
+            // CAST 兜底字符串形态的计数：服务端契约保证 int，但缓存行
+            // 只认数字口径，未知形态当 0 而不是 TEXT 比较出错序。
+            wheres.push(format!(
+                "COALESCE(CAST(json_extract(summary_json, '$.{field}') AS INTEGER), 0) {op} ?"
+            ));
+            binds.push(Box::new(value));
+        }
+    }
+    if let Some(rt) = &dto.role_type {
+        wheres.push("json_extract(summary_json, '$.roleType') = ?".to_string());
+        binds.push(Box::new(rt.clone()));
+    }
+    if dto.recommended_only == Some(true) {
+        wheres.push("json_extract(summary_json, '$.is_recommended') = 1".to_string());
+    }
+    if dto.native_allowed_only == Some(true) {
+        wheres.push("json_extract(summary_json, '$.nativeAllowed') = 1".to_string());
+    }
+    if let Some(tag_ids) = &dto.tag_ids {
+        let ids: Vec<String> = tag_ids
+            .iter()
+            .map(|id| id.trim().to_string())
+            .filter(|id| !id.is_empty())
+            .collect();
+        if !ids.is_empty() {
+            if dto.tag_match.as_deref() == Some("all") {
+                // 服务端 'all' 是逐标签 EXISTS 的 AND——逐条展开对齐。
+                for id in ids {
+                    wheres.push(
+                        "EXISTS (SELECT 1 FROM \
+                         json_each(COALESCE(json_extract(summary_json, '$.tag_ids'), '[]')) \
+                         WHERE value = ?)"
+                            .to_string(),
+                    );
+                    binds.push(Box::new(id));
+                }
+            } else {
+                let placeholders = vec!["?"; ids.len()].join(",");
+                wheres.push(format!(
+                    "EXISTS (SELECT 1 FROM \
+                     json_each(COALESCE(json_extract(summary_json, '$.tag_ids'), '[]')) \
+                     WHERE value IN ({placeholders}))"
+                ));
+                for id in ids {
+                    binds.push(Box::new(id));
+                }
+            }
+        }
+    }
+    let sort_expr = match dto.sort_by.as_str() {
+        "likes" => "COALESCE(CAST(json_extract(summary_json, '$.like_count') AS INTEGER), 0)",
+        "usage" => "COALESCE(CAST(json_extract(summary_json, '$.usage_count') AS INTEGER), 0)",
+        "favorites" => "COALESCE(CAST(json_extract(summary_json, '$.favorite_count') AS INTEGER), 0)",
+        // 'created_at' 排序的服务端映射键是 summary.created_at；
+        // 缺失时回落 updated_at 与稳定次序保持一致。
+        _ => "COALESCE(json_extract(summary_json, '$.created_at'), \
+               json_extract(summary_json, '$.updated_at'), '')",
+    };
+    let order_sql = format!(
+        "{sort_expr} DESC, \
+         COALESCE(summary_updated_at, json_extract(summary_json, '$.created_at'), '') DESC, \
+         card_id DESC"
+    );
+    Ok(QueryPlan {
+        where_sql: wheres.join(" AND "),
+        binds,
+        order_sql,
+        limit: dto.limit,
+        offset: dto.offset,
+    })
 }
 
 /* ── 打开与迁移 ────────────────────────────────────────────────────────── */
@@ -2582,6 +3097,280 @@ mod tests {
         // 过后恢复——这里验证锁释放后缓存本身并未损坏。
         let stats = cache.stats().expect("stats still readable");
         assert_eq!(stats.status, "ready");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /* ── K2 读路径 ─────────────────────────────────────────────────────── */
+
+    fn query_dto() -> PublicCacheQueryDto {
+        PublicCacheQueryDto {
+            r#type: None,
+            limit: 24,
+            offset: 0,
+            sort_by: "created_at".to_string(),
+            search: None,
+            tag_ids: None,
+            tag_match: None,
+            author: None,
+            min_likes: None,
+            max_likes: None,
+            min_usage: None,
+            max_usage: None,
+            min_favorites: None,
+            max_favorites: None,
+            role_type: None,
+            recommended_only: None,
+            native_allowed_only: None,
+        }
+    }
+
+    fn card_req(id: &str) -> PublicCacheCardRequestDto {
+        PublicCacheCardRequestDto {
+            card_id: id.to_string(),
+        }
+    }
+
+    fn capture_summaries(cache: &PublicReadCache, items: Vec<serde_json::Value>) {
+        let outcome = observe(
+            cache,
+            &summary_query(),
+            Some(PUBLIC_CC),
+            200,
+            &summary_page(items),
+        );
+        assert_eq!(outcome.outcome, CacheOutcomeKind::Captured);
+    }
+
+    fn capture_card(cache: &PublicReadCache, id: &str, data: &str) {
+        let outcome = observe(
+            cache,
+            &single_query(id),
+            Some(PUBLIC_CC),
+            200,
+            &single_card(id, data, "2026-10-02T00:00:00Z"),
+        );
+        assert_eq!(outcome.outcome, CacheOutcomeKind::Captured);
+    }
+
+    fn entry_id(entry: &PublicCacheEntryDto) -> &str {
+        entry
+            .card
+            .get("id")
+            .and_then(|v| v.as_str())
+            .expect("entry id")
+    }
+
+    #[test]
+    fn query_reports_states_then_serves_captured_summaries() {
+        let root = scratch("k2-query-states");
+        let cache = PublicReadCache::at(&root);
+        // 还没建过缓存文件：empty，不为一次查询先造库。
+        let result = cache.query(SCOPE, &query_dto()).expect("query");
+        assert_eq!(result.status, "empty");
+        assert!(!root.join(PUBLIC_READ_CACHE_FILE).exists());
+
+        enable_capture(&cache);
+        capture_summaries(
+            &cache,
+            vec![summary_item("a", "Alice", "2026-10-02T00:00:00Z")],
+        );
+        let result = cache.query(SCOPE, &query_dto()).expect("query");
+        assert_eq!(result.status, "ready");
+        assert_eq!(result.total, 1);
+        assert_eq!(result.body_count, 0);
+        assert_eq!(entry_id(&result.entries[0]), "a");
+        assert!(!result.entries[0].has_body);
+        // scope 之外没有行——缓存读取限定在当前云 origin。
+        let other = cache
+            .query("https://other.example.test", &query_dto())
+            .expect("other scope");
+        assert_eq!(other.total, 0);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn query_filters_sorts_and_paginates_like_public_summary() {
+        let root = scratch("k2-query-filters");
+        let cache = PublicReadCache::at(&root);
+        enable_capture(&cache);
+        let mut a = summary_item("a", "Alice 魔法", "2026-10-02T00:00:00Z");
+        set_field(&mut a, "username", json!("alice-author"));
+        set_field(&mut a, "like_count", json!(10));
+        set_field(&mut a, "tag_ids", json!(["t1", "t2"]));
+        set_field(&mut a, "is_recommended", json!(1));
+        let mut b = summary_item("b", "Bob", "2026-10-03T00:00:00Z");
+        set_field(&mut b, "type", json!("scenario"));
+        set_field(&mut b, "username", json!("bob-author"));
+        set_field(&mut b, "like_count", json!(2));
+        set_field(&mut b, "tag_ids", json!(["t2"]));
+        let mut c = summary_item("c", "Carol 魔法少女", "2026-10-04T00:00:00Z");
+        set_field(&mut c, "username", json!("alice-author"));
+        set_field(&mut c, "like_count", json!(40));
+        set_field(&mut c, "nativeAllowed", json!(false));
+        set_field(&mut c, "roleType", json!("canshou"));
+        set_field(&mut c, "tag_ids", json!(["t3"]));
+        capture_summaries(&cache, vec![a, b, c]);
+
+        // search：id/name/description 模糊匹配（公开 summary 语义）。
+        let mut dto = query_dto();
+        dto.search = Some("魔法".to_string());
+        assert_eq!(cache.query(SCOPE, &dto).unwrap().total, 2);
+        // type 精确匹配。
+        let mut dto = query_dto();
+        dto.r#type = Some("scenario".to_string());
+        assert_eq!(cache.query(SCOPE, &dto).unwrap().total, 1);
+        // author 精确匹配（公开语义是 exact，不是模糊）。
+        let mut dto = query_dto();
+        dto.author = Some("alice-author".to_string());
+        assert_eq!(cache.query(SCOPE, &dto).unwrap().total, 2);
+        // 数值区间（缺失字段 COALESCE 0）。
+        let mut dto = query_dto();
+        dto.min_likes = Some("5".to_string());
+        dto.max_likes = Some("30".to_string());
+        let r = cache.query(SCOPE, &dto).unwrap();
+        assert_eq!(r.total, 1);
+        assert_eq!(entry_id(&r.entries[0]), "a");
+        // tag any：命中任一即可。
+        let mut dto = query_dto();
+        dto.tag_ids = Some(vec!["t1".to_string()]);
+        assert_eq!(cache.query(SCOPE, &dto).unwrap().total, 1);
+        // tag all：必须同时持有 t1 与 t2。
+        let mut dto = query_dto();
+        dto.tag_ids = Some(vec!["t1".to_string(), "t2".to_string()]);
+        dto.tag_match = Some("all".to_string());
+        assert_eq!(cache.query(SCOPE, &dto).unwrap().total, 1);
+        // roleType / recommendedOnly / nativeAllowedOnly。
+        let mut dto = query_dto();
+        dto.role_type = Some("canshou".to_string());
+        assert_eq!(cache.query(SCOPE, &dto).unwrap().total, 1);
+        let mut dto = query_dto();
+        dto.recommended_only = Some(true);
+        assert_eq!(cache.query(SCOPE, &dto).unwrap().total, 1);
+        let mut dto = query_dto();
+        dto.native_allowed_only = Some(true);
+        assert_eq!(cache.query(SCOPE, &dto).unwrap().total, 2);
+
+        // 排序：likes DESC → updated_at DESC → card_id DESC。
+        let mut dto = query_dto();
+        dto.sort_by = "likes".to_string();
+        let r = cache.query(SCOPE, &dto).unwrap();
+        let ids: Vec<&str> = r.entries.iter().map(entry_id).collect();
+        assert_eq!(ids, vec!["c", "a", "b"]);
+        // 分页：total 是全量匹配数，entries 是页切片。
+        let mut dto = query_dto();
+        dto.sort_by = "likes".to_string();
+        dto.limit = 1;
+        dto.offset = 1;
+        let r = cache.query(SCOPE, &dto).unwrap();
+        assert_eq!(r.total, 3);
+        assert_eq!(r.entries.len(), 1);
+        assert_eq!(entry_id(&r.entries[0]), "a");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn card_read_reports_full_summary_only_absent_withdrawn() {
+        let root = scratch("k2-card-availability");
+        let cache = PublicReadCache::at(&root);
+        // 冷启动：文件还没建过 → empty，且不为单卡读造库。
+        let cold = cache.card(SCOPE, &card_req("x")).expect("card");
+        assert_eq!(cold.status, "empty");
+        assert_eq!(cold.availability, "absent");
+        assert!(!root.join(PUBLIC_READ_CACHE_FILE).exists());
+
+        enable_capture(&cache);
+        capture_summaries(
+            &cache,
+            vec![summary_item("sum", "Sum", "2026-10-02T00:00:00Z")],
+        );
+        capture_card(&cache, "full", "{\"x\":1}");
+
+        let full = cache.card(SCOPE, &card_req("full")).expect("full");
+        assert_eq!(full.status, "ready");
+        assert_eq!(full.availability, "full");
+        let entry = full.entry.expect("entry");
+        assert_eq!(
+            entry.card.get("data").and_then(|v| v.as_str()),
+            Some("{\"x\":1}")
+        );
+        // 正文确实交付才写 last_used_at——LRU 的粗粒度使用证据。
+        let conn = Connection::open(root.join(PUBLIC_READ_CACHE_FILE)).expect("open cache file");
+        let last_used: Option<String> = conn
+            .query_row(
+                "SELECT last_used_at FROM cards WHERE card_id = 'full' AND source_scope = ?1",
+                params![SCOPE],
+                |r| r.get(0),
+            )
+            .expect("last_used_at");
+        assert!(last_used.is_some());
+
+        let sum = cache.card(SCOPE, &card_req("sum")).expect("summary-only");
+        assert_eq!(sum.availability, "summary-only");
+        assert!(sum.entry.is_none());
+        let absent = cache.card(SCOPE, &card_req("nope")).expect("absent");
+        assert_eq!(absent.availability, "absent");
+        // 业务撤回：占位标记 → withdrawn，正文绝不返回。
+        let outcome = observe(
+            &cache,
+            &single_query("full"),
+            Some(PUBLIC_CC),
+            404,
+            &withdraw_body(),
+        );
+        assert_eq!(outcome.outcome, CacheOutcomeKind::Withdrawn);
+        let withdrawn = cache.card(SCOPE, &card_req("full")).expect("withdrawn");
+        assert_eq!(withdrawn.availability, "withdrawn");
+        assert!(withdrawn.entry.is_none());
+        // 撤回行也不再出现在摘要查询里。
+        let r = cache.query(SCOPE, &query_dto()).unwrap();
+        assert!(!r.entries.iter().any(|e| entry_id(e) == "full"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn query_rejects_out_of_domain_params() {
+        let root = scratch("k2-query-invalid");
+        let cache = PublicReadCache::at(&root);
+        enable_capture(&cache);
+        capture_summaries(
+            &cache,
+            vec![summary_item("a", "A", "2026-10-02T00:00:00Z")],
+        );
+        let cases: Vec<Box<dyn Fn(&mut PublicCacheQueryDto)>> = vec![
+            Box::new(|d: &mut PublicCacheQueryDto| d.sort_by = "random".to_string()),
+            Box::new(|d: &mut PublicCacheQueryDto| {
+                d.r#type = Some("weapon".to_string());
+            }),
+            Box::new(|d: &mut PublicCacheQueryDto| {
+                d.min_likes = Some("abc".to_string());
+            }),
+            Box::new(|d: &mut PublicCacheQueryDto| d.limit = 0),
+            Box::new(|d: &mut PublicCacheQueryDto| {
+                d.tag_match = Some("some".to_string());
+            }),
+            Box::new(|d: &mut PublicCacheQueryDto| d.tag_ids = Some(vec![])),
+            Box::new(|d: &mut PublicCacheQueryDto| {
+                d.search = Some("x".repeat(300));
+            }),
+        ];
+        for (index, patch) in cases.iter().enumerate() {
+            let mut dto = query_dto();
+            patch(&mut dto);
+            let err = cache
+                .query(SCOPE, &dto)
+                .err()
+                .unwrap_or_else(|| panic!("case {index} must be rejected"));
+            assert_eq!(
+                err.code,
+                PublicCacheErrorCode::InvalidRequest,
+                "case {index}"
+            );
+        }
+        // card_id 同样不接受空值。
+        let err = cache
+            .card(SCOPE, &card_req(""))
+            .expect_err("empty card id");
+        assert_eq!(err.code, PublicCacheErrorCode::InvalidRequest);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

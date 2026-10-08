@@ -1165,12 +1165,14 @@ async fn desktop_config_write(
     })?
 }
 
-/* ── D5.1-K1 公开资料持久只读缓存 ───────────────────────────────────────
+/* ── D5.1-K1/K2 公开资料持久只读缓存 ─────────────────────────────────────
  *
  * `public-read-cache.sqlite` 是与正式本地库物理隔离的派生缓存：renderer
- * 只能推送策略、查统计、清库——记录本身没有 renderer 可见的读取命令
- * （K2 离线降级才开放读取通路）。三条命令一律 `spawn_blocking`：缓存 I/O
- * 不得落在 WebView 主线程上。
+ * 能推送策略、查统计、清库，并经 `public_read_cache_query` /
+ * `public_read_cache_card` 读取抓取时的受控投影（K2 开放）。scope 一律
+ * 由 native 从当前云 origin 推导，renderer 不提供；读取不接收任意
+ * SQL/路径/排序表达式。所有命令一律 `spawn_blocking`：缓存 I/O 不得落
+ * 在 WebView 主线程上。
  */
 
 /// 推送公开缓存策略。renderer 已把 config.json 的归一结果折叠成
@@ -1213,6 +1215,40 @@ async fn public_read_cache_clear(
     })
     .await
     .map_err(|_| public_cache::PublicCacheError::internal("缓存清理任务失败"))?
+}
+
+/// 在本机已捕获集合上做离线搜索/筛选/排序/分页（`DESK-CACHE-004`）。
+/// 参数面与公开 summary 查询对齐但作用域是本机缓存：`total`/`bodyCount`
+/// 是匹配缓存数，不是线上范围。非 ready 的缓存状态如实回显。
+#[tauri::command]
+async fn public_read_cache_query(
+    app: tauri::AppHandle,
+    request: public_cache::PublicCacheQueryDto,
+) -> Result<public_cache::PublicCacheQueryResult, public_cache::PublicCacheError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let scope = app.state::<cloud::CloudState>().origin().to_string();
+        app.state::<public_cache::PublicReadCache>()
+            .query(&scope, &request)
+    })
+    .await
+    .map_err(|_| public_cache::PublicCacheError::internal("缓存查询任务失败"))?
+}
+
+/// 按 card_id 取缓存完整正文。只有 `availability='full'` 时 `entry.card`
+/// 才携带抓取时的公开完整投影；`summary-only`/`absent`/`withdrawn` 都
+/// 如实回显而不是伪装成「卡不存在」。
+#[tauri::command]
+async fn public_read_cache_card(
+    app: tauri::AppHandle,
+    request: public_cache::PublicCacheCardRequestDto,
+) -> Result<public_cache::PublicCacheCardResult, public_cache::PublicCacheError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let scope = app.state::<cloud::CloudState>().origin().to_string();
+        app.state::<public_cache::PublicReadCache>()
+            .card(&scope, &request)
+    })
+    .await
+    .map_err(|_| public_cache::PublicCacheError::internal("缓存单卡读取任务失败"))?
 }
 
 /// 打开固定的配置目录（设置页「显示路径」的配套入口）；不开放任意路径。
@@ -1425,7 +1461,9 @@ pub fn run() {
             desktop_config_open_directory,
             public_read_cache_apply_policy,
             public_read_cache_stats,
-            public_read_cache_clear
+            public_read_cache_clear,
+            public_read_cache_query,
+            public_read_cache_card
         ])
         .run(tauri::generate_context!())
         .expect("error while running MahoShojo Generator desktop app");

@@ -63,6 +63,8 @@
     "allow-desktop-config-open-directory",
     "allow-public-read-cache-apply-policy",
     "allow-public-read-cache-stats",
-    "allow-public-read-cache-clear"
+    "allow-public-read-cache-clear",
+    "allow-public-read-cache-query",
+    "allow-public-read-cache-card"
   ]
 }

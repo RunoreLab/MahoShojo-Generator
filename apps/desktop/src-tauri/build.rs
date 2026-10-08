@@ -69,6 +69,8 @@ fn main() {
             "public_read_cache_apply_policy",
             "public_read_cache_stats",
             "public_read_cache_clear",
+            "public_read_cache_query",
+            "public_read_cache_card",
         ]),
     ))
     .expect("failed to run tauri build script");

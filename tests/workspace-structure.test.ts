@@ -700,6 +700,8 @@ describe('desktop workspace app ownership', () => {
       'public_read_cache_apply_policy',
       'public_read_cache_stats',
       'public_read_cache_clear',
+      'public_read_cache_query',
+      'public_read_cache_card',
     ]);
 
     // renderer 可用的 secret 能力只有写入与存在性；任何读取形态都会让

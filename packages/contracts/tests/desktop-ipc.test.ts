@@ -844,3 +844,90 @@ describe('公开库持久缓存命令（D5.1-K1）', () => {
     }).success).toBe(false);
   });
 });
+
+describe('公开库持久缓存读取命令（D5.1-K2）', () => {
+  it('摘要查询请求只接受已登记字段与合法域', () => {
+    const { DesktopPublicCacheQueryRequestSchema } = desktopIpc;
+    const base = { type: 'character', limit: 24, offset: 0, sortBy: 'likes' };
+    expect(DesktopPublicCacheQueryRequestSchema.safeParse(base).success).toBe(true);
+    expect(DesktopPublicCacheQueryRequestSchema.safeParse({
+      ...base,
+      search: '魔法',
+      tagIds: ['tag-1', 'tag-2'],
+      tagMatch: 'all',
+      author: 'user-a',
+      minLikes: '10',
+      maxUsage: '500',
+      roleType: 'magical-girl',
+      recommendedOnly: true,
+      nativeAllowedOnly: true,
+    }).success).toBe(true);
+
+    for (const bad of [
+      { type: 'weapon' },
+      { limit: 0 },
+      { limit: 101 },
+      { offset: -1 },
+      { sortBy: 'random' },
+      { tagMatch: 'some' },
+      { roleType: 'npc' },
+      { tagIds: [] },
+      { nativeOnly: true }, // 缓存投影没有 isNative，renderer 不得透传
+      { sql: 'DROP TABLE cards' },
+    ]) {
+      expect(
+        DesktopPublicCacheQueryRequestSchema.safeParse({ ...base, ...bad }).success,
+        JSON.stringify(bad),
+      ).toBe(false);
+    }
+  });
+
+  it('摘要查询结果与正文结果的 envelope 形状', () => {
+    const {
+      DesktopPublicCacheQueryResultSchema,
+      DesktopPublicCacheCardRequestSchema,
+      DesktopPublicCacheCardResultSchema,
+    } = desktopIpc;
+    expect(DesktopPublicCacheQueryResultSchema.safeParse({
+      status: 'ready',
+      entries: [{
+        card: { id: 'c1', name: 'x', is_public: 1 },
+        hasBody: true,
+        lastSuccessAt: '2026-10-01T00:00:00Z',
+        summaryUpdatedAt: '2026-09-30T12:00:00Z',
+        bodyUpdatedAt: '2026-09-30T12:00:00Z',
+      }],
+      total: 5,
+      bodyCount: 3,
+    }).success).toBe(true);
+    expect(DesktopPublicCacheQueryResultSchema.safeParse({
+      status: 'empty', entries: [], total: 0, bodyCount: 0,
+    }).success).toBe(true);
+    expect(DesktopPublicCacheQueryResultSchema.safeParse({
+      status: 'ready', entries: 'not-array', total: 0, bodyCount: 0,
+    }).success).toBe(false);
+    // card 投影是记录对象，不允许裸字符串/数组混入正文面。
+    expect(DesktopPublicCacheQueryResultSchema.safeParse({
+      status: 'ready',
+      entries: [{ card: 'raw-json-string', hasBody: false, lastSuccessAt: null, summaryUpdatedAt: null, bodyUpdatedAt: null }],
+      total: 1, bodyCount: 0,
+    }).success).toBe(false);
+
+    expect(DesktopPublicCacheCardRequestSchema.safeParse({ cardId: 'abc' }).success).toBe(true);
+    expect(DesktopPublicCacheCardRequestSchema.safeParse({ cardId: '' }).success).toBe(false);
+    expect(DesktopPublicCacheCardRequestSchema.safeParse({ cardId: 'a', path: '/tmp/x' }).success).toBe(false);
+
+    for (const availability of ['full', 'summary-only', 'absent', 'withdrawn']) {
+      expect(DesktopPublicCacheCardResultSchema.safeParse({
+        status: 'ready',
+        availability,
+        entry: availability === 'full'
+          ? { card: { id: 'c1', data: '{}' }, bodyUpdatedAt: null, lastSuccessAt: '2026-10-01T00:00:00Z' }
+          : null,
+      }).success, availability).toBe(true);
+    }
+    expect(DesktopPublicCacheCardResultSchema.safeParse({
+      status: 'ready', availability: 'gone', entry: null,
+    }).success).toBe(false);
+  });
+});
