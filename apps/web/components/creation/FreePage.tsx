@@ -822,7 +822,7 @@ export function FreePage() {
                   type="button"
                   className="text-red-600 hover:underline"
                   onClick={clearAttachments}
-                  disabled={attachments.length === 0 || submitting || isReadingAttachments}
+                  disabled={submitting || (attachments.length === 0 && !isReadingAttachments)}
                 >
                   清空附件
                 </button>
@@ -847,7 +847,7 @@ export function FreePage() {
                         type="button"
                         className="text-xs text-red-600 hover:underline shrink-0"
                         onClick={() => removeAttachment(item.id)}
-                        disabled={submitting || isReadingAttachments}
+                        disabled={submitting}
                       >
                         移除
                       </button>

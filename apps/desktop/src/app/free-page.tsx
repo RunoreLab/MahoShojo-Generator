@@ -278,7 +278,7 @@ function FreeForm({ session }: { session: FreeSession }) {
                   <button className={actionClass} disabled={isReadingAttachments} onClick={() => attachmentInputRef.current?.click()}>
                     {isReadingAttachments ? '正在读取附件…' : '添加附件'}
                   </button>
-                  {attachments.length > 0 && <button className={actionClass} onClick={clearAttachments}>清空附件</button>}
+                  {(attachments.length > 0 || isReadingAttachments) && <button className={actionClass} onClick={clearAttachments}>清空附件</button>}
                 </div>
                 <p className="text-xs text-(--app-text-muted)">
                   仅文本内容会随提示词发送；单文件 {formatBytes(FREE_GENERATION_ATTACHMENT_LIMITS.maxBytesPerFile)} / 全部 {formatBytes(FREE_GENERATION_ATTACHMENT_LIMITS.maxBytesTotal)} 上限，超长部分截断后标记「已截断」。
