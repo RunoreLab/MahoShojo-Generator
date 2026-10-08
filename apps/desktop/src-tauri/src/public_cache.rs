@@ -731,12 +731,11 @@ impl PublicReadCache {
             plan.where_sql
         );
         let (total, body_count): (u64, u64) = conn
-            .query_row(&count_sql, params_from_iter(bind_refs(&plan.binds)), |row| {
-                Ok((
-                    row.get::<_, i64>(0)? as u64,
-                    row.get::<_, i64>(1)? as u64,
-                ))
-            })
+            .query_row(
+                &count_sql,
+                params_from_iter(bind_refs(&plan.binds)),
+                |row| Ok((row.get::<_, i64>(0)? as u64, row.get::<_, i64>(1)? as u64)),
+            )
             .map_err(|_| {
                 PublicCacheError::new(PublicCacheErrorCode::StorageUnavailable, "缓存计数查询失败")
             })?;
@@ -1104,11 +1103,15 @@ fn build_query_plan(scope: &str, dto: &PublicCacheQueryDto) -> Result<QueryPlan,
     let sort_expr = match dto.sort_by.as_str() {
         "likes" => "COALESCE(CAST(json_extract(summary_json, '$.like_count') AS INTEGER), 0)",
         "usage" => "COALESCE(CAST(json_extract(summary_json, '$.usage_count') AS INTEGER), 0)",
-        "favorites" => "COALESCE(CAST(json_extract(summary_json, '$.favorite_count') AS INTEGER), 0)",
+        "favorites" => {
+            "COALESCE(CAST(json_extract(summary_json, '$.favorite_count') AS INTEGER), 0)"
+        }
         // 'created_at' 排序的服务端映射键是 summary.created_at；
         // 缺失时回落 updated_at 与稳定次序保持一致。
-        _ => "COALESCE(json_extract(summary_json, '$.created_at'), \
-               json_extract(summary_json, '$.updated_at'), '')",
+        _ => {
+            "COALESCE(json_extract(summary_json, '$.created_at'), \
+               json_extract(summary_json, '$.updated_at'), '')"
+        }
     };
     let order_sql = format!(
         "{sort_expr} DESC, \
@@ -3332,11 +3335,9 @@ mod tests {
         let root = scratch("k2-query-invalid");
         let cache = PublicReadCache::at(&root);
         enable_capture(&cache);
-        capture_summaries(
-            &cache,
-            vec![summary_item("a", "A", "2026-10-02T00:00:00Z")],
-        );
-        let cases: Vec<Box<dyn Fn(&mut PublicCacheQueryDto)>> = vec![
+        capture_summaries(&cache, vec![summary_item("a", "A", "2026-10-02T00:00:00Z")]);
+        type QueryPatch = Box<dyn Fn(&mut PublicCacheQueryDto)>;
+        let cases: Vec<QueryPatch> = vec![
             Box::new(|d: &mut PublicCacheQueryDto| d.sort_by = "random".to_string()),
             Box::new(|d: &mut PublicCacheQueryDto| {
                 d.r#type = Some("weapon".to_string());
@@ -3367,9 +3368,7 @@ mod tests {
             );
         }
         // card_id 同样不接受空值。
-        let err = cache
-            .card(SCOPE, &card_req(""))
-            .expect_err("empty card id");
+        let err = cache.card(SCOPE, &card_req("")).expect_err("empty card id");
         assert_eq!(err.code, PublicCacheErrorCode::InvalidRequest);
         let _ = std::fs::remove_dir_all(&root);
     }
