@@ -636,6 +636,12 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   const confirmCopy = confirmRegenerate === false
     ? null
     : describeRegenerateConfirm(pendingActionRef.current, confirmRegenerate);
+  // 签名标签与本地保存消费同一份会话层投影（G2-r1 复审，scenario 同口径）。
+  const resultSignatureLabel = session.resultSignatureKind() === 'official-signed'
+    ? '官方签名'
+    : session.resultSignatureKind() === 'signature-unverified'
+      ? '含签名字段（本机未验证）'
+      : '未签名';
   return (
     <div className="blue-theme">
       <section data-testid="page-details" className="magic-background">
@@ -910,9 +916,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
                   {state.cardKind === 'general'
                     ? (typeof state.card.name === 'string' && state.card.name ? state.card.name : '未命名角色')
                     : (typeof state.card.codename === 'string' && state.card.codename ? state.card.codename : '未命名魔法少女')}
-                  {' · '}{typeof state.card.signature === 'string' && state.card.signature
-                    ? (state.resultRestored ? '含签名字段（本机未验证）' : '官方签名')
-                    : '未签名'}
+                  {' · '}{resultSignatureLabel}
                 </h2>
                 {state.cardKind === 'general'
                   ? <GeneralCharacterCard

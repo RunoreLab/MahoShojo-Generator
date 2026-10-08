@@ -248,8 +248,18 @@ export class DesktopGenerationSession<
         this.scheduleDraftSave();
       });
       if (this.disposed) return;
+      // 先把执行器带回的正文落进状态再进入分支处理：completed 分支的家族
+      // validateCard 可能再次抛错，hosted-json 没有增量正文回调——不先落库
+      // （状态意义上），catch 里的 this.state.rawText 仍是空串，已取得的
+      // 原文会随异常一并丢失（D5.1-G2-r1 复审）。
+      this.publish({ rawText: outcome.rawText });
       if (outcome.status === 'completed' && !controller.signal.aborted) {
-        this.publish({ phase: 'completed', card: this.family.validateCard(outcome.cardKind, outcome.card), cardKind: outcome.cardKind, resultRestored: false, reasoning: outcome.reasoning ?? null, rawText: outcome.rawText, message: '生成完成，可保存到本地卡库。' });
+        const card = clone(outcome.card);
+        // 签名只可能来自本会话派发的 hosted-json 通路；其余意图的结果中混入
+        // 签名字段一律剥除——与 parseDraft 对非 hosted 草稿的既有处理同一条
+        // 不变量，两个入口（新鲜响应/草稿恢复）对称执行（G2-r1 复审）。
+        if (this.mode !== 'hosted-json') this.family.stripSignature(card);
+        this.publish({ phase: 'completed', card: this.family.validateCard(outcome.cardKind, card), cardKind: outcome.cardKind, resultRestored: false, reasoning: outcome.reasoning ?? null, rawText: outcome.rawText, message: '生成完成，可保存到本地卡库。' });
       } else if (outcome.status === 'uncertain') {
         // uncertain 不落入 failed/cancelled：服务器是否已执行无从确认，
         // 提示语里必须包含「可能重复调用与费用」的警告，供再生成时复述。
@@ -290,6 +300,33 @@ export class DesktopGenerationSession<
     this.publish({ phase: 'idle', rawText: '', card: null, cardKind: this.family.defaultCardKind, resultRestored: false, reasoning: null, message: null, saveStatus: 'idle', saveError: null, draftSaved: false });
     this.retryDraftSave();
   }
+  /**
+   * 签名可信度唯一投影（G2-r1 复审收口）：签名字段是否存在是卡的事实
+   * （`family.signatureFrom`），可信级别是通路的事实——只有本会话以
+   * hosted-json 意图派发取得的新鲜响应才可记 official-signed；从可编辑
+   * localStorage 草稿恢复、或经非签名通路混入的签名字段一律
+   * signature-unverified（本机未验证）。结果标题标签与 saveResult 的
+   * provenance 都经此取数，页面不得再各自解释签名字段。
+   */
+  private signatureDisposition(
+    kind: TCardKind,
+    card: GenerationResultCardData | null,
+  ):
+    | { kind: 'official-signed' | 'signature-unverified'; signature: string }
+    | { kind: 'unsigned'; signature?: undefined } {
+    const signature = card === null ? undefined : this.family.signatureFrom(kind, card);
+    if (signature === undefined) return { kind: 'unsigned' };
+    return {
+      signature,
+      kind: this.mode === 'hosted-json' && !this.state.resultRestored
+        ? 'official-signed'
+        : 'signature-unverified',
+    };
+  }
+  /** 当前结果卡的签名可信度（生成结果标题/标签消费，与 saveResult 同源）。 */
+  resultSignatureKind(): 'official-signed' | 'signature-unverified' | 'unsigned' {
+    return this.signatureDisposition(this.state.cardKind, this.state.card).kind;
+  }
   async saveResult(): Promise<boolean> {
     if (this.disposed || this.state.saving || this.controller || this.state.phase !== 'completed' || !this.state.card) return false;
     const card = clone(this.state.card);
@@ -302,13 +339,11 @@ export class DesktopGenerationSession<
       if (this.disposed) return false;
       const now = new Date().toISOString();
       const execution = modeExecutionProvenance(mode);
-      // 签名只可能来自 hosted-json 通路的新鲜响应；签名字段的归属（顶层
-      // `signature` 或 `metadata.signature`）由各家族 `signatureFrom` 判定。
-      const signature = mode === 'hosted-json' ? this.family.signatureFrom(cardKind, data) : undefined;
+      // 签名归属走同一份投影：official-signed 仅当本会话 hosted-json 新鲜
+      // 响应；其余携带签名字段的情形如实记 signature-unverified。
+      const disposition = this.signatureDisposition(cardKind, data);
       const title = this.family.titleOf(cardKind, data);
-      // 签名字段只如实记录来源：新鲜 hosted 响应 → official-signed；
-      // 从可编辑 localStorage 草稿恢复的签名卡 → signature-unverified（本机未验证）。
-      const record = LocalCardRecordV1Schema.parse({ id: deriveLocalDataCardIdV1(digest), schemaVersion: 1, storageLocation: 'local', cardType: this.family.cardTypeOf(cardKind), title, data, contentDigest: digest, provenance: signature ? { kind: this.state.resultRestored ? 'signature-unverified' : 'official-signed', signature, execution } : { kind: 'unsigned', execution }, createdAt: now, updatedAt: now });
+      const record = LocalCardRecordV1Schema.parse({ id: deriveLocalDataCardIdV1(digest), schemaVersion: 1, storageLocation: 'local', cardType: this.family.cardTypeOf(cardKind), title, data, contentDigest: digest, provenance: disposition.signature !== undefined ? { kind: disposition.kind, signature: disposition.signature, execution } : { kind: 'unsigned', execution }, createdAt: now, updatedAt: now });
       const result = await this.dependencies.repository.putIfAbsent(record);
       this.publish({ saveStatus: 'written' in result ? 'saved' : 'already-present' });
       return !this.disposed;

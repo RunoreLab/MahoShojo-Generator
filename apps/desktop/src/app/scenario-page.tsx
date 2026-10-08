@@ -194,16 +194,14 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
   const cardKind: ScenarioCardKind = state.cardKind;
   const resultJsonName = card ? resolveResultJsonFileName(card) : 'data.json';
   const confirmCopy = confirmRegenerate === false ? null : describeRegenerateConfirm(confirmRegenerate);
-  // 结构化情景 hosted-json 卡可由服务器签名；其余通路永不签名（与 Web 同口径）。
-  const cardSignature = card && cardKind === 'scenario' && typeof card.metadata === 'object' && card.metadata !== null
-    ? (card.metadata as Record<string, unknown>).signature
-    : undefined;
-  // 签名标签统一按会话层 provenance 判定：含签名字段只陈述「字符串存在」——
-  // 新鲜 hosted-json 响应才可称服务器签名来源；从可编辑 localStorage 恢复的
-  // 卡一律记本机未验证（与 details/canshou 同一口径，G2-r1 复审）。
-  const resultSignatureLabel = typeof cardSignature === 'string' && cardSignature.trim()
-    ? (state.resultRestored ? '含签名字段（本机未验证）' : '官方签名（服务器生成）')
-    : '未签名（非原生卡）';
+  // 签名标签与本地保存消费同一份会话层投影（G2-r1 复审）：签名字段是否
+  // 存在、是否本会话 hosted-json 意图的新鲜响应、是否从可编辑草稿恢复，
+  // 统一由会话层判定——页面不再各自读签名字段自行推断（details/canshou 同）。
+  const resultSignatureLabel = session.resultSignatureKind() === 'official-signed'
+    ? '官方签名（服务器生成）'
+    : session.resultSignatureKind() === 'signature-unverified'
+      ? '含签名字段（本机未验证）'
+      : '未签名（非原生卡）';
   return (
     <div>
       <section data-testid="page-scenario" className="magic-background-white">

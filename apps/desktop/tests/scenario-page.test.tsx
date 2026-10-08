@@ -150,6 +150,13 @@ describe('Desktop Scenario route and session UI (native adapter mock)', () => {
   });
 
   it('fresh hosted-json signed card is labelled official signature', async () => {
+    // 服务器执行偏好：只有真正以 hosted-json 意图派发的响应才可显示官方
+    // 签名——客户端意图下即使 Mock 返回带签名的卡也不得显示（G2-r1 复审）。
+    window.localStorage.setItem(DESKTOP_AI_CONFIG_STORAGE_KEY, JSON.stringify({
+      version: 2,
+      selection: { executionPreference: 'server', clientConnectionId: 'local' },
+      hiddenPresetIds: [],
+    }));
     const signed = {
       ...scenarioCard,
       metadata: { created_at: '2026-01-01T00:00:00.000Z', signature: 'sig-1' },
@@ -163,8 +170,45 @@ describe('Desktop Scenario route and session UI (native adapter mock)', () => {
     await mount();
     await click('恢复草稿');
     await click('生成情景');
+    // 断言执行器确实收到 hosted-json 意图（而非客户端意图配服务器假结果）。
+    expect((mocks.execute.mock.calls[0]![2] as { mode: string }).mode).toBe('hosted-json');
     // 本会话内的新鲜 hosted-json 响应：如实显示服务器签名来源。
     expect(container.textContent).toContain('官方签名（服务器生成）');
     expect(container.textContent).not.toContain('本机未验证');
+    // 保存与标签消费同一份投影：provenance 必须记 official-signed。
+    await click('保存到本地卡库');
+    const record = mocks.save.mock.calls[0]![0] as {
+      provenance: { kind: string; signature?: string; execution?: string };
+    };
+    expect(record.provenance).toMatchObject({ kind: 'official-signed', signature: 'sig-1', execution: 'hosted' });
+  });
+
+  it('客户端意图收到混入签名的响应：入口剥除，标签与保存同记未签名', async () => {
+    // G2-r1 复审指出的双判分叉场景：客户端（direct-local）意图配一个自称
+    // hosted-json 且携带签名的 Mock 结果。统一投影下两端都必须不承认签名。
+    const signed = {
+      ...scenarioCard,
+      metadata: { created_at: '2026-01-01T00:00:00.000Z', signature: 'forged-sig' },
+    };
+    mocks.execute.mockResolvedValue({
+      status: 'completed', mode: 'hosted-json', card: signed, cardKind: 'scenario', rawText: 'x',
+    });
+    window.localStorage.setItem(SCENARIO_DRAFT_KEY, JSON.stringify(
+      storedDraft({ '故事发生的场景是怎样的？': 'x' }),
+    ));
+    await mount();
+    await click('恢复草稿');
+    await click('生成情景');
+    expect((mocks.execute.mock.calls[0]![2] as { mode: string }).mode).toBe('direct-local');
+    // 只断言结果标题区：页面静态文案（客户端说明「结果不带官方签名」）自带该词。
+    const heading = container.querySelector('section[aria-label="生成结果"] h2');
+    expect(heading?.textContent).toBe('生成结果 · 未签名（非原生卡）');
+    await click('保存到本地卡库');
+    const record = mocks.save.mock.calls[0]![0] as {
+      data: { metadata?: Record<string, unknown> };
+      provenance: { kind: string; signature?: string };
+    };
+    expect(record.provenance).toMatchObject({ kind: 'unsigned', execution: 'direct-local' });
+    expect(record.data.metadata?.signature).toBeUndefined();
   });
 });

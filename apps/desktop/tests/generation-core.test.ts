@@ -153,6 +153,76 @@ describe('通用生成执行器（家族无关语义）', () => {
     expect(okOutcome.status).toBe('completed');
     expect(freeInvoke).toHaveBeenCalledTimes(1);
   });
+
+  it('路由预算精确边界：序列化恰在上限放行、+1 字节即拦截（256 KiB / 1 MiB）', async () => {
+    // fake 家族 hosted 请求体固定为 {prompt, extra:null}，JSON 包装开销 26 字节。
+    const overhead = JSON.stringify({ prompt: '', extra: null }).length;
+    const run = (
+      invoke: ReturnType<typeof vi.fn>,
+      prompt: string,
+      jsonRouteId: 'generate-scenario' | 'generate-free',
+    ) => executeDesktopGeneration(
+      { ...fakeExecutorFamily(), jsonRouteId },
+      { invoke, profileId: '' },
+      { prompt },
+      { requestId: 'b', mode: 'hosted-json' },
+      new AbortController().signal,
+    );
+    const okInvoke = () => vi.fn(async () => ({ status: 200, body: { data: { title: 'x' }, aiMeta: null } }));
+
+    // 默认路由（generate-scenario）256 KiB：恰在上限放行，+1 B 不发起调用。
+    const limit256 = 256 * 1024;
+    const atLimit = 'x'.repeat(limit256 - overhead);
+    const atInvoke = okInvoke();
+    await expect(run(atInvoke, atLimit, 'generate-scenario')).resolves.toMatchObject({ status: 'completed' });
+    expect(atInvoke).toHaveBeenCalledTimes(1);
+    const overInvoke = okInvoke();
+    await expect(run(overInvoke, `${atLimit}x`, 'generate-scenario')).resolves.toMatchObject({ status: 'failed', code: 'invalid-request' });
+    expect(overInvoke).not.toHaveBeenCalled();
+
+    // 放宽路由（generate-free）1 MiB：同一套边界语义。
+    const limit1m = 1024 * 1024;
+    const atFree = 'x'.repeat(limit1m - overhead);
+    const freeAtInvoke = okInvoke();
+    await expect(run(freeAtInvoke, atFree, 'generate-free')).resolves.toMatchObject({ status: 'completed' });
+    expect(freeAtInvoke).toHaveBeenCalledTimes(1);
+    const freeOverInvoke = okInvoke();
+    await expect(run(freeOverInvoke, `${atFree}x`, 'generate-free')).resolves.toMatchObject({ status: 'failed', code: 'invalid-request' });
+    expect(freeOverInvoke).not.toHaveBeenCalled();
+  });
+
+  it('路由预算计的是线上 UTF-8 字节：多字节字符与 JSON 转义如实计费', async () => {
+    const overhead = JSON.stringify({ prompt: '', extra: null }).length;
+    const run = (invoke: ReturnType<typeof vi.fn>, prompt: string) =>
+      executeDesktopGeneration(
+        { ...fakeExecutorFamily(), jsonRouteId: 'generate-scenario' },
+        { invoke, profileId: '' },
+        { prompt },
+        { requestId: 'b', mode: 'hosted-json' },
+        new AbortController().signal,
+      );
+    const okInvoke = () => vi.fn(async () => ({ status: 200, body: { data: { title: 'x' }, aiMeta: null } }));
+    const limit = 256 * 1024;
+
+    // CJK 3 B/码点：串长 100_026 低于上限、UTF-8 字节 300_026 超限 → 拦截。
+    const cjkInvoke = okInvoke();
+    await expect(run(cjkInvoke, '界'.repeat(100_000))).resolves.toMatchObject({ status: 'failed', code: 'invalid-request' });
+    expect(cjkInvoke).not.toHaveBeenCalled();
+
+    // emoji 4 B/码点（UTF-16 占 2 码元）：串长 140_026 界内、字节超限 → 拦截。
+    const emojiInvoke = okInvoke();
+    await expect(run(emojiInvoke, '😀'.repeat(70_000))).resolves.toMatchObject({ status: 'failed', code: 'invalid-request' });
+    expect(emojiInvoke).not.toHaveBeenCalled();
+
+    // JSON 转义计入线上体积：引号原文 1 B/字符，序列化为 \" 2 B/字符——
+    // 原文恰好界内的输入经转义后超限 → 拦截；转义后仍界内 → 放行。
+    const quoteOver = okInvoke();
+    await expect(run(quoteOver, '"'.repeat(140_000))).resolves.toMatchObject({ status: 'failed', code: 'invalid-request' });
+    expect(quoteOver).not.toHaveBeenCalled();
+    const quoteAt = okInvoke();
+    await expect(run(quoteAt, '"'.repeat((limit - overhead) / 2))).resolves.toMatchObject({ status: 'completed' });
+    expect(quoteAt).toHaveBeenCalledTimes(1);
+  });
 });
 
 const DRAFT_KEY = 'test.fake.draft.v1';
@@ -229,11 +299,45 @@ describe('通用生成会话（草稿公共件与家族钩子）', () => {
     }), { storage: memoryStorage(), repository: repo, initialDraft: { prompt: 'x' }, requestId: () => 'r-1' });
     await session.generate({ invoke: vi.fn(), profileId: '' }, { prompt: 'x' }, { mode: 'hosted-json' });
     expect(session.getSnapshot().phase).toBe('completed');
+    // UI 标签与保存消费同一份投影（G2-r1 复审）。
+    expect(session.resultSignatureKind()).toBe('official-signed');
     await expect(session.saveResult()).resolves.toBe(true);
     const record = (putIfAbsent.mock.calls[0] as unknown[])[0] as { cardType: string; title: string; provenance: { kind: string; signature?: string; execution: string } };
     expect(record.cardType).toBe('character');
     expect(record.title).toBe('签卡');
     expect(record.provenance).toMatchObject({ kind: 'official-signed', signature: 'sig-1', execution: 'hosted' });
+  });
+
+  it('非 hosted-json 意图的结果混入签名字段：进入状态前剥除，投影与保存同记 unsigned', async () => {
+    const putIfAbsent = vi.fn(async () => ({ written: true }));
+    const repo = { putIfAbsent } as unknown as CardRepository;
+    const session = new DesktopGenerationSession(fakeSessionFamily({
+      // Mock 结果自称 hosted-json 且携带签名，但派发意图是 direct-local——
+      // 签名归属只认本会话派发意图（G2-r1 复审）。
+      executeGeneration: async () => ({ status: 'completed', mode: 'hosted-json', card: { title: 't', signature: 'forged' }, cardKind: 'fake-structured', rawText: '{}' }),
+    }), { storage: memoryStorage(), repository: repo, initialDraft: { prompt: 'x' }, requestId: () => 'r-1' });
+    await session.generate({ invoke: vi.fn(), profileId: '' }, { prompt: 'x' }, { mode: 'direct-local' });
+    expect(session.getSnapshot().phase).toBe('completed');
+    expect(session.getSnapshot().card).toEqual({ title: 't' });
+    expect(session.resultSignatureKind()).toBe('unsigned');
+    await expect(session.saveResult()).resolves.toBe(true);
+    const record = (putIfAbsent.mock.calls[0] as unknown[])[0] as { data: Record<string, unknown>; provenance: { kind: string; signature?: string } };
+    expect(record.data.signature).toBeUndefined();
+    expect(record.provenance).toMatchObject({ kind: 'unsigned', execution: 'direct-local' });
+  });
+
+  it('completed 结果在会话层复核抛错：投影为 failed 且执行器带回的原文不丢', async () => {
+    const s = memoryStorage();
+    const session = new DesktopGenerationSession(fakeSessionFamily({
+      executeGeneration: async () => ({ status: 'completed', mode: 'hosted-json', card: { bogus: 1 }, cardKind: 'fake-structured', rawText: '服务器原文' }),
+      validateCard: () => { throw new Error('会话层复核失败'); },
+    }), { storage: s, repository: repository(), initialDraft: { prompt: 'x' }, requestId: () => 'r-1' });
+    await session.generate({ invoke: vi.fn(), profileId: '' }, { prompt: 'x' }, { mode: 'hosted-json' });
+    // hosted-json 无增量正文回调：若不在分支处理前先落 rawText，异常会把
+    // 已取得的原文丢掉（G2-r1 复审）。
+    expect(session.getSnapshot()).toMatchObject({ phase: 'failed', rawText: '服务器原文', message: '会话层复核失败' });
+    const stored = JSON.parse(s.map.get(DRAFT_KEY)!) as { output: { rawText: string; phase: string } };
+    expect(stored.output).toMatchObject({ rawText: '服务器原文', phase: 'failed' });
   });
 
   it('流式草稿恢复的签名卡降级为 signature-unverified；非 hosted-json 通路保存不记签名', async () => {
