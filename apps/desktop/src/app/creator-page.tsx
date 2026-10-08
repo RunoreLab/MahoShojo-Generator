@@ -866,10 +866,13 @@ function CreatorForm({ session }: { session: CreatorSession }) {
   // 结果快照：供工作台侧栏「阶段/进度」投影——结果存在时以发起生成时的快照为准
   // （与 Web `creatorResultSnapshot`/`resolveCreatorWorkbenchDisplayState` 同义）。
   // 草稿恢复出的结果没有对应快照，`buildCreatorResultOverview` 对 null 快照有兜底文案。
+  // 快照归属本次生成意图（G3-r1）：重新生成先把旧结果卡置空再派发，不能因为
+  // card 变 null 就连带清掉刚记录的新快照；只在生成未产出结果或结果被
+  // 显式清除（清草稿/无卡恢复等相位回到非生成态且无卡）时清理。
   const resultSnapshotRef = useRef<CreatorWorkbenchSnapshot | null>(null);
   useEffect(() => {
-    if (!state.card) resultSnapshotRef.current = null;
-  }, [state.card]);
+    if (!state.card && state.phase !== 'generating') resultSnapshotRef.current = null;
+  }, [state.card, state.phase]);
   const resultOverview = useMemo(() => buildCreatorResultOverview({
     isSubmitting: state.phase === 'generating',
     snapshot: resultSnapshotRef.current,

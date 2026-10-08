@@ -133,6 +133,32 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     expect(container.textContent).toContain('已保存到本地卡库。');
   });
 
+  it('keeps the result-overview snapshot across regeneration (G3-r1)', async () => {
+    await mount();
+    await click('开始回答问卷');
+    await clickText('魔法少女（结构化）');
+    await click('还没想好');
+    await click('生成数据卡');
+    expect(container.textContent).toContain('百合 · 未签名');
+    // 首次完成：侧栏按发起生成时的快照投影——题数与阶段如实。
+    expect(container.textContent).toContain('创作完成');
+    expect(container.textContent).toMatch(/共 \d+ 题，已进入结果阶段/);
+
+    // 连续重新生成：执行器挂起期间旧结果卡已置空，刚记录的新快照不得被清掉。
+    let resolveSecond: ((outcome: CreatorGenerationOutcome) => void) | undefined;
+    mocks.execute.mockImplementation(() => new Promise<CreatorGenerationOutcome>((resolve) => { resolveSecond = resolve; }));
+    await click('重新生成');
+    await click('确定重新生成');
+    expect(container.textContent).toContain('正在生成');
+    await act(async () => resolveSecond!(completed('direct-local')));
+    await settle();
+    expect(container.textContent).toContain('百合 · 未签名');
+    // 快照归属本次生成意图：完成后侧栏仍按新快照投影（修复前回落为无快照兜底文案）。
+    expect(container.textContent).toContain('创作完成');
+    expect(container.textContent).toMatch(/共 \d+ 题，已进入结果阶段/);
+    expect(container.textContent).not.toContain('请以当前结果数据为准');
+  });
+
   it('gates generation on pending restore until the draft is explicitly restored', async () => {
     window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft()));
     await mount();
