@@ -760,7 +760,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
                     server={{ enabled: true }}
                     onChange={(location) => aiStore.selectExecutionLocation(location)}
                   />
-                  <GenerationModeSwitcher value={generationMode} onChange={setGenerationMode} />
+                  <GenerationModeSwitcher value={generationMode} onChange={setGenerationMode} helper={false} />
                   <label className="flex flex-col gap-1">AI 连接
                     <select
                       aria-label="AI 连接"

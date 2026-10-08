@@ -131,6 +131,12 @@
     background: var(--battle-lite-subpanel-bg, var(--app-surface));
   }
 
+  /* 键盘导航的虚拟焦点（aria-activedescendant）：与 hover 同一底色，
+     使方向键定位的选项有可见反馈而不依赖鼠标悬停。 */
+  .battle-lite-select-option-focus {
+    background: var(--battle-lite-subpanel-bg, var(--app-surface));
+  }
+
   .battle-lite-select-option-active {
     background: rgba(244, 114, 182, 0.14);
     color: var(--app-text);

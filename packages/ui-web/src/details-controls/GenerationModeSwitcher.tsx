@@ -1,4 +1,5 @@
 import { FileCheck2, Waves } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { SegmentedControl, type SegmentedOption } from './SegmentedControl';
 
 export type GenerationMode = 'non-stream' | 'stream';
@@ -13,14 +14,33 @@ export function GenerationModeSwitcher(props: {
   value: GenerationMode;
   disabled?: boolean;
   onChange: (mode: GenerationMode) => void;
-  helper?: boolean;
+  /**
+   * 「生成方式」下方的业务说明（DESK-AIP-009.4）。
+   * - `true` / 缺省：沿用内置战报默认文案（仅战报类页面适用）；
+   * - `false` / `null`：不渲染 helper——非战报页必须关闭默认战报文案；
+   * - 其他 ReactNode：渲染宿主提供的上下文说明。
+   */
+  helper?: boolean | ReactNode;
+  /**
+   * 选项级禁用原因（DESK-AIP-009.9）：如客户端 Direct 不支持页面可见流式
+   * Markdown 时把 `stream` 标记为不可用并解释；不会静默改写当前选择。
+   */
+  disabledReasons?: Partial<Record<GenerationMode, string>>;
 }) {
   const value = props.value;
   const disabled = props.disabled === true;
-  const helper = props.helper !== false;
+  const helper = props.helper;
+
+  const options: readonly SegmentedOption<GenerationMode>[] = MODE_OPTIONS.map((option) => {
+    const reason = props.disabledReasons?.[option.value];
+    return reason === undefined
+      ? option
+      : { ...option, disabled: true, reason };
+  });
 
   const renderHelper = () => {
-    if (!helper) return null;
+    if (helper === false || helper === null) return null;
+    if (helper !== undefined && helper !== true) return helper;
     if (value === 'stream') {
       return (
         <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800 dark:bg-yellow-900/30 dark:border-yellow-700 dark:text-yellow-200">
@@ -40,7 +60,7 @@ export function GenerationModeSwitcher(props: {
 
   return (
     <div className="input-group">
-      <SegmentedControl label={props.label || '选择生成方式'} value={value} options={MODE_OPTIONS} onChange={props.onChange} disabled={disabled} />
+      <SegmentedControl label={props.label || '选择生成方式'} value={value} options={options} onChange={props.onChange} disabled={disabled} />
       {renderHelper()}
     </div>
   );

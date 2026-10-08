@@ -1,8 +1,11 @@
 // 共源 AI Provider 选择器视图。
 //
-// 这是从 `apps/web/components/AiProviderSelector.tsx` 抽出的宿主无关组件：展示、
-// 选择与持久化状态机都在这里；存储、可用性数据源、文档链接与跨实例同步由宿主经
-// props 注入（SPEC DESK-ONLINE-004/005：shared UI 不得假设 window/localStorage/Next）。
+// 这是从 `apps/web/components/AiProviderSelector.tsx` 抽出的宿主无关组件：选择与
+// 持久化状态机（`useAiProviderSelection`，Web 唯一 writer）在本文件装配，纯受控
+// 展示层在 `./selector-form`（DESK-AIP-009：持久化副作用与视图分离，Desktop 用
+// `DesktopAiConfigStore` 驱动同一骨架）；存储、可用性数据源、文档链接与跨实例
+// 同步由宿主经 props 注入（SPEC DESK-ONLINE-004/005：shared UI 不得假设
+// window/localStorage/Next）。
 
 import { useMemo, type ReactNode } from 'react';
 
@@ -22,6 +25,7 @@ import type {
   AiProviderSyncDetail,
 } from './contract';
 import { AiProviderCustomSelect } from './custom-select';
+import { AiProviderSelectorForm } from './selector-form';
 import { summarizeProviderAvailability } from './selection';
 import {
   DEFAULT_AI_PROVIDER_STORAGE_NAMESPACE,
@@ -125,81 +129,81 @@ export const AiProviderSelectorView = ({
   }, [activeProvider, availabilityMap]);
 
   return (
-    <div className="input-group">
-      <label className="input-label">{label}</label>
-      <AiProviderCustomSelect
-        options={providerSelectOptions}
-        value={selectedProviderId}
-        onChange={setSelectedProviderId}
-        placeholder="选择供应商"
-        renderAvailabilityBadge={renderAvailabilityBadge}
-      />
-      <label className="battle-lite-subtle-text text-xs">更多提供商正在添加中...</label>
-      {activeProvider && !isSystemProviderOption(activeProvider) && renderDocsLink?.(activeProvider)}
-
-      <div className="battle-lite-accent-box mt-3 space-y-3 rounded-lg p-3 text-sm">
-        <div>
-          <label className="battle-lite-muted-text mb-1 block text-xs font-semibold">选择模型</label>
-          <AiProviderCustomSelect
-            options={modelSelectOptions}
-            value={selectedModel}
-            onChange={setSelectedModel}
-            placeholder="选择模型"
-            disabled={modelSelectOptions.length === 0}
-            renderAvailabilityBadge={renderAvailabilityBadge}
-          />
-        </div>
-
-        {activeProvider && isCustomModelSelected && (
-          <div>
-            <label className="battle-lite-muted-text mb-1 block text-xs font-semibold">自定义 modelId</label>
-            <input
-              className="input-field font-mono"
-              type="text"
-              placeholder="请输入该供应商支持的 modelId"
-              value={customModelId}
-              autoComplete="off"
-              spellCheck={false}
-              onChange={(event) => setCustomModelId(event.target.value)}
-            />
-            <p className="battle-lite-subtle-text mt-1 text-xs">
-              仅切换模型名，端点仍固定为当前预置供应商。
-            </p>
-          </div>
-        )}
-
-        {activeProvider && !isSystemProviderOption(activeProvider) && (
-          <div>
-            <label className="battle-lite-muted-text mb-1 block text-xs font-semibold">API Key</label>
-            <input
-              className="input-field font-mono"
-              type={shouldShowMaskedApiKey ? 'text' : 'password'}
-              placeholder={shouldShowMaskedApiKey ? '' : '请输入该供应商的 API Key'}
-              value={shouldShowMaskedApiKey ? maskedApiKey : apiKey}
-              readOnly={shouldShowMaskedApiKey}
-              autoComplete="off"
-              spellCheck={false}
-              onFocus={() => {
-                if (hasApiKey) {
-                  setIsEditingApiKey(true);
-                }
-              }}
-              onChange={(event) => setApiKey(event.target.value)}
-              onBlur={(event) => {
-                if (event.target.value.trim()) {
-                  setIsEditingApiKey(false);
-                }
-              }}
-            />
-            <p className="battle-lite-subtle-text mt-1 text-xs">
-              已默认隐藏完整 Key，仅显示前 6 位；点击输入框可直接修改。
-            </p>
-            {apiKeyStorageHint && (
-              <p className="battle-lite-subtle-text mt-1 text-xs">{apiKeyStorageHint}</p>
-            )}
-          </div>
-        )}
-
+    <AiProviderSelectorForm
+      label={label}
+      providerSelect={
+        <AiProviderCustomSelect
+          options={providerSelectOptions}
+          value={selectedProviderId}
+          onChange={setSelectedProviderId}
+          placeholder="选择供应商"
+          renderAvailabilityBadge={renderAvailabilityBadge}
+        />
+      }
+      providerExtra={
+        activeProvider && !isSystemProviderOption(activeProvider)
+          ? renderDocsLink?.(activeProvider)
+          : null
+      }
+      modelSelect={
+        <AiProviderCustomSelect
+          options={modelSelectOptions}
+          value={selectedModel}
+          onChange={setSelectedModel}
+          placeholder="选择模型"
+          disabled={modelSelectOptions.length === 0}
+          renderAvailabilityBadge={renderAvailabilityBadge}
+        />
+      }
+      customModelId={
+        activeProvider && isCustomModelSelected
+          ? {
+              input: (
+                <input
+                  className="input-field font-mono"
+                  type="text"
+                  placeholder="请输入该供应商支持的 modelId"
+                  value={customModelId}
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(event) => setCustomModelId(event.target.value)}
+                />
+              ),
+              hint: '仅切换模型名，端点仍固定为当前预置供应商。',
+            }
+          : undefined
+      }
+      apiKey={
+        activeProvider && !isSystemProviderOption(activeProvider)
+          ? {
+              content: (
+                <input
+                  className="input-field font-mono"
+                  type={shouldShowMaskedApiKey ? 'text' : 'password'}
+                  placeholder={shouldShowMaskedApiKey ? '' : '请输入该供应商的 API Key'}
+                  value={shouldShowMaskedApiKey ? maskedApiKey : apiKey}
+                  readOnly={shouldShowMaskedApiKey}
+                  autoComplete="off"
+                  spellCheck={false}
+                  onFocus={() => {
+                    if (hasApiKey) {
+                      setIsEditingApiKey(true);
+                    }
+                  }}
+                  onChange={(event) => setApiKey(event.target.value)}
+                  onBlur={(event) => {
+                    if (event.target.value.trim()) {
+                      setIsEditingApiKey(false);
+                    }
+                  }}
+                />
+              ),
+              hint: '已默认隐藏完整 Key，仅显示前 6 位；点击输入框可直接修改。',
+              footnote: apiKeyStorageHint,
+            }
+          : undefined
+      }
+      advancedSettings={
         <AdvancedGenerationSettings
           value={generationOverrides}
           onChange={updateGenerationOverrides}
@@ -217,11 +221,7 @@ export const AiProviderSelectorView = ({
               : true
           }
         />
-
-        <p className="battle-lite-subtle-text mt-1 text-xs">
-          高级设置按「供应商 + 模型」分别保存；留空表示跟随模型 / 供应商默认。
-        </p>
-      </div>
-    </div>
+      }
+    />
   );
 };

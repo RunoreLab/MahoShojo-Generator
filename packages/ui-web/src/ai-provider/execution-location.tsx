@@ -5,7 +5,13 @@
 // 的落地由调用方按连接 endpoint 判定（本机服务 vs 远端服务），`hosted`/`authoritative`
 // 属于服务器侧模式，不在本控件直接暴露。
 
+import { Cloud, Laptop } from 'lucide-react';
 import type { ReactNode } from 'react';
+
+import {
+  SegmentedControl,
+  type SegmentedOption,
+} from '../details-controls/SegmentedControl';
 
 export type AiExecutionLocation = 'client' | 'server';
 
@@ -78,6 +84,9 @@ export interface AiExecutionLocationFieldProps {
 /**
  * 「AI 执行：客户端｜服务器」分段选择。
  * 不可用的选项渲染为禁用并附原因，不提供空转按钮（DESK-ONLINE-001）。
+ *
+ * DESK-AIP-009.7：消费与 `GenerationModeSwitcher` 相同的 `SegmentedControl`
+ * 轨道/图标/激活态/焦点与响应式样式，不再保留独立的紧凑小开关实现。
  */
 export const AiExecutionLocationField = ({
   value,
@@ -86,37 +95,39 @@ export const AiExecutionLocationField = ({
   onChange,
   label = 'AI 执行',
 }: AiExecutionLocationFieldProps) => {
-  const options: ReadonlyArray<{ key: AiExecutionLocation; label: string; state: AiExecutionLocationOptionState }> = [
-    { key: 'client', label: '客户端', state: client },
-    { key: 'server', label: '服务器', state: server },
+  const options: readonly SegmentedOption<AiExecutionLocation>[] = [
+    {
+      value: 'client',
+      label: '客户端',
+      icon: <Laptop />,
+      description:
+        '由本机直接连接你已配置的模型服务（客户端 Direct），请求不经过项目服务器。',
+      disabled: !client.enabled,
+      ...(client.reason !== undefined ? { reason: client.reason } : {}),
+    },
+    {
+      value: 'server',
+      label: '服务器',
+      icon: <Cloud />,
+      description:
+        '由项目服务器代为生成（System Default / 云端通路），不使用客户端连接与本地凭据。',
+      disabled: !server.enabled,
+      ...(server.reason !== undefined ? { reason: server.reason } : {}),
+    },
   ];
 
-  const disabledReason = options.find((option) => !option.state.enabled)?.state.reason;
+  const disabledReason = options.find((option) => option.disabled)?.reason;
 
   return (
-    <div className="flex flex-col gap-1">
-      <span className="battle-lite-muted-text text-xs font-semibold">{label}</span>
-      <div className="inline-flex overflow-hidden rounded-lg border border-(--app-border-strong)">
-        {options.map((option) => (
-          <button
-            key={option.key}
-            type="button"
-            disabled={!option.state.enabled}
-            aria-pressed={value === option.key}
-            title={option.state.enabled ? undefined : option.state.reason}
-            className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
-              value === option.key
-                ? 'battle-lite-select-option-active'
-                : 'battle-lite-select-option'
-            } ${option.state.enabled ? 'cursor-pointer' : 'cursor-not-allowed opacity-50'}`}
-            onClick={() => option.state.enabled && onChange?.(option.key)}
-          >
-            {option.label}
-          </button>
-        ))}
-      </div>
+    <div className="input-group">
+      <SegmentedControl
+        label={label}
+        value={value}
+        options={options}
+        onChange={(location) => onChange?.(location)}
+      />
       {disabledReason && (
-        <p className="battle-lite-subtle-text text-xs">{disabledReason}</p>
+        <p className="battle-lite-subtle-text mt-1 text-xs">{disabledReason}</p>
       )}
     </div>
   );

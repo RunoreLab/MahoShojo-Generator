@@ -981,6 +981,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
       <GenerationModeSwitcher
         value={generationMode}
         disabled={target.location === 'client'}
+        helper={false}
         onChange={(next: GenerationMode) => {
           const normalizedTemplate = normalizeCreatorTemplateForGenerationMode(next, template);
           if (normalizedTemplate !== session.getSnapshot().draft.template) invalidatePresetLoads();

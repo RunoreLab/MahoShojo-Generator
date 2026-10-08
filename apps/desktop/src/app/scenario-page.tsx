@@ -246,6 +246,7 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
                   value={draft.generationMode}
                   disabled={target.location === 'client'}
                   onChange={(next) => updateDraft({ generationMode: next })}
+                  helper={false}
                 />
                 {target.location === 'client' && (
                   <p className="mt-1 text-sm text-(--app-text-muted)">

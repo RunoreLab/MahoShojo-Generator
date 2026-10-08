@@ -8,6 +8,7 @@ export { maskApiKeyForDisplay } from './mask-api-key';
 export {
   AI_PROVIDER_SYNC_EVENT,
   type AiChannelAvailabilityEntry,
+  type AiProviderSelectAction,
   type AiProviderSelectOption,
   type AiProviderStoragePort,
   type AiProviderSyncDetail,
@@ -52,6 +53,11 @@ export {
   AiProviderSelectorView,
   type AiProviderSelectorViewProps,
 } from './ai-provider-selector-view';
+
+export {
+  AiProviderSelectorForm,
+  type AiProviderSelectorFormProps,
+} from './selector-form';
 
 export {
   AiExecutionLocationField,

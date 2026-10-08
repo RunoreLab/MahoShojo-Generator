@@ -52,6 +52,32 @@ export interface AiProviderSelectOption {
   label: string;
   description?: string;
   availability?: AiChannelAvailabilityEntry;
+  /**
+   * 分组标题（DESK-AIP-002）：相同 `group` 的连续选项渲染在同一分组下，
+   * 如「内置供应商」「我的连接」。缺省不分组。
+   */
+  group?: string;
+  /**
+   * 选项身份标记（如 `preset` / `connection`）：真实 Profile 与目录预设即使
+   * 显示名、Endpoint 相同也按身份区分；本字段只做展示/归类标记，`value`
+   * 的唯一性仍由宿主保证。
+   */
+  kind?: string;
+  /** 不可选；须同时给出 `disabledReason` 解释原因，不提供空转选项。 */
+  disabled?: boolean;
+  disabledReason?: string;
+}
+
+/**
+ * 选择菜单操作区的独立动作（DESK-AIP-002）：如「＋ 新建自定义连接」「管理连接」。
+ * 动作不是 Provider/模型选项：经 `onAction` 派发，绝不进入 `onChange` 的取值空间。
+ */
+export interface AiProviderSelectAction {
+  id: string;
+  label: string;
+  description?: string;
+  disabled?: boolean;
+  disabledReason?: string;
 }
 
 export type { AIProviderOption, UserGenerationOverrides };
