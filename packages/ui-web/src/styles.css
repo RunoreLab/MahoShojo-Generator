@@ -190,8 +190,18 @@
   box-shadow: 0 0 0 3px var(--app-focus-ring, rgba(255, 107, 107, 0.2));
 }
 
+/* 操作区布局和按钮随问卷组件共享，不依赖宿主 generate-button/actionClass。 */
+.ui-web-questionnaire-navigation {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 3fr);
+  gap: 8px;
+  margin-top: 16px;
+  margin-bottom: 20px;
+}
+
 .ui-web-questionnaire-step-button {
-  flex: 1 1 0%;
+  min-width: 0;
+  min-height: 48px;
   width: 100%;
   padding: 15px;
   border: 0;
@@ -207,6 +217,24 @@
 .ui-web-questionnaire-step-button:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow: 0 10px 20px var(--app-accent-shadow, rgba(255, 107, 107, 0.3));
+}
+
+.ui-web-questionnaire-step-button:focus-visible {
+  outline: 3px solid var(--app-accent, #ff6b6b);
+  outline-offset: 3px;
+}
+
+/* 保留成熟 Web /details 的蓝色生成操作主题。 */
+.blue-theme .ui-web-questionnaire-step-button {
+  background: linear-gradient(45deg, #3b82f6, #1d4ed8);
+}
+
+.blue-theme .ui-web-questionnaire-step-button:hover:not(:disabled) {
+  box-shadow: 0 10px 20px rgba(59, 130, 246, 0.35);
+}
+
+.blue-theme .ui-web-questionnaire-step-button:focus-visible {
+  outline-color: #3b82f6;
 }
 
 .ui-web-questionnaire-step-button:disabled {

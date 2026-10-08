@@ -15,3 +15,4 @@ export {
   type QuestionnaireSelectionPanelProps,
   type QuestionnaireSelectionTheme,
 } from './QuestionnaireSelectionPanel';
+export { QuestionnaireNavigationActions, type QuestionnaireNavigationActionsProps } from './QuestionnaireNavigationActions';

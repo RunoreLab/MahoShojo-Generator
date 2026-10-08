@@ -1675,8 +1675,6 @@ export const DetailsPage: React.FC = () => {
                   onNext={handleNext}
                   disablePrev={currentQuestionIndex === 0 || submitting || isTransitioning || isCooldown}
                   disableNext={submitting || isTransitioning || isCooldown || (isCurrentRequired && currentAnswer.trim().length === 0)}
-                  prevButtonClass="generate-button w-1/4"
-                  nextButtonClass="generate-button"
                 />
 
                 <TokenIndicator

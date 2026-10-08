@@ -299,6 +299,11 @@ describe('Web CanshouPage 页面级行为契约（真实共享控件）', () => 
     expect(container.querySelector('img[alt="残兽调查"]')).toBe(logo);
     expect(container.textContent).toContain('前进吧，残兽！');
     expect(progressText()).toBe('问题 1 / 10');
+    const actions = container.querySelector('[aria-label="问卷翻页操作"]');
+    expect(actions?.className).toBe('ui-web-questionnaire-navigation');
+    expect(actions?.querySelectorAll('.ui-web-questionnaire-step-button')).toHaveLength(2);
+    expect(actions?.querySelectorAll('button')[1].textContent).toBe('下一题');
+
 
     // v3 草稿按 composite key 恢复到当前题输入框。
     const textarea = answerTextarea();

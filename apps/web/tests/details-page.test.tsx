@@ -83,6 +83,10 @@ describe('Web DetailsPage 常驻品牌（真实共享控件）', () => {
     expect(container.querySelector('img[alt="Questionnaire Logo"]')).toBe(logo);
     expect(container.querySelectorAll('img[alt="Questionnaire Logo"]')).toHaveLength(1);
     expect(container.querySelector('textarea.ui-web-questionnaire-answer-input')?.getAttribute('aria-label')).toBe(magicalQuestionnaire.questions[0]!.question);
+    const actions = container.querySelector('[aria-label="问卷翻页操作"]');
+    expect(actions?.className).toBe('ui-web-questionnaire-navigation');
+    expect(actions?.querySelectorAll('.ui-web-questionnaire-step-button')).toHaveLength(2);
+    expect(actions?.querySelectorAll('button')[1].textContent).toBe(withDraft ? '下一题' : '跳过并继续');
     expect(container.querySelector<HTMLTextAreaElement>('textarea.ui-web-questionnaire-answer-input')?.value).toBe(withDraft ? '保留草稿回答' : '');
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/api/generate-'))).toBe(false);
   });

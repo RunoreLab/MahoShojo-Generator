@@ -1,4 +1,5 @@
 import React from 'react';
+import { QuestionnaireNavigationActions, type QuestionnaireNavigationActionsProps } from './QuestionnaireNavigationActions';
 
 export type QuestionnaireOption = string | { value: string; label: string; disabled?: boolean };
 
@@ -74,7 +75,7 @@ export const CANSHOU_QUESTIONNAIRE_THEME: QuestionnaireTheme = {
   noTextInputHint: 'mt-3 text-center text-xs text-slate-500',
 };
 
-export type QuestionnaireQuestionPanelProps = {
+export type QuestionnaireQuestionPanelProps = QuestionnaireNavigationActionsProps & {
   theme: QuestionnaireTheme;
   progressLabel: string;
   progressPercent: number;
@@ -107,14 +108,6 @@ export type QuestionnaireQuestionPanelProps = {
   isTransitioning?: boolean;
   transitionClassName?: string;
   transitionStyle?: React.CSSProperties;
-  prevLabel: string;
-  nextButtonContent: React.ReactNode;
-  onPrev: () => void;
-  onNext: () => void;
-  disablePrev?: boolean;
-  disableNext?: boolean;
-  prevButtonClass?: string;
-  nextButtonClass?: string;
 };
 
 export function QuestionnaireQuestionPanel({
@@ -156,8 +149,8 @@ export function QuestionnaireQuestionPanel({
   onNext,
   disablePrev,
   disableNext,
-  prevButtonClass = 'ui-web-questionnaire-step-button',
-  nextButtonClass = 'ui-web-questionnaire-step-button',
+  prevButtonClass,
+  nextButtonClass,
 }: QuestionnaireQuestionPanelProps) {
   const safeQuestion = questionText?.trim() ? questionText : '未加载题目';
   const quickOptionList = (quickOptions ?? []).filter(Boolean);
@@ -275,14 +268,16 @@ export function QuestionnaireQuestionPanel({
         <div className={noTextInputHint ?? theme.noTextInputHint}>本题仅可从选项中选择，无需填写文本。</div>
       )}
 
-      <div className="mt-4 flex flex-col sm:flex-row gap-2">
-        <button className={prevButtonClass} onClick={onPrev} disabled={disablePrev}>
-          {prevLabel}
-        </button>
-        <button onClick={onNext} disabled={disableNext} className={nextButtonClass}>
-          {nextButtonContent}
-        </button>
-      </div>
+      <QuestionnaireNavigationActions
+        prevLabel={prevLabel}
+        nextButtonContent={nextButtonContent}
+        onPrev={onPrev}
+        onNext={onNext}
+        disablePrev={disablePrev}
+        disableNext={disableNext}
+        prevButtonClass={prevButtonClass}
+        nextButtonClass={nextButtonClass}
+      />
     </>
   );
 }

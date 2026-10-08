@@ -806,7 +806,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
                     showLimitLabel limitLabel={`建议不超过 ${getAnswerLimitInfo(question.maxLength).limit ?? 500} 字，不限制生成`} isOverLimit={isAnswerOverLimit(answer, question.maxLength)} overLimitText="回答超过建议长度，仍可生成未签名角色卡。"
                     prevLabel="上一题" nextButtonContent={nextButtonLabel} onPrev={() => setQuestionIndex((index) => Math.max(0, index - 1))}
                     onNext={handleNext}
-                    disablePrev={currentIndex === 0} disableNext={busy || (question.required === true && !answer.trim())} prevButtonClass={actionClass} nextButtonClass={actionClass}
+                    disablePrev={currentIndex === 0} disableNext={busy || (question.required === true && !answer.trim())}
                   />}
                   <QuestionnaireLanguageSection
                     variant="details"

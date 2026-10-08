@@ -130,6 +130,9 @@ describe('Desktop Canshou real route and session UI (native adapter mock)', () =
       { id: 'last', question: '末题' },
     ]);
     await mount(); await click('恢复草稿');
+    expect(container.querySelector('[aria-label="问卷翻页操作"]')?.className).toBe('ui-web-questionnaire-navigation');
+    expect(button('下一题').classList.contains('ui-web-questionnaire-step-button')).toBe(true);
+    expect(button('下一题').type).toBe('button');
     expect(button('下一题').disabled).toBe(true);
     await click('下一题');
     expect(container.textContent).toContain('第 1 / 3 题');

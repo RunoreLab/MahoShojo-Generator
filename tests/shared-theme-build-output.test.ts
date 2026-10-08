@@ -70,6 +70,13 @@ const expectSharedOutput = (css: string, artifact: string): void => {
     });
     return declarations;
   };
+  // 问卷操作区不能退回宿主文字按钮；两端真实 CSS 都须带共享布局与焦点/主题。
+  expect(declarationsFor('.ui-web-questionnaire-navigation'), artifact).toMatchObject({ display: 'grid' });
+  expect(declarationsFor('.ui-web-questionnaire-navigation')['grid-template-columns']?.replace(/\s/g, ''), artifact)
+    .toBe('minmax(0,1fr)minmax(0,3fr)');
+  expect(declarationsFor('.ui-web-questionnaire-step-button'), artifact).toMatchObject({ 'min-height': '48px', 'border-radius': '12px' });
+  expect(declarationsFor('.ui-web-questionnaire-step-button:focus-visible')['outline-offset'], artifact).toBe('3px');
+  expect(declarationsFor('.blue-theme .ui-web-questionnaire-step-button').background, artifact).toContain('linear-gradient');
   expect(declarationsFor('.creator-workbench-shell .container'), artifact).toMatchObject({ 'max-width': 'none', padding: '0' });
   expect(declarationsFor('.creator-workbench-shell .card'), artifact).toMatchObject({ 'max-width': 'none', 'margin-top': '1rem' });
   expect(declarationsFor('.creator-workbench-shell .result-card'), artifact).toMatchObject({ 'max-width': 'none' });

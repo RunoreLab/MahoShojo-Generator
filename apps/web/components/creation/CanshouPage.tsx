@@ -1478,8 +1478,6 @@ export const CanshouPage: React.FC = () => {
                   onNext={handleNext}
                   disablePrev={currentQuestionIndex === 0 || submitting || isTransitioning || isCooldown}
                   disableNext={submitting || isTransitioning || isCooldown || (isCurrentRequired && !currentAnswer.trim())}
-                  prevButtonClass="generate-button sm:w-1/4"
-                  nextButtonClass="generate-button flex-1"
                 />
 
                 <TokenIndicator
