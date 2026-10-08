@@ -259,8 +259,16 @@ describe('desktop config store — read projection', () => {
     expect(state.invalidPresent).toBe(true);
     expect(state.publicCacheDegraded).toBe(true);
     expect(state.diagnostics.some((d) => d.message.includes('config.json.invalid'))).toBe(true);
-    // 文件可编辑基底仍在——显式恢复动作可用。
-    expect(store.editable()).toBe(true);
+    // K1-r2：隔离残留形态下普通字段编辑整体禁用——否则一次顺手的
+    // 公告/Esc 修改就会创建新文件并复活被降级的缓存捕获；唯一出口是
+    // 显式「创建默认配置」。
+    expect(store.editable()).toBe(false);
+    store.setField('confirmContentLinks', false);
+    await Promise.resolve();
+    expect(
+      invoke.mock.calls.filter((call) => call[0] === 'desktop_config_write'),
+    ).toHaveLength(0);
+    expect(store.getSnapshot().publicCacheDegraded).toBe(true);
   });
 
   it('createDefaultConfig recovers a quarantined-missing file and clears the degraded bit', async () => {

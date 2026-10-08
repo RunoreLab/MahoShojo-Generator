@@ -197,7 +197,11 @@ export class DesktopConfigStore {
     return (
       this.state.status === 'ready'
       && !this.state.fileFatal
-      && (this.state.fileStatus === 'ok' || this.state.fileStatus === 'missing')
+      && (this.state.fileStatus === 'ok'
+        // 缺失 + `.invalid` 隔离残留 = 上一份配置不可读而非首启：此时
+        // 只允许显式「创建默认配置」，普通字段编辑禁用——避免一次顺手
+        // 修改公告/Esc 菜单就创建新文件并把已降级的缓存捕获复活（K1-r2）。
+        || (this.state.fileStatus === 'missing' && !this.state.invalidPresent))
     );
   }
 

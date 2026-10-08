@@ -337,6 +337,80 @@ describe('desktop settings shell', () => {
     expect(lastWriteDoc().publicLibraryCache?.maxBytes).toBe(128 * 1024 * 1024);
   });
 
+  it('stale stats cannot bypass the budget-lowering confirmation in evict mode (K1-r2)', async () => {
+    // 统计是挂载时读的旧快照——缓存增长后「旧统计低于新上限」不能成为
+    // 跳过确认的依据：evict 模式下任何降预算都先确认。
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'desktop_config_read') {
+        return {
+          path: 'C:\\cfg\\config.json',
+          directory: 'C:\\cfg',
+          backupPresent: false,
+          invalidPresent: false,
+          file: {
+            status: 'ok' as const,
+            revision: `sha256:${'a'.repeat(64)}`,
+            content:
+              '{"version":1,"publicLibraryCache":{"captureEnabled":true,"maxBytes":536870912,"whenFull":"evict-least-recently-used"}}',
+          },
+        };
+      }
+      if (command === 'public_read_cache_stats') {
+        return {
+          status: 'ready',
+          path: 'C:\\data\\public-read-cache.sqlite',
+          // 旧统计用量低于即将选择的新上限——确认条不得因此缺席。
+          usageBytes: 100 * 1024 * 1024,
+          entryCount: 4,
+          summaryCount: 4,
+          bodyCount: 1,
+          withdrawnCount: 0,
+          appliedPolicy: {
+            captureEnabled: true,
+            maxBytes: 536_870_912,
+            whenFull: 'evict-least-recently-used',
+          },
+        };
+      }
+      return defaultInvokeImpl(command);
+    });
+    await mountAt('/settings?section=data');
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('public-read-cache.sqlite');
+    });
+
+    const budget256 = [...container.querySelectorAll('button')].find(
+      (el) => el.textContent === '256 MiB（默认）',
+    );
+    await click(budget256 ?? null);
+    const confirmBar = container.querySelector(
+      '[data-testid="public-cache-eviction-confirm"]',
+    );
+    expect(confirmBar).not.toBeNull();
+    expect(confirmBar?.textContent).toContain('统计可能滞后');
+    expect(
+      invokeMock.mock.calls.filter((call) => call[0] === 'desktop_config_write'),
+    ).toHaveLength(0);
+    const confirm = [...confirmBar!.querySelectorAll('button')].find(
+      (el) => el.textContent === '确认',
+    );
+    await click(confirm ?? null);
+    await vi.waitFor(() => {
+      expect(
+        invokeMock.mock.calls.filter((call) => call[0] === 'desktop_config_write'),
+      ).toHaveLength(1);
+    });
+    const request = (
+      invokeMock.mock.calls
+        .filter((call) => call[0] === 'desktop_config_write')
+        .at(-1)?.[1] as { request?: { content?: string } }
+    )?.request;
+    const doc = JSON.parse(request?.content ?? '{}') as {
+      publicLibraryCache?: { maxBytes?: unknown };
+    };
+    expect(doc.publicLibraryCache?.maxBytes).toBe(256 * 1024 * 1024);
+  });
+
   it('appearance group carries the Esc 快捷菜单 toggle wired to desktop.escapeMenu.enabled', async () => {
     // D5.1-N1：开关是 config.json 字段（desktop.escapeMenu.enabled，默认 true），
     // 挂在外观与交互组——与「在线与通知」共用同一个 DesktopConfigStore 读写路径。
@@ -507,8 +581,14 @@ describe('desktop settings shell', () => {
 
     expect(container.querySelector('[data-testid="config-invalid-present"]')).not.toBeNull();
     expect(container.textContent).toContain('config.json.invalid');
-    // 该形态按坏配置降级：缓存卡提示暂停，并提供「创建默认配置」出口。
+    // 该形态按坏配置降级：缓存卡提示暂停，普通字段编辑整体禁用
+    // （K1-r2：顺手改公告/Esc 不得顺手创建文件复活捕获），唯一出口是
+    // 「创建默认配置」。
     expect(container.textContent).toContain('缓存配置无法校验');
+    const cacheToggle = [...container.querySelectorAll('[role="switch"]')].find(
+      (el) => el.getAttribute('aria-label') === '缓存公开资料',
+    );
+    expect((cacheToggle as HTMLButtonElement | undefined)?.disabled).toBe(true);
     expect(
       [...container.querySelectorAll('button')].some(
         (button) => button.textContent === '创建默认配置',

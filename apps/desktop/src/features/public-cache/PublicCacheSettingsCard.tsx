@@ -155,15 +155,20 @@ export const PublicCacheSettingsCard = () => {
       : null;
   const unlimitedBudget = state.values.publicCacheMaxBytes === 'unlimited';
 
-  /** 调低上限且当前策略是自动清理时，超出的旧副本会被真实删除——要求确认；
-   *  统计读不到时按「用量未知」同样先确认，不静默授权删除。 */
+  /** evict 模式下任何调低上限都先确认：统计是挂载时读的旧快照，缓存增长
+   *  后「旧统计低于新上限」会漏掉真实删除——按「降低预算可能淘汰」保守
+   *  处理，文案随统计可用性如实表述（K1-r2）。 */
   const chooseBudget = (value: string) => {
     const preset = BUDGET_PRESETS.find((option) => option.value === value);
     if (!preset) return;
+    const currentBudget = state.values.publicCacheMaxBytes;
+    const lowersBudget =
+      typeof preset.bytes === 'number'
+      && (currentBudget === 'unlimited' || preset.bytes < currentBudget);
     if (
-      preset.bytes !== 'unlimited'
+      typeof preset.bytes === 'number'
+      && lowersBudget
       && state.values.publicCacheWhenFull === 'evict-least-recently-used'
-      && (!stats || stats.usageBytes > preset.bytes)
     ) {
       setPendingChange({
         kind: 'budget',
@@ -276,7 +281,9 @@ export const PublicCacheSettingsCard = () => {
               ? '开启后，缓存达到上限时将自动删除最久未使用的公开缓存副本以容纳新内容。确认开启自动清理？'
               : pendingChange.usageBytes === null
                 ? `当前缓存用量暂时无法读取；若实际用量超过新上限 ${formatBytes(pendingChange.bytes)}，最久未用的副本将被删除。确认调低上限？`
-                : `新上限 ${formatBytes(pendingChange.bytes)} 低于当前已缓存用量 ${formatBytes(pendingChange.usageBytes)}；当前缓存 ${pendingChange.entryCount ?? 0} 条（含正文 ${pendingChange.bodyCount ?? 0} 条），其中超出新上限的最久未用副本将被删除。确认调低上限？`}
+                : pendingChange.usageBytes > pendingChange.bytes
+                  ? `新上限 ${formatBytes(pendingChange.bytes)} 低于当前已缓存用量 ${formatBytes(pendingChange.usageBytes)}；当前缓存共 ${pendingChange.entryCount ?? 0} 条（含正文 ${pendingChange.bodyCount ?? 0} 条，此为缓存总量而非预计删除数）——超出新上限的最久未用副本将被删除。确认调低上限？`
+                  : `按当前统计用量 ${formatBytes(pendingChange.usageBytes)} 未超过新上限 ${formatBytes(pendingChange.bytes)}（统计可能滞后）；若实际用量已超过，最久未用的副本将被删除。确认调低上限？`}
           </span>
           <button
             type="button"
