@@ -202,8 +202,9 @@ export function CardLibraryModal({
   const cardDetailControllerRef = useRef<AbortController | null>(null);
   const isSingleSelectingRef = useRef(false);
   const [publicDataCards, setPublicDataCards] = useState<any[]>([]);
-  // 记录当前 publicDataCards 展示结果所属的查询；只有相同查询的刷新失败才允许保留 stale 数据。
-  const publicLoadedRequestKeyRef = useRef<string | null>(null);
+  // 「上一次成功在线结果」标记：查询键 + 该行数。行数为 0 的成功结果
+  // 不能算「可保留的在线行」——同条件刷新失败时必须允许缓存降级。
+  const publicLoadedRef = useRef<{ requestKey: string; rowCount: number } | null>(null);
   const [publicTotalPages, setPublicTotalPages] = useState<number | null>(null);
 
   /**
@@ -716,7 +717,7 @@ export function CardLibraryModal({
     publicFailedKey === currentPublicRequestKey;
   const staleOnlineRowsShown =
     publicDegradedActive &&
-    publicLoadedRequestKeyRef.current === currentPublicRequestKey &&
+    publicLoadedRef.current?.requestKey === currentPublicRequestKey &&
     publicDataCards.length > 0;
   const cachedViewShown = isPublicTab && cachedView !== null && (
     (publicViewMode === 'cache' && cachedView.key === currentPublicRequestKey) ||
@@ -788,9 +789,9 @@ export function CardLibraryModal({
     publicFetchAbortControllerRef.current?.abort();
     const abortController = new AbortController();
     publicFetchAbortControllerRef.current = abortController;
-    if (publicLoadedRequestKeyRef.current !== requestKey) {
+    if (publicLoadedRef.current?.requestKey !== requestKey) {
       // 查询语义变化（含 UUID 切换）：旧结果不得冒充新查询结果。
-      publicLoadedRequestKeyRef.current = null;
+      publicLoadedRef.current = null;
       setPublicDataCards([]);
       setPublicTotalPages(null);
     }
@@ -802,7 +803,8 @@ export function CardLibraryModal({
       if (result.ok) {
         if (abortController.signal.aborted) return;
         const card = result.data.success && result.data.card && effectiveAllowedTypeSet.has(result.data.card.type) ? result.data.card : null;
-        publicLoadedRequestKeyRef.current = requestKey;
+        // rowCount 记「实际可展示行数」：返回成功但卡片被过滤掉时记 0。
+        publicLoadedRef.current = { requestKey, rowCount: card ? 1 : 0 };
         setPublicDataCards(card ? mapWithRoleType([card]) : []);
         setPublicTotalPages(1);
         setPublicFailedKey(null);
@@ -815,10 +817,13 @@ export function CardLibraryModal({
         return;
       }
       // 同 requestKey 的 5xx/timeout 保留 stale 单卡；4xx 业务终态（卡被转私有/删除）必须清掉。
-      const keepStale = publicLoadedRequestKeyRef.current === requestKey
-        && !(failedStatus !== null && isDefinitiveClientTerminalStatus(failedStatus));
+      // 「保留」以有可展示行为前提：上次成功但零行时允许查缓存降级。
+      const hasRetainedRows =
+        publicLoadedRef.current?.requestKey === requestKey && publicLoadedRef.current.rowCount > 0;
+      const keepStale =
+        hasRetainedRows && !(failedStatus !== null && isDefinitiveClientTerminalStatus(failedStatus));
       if (!keepStale) {
-        publicLoadedRequestKeyRef.current = null;
+        publicLoadedRef.current = null;
         setPublicDataCards([]);
         setPublicTotalPages(null);
       }
@@ -852,9 +857,9 @@ export function CardLibraryModal({
     publicFetchAbortControllerRef.current?.abort();
     const abortController = new AbortController();
     publicFetchAbortControllerRef.current = abortController;
-    if (publicLoadedRequestKeyRef.current !== requestKey) {
+    if (publicLoadedRef.current?.requestKey !== requestKey) {
       // 翻页/搜索/筛选/Tab 变化：旧查询结果不得冒充新查询结果。
-      publicLoadedRequestKeyRef.current = null;
+      publicLoadedRef.current = null;
       setPublicDataCards([]);
       setPublicTotalPages(null);
     }
@@ -898,7 +903,7 @@ export function CardLibraryModal({
       const batches = await Promise.all(effectiveAllowedTypes.map((type) => fetchType(type)));
       if (abortController.signal.aborted) return;
       const cards = mapWithRoleType(batches.flatMap((batch) => batch.cards));
-      publicLoadedRequestKeyRef.current = requestKey;
+      publicLoadedRef.current = { requestKey, rowCount: cards.length };
       setPublicDataCards(cards);
       setPublicFailedKey(null);
       // 多类型并行请求时总页数取各类型最大（与 Web 旧行为一致：跨类型分页各自独立）。
@@ -911,12 +916,14 @@ export function CardLibraryModal({
       if (abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
         return;
       }
-      if (publicLoadedRequestKeyRef.current !== requestKey) {
-        publicLoadedRequestKeyRef.current = null;
+      const hasRetainedRows =
+        publicLoadedRef.current?.requestKey === requestKey && publicLoadedRef.current.rowCount > 0;
+      if (!hasRetainedRows) {
+        publicLoadedRef.current = null;
         setPublicDataCards([]);
         setPublicTotalPages(null);
-        // K2：本次失败语义没有可保留的在线行——查本机缓存，命中的快照
-        // 以 stale 标记展示，不混入（也不冒充）线上结果。
+        // K2：本次失败语义没有可保留的在线行（含「上次成功但零行」）——
+        // 查本机缓存，命中的快照以 stale 标记展示，不混入线上结果。
         void loadCachedListPage(page, requestKey);
       }
       setPublicError(error instanceof Error ? error.message : '获取公开数据卡失败');
@@ -1036,8 +1043,10 @@ export function CardLibraryModal({
   // - 降级中：重试线上查询，成功即自动回到当前线上结果；
   // - 主动缓存视图：保留用户选择，只刷新快照视图本身；
   // - 'online' 事件是恢复信号，强制重发；focus 走 15s 节流防连击。
+  // 该监听是缓存宿主（Desktop）的专属能力：没有 publicCache 端口的
+  // 宿主（Web）不得挂载这套自动重发逻辑，避免新增原本不存在的请求。
   useEffect(() => {
-    if (!isOpen || !isPublicTab || typeof window === 'undefined') return;
+    if (!isOpen || !isPublicTab || !host.publicCache || typeof window === 'undefined') return;
     const maybeRevalidate = (force: boolean) => {
       const now = Date.now();
       if (!force && now - lastReconnectAtRef.current < 15_000) return;
@@ -1058,7 +1067,7 @@ export function CardLibraryModal({
       window.removeEventListener('online', onOnline);
       window.removeEventListener('focus', onFocus);
     };
-  }, [isOpen, isPublicTab, publicViewMode, publicFailedKey, currentPage, reloadPublicCurrentQuery, reloadCachedCurrentQuery]);
+  }, [isOpen, isPublicTab, host.publicCache, publicViewMode, publicFailedKey, currentPage, reloadPublicCurrentQuery, reloadCachedCurrentQuery]);
 
   useEffect(() => {
     return () => {
@@ -1120,12 +1129,38 @@ export function CardLibraryModal({
   const canImportDeck = allowDeckImport && Boolean(host.slots.DecksModal) && isAuthenticated && selectionMode === 'multi' && selectedType === 'character' && (typeof onToggleCard === 'function' || typeof onSelectCard === 'function');
 
   /**
+   * 确认撤回后立即把当前缓存视图里的该行标为不可选（hasBody → false），
+   * 用户不必等下一次查询刷新才看到失效（DESK-CACHE-006）。
+   */
+  const markCachedRowWithdrawn = useCallback((cardId: string) => {
+    setCachedView((view) => {
+      if (!view) return view;
+      let changed = false;
+      const entries = view.entries.map((entry) => {
+        if (entry?.id !== cardId || !getCachedDataCardRowMeta(entry)?.hasBody) return entry;
+        changed = true;
+        return markCachedDataCardRow(entry, {
+          hasBody: false,
+          lastSuccessAt: getCachedDataCardRowMeta(entry)?.lastSuccessAt ?? null,
+        });
+      });
+      if (!changed) return view;
+      return {
+        ...view,
+        entries,
+        bodyCount: entries.reduce((sum, entry) => sum + (getCachedDataCardRowMeta(entry)?.hasBody ? 1 : 0), 0),
+      };
+    });
+  }, []);
+
+  /**
    * K2：取缓存行的正文快照（DESK-CACHE-005）。
    *
    * 联网可达且当前查询没有被判「线上失败」时先按需重验证单卡：
-   * 明确的撤回证据（业务错误码或 native 已写入撤回标记）→ 不再提供缓存
-   * 替代；传输类失败/未知 4xx 才回落缓存正文。仅摘要/缺失/撤回是终态，
-   * 用 CachedCardUnavailableError 终止选择流程，错误文案如实说明。
+   * 撤回终态与 native 分类同一证据——HTTP 404 + `success:false` + 业务
+   * 撤回码三者同时成立才算「已确认撤回」（DESK-CACHE-006）；传输类失败/
+   * 未知 4xx/5xx 都回落缓存正文。仅摘要/缺失/撤回是终态，用
+   * CachedCardUnavailableError 终止选择流程，错误文案如实说明。
    */
   const loadCachedCardBody = useCallback(async (
     cardId: string,
@@ -1140,13 +1175,16 @@ export function CardLibraryModal({
         const res = await host.online.fetchPublicCardById(cardId, signal);
         if (signal.aborted) throw new DOMException('The operation was aborted.', 'AbortError');
         const body = res.data as { success?: unknown; card?: unknown; code?: unknown } | undefined;
-        if (res.ok && body?.success === true && body.card) {
-          // 按需重验证成功：这份正文是本次线上已验证事实，
-          // 选择语义可如实升级为 'cloud'（selectionId 同步换 cloud:<id>）。
-          return { card: body.card as Record<string, unknown>, viaCache: false };
+        const onlineCard = body?.card as Record<string, unknown> | null | undefined;
+        // 升级为线上已验证事实前必须核对返回卡 id：错置身份（拿到另一张
+        // 卡却标成 cloud:<请求id>）比传输失败更严重，不许放行。
+        if (res.ok && body?.success === true && onlineCard && onlineCard.id === cardId) {
+          return { card: onlineCard, viaCache: false };
         }
-        // 只有明确业务撤回码才是终态；401/无码 404/5xx/HTML 一律当传输失败回落缓存。
-        if (body?.code === PUBLIC_DATA_CARD_NOT_FOUND_CODE) {
+        // 401/无码 404/5xx/HTML/成功但卡 id 不符——一律当传输失败回落缓存；
+        // 只有三项证据齐全的业务撤回才是终态，并立即把该缓存行标记失效。
+        if (res.status === 404 && body?.success === false && body?.code === PUBLIC_DATA_CARD_NOT_FOUND_CODE) {
+          markCachedRowWithdrawn(cardId);
           throw new CachedCardUnavailableError('这张卡已从公开库撤回或不再公开，缓存快照不再提供。');
         }
       } catch (error) {
@@ -1169,13 +1207,14 @@ export function CardLibraryModal({
       };
     }
     if (result.availability === 'withdrawn') {
+      markCachedRowWithdrawn(cardId);
       throw new CachedCardUnavailableError('这张卡已从公开库撤回或不再公开。');
     }
     if (result.availability === 'summary-only') {
       throw new CachedCardUnavailableError('这张卡只缓存了摘要，正文需联网后获取。');
     }
     throw new CachedCardUnavailableError('本机缓存中没有这张卡。');
-  }, [host.publicCache, host.online, publicFailedKey, currentPublicRequestKey]);
+  }, [host.publicCache, host.online, publicFailedKey, currentPublicRequestKey, markCachedRowWithdrawn]);
 
   // 处理卡片选择
   const handleSelectCard = async (card: any) => {

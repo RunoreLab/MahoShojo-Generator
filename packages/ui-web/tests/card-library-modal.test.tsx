@@ -7,8 +7,10 @@ import type { CardRepository } from '@mahoshojo/local-library/repository';
 
 import {
   CardLibraryModal,
+  DataCardEmptyState,
   mapDataCardRuntimeSourceInfo,
   type CardLibraryHost,
+  type CardLibraryPublicCachePort,
 } from '../src/card-library/index';
 
 let container: HTMLDivElement;
@@ -516,7 +518,7 @@ const cachedEntry = (id: string, hasBody = true) => ({
   bodyUpdatedAt: hasBody ? '2026-10-05T00:00:00Z' : null,
 });
 
-const createCachePort = (entries: Array<ReturnType<typeof cachedEntry>>) => ({
+const createCachePort = (entries: Array<ReturnType<typeof cachedEntry>>): CardLibraryPublicCachePort => ({
   queryCachedCards: vi.fn(async () => ({
     status: 'ready' as const,
     entries,
@@ -630,4 +632,247 @@ test('「已缓存」主动浏览缓存视图：查询缓存、显示快照横�
   await settle();
   expect(fetchPublicCards.mock.calls.length).toBeGreaterThan(onlineCalls);
   expect(document.body.textContent).toContain('公开角色 online-1');
+});
+
+/* ── D5.1-K2-r1 审查修复回归 ─────────────────────────────────────────── */
+
+test('宿主无 publicCache 端口时 online/focus 不新增请求（Web 行为不回变）', async () => {
+  const fetchPublicCards = vi.fn(async () => ({
+    ok: true as const, status: 200,
+    data: { success: true, cards: [publicCard('online-1')], total: 1, nextOffset: null },
+  }));
+  const { host } = createHost([], { online: { fetchPublicCards } });
+  await render({
+    host, isOpen: true, onClose: vi.fn(), onSelectCard: vi.fn(),
+    selectedType: 'character', initialTab: 'public',
+  });
+  await settle();
+  expect(document.body.textContent).toContain('公开角色 online-1');
+  const calls = fetchPublicCards.mock.calls.length;
+  expect(calls).toBeGreaterThan(0);
+
+  await act(async () => { window.dispatchEvent(new Event('online')); });
+  await act(async () => { window.dispatchEvent(new Event('focus')); });
+  await settle();
+  // K2 的断线重连/回前台重验证是缓存宿主专属逻辑——Web 不得挂载监听。
+  expect(fetchPublicCards.mock.calls.length).toBe(calls);
+});
+
+test('缓存宿主的 online 事件触发线上重试并从降级恢复', async () => {
+  let fail = true;
+  const fetchPublicCards = vi.fn(async () => {
+    if (fail) return { ok: false as const, status: 503 };
+    return {
+      ok: true as const, status: 200,
+      data: { success: true, cards: [publicCard('online-1')], total: 1, nextOffset: null },
+    };
+  });
+  const { host } = createHost([], { online: { fetchPublicCards } });
+  host.publicCache = createCachePort([cachedEntry('card-c')]);
+  await render({
+    host, isOpen: true, onClose: vi.fn(), onSelectCard: vi.fn(),
+    selectedType: 'character', initialTab: 'public',
+  });
+  await settle();
+  // 线上失败 → 已降级到缓存快照。
+  expect(document.body.textContent).toContain('公开角色 card-c');
+  expect(document.body.textContent).toContain('线上公开库暂时不可用');
+  const calls = fetchPublicCards.mock.calls.length;
+
+  fail = false;
+  await act(async () => { window.dispatchEvent(new Event('online')); });
+  await settle();
+  expect(fetchPublicCards.mock.calls.length).toBeGreaterThan(calls);
+  // 重连重试成功：自动回到线上结果，不再展示缓存行。
+  expect(document.body.textContent).toContain('公开角色 online-1');
+  expect(document.body.textContent).not.toContain('公开角色 card-c');
+});
+
+test('在线成功返回空结果后，同条件刷新失败仍降级到本机缓存', async () => {
+  let fail = false;
+  const fetchPublicCards = vi.fn(async () => {
+    if (fail) return { ok: false as const, status: 503 };
+    // 语义级成功但零行——这是「没有可保留的在线行」，不是「没有成功过」。
+    return {
+      ok: true as const, status: 200,
+      data: { success: true, cards: [], total: 0, nextOffset: null },
+    };
+  });
+  const { host } = createHost([], { online: { fetchPublicCards } });
+  const cache = createCachePort([cachedEntry('card-c')]);
+  host.publicCache = cache;
+  await render({
+    host, isOpen: true, onClose: vi.fn(), onSelectCard: vi.fn(),
+    selectedType: 'character', initialTab: 'public',
+  });
+  await settle();
+  expect(document.body.textContent).toContain('公开库里还没有公开的角色数据卡');
+  // 成功路径不发缓存查询。
+  expect(cache.queryCachedCards).not.toHaveBeenCalled();
+
+  // 同条件强制刷新（重连信号）失败：没有可保留的在线行 → 查本机缓存。
+  fail = true;
+  await act(async () => { window.dispatchEvent(new Event('online')); });
+  await settle();
+  expect(cache.queryCachedCards).toHaveBeenCalled();
+  expect(document.body.textContent).toContain('线上公开库暂时不可用');
+  expect(document.body.textContent).toContain('公开角色 card-c');
+});
+
+test('缓存空态优先级：unavailable/unsupported-schema 不被线上错误文案覆盖', async () => {
+  await act(async () => {
+    root.render(<DataCardEmptyState
+      tab="public" typeLabel="角色" error onRetry={() => {}}
+      cacheView="degraded" cachedStatus="unavailable"
+    />);
+  });
+  // 缓存故障不能伪装成「缓存为空」（DESK-CACHE-002）。
+  expect(document.body.textContent).toContain('本机缓存当前也不可读取');
+  expect(document.body.textContent).not.toContain('本机缓存中也没有可显示的内容');
+
+  await act(async () => {
+    root.render(<DataCardEmptyState
+      tab="public" typeLabel="角色" error onRetry={() => {}}
+      cacheView="degraded" cachedStatus="unsupported-schema"
+    />);
+  });
+  expect(document.body.textContent).toContain('本机缓存由更新版本的应用创建');
+
+  // 主动浏览缓存：线上错误与缓存内容无关，照常展示缓存空态。
+  await act(async () => {
+    root.render(<DataCardEmptyState
+      tab="public" typeLabel="角色" error onRetry={() => {}}
+      cacheView="browse" cachedStatus="ready"
+    />);
+  });
+  expect(document.body.textContent).toContain('本机缓存中还没有公开的角色数据卡');
+  expect(document.body.textContent).not.toContain('加载失败');
+
+  // 无缓存视图（Web 现状）：错误文案完全不变。
+  await act(async () => {
+    root.render(<DataCardEmptyState tab="public" typeLabel="角色" error onRetry={() => {}} />);
+  });
+  expect(document.body.textContent).toContain('数据卡加载失败，请重试。');
+});
+
+const renderCacheBrowse = async (cache: ReturnType<typeof createCachePort>, online: Partial<CardLibraryHost['online']>) => {
+  const { host } = createHost([], {
+    online: {
+      fetchPublicCards: vi.fn(async () => ({
+        ok: true as const, status: 200,
+        data: { success: true, cards: [publicCard('online-1')], total: 1, nextOffset: null },
+      })),
+      ...online,
+    },
+  });
+  host.publicCache = cache;
+  const onSelectCard = vi.fn();
+  await render({
+    host, isOpen: true, onClose: vi.fn(), onSelectCard,
+    selectedType: 'character', initialTab: 'public',
+  });
+  await settle();
+  await click([...document.body.querySelectorAll('button')].find((b) => b.textContent?.includes('已缓存'))!);
+  await settle();
+  expect(document.body.textContent).toContain('公开角色 card-c');
+  return { onSelectCard };
+};
+
+const selectCachedRow = () => click(document.body.querySelector('[role="button"][aria-label="选择公开角色 card-c"]')!);
+
+test('缓存正文重验证：仅「404 + success:false + 撤回码」三证齐全才判撤回并即时标记行失效', async () => {
+  const fetchPublicCardById = vi.fn(async () => ({
+    ok: false as const, status: 404,
+    data: { success: false, code: 'PUBLIC_DATA_CARD_NOT_FOUND', error: 'not found' },
+  }));
+  const cache = createCachePort([cachedEntry('card-c')]);
+  const { onSelectCard } = await renderCacheBrowse(cache, { fetchPublicCardById });
+
+  await selectCachedRow();
+  await settle();
+  // 明确撤回是终态：不再回落缓存正文，选择终止，错误如实说明。
+  expect(onSelectCard).not.toHaveBeenCalled();
+  expect(cache.loadCachedCard).not.toHaveBeenCalled();
+  expect(document.body.textContent).toContain('已从公开库撤回或不再公开');
+  // UI 立即把该缓存行标记为不可选（不必等下一次查询刷新）。
+  const row = document.body.querySelector('[role="button"][aria-label="选择公开角色 card-c"]');
+  expect(row?.getAttribute('aria-disabled')).toBe('true');
+  expect(document.body.textContent).toContain('仅摘要');
+});
+
+test('缓存正文重验证：同名 code 的非 404 响应不算撤回，照常回落缓存正文', async () => {
+  for (const status of [200, 503]) {
+    const fetchPublicCardById = vi.fn(async () => ({
+      ok: status === 200, status,
+      data: { success: status === 200, code: 'PUBLIC_DATA_CARD_NOT_FOUND' },
+    }));
+    const cache = createCachePort([cachedEntry('card-c')]);
+    const { onSelectCard } = await renderCacheBrowse(cache, { fetchPublicCardById });
+
+    await selectCachedRow();
+    await settle();
+    expect(cache.loadCachedCard).toHaveBeenCalledWith('card-c', expect.anything());
+    expect(onSelectCard).toHaveBeenCalledTimes(1);
+    const [, context] = onSelectCard.mock.calls[0]! as [unknown, { selectionId: string }];
+    expect(context.selectionId).toBe('cache:card-c');
+    expect(document.body.textContent).not.toContain('撤回');
+
+    await act(async () => { root.unmount(); });
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  }
+});
+
+test('缓存正文重验证：返回卡 id 与请求不符不得升级为 cloud 身份', async () => {
+  const fetchPublicCardById = vi.fn(async () => ({
+    ok: true as const, status: 200,
+    data: { success: true, card: publicCard('card-WRONG') },
+  }));
+  const cache = createCachePort([cachedEntry('card-c')]);
+  const { onSelectCard } = await renderCacheBrowse(cache, { fetchPublicCardById });
+
+  await selectCachedRow();
+  await settle();
+  // id 不符不构成已验证事实 → 回落缓存，语义保持 cache:card-c。
+  expect(cache.loadCachedCard).toHaveBeenCalledWith('card-c', expect.anything());
+  expect(onSelectCard).toHaveBeenCalledTimes(1);
+  const [, context] = onSelectCard.mock.calls[0]! as [unknown, { selectionId: string }];
+  expect(context.selectionId).toBe('cache:card-c');
+});
+
+test('缓存正文重验证：返回卡 id 匹配才升级为 cloud 选择语义', async () => {
+  const fetchPublicCardById = vi.fn(async () => ({
+    ok: true as const, status: 200,
+    data: { success: true, card: publicCard('card-c') },
+  }));
+  const cache = createCachePort([cachedEntry('card-c')]);
+  const { onSelectCard } = await renderCacheBrowse(cache, { fetchPublicCardById });
+
+  await selectCachedRow();
+  await settle();
+  expect(onSelectCard).toHaveBeenCalledTimes(1);
+  const [, context] = onSelectCard.mock.calls[0]! as [unknown, { selectionId: string; cloudCardId: string }];
+  expect(context).toEqual({ selectionId: 'cloud:card-c', storageLocation: 'cloud', cloudCardId: 'card-c' });
+});
+
+test('缓存通道自身判撤回时同样终止并即时标记行失效', async () => {
+  const cache = createCachePort([cachedEntry('card-c')]);
+  cache.loadCachedCard = vi.fn(async () => ({
+    status: 'ready' as const,
+    availability: 'withdrawn' as const,
+    entry: null,
+  }));
+  const { onSelectCard } = await renderCacheBrowse(cache, {
+    // 传输层失败（非撤回）→ 回落缓存通道，由缓存的撤回标记终结。
+    fetchPublicCardById: vi.fn(async () => ({ ok: false as const, status: 503 })),
+  });
+
+  await selectCachedRow();
+  await settle();
+  expect(onSelectCard).not.toHaveBeenCalled();
+  expect(document.body.textContent).toContain('已从公开库撤回或不再公开');
+  const row = document.body.querySelector('[role="button"][aria-label="选择公开角色 card-c"]');
+  expect(row?.getAttribute('aria-disabled')).toBe('true');
 });

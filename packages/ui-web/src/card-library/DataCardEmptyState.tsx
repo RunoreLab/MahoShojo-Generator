@@ -52,44 +52,42 @@ export function DataCardEmptyState({
   /** 缓存库状态——unavailable/unsupported-schema 时空态要如实说明，不冒充「缓存为空」。 */
   cachedStatus?: 'empty' | 'ready' | 'unavailable' | 'unsupported-schema';
 }) {
-  // 主动浏览缓存视图时，线上错误与「缓存里有什么」无关——
-  // 缓存空态由 cacheView 分支如实说明，不用在线失败文案覆盖它。
-  if (error && cacheView !== 'browse') {
-    return (
-      <div className="flex flex-col items-center gap-3 py-8 text-center">
-        <p className="text-sm text-gray-500">
-          {cacheView === 'degraded'
-            ? '公开库连接失败，本机缓存中也没有可显示的内容。'
-            : tab === 'local' ? '本地库读取失败，请重试。' : '数据卡加载失败，请重试。'}
-        </p>
-        {onRetry ? (
-          <button
-            type="button"
-            onClick={onRetry}
-            className="min-h-11 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-900 hover:bg-gray-50"
-          >
-            重试
-          </button>
-        ) : null}
-      </div>
-    );
-  }
-
+  // 缓存视图里「缓存不可读 / 版本不兼容」必须先于线上错误文案——
+  // 缓存故障不能伪装成「缓存为空」（DESK-CACHE-002），降级场景的
+  // 线上失败只增加上下文，不抢走这个优先级。
   if (cacheView) {
     if (cachedStatus === 'unavailable') {
       return (
         <NoQueryMatch
-          title="本机缓存当前不可用"
-          hint="缓存文件无法读写（可能被占用或损坏）。这不影响本地库与线上公开库——回到线上视图后照常可用。"
+          title={cacheView === 'degraded' ? '公开库连接失败，本机缓存当前也不可读取' : '本机缓存当前不可用'}
+          hint="缓存文件无法读写（可能被占用或损坏）。这不影响本地库与线上公开库——线上恢复后可重试，修复缓存后即可继续浏览。"
         />
       );
     }
     if (cachedStatus === 'unsupported-schema') {
       return (
         <NoQueryMatch
-          title="本机缓存由更新版本的应用创建"
+          title={cacheView === 'degraded' ? '公开库连接失败，且本机缓存由更新版本的应用创建' : '本机缓存由更新版本的应用创建'}
           hint="当前版本不能读取它，也不会覆盖写入。升级应用后可继续使用；线上公开库不受影响。"
         />
+      );
+    }
+    if (error && cacheView === 'degraded') {
+      // 主动浏览缓存视图时线上错误与「缓存里有什么」无关——
+      // 只有自动降级才需要把线上失败写进空态并提供重试。
+      return (
+        <div className="flex flex-col items-center gap-3 py-8 text-center">
+          <p className="text-sm text-gray-500">公开库连接失败，本机缓存中也没有可显示的内容。</p>
+          {onRetry ? (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="min-h-11 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-900 hover:bg-gray-50"
+            >
+              重试
+            </button>
+          ) : null}
+        </div>
       );
     }
     if (hasActiveSearch) {
@@ -105,6 +103,25 @@ export function DataCardEmptyState({
         title={cacheView === 'degraded' ? '线上不可用，且本机缓存还没有捕获过公开资料' : '本机缓存中还没有公开的' + typeLabel + '数据卡'}
         hint="联网状态下浏览公开库时，可公开的内容会自动缓存到本机，之后离线也能浏览。缓存里没有不等于线上没有。"
       />
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-8 text-center">
+        <p className="text-sm text-gray-500">
+          {tab === 'local' ? '本地库读取失败，请重试。' : '数据卡加载失败，请重试。'}
+        </p>
+        {onRetry ? (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="min-h-11 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-900 hover:bg-gray-50"
+          >
+            重试
+          </button>
+        ) : null}
+      </div>
     );
   }
 
