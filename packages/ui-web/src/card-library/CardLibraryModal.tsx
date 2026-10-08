@@ -481,6 +481,12 @@ export function CardLibraryModal({
   } | null>(null);
   const cacheFetchAbortControllerRef = useRef<AbortController | null>(null);
   const [cacheLoading, setCacheLoading] = useState(false);
+  /**
+   * 本次会话内已确认撤回的卡 id：撤回确认之前发起的缓存查询响应不得
+   * 重新展示它们（`DESK-CACHE-006`——「已撤回」是移出可见/可选集合的
+   * 终态，不是「仅摘要」）。弹窗重开即重置，native 读侧本就是权威兜底。
+   */
+  const withdrawnCacheIdsRef = useRef<Set<string>>(new Set());
   /** 连接恢复/窗口回前台的重验证合并节流。 */
   const lastReconnectAtRef = useRef(0);
   const isLocalTab = activeTab === 'local';
@@ -642,12 +648,19 @@ export function CardLibraryModal({
       );
       if (abortController.signal.aborted) return;
       const entries = pages.flatMap((p) =>
-        p.entries.map((entry) =>
-          markCachedDataCardRow(
-            { ...entry.card, roleType: inferRoleType(entry.card) || undefined },
-            { hasBody: entry.hasBody, lastSuccessAt: entry.lastSuccessAt },
+        p.entries
+          // 撤回确认晚于本次查询签发：迟到响应不得把已撤回卡重新放回
+          // 可见集合——会话级集合先于视图写入过滤它们。
+          .filter((entry) => {
+            const id = entry.card.id;
+            return typeof id !== 'string' || !withdrawnCacheIdsRef.current.has(id);
+          })
+          .map((entry) =>
+            markCachedDataCardRow(
+              { ...entry.card, roleType: inferRoleType(entry.card) || undefined },
+              { hasBody: entry.hasBody, lastSuccessAt: entry.lastSuccessAt },
+            ),
           ),
-        ),
       );
       const status: CardLibraryCacheStatus =
         pages.every((p) => p.status === 'ready') ? 'ready'
@@ -1096,6 +1109,8 @@ export function CardLibraryModal({
     setPublicViewMode('online');
     setPublicFailedKey(null);
     setCachedView(null);
+    // 会话级撤回集合同属本弹窗会话——重开后由 native 权威读兜底。
+    withdrawnCacheIdsRef.current.clear();
 
     const fallbackTab: BattleDataTab = effectiveTabs[0] ?? 'public';
     const canUseInitialTab = Boolean(initialTab && effectiveTabs.includes(initialTab));
@@ -1129,29 +1144,47 @@ export function CardLibraryModal({
   const canImportDeck = allowDeckImport && Boolean(host.slots.DecksModal) && isAuthenticated && selectionMode === 'multi' && selectedType === 'character' && (typeof onToggleCard === 'function' || typeof onSelectCard === 'function');
 
   /**
-   * 确认撤回后立即把当前缓存视图里的该行标为不可选（hasBody → false），
-   * 用户不必等下一次查询刷新才看到失效（DESK-CACHE-006）。
+   * 确认撤回后立即把该卡从缓存可见/可选集合移除——「已撤回」是终态
+   * （`DESK-CACHE-006`），不是「仅摘要」。三步收口：
+   * 1. 记入会话级撤回集合：撤回确认前发起的缓存查询响应即使迟到
+   *    也不得重新展示该卡；
+   * 2. 中止在途缓存列表查询（abort 信号让该批结果在写 state 前被
+   *    丢弃），并把行从当前视图立即移除；
+   * 3. 重查 native 缓存集合：total/bodyCount/分页按撤回后的权威
+   *    全集重新计算——不再从当前页条目近似推算 bodyCount。
    */
   const markCachedRowWithdrawn = useCallback((cardId: string) => {
-    setCachedView((view) => {
-      if (!view) return view;
-      let changed = false;
-      const entries = view.entries.map((entry) => {
-        if (entry?.id !== cardId || !getCachedDataCardRowMeta(entry)?.hasBody) return entry;
-        changed = true;
-        return markCachedDataCardRow(entry, {
-          hasBody: false,
-          lastSuccessAt: getCachedDataCardRowMeta(entry)?.lastSuccessAt ?? null,
-        });
-      });
-      if (!changed) return view;
-      return {
-        ...view,
-        entries,
-        bodyCount: entries.reduce((sum, entry) => sum + (getCachedDataCardRowMeta(entry)?.hasBody ? 1 : 0), 0),
-      };
-    });
-  }, []);
+    withdrawnCacheIdsRef.current.add(cardId);
+    cacheFetchAbortControllerRef.current?.abort();
+    // 中止不释放 ref 引用——被弃用的那次加载在 finally 里看到 ref
+    // 已换人便不再清 loading；这里手动复位，避免转圈悬挂。
+    cacheFetchAbortControllerRef.current = null;
+    setCacheLoading(false);
+    setCachedView((view) =>
+      view
+        ? { ...view, entries: view.entries.filter((entry) => entry?.id !== cardId) }
+        : view,
+    );
+    if (!isPublicTab || !host.publicCache) return;
+    // 沿用当前视图语义的 key 重查（降级态是失败查询的 key，浏览态是
+    // list 语义），不引入新语义；当前页被抽空时由 clamp effect 回退。
+    if (publicDegradedActive && publicFailedKey) {
+      void loadCachedListPage(currentPage, publicFailedKey);
+    } else {
+      reloadCachedCurrentQuery(currentPage);
+    }
+  }, [isPublicTab, host.publicCache, publicDegradedActive, publicFailedKey, currentPage, loadCachedListPage, reloadCachedCurrentQuery]);
+
+  // 缓存视图的页码回收：撤回移除/筛选收紧使 totalPages 收缩、当前页
+  // 越界时回退到末页并重查。只作用于主动缓存视图——降级快照附着在
+  // 失败的线上请求上，翻页本就由在线路径重试（与线上 clamp 同口径）。
+  useEffect(() => {
+    if (!isOpen || !isPublicTab || publicViewMode !== 'cache') return;
+    if (!cachedView || !cachedViewShown || currentPage <= cachedView.totalPages) return;
+    const next = Math.max(1, cachedView.totalPages);
+    setCurrentPage(next);
+    reloadCachedCurrentQuery(next);
+  }, [isOpen, isPublicTab, publicViewMode, cachedView, cachedViewShown, currentPage, reloadCachedCurrentQuery]);
 
   /**
    * K2：取缓存行的正文快照（DESK-CACHE-005）。
@@ -1212,6 +1245,14 @@ export function CardLibraryModal({
     }
     if (result.availability === 'summary-only') {
       throw new CachedCardUnavailableError('这张卡只缓存了摘要，正文需联网后获取。');
+    }
+    // 'absent' 之外先按 status 如实归因：缓存损坏/版本不受支持不是
+    // 「没有这张卡」——文案不得把缓存故障说成数据缺失。
+    if (result.status === 'unsupported-schema') {
+      throw new CachedCardUnavailableError('本机缓存数据版本不受支持，正文需联网后获取。');
+    }
+    if (result.status === 'unavailable') {
+      throw new CachedCardUnavailableError('本机缓存暂不可用，正文需联网后获取。');
     }
     throw new CachedCardUnavailableError('本机缓存中没有这张卡。');
   }, [host.publicCache, host.online, publicFailedKey, currentPublicRequestKey, markCachedRowWithdrawn]);

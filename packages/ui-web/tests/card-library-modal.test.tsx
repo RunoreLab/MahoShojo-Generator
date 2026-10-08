@@ -780,13 +780,33 @@ const renderCacheBrowse = async (cache: ReturnType<typeof createCachePort>, onli
 
 const selectCachedRow = () => click(document.body.querySelector('[role="button"][aria-label="选择公开角色 card-c"]')!);
 
-test('缓存正文重验证：仅「404 + success:false + 撤回码」三证齐全才判撤回并即时标记行失效', async () => {
-  const fetchPublicCardById = vi.fn(async () => ({
-    ok: false as const, status: 404,
-    data: { success: false, code: 'PUBLIC_DATA_CARD_NOT_FOUND', error: 'not found' },
+test('缓存正文重验证：仅「404 + success:false + 撤回码」三证齐全才判撤回并即时移除行', async () => {
+  // 在线侧确认撤回发生在 native 观察路径——mock 里翻转 withdrawn，
+  // 模拟「404 证据落盘/登记后再重查」的权威计数。
+  let withdrawn = false;
+  const fetchPublicCardById = vi.fn(async () => {
+    withdrawn = true;
+    return {
+      ok: false as const, status: 404,
+      data: { success: false, code: 'PUBLIC_DATA_CARD_NOT_FOUND', error: 'not found' },
+    };
+  });
+  const queryCachedCards = vi.fn(async () => ({
+    status: 'ready' as const,
+    entries: withdrawn ? [cachedEntry('card-d')] : [cachedEntry('card-c'), cachedEntry('card-d')],
+    total: withdrawn ? 1 : 2,
+    bodyCount: withdrawn ? 1 : 2,
   }));
-  const cache = createCachePort([cachedEntry('card-c')]);
+  const cache: CardLibraryPublicCachePort = {
+    queryCachedCards,
+    loadCachedCard: vi.fn(async () => ({
+      status: 'ready' as const,
+      availability: 'full' as const,
+      entry: { card: publicCard('card-c'), bodyUpdatedAt: null, lastSuccessAt: null },
+    })),
+  };
   const { onSelectCard } = await renderCacheBrowse(cache, { fetchPublicCardById });
+  expect(document.body.textContent).toContain('命中 2 条（2 条已缓存正文可离线打开）');
 
   await selectCachedRow();
   await settle();
@@ -794,10 +814,12 @@ test('缓存正文重验证：仅「404 + success:false + 撤回码」三证齐�
   expect(onSelectCard).not.toHaveBeenCalled();
   expect(cache.loadCachedCard).not.toHaveBeenCalled();
   expect(document.body.textContent).toContain('已从公开库撤回或不再公开');
-  // UI 立即把该缓存行标记为不可选（不必等下一次查询刷新）。
-  const row = document.body.querySelector('[role="button"][aria-label="选择公开角色 card-c"]');
-  expect(row?.getAttribute('aria-disabled')).toBe('true');
-  expect(document.body.textContent).toContain('仅摘要');
+  // K-r2：已撤回行从可见/可选集合立即移除，不是降格为「仅摘要」；
+  // 重查询以撤回后的权威全集计数 total/bodyCount。
+  expect(document.body.querySelector('[role="button"][aria-label="选择公开角色 card-c"]')).toBeNull();
+  expect(document.body.textContent).toContain('公开角色 card-d');
+  expect(document.body.textContent).toContain('命中 1 条（1 条已缓存正文可离线打开）');
+  expect(queryCachedCards.mock.calls.length).toBeGreaterThanOrEqual(2);
 });
 
 test('缓存正文重验证：同名 code 的非 404 响应不算撤回，照常回落缓存正文', async () => {
@@ -857,7 +879,7 @@ test('缓存正文重验证：返回卡 id 匹配才升级为 cloud 选择语义
   expect(context).toEqual({ selectionId: 'cloud:card-c', storageLocation: 'cloud', cloudCardId: 'card-c' });
 });
 
-test('缓存通道自身判撤回时同样终止并即时标记行失效', async () => {
+test('缓存通道自身判撤回时同样终止并即时移除行', async () => {
   const cache = createCachePort([cachedEntry('card-c')]);
   cache.loadCachedCard = vi.fn(async () => ({
     status: 'ready' as const,
@@ -873,6 +895,85 @@ test('缓存通道自身判撤回时同样终止并即时标记行失效', async
   await settle();
   expect(onSelectCard).not.toHaveBeenCalled();
   expect(document.body.textContent).toContain('已从公开库撤回或不再公开');
-  const row = document.body.querySelector('[role="button"][aria-label="选择公开角色 card-c"]');
-  expect(row?.getAttribute('aria-disabled')).toBe('true');
+  // K-r2：撤回行直接移出可见集合（mock 重查仍返回它，会话级撤回集合
+  // 挡在视图写入前——迟到/陈旧响应不得重新展示已撤回卡）。
+  expect(document.body.querySelector('[role="button"][aria-label="选择公开角色 card-c"]')).toBeNull();
+});
+
+test('撤回确认前签发的在途缓存列表响应不得重新展示已撤回卡', async () => {
+  // 第二次查询（撤回触发的重查）挂起：模拟「撤回确认前签发、确认后
+  // 才返回」的迟到响应——即使负载里仍带该卡也不得重显。
+  const late = deferred<{
+    status: 'ready'; entries: ReturnType<typeof cachedEntry>[]; total: number; bodyCount: number;
+  }>();
+  let calls = 0;
+  const cache: CardLibraryPublicCachePort = {
+    queryCachedCards: vi.fn(() => {
+      calls += 1;
+      if (calls === 1) {
+        return Promise.resolve({
+          status: 'ready' as const,
+          entries: [cachedEntry('card-c'), cachedEntry('card-d')],
+          total: 2, bodyCount: 2,
+        });
+      }
+      return late.promise;
+    }),
+    loadCachedCard: vi.fn(async () => ({
+      status: 'ready' as const,
+      availability: 'withdrawn' as const,
+      entry: null,
+    })),
+  };
+  const { onSelectCard } = await renderCacheBrowse(cache, {
+    fetchPublicCardById: vi.fn(async () => ({ ok: false as const, status: 503 })),
+  });
+
+  await selectCachedRow();
+  await settle();
+  // 即时移除已生效，重查尚在途。
+  expect(document.body.querySelector('[role="button"][aria-label="选择公开角色 card-c"]')).toBeNull();
+  expect(document.body.textContent).toContain('公开角色 card-d');
+
+  // 迟到响应仍携带已撤回卡——会话级撤回集合必须把它滤掉。
+  await act(async () => {
+    late.resolve({
+      status: 'ready',
+      entries: [cachedEntry('card-c'), cachedEntry('card-d')],
+      total: 2, bodyCount: 2,
+    });
+  });
+  await settle();
+  expect(document.body.querySelector('[role="button"][aria-label="选择公开角色 card-c"]')).toBeNull();
+  expect(document.body.textContent).toContain('公开角色 card-d');
+  expect(onSelectCard).not.toHaveBeenCalled();
+});
+
+test('缓存正文读取：unavailable/unsupported-schema 如实报错而非「没有这张卡」', async () => {
+  for (const status of ['unavailable', 'unsupported-schema'] as const) {
+    const cache = createCachePort([cachedEntry('card-c')]);
+    cache.loadCachedCard = vi.fn(async () => ({
+      status,
+      availability: 'absent' as const,
+      entry: null,
+    }));
+    const { onSelectCard } = await renderCacheBrowse(cache, {
+      // 传输层失败 → 走缓存通道；缓存整体不可用不是「没有这张卡」。
+      fetchPublicCardById: vi.fn(async () => ({ ok: false as const, status: 503 })),
+    });
+
+    await selectCachedRow();
+    await settle();
+    expect(onSelectCard).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain(
+      status === 'unavailable' ? '本机缓存暂不可用' : '本机缓存数据版本不受支持',
+    );
+    expect(document.body.textContent).not.toContain('本机缓存中没有这张卡');
+
+    await act(async () => { root.unmount(); });
+    container.remove();
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  }
 });
