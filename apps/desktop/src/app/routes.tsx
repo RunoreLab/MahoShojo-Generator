@@ -104,7 +104,7 @@ const ESCAPE_MENU_ENTRIES: readonly ShellEscapeMenuEntry[] = (
   ] as const
 ).filter((entry) => readCapability(CAPABILITIES, entry.href).kind === 'available');
 
-const FULL_BLEED_PATHS = new Set(['/', '/details', '/canshou', '/free', '/scenario', '/character-manager', '/encyclopedia', '/messages']);
+const FULL_BLEED_PATHS = new Set(['/', '/details', '/canshou', '/free', '/scenario', '/creator', '/character-manager', '/encyclopedia', '/messages']);
 
 /** 条目页是前缀而不是字面路径：`/encyclopedia/<slug>`。 */
 const isFullBleedPath = (pathname: string) =>
@@ -442,12 +442,19 @@ const scenarioRoute = createRoute({
   component: lazyRouteComponent(() => import('./scenario-page'), 'DesktopScenario'),
 });
 
+const creatorRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/creator',
+  component: lazyRouteComponent(() => import('./creator-page'), 'DesktopCreator'),
+});
+
 export const routeTree = rootRoute.addChildren([
   indexRoute,
   detailsRoute,
   canshouRoute,
   freeRoute,
   scenarioRoute,
+  creatorRoute,
   characterManagerRoute,
   encyclopediaIndexRoute,
   encyclopediaEntryRoute,

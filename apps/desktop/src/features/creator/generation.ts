@@ -221,6 +221,11 @@ const CREATOR_GENERATION_FAMILY: DesktopGenerationFamily<
   CreatorCardKind
 > = {
   validateInput: (input) => {
+    // 'scenario' 模板当前不接任何生成通路（hosted 两路由白名单不含、direct 无
+    // 对应结构化配置）——显式拒绝，防止静默落到 magical-girl 分派分支。
+    if (input.template === 'scenario') {
+      throw new Error('「情景（结构化）」模板暂未接入生成通路，请选择其他创作模板。');
+    }
     try {
       validateCreatorRequest(buildCreatorRequestInput(input));
     } catch (error) {

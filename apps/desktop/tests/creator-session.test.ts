@@ -6,7 +6,6 @@ import {
   type CreatorDraft,
 } from '../src/features/creator/session';
 import type { CreatorGenerationOutcome } from '../src/features/creator/generation';
-import { STREAM_HOSTED_AI_COMMAND } from '../src/platform/cloud-bridge';
 
 const initialDraft: CreatorDraft = {
   answers: {},
