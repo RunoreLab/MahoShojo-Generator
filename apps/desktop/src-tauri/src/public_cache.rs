@@ -421,6 +421,68 @@ struct CacheInner {
     /// LRU 证据只需要粗粒度事实，同一进程内每卡触碰一次足够表达
     /// 「最近被用过」，避免把每次正文读取都变成一次写事务。
     touched_keys: BTreeSet<String>,
+    /// 进程内撤回屏障：已从线上确认撤回、但失效标记未必成功落盘
+    /// （写盘失败/熔断窗口）的 `scope\0card_id` 键。`card`/`query`
+    /// 在读磁盘行之前先查它——失效写盘失败不得让旧快照继续提供
+    /// （`DESK-CACHE-006`）。只有新一轮真实成功公开读取才能解除；
+    /// `clear` 与断网恢复都无权解除。
+    withdrawn_barrier: WithdrawnBarrier,
+}
+
+/// 进程内撤回证据的有界集合。语义与磁盘占位行相同——只是证据尚未
+/// （或无法）持久化：容量与 `MAX_WITHDRAWN_MARKERS` 同界，超出时回收
+/// 最旧的未持久化标记；重复确认会把键刷新到最新位置。
+///
+/// 键形态沿用 `touched_keys` 的 `scope\0card_id`。
+#[derive(Debug, Default)]
+struct WithdrawnBarrier {
+    keys: BTreeSet<String>,
+    order: std::collections::VecDeque<String>,
+}
+
+impl WithdrawnBarrier {
+    fn barrier_key(scope: &str, card_id: &str) -> String {
+        format!("{scope}\u{0}{card_id}")
+    }
+
+    fn insert(&mut self, scope: &str, card_id: &str) {
+        let key = Self::barrier_key(scope, card_id);
+        if self.keys.insert(key.clone()) {
+            self.order.push_back(key);
+        } else {
+            // 重复确认：刷新次序，最近确认的标记最不该被回收。
+            self.order.retain(|existing| existing != &key);
+            self.order.push_back(key);
+        }
+        while self.order.len() > MAX_WITHDRAWN_MARKERS as usize {
+            if let Some(oldest) = self.order.pop_front() {
+                self.keys.remove(&oldest);
+            }
+        }
+    }
+
+    fn remove(&mut self, scope: &str, card_id: &str) {
+        let key = Self::barrier_key(scope, card_id);
+        self.order.retain(|existing| existing != &key);
+        self.keys.remove(&key);
+    }
+
+    fn contains(&self, scope: &str, card_id: &str) -> bool {
+        self.keys.contains(&Self::barrier_key(scope, card_id))
+    }
+
+    /// 收集某 scope 下被屏障的卡 id（`query` 的排除谓词用）。
+    fn ids_for_scope(&self, scope: &str) -> Vec<String> {
+        let prefix = format!("{scope}\u{0}");
+        self.keys
+            .iter()
+            .filter_map(|key| key.strip_prefix(&prefix).map(str::to_string))
+            .collect()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.keys.is_empty()
+    }
 }
 
 /// native 侧共享状态本体：`Mutex` 保证单连接单写者。
@@ -456,6 +518,7 @@ impl PublicReadCache {
                     policy: PublicCachePolicyDto::default(),
                     write_cooldown_until: None,
                     touched_keys: BTreeSet::new(),
+                    withdrawn_barrier: WithdrawnBarrier::default(),
                 }),
             }),
         }
@@ -541,6 +604,15 @@ impl PublicReadCache {
         match verdict {
             PublicVerdict::Ignore => CacheOutcome::simple(CacheOutcomeKind::Ignored),
             PublicVerdict::Withdraw(card_id) => {
+                // 进程内撤回屏障先登记：即使随后的落盘失败或正处于写盘熔断
+                // 窗口，本进程内该卡的缓存行也立即不可选/不可读
+                //（`DESK-CACHE-006`：失效写盘失败不得再走 stale fallback）。
+                // 登记口径与 `withdraw_card` 的并发守卫一致——epoch 过期或
+                // 行已有更新证据的迟到 404 不产生失效事实；守卫读失败按
+                // 「无法证明过期」处理，已确认的撤回证据偏向 fail-closed。
+                if !response_is_stale(conn, scope, &card_id, ticket) {
+                    inner_ref.withdrawn_barrier.insert(scope, &card_id);
+                }
                 if cooling {
                     return CacheOutcome::unavailable();
                 }
@@ -554,6 +626,14 @@ impl PublicReadCache {
                 }
             }
             PublicVerdict::Summaries(items, invalid) => {
+                // 新一轮成功公开读取是解除屏障的唯一证据（DESK-CACHE-006）。
+                lift_withdrawn_barrier(
+                    &mut inner_ref.withdrawn_barrier,
+                    conn,
+                    scope,
+                    items.iter().map(|item| item.card_id.as_str()),
+                    ticket,
+                );
                 if !policy.capture_enabled {
                     return CacheOutcome {
                         outcome: CacheOutcomeKind::Disabled,
@@ -574,6 +654,13 @@ impl PublicReadCache {
                 }
             }
             PublicVerdict::Card(item) => {
+                lift_withdrawn_barrier(
+                    &mut inner_ref.withdrawn_barrier,
+                    conn,
+                    scope,
+                    std::iter::once(item.card_id.as_str()),
+                    ticket,
+                );
                 if !policy.capture_enabled {
                     return CacheOutcome {
                         outcome: CacheOutcomeKind::Disabled,
@@ -708,7 +795,7 @@ impl PublicReadCache {
     ) -> Result<PublicCacheQueryResult, PublicCacheError> {
         // 参数域先校验：契约 schema 已挡一道，native 侧对 renderer 不
         // 授信——非法值必须是 invalid-request，而不是被静默拼进 SQL。
-        let plan = build_query_plan(scope, dto)?;
+        let mut plan = build_query_plan(scope, dto)?;
         let mut inner = self.lock()?;
         let empty = |status: &'static str| PublicCacheQueryResult {
             status,
@@ -723,6 +810,15 @@ impl PublicReadCache {
             ReadGate::Open => {}
         }
         let inner_ref = &mut *inner;
+        // 进程内撤回屏障对列表同样生效：失效未落盘的卡不得混入查询结果。
+        let barriered = inner_ref.withdrawn_barrier.ids_for_scope(scope);
+        if !barriered.is_empty() {
+            let placeholders = vec!["?"; barriered.len()].join(",");
+            plan.where_sql = format!("{} AND card_id NOT IN ({placeholders})", plan.where_sql);
+            for card_id in barriered {
+                plan.binds.push(Box::new(card_id));
+            }
+        }
         let ConnState::Open(conn) = &mut inner_ref.conn else {
             return Ok(empty("unavailable"));
         };
@@ -820,6 +916,15 @@ impl PublicReadCache {
             ReadGate::Open => {}
         }
         let inner_ref = &mut *inner;
+        // 进程内撤回屏障先于磁盘行判定：撤回写盘失败/熔断期间，本进程
+        // 已确认撤回的卡不得以旧快照交付（DESK-CACHE-006）。
+        if inner_ref.withdrawn_barrier.contains(scope, card_id) {
+            return Ok(PublicCacheCardResult {
+                status: "ready",
+                availability: "withdrawn",
+                entry: None,
+            });
+        }
         let ConnState::Open(conn) = &mut inner_ref.conn else {
             return Ok(empty("unavailable"));
         };
@@ -1487,6 +1592,50 @@ fn read_row(conn: &Connection, scope: &str, card_id: &str) -> CacheResult<Option
     )
     .optional()
     .map_err(|_| Failure)
+}
+
+/// 并发守卫的只读版，与 `withdraw_card`/`commit_captures` 的判定同一口径：
+/// epoch 不匹配或目标行已有更新证据 ⇒ 响应过期，不产生也不解除失效事实。
+/// 守卫读本身失败按「无法证明过期」处理——偏向信任刚到手的响应，同时
+/// 让屏障登记保持 fail-closed（已确认的撤回不因一次读抖动放行旧快照）。
+fn response_is_stale(
+    conn: &Connection,
+    scope: &str,
+    card_id: &str,
+    ticket: &ObserveTicket,
+) -> bool {
+    match meta_i64(conn, META_WRITE_EPOCH) {
+        Ok(epoch) => {
+            if epoch != ticket.epoch {
+                return true;
+            }
+            match read_row(conn, scope, card_id) {
+                Ok(Some(row)) => row.revision > ticket.mutation_seq,
+                _ => false,
+            }
+        }
+        Err(_) => false,
+    }
+}
+
+/// 新一轮成功公开读取是解除进程内撤回屏障的唯一证据（DESK-CACHE-006）：
+/// 仅凭网络恢复、`clear` 或旧磁盘记录都不能解除；与撤回登记同一时效
+/// 口径——过期响应无权复活已确认撤回的卡。
+fn lift_withdrawn_barrier<'a>(
+    barrier: &mut WithdrawnBarrier,
+    conn: &Connection,
+    scope: &str,
+    card_ids: impl Iterator<Item = &'a str>,
+    ticket: &ObserveTicket,
+) {
+    if barrier.is_empty() {
+        return;
+    }
+    for card_id in card_ids {
+        if barrier.contains(scope, card_id) && !response_is_stale(conn, scope, card_id, ticket) {
+            barrier.remove(scope, card_id);
+        }
+    }
 }
 
 fn total_usage(conn: &Connection) -> CacheResult<u64> {
@@ -2951,6 +3100,102 @@ mod tests {
         let stats = cache.stats().expect("stats");
         assert_eq!(stats.entry_count, 0);
         assert_eq!(stats.withdrawn_count, 1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn withdrawal_barrier_survives_failed_marker_write_for_process_lifetime() {
+        // K1/K2-r1（审查）：撤回标记写盘失败或正处于熔断窗口时，磁盘上的
+        // 旧快照不得经缓存读取路径复活（DESK-CACHE-006）。进程内屏障与
+        // 磁盘占位同口径：已确认撤回的卡对 card/query 立即不可见。
+        let root = scratch("withdraw-barrier-unpersisted");
+        let cache = PublicReadCache::at(&root);
+        enable_capture(&cache);
+        capture_card(&cache, "a", "{\"x\":1}");
+        capture_card(&cache, "b", "{\"y\":2}");
+
+        // 持写锁让撤回写盘必然失败——磁盘上仍是旧 'known' 快照。
+        let blocker = Connection::open(root.join(PUBLIC_READ_CACHE_FILE)).expect("open cache file");
+        blocker
+            .execute_batch("BEGIN IMMEDIATE")
+            .expect("hold write lock");
+        let outcome = observe(
+            &cache,
+            &single_query("a"),
+            Some(PUBLIC_CC),
+            404,
+            &withdraw_body(),
+        );
+        assert_eq!(outcome.outcome, CacheOutcomeKind::Unavailable);
+        assert_eq!(
+            open_row(&root, SCOPE, "a").unwrap().0,
+            "known",
+            "撤回标记未能落盘，磁盘上还是旧快照"
+        );
+        // 熔断窗口内的第二张撤回：连写盘尝试都不会发生，屏障照样登记。
+        let outcome = observe(
+            &cache,
+            &single_query("b"),
+            Some(PUBLIC_CC),
+            404,
+            &withdraw_body(),
+        );
+        assert_eq!(outcome.outcome, CacheOutcomeKind::Unavailable);
+
+        // 写盘失败不改变进程内的失效事实：正文读一律判 'withdrawn'，
+        // 摘要查询同样看不到屏障内的卡。
+        for id in ["a", "b"] {
+            let result = cache.card(SCOPE, &card_req(id)).expect("card");
+            assert_eq!(result.availability, "withdrawn", "{id} 必须被屏障阻断");
+            assert!(result.entry.is_none());
+        }
+        let list = cache.query(SCOPE, &query_dto()).expect("query");
+        assert_eq!(list.total, 0);
+        assert!(list.entries.is_empty());
+
+        blocker.execute_batch("ROLLBACK").expect("release lock");
+
+        // 新一轮真实成功公开读取才解除屏障——且解除不依赖写盘成功
+        // （熔断窗口内 outcome 仍为 unavailable，屏障已被证据解除）。
+        let outcome = observe(
+            &cache,
+            &single_query("a"),
+            Some(PUBLIC_CC),
+            200,
+            &single_card("a", "{\"x\":1}", "2026-10-02T01:00:00Z"),
+        );
+        assert_eq!(outcome.outcome, CacheOutcomeKind::Unavailable);
+        let result = cache.card(SCOPE, &card_req("a")).expect("card after lift");
+        assert_eq!(result.availability, "full", "成功公开读取解除屏障");
+        // b 从未被新一轮成功确认——屏障保持，旧快照继续不可读。
+        let result = cache.card(SCOPE, &card_req("b")).expect("card b");
+        assert_eq!(result.availability, "withdrawn");
+        let list = cache.query(SCOPE, &query_dto()).expect("query");
+        assert_eq!(list.total, 1);
+        assert_eq!(entry_id(&list.entries[0]), "a");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn stale_404_does_not_register_barrier() {
+        // 时效口径对称：票据签发后行已被更新的证据改写时，迟到 404
+        // 既不写撤回标记也不登记进程内屏障。
+        let root = scratch("stale-404-barrier");
+        let cache = PublicReadCache::at(&root);
+        enable_capture(&cache);
+        let stale_ticket = cache.begin_observe().expect("ticket");
+        capture_card(&cache, "a", "{\"x\":1}");
+        let outcome = cache.observe_response(
+            &stale_ticket,
+            SCOPE,
+            Some(&single_query("a")),
+            Some(PUBLIC_CC),
+            404,
+            &withdraw_body(),
+        );
+        assert_eq!(outcome.outcome, CacheOutcomeKind::Stale);
+        let result = cache.card(SCOPE, &card_req("a")).expect("card");
+        assert_eq!(result.availability, "full", "迟到 404 不得阻断已更新的行");
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -166,7 +166,9 @@ export const queryPublicReadCache = async (
   }
   let raw: unknown;
   try {
-    raw = await invoke(PUBLIC_READ_CACHE_QUERY_COMMAND, { query: parsed.data });
+    // Tauri 按 Rust 参数名绑定顶层键——命令签名是 `request: PublicCacheQueryDto`，
+    // 传 `{ query: … }` 会在 native 反序列化阶段直接失败（K2-r1 审查）。
+    raw = await invoke(PUBLIC_READ_CACHE_QUERY_COMMAND, { request: parsed.data });
   } catch (cause) {
     throw toPublicCacheError(PUBLIC_READ_CACHE_QUERY_COMMAND, cause);
   }
@@ -192,7 +194,8 @@ export const readPublicCacheCard = async (
   }
   let raw: unknown;
   try {
-    raw = await invoke(PUBLIC_READ_CACHE_CARD_COMMAND, { cardId: parsed.data.cardId });
+    // 同上：顶层键必须等于 Rust 参数名 `request`（`PublicCacheCardRequestDto`）。
+    raw = await invoke(PUBLIC_READ_CACHE_CARD_COMMAND, { request: parsed.data });
   } catch (cause) {
     throw toPublicCacheError(PUBLIC_READ_CACHE_CARD_COMMAND, cause);
   }
