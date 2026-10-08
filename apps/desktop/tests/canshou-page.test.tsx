@@ -437,10 +437,78 @@ describe('Desktop Canshou real route and session UI (native adapter mock)', () =
     expect(mocks.scrollResult).toHaveBeenCalledTimes(2);
   });
 
+  it('compares actual submitted answers across view switches, undo and successful regeneration without changing saves', async () => {
+    storeStepQuestionnaire([{ id: 'last', question: '末题' }], { last: '原回答' });
+    await mount(); await click('恢复草稿'); await click('发送问卷并生成');
+    await click('保存到本地卡库');
+    const output = JSON.parse(window.localStorage.getItem(CANSHOU_DRAFT_KEY)!).output;
+    const stale = '问卷答案已修改，当前显示的仍是上次生成结果。';
+    expect(container.textContent).not.toContain(stale);
+    await click('返回编辑答案'); await fillCurrentAnswer('新回答'); await click('查看当前结果');
+    expect(container.textContent).toContain(stale);
+    expect(button('保存到本地卡库').disabled).toBe(true);
+    expect(JSON.parse(window.localStorage.getItem(CANSHOU_DRAFT_KEY)!).output).toEqual(output);
+    await click('返回编辑答案'); await fillCurrentAnswer('  原回答  '); await click('查看当前结果');
+    expect(container.textContent).not.toContain(stale);
+    await click('返回编辑答案'); await fillCurrentAnswer('新回答'); await click('查看当前结果');
+    expect(container.textContent).toContain(stale);
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.save).toHaveBeenCalledTimes(1);
+    await click('重新生成');
+    expect(container.textContent).not.toContain(stale);
+    expect(container.textContent).not.toContain('未记录对应的问卷答案');
+    expect(mocks.execute).toHaveBeenCalledTimes(2);
+    await click('返回编辑答案'); await fillCurrentAnswer('原回答'); await click('查看当前结果');
+    expect(container.textContent).toContain(stale);
+  });
+
+  it('captures the synchronously selected final option rather than the preceding render', async () => {
+    storeStepQuestionnaire([{ id: 'last', question: '末题', options: ['最终选项'] }], { last: '原回答' });
+    await mount(); await click('恢复草稿'); await click('最终选项');
+    expect(mocks.execute.mock.calls[0]![1].answers[0].answer).toBe('最终选项');
+    expect(container.textContent).not.toContain('问卷答案已修改');
+    await click('返回编辑答案'); await fillCurrentAnswer('原回答'); await click('查看当前结果');
+    expect(container.textContent).toContain('问卷答案已修改');
+  });
+
+  it.each(['failed', 'cancelled'] as const)('does not treat %s regeneration as a fresh answer baseline', async (status) => {
+    storeStepQuestionnaire([{ id: 'last', question: '末题' }], { last: '原回答' });
+    await mount(); await click('恢复草稿'); await click('发送问卷并生成');
+    await click('返回编辑答案'); await fillCurrentAnswer('新回答'); await click('查看当前结果');
+    await click('重新生成'); await click('取消');
+    expect(container.textContent).toContain('问卷答案已修改');
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    mocks.execute.mockResolvedValueOnce(status === 'failed'
+      ? { status, mode: 'direct-local', rawText: '失败正文', message: '生成失败' }
+      : { status, mode: 'direct-local', rawText: '取消正文', reason: 'aborted' });
+    await click('重新生成'); await click('确定重新生成');
+    expect(container.querySelector('[aria-label="生成结果"]')).toBeNull();
+    expect(container.textContent).not.toContain('问卷答案已修改');
+    await click('重新生成');
+    expect(container.querySelector('[aria-label="生成结果"]')).toBeTruthy();
+    expect(container.textContent).not.toContain('问卷答案已修改');
+    expect(container.textContent).not.toContain('未记录对应的问卷答案');
+  });
+
+  it('keeps restored result association unknown even when restored answers are edited and reverted', async () => {
+    window.localStorage.setItem(CANSHOU_DRAFT_KEY, JSON.stringify({
+      ...draft(), output: { mode: 'direct-local', phase: 'completed', cardKind: 'canshou', card, rawText: completed.rawText },
+    }));
+    await mount(); await click('恢复草稿');
+    const unknown = '当前结果未记录对应的问卷答案，可能与当前答案不同。';
+    expect(container.textContent).toContain(unknown);
+    await click('返回编辑答案'); await fillCurrentAnswer('新回答'); await click('查看当前结果');
+    expect(container.textContent).toContain(unknown);
+    await click('返回编辑答案'); await fillCurrentAnswer('巢穴'); await click('查看当前结果');
+    expect(container.textContent).toContain(unknown);
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
   it('quick random produces an unsigned canshou card without invoking the model', async () => {
     await mount();
     await click('快速随机生成');
     expect(mocks.execute).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('当前结果为快速随机生成，未使用问卷答案。');
     expect(container.textContent).toContain('未签名');
     expect(container.textContent).toContain('保存到本地卡库');
     expect(container.querySelector('[aria-label="生成结果"]')).toBeTruthy();

@@ -14,6 +14,7 @@ import {
 } from '@mahoshojo/domain/questionnaire';
 import {
   buildQuestionnaireFlow,
+  collectQuestionnaireFlowAnswerItems,
   MAX_QUESTIONNAIRE_IMPORT_BYTES,
   normalizeQuestionnaireDefinition,
   resolveQuestionnaireReferences,
@@ -175,6 +176,12 @@ function CanshouForm({ session }: { session: CanshouSession }) {
   const [showIntroduction, setShowIntroduction] = useState(true);
   // 只切换展示：编辑回答时保留旧结果与保存状态，替换仍须经过原有重生确认。
   const [editingAnswers, setEditingAnswers] = useState(false);
+  // 只描述结果与答案的关联，不改草稿协议、结果对象或保存状态。
+  // 绑定实际成功结果；恢复的旧草稿没有可验证的提交快照，不能视为当前答案生成。
+  const [resultAnswerBaseline, setResultAnswerBaseline] = useState<{
+    card: NonNullable<typeof state.card>;
+    answersKey: string | null; // null：快速随机，不依赖问卷答案。
+  } | null>(null);
   const [showQuestionnaireSettings, setShowQuestionnaireSettings] = useState(false);
   const [showLanguageSection, setShowLanguageSection] = useState(false);
   const [showPasteImport, setShowPasteImport] = useState(false);
@@ -465,6 +472,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
     }
     try {
       const answers = buildCanshouAnswers(submissionFlow, current.draft.answers);
+      const submittedAnswersKey = JSON.stringify(answers);
       setActionError(null);
       setActionInfo(null);
       setEditingAnswers(false);
@@ -484,7 +492,13 @@ function CanshouForm({ session }: { session: CanshouSession }) {
         },
         { mode: executionMode, modelId: target.modelId ?? undefined, overrides: target.generationOverrides },
         discardUnsavedResult,
-      );
+      ).then(() => {
+        const result = session.getSnapshot();
+        if (result.phase === 'completed' && result.card && result.card !== current.card && !result.resultRestored) {
+          // 使用实际派发的最终答案（含同事件末题选项），不读取成功时可能变化的草稿。
+          setResultAnswerBaseline({ card: result.card, answersKey: submittedAnswersKey });
+        }
+      });
     } catch (error) { setActionError(error instanceof Error ? error.message : '问卷无法生成。'); }
   };
 
@@ -520,6 +534,8 @@ function CanshouForm({ session }: { session: CanshouSession }) {
     try {
       const data = generateRandomCanshou();
       session.applyLocalResult(data, 'canshou', true);
+      const result = session.getSnapshot();
+      if (result.card) setResultAnswerBaseline({ card: result.card, answersKey: null });
       setShowIntroduction(false);
       setEditingAnswers(false);
       setActionError(null);
@@ -670,6 +686,18 @@ function CanshouForm({ session }: { session: CanshouSession }) {
   useEffect(() => () => revokeBlobUrl(savedImageUrl), [savedImageUrl]);
   const resolvedResultPayload = state.card;
   const showResult = Boolean(state.card) && !editingAnswers;
+  let currentAnswersKey: string | null = null;
+  try {
+    // 共用生成的 trim、空值、条件流程和顺序语义；无效选项同样不能冒充原提交。
+    currentAnswersKey = JSON.stringify(collectQuestionnaireFlowAnswerItems(flow, answersByKey));
+  } catch { /* 当前答案无法构成有效提交，继续呈现已有结果与差异提示。 */ }
+  const resultAnswerNotice = resultAnswerBaseline?.card !== state.card
+    ? '当前结果未记录对应的问卷答案，可能与当前答案不同。'
+    : resultAnswerBaseline?.answersKey === null
+      ? '当前结果为快速随机生成，未使用问卷答案。'
+      : resultAnswerBaseline?.answersKey !== currentAnswersKey
+        ? '问卷答案已修改，当前显示的仍是上次生成结果。'
+        : null;
   const generationDisabled = !guard.ready || busy || questionnaireLoading || clientProfilesBlocked
     || effectiveSelections.length === 0 || flow.length === 0 || !executionMode
     || (target.location === 'client' && !selected) || blockedDraft;
@@ -943,6 +971,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
             )}
             <div ref={resultSectionRef}>
               {showResult && state.card && <section aria-label="生成结果" className="flex flex-col gap-3">
+                {resultAnswerNotice && <p role="status" className="text-sm text-(--app-text-muted)">{resultAnswerNotice}</p>}
                 <h2 className="text-xl font-semibold">
                   {typeof state.card.name === 'string' && state.card.name ? state.card.name : '未命名残兽'}
                   {' · '}{resultSignatureLabel}
