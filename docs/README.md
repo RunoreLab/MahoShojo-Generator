@@ -1,6 +1,6 @@
 # 文档导航
 
-2026-10-08 双端产品面对照：已完成首页、`/free` 基础布局/控件、Creator CSS 闭包的首批共源修复，并独立修复 Creator RSC 文案入口、构建诊断误报和附件读取忙碌状态。A–E 分类、提交与实际自动验证见[唯一 Desktop 计划](./plans/2026-09-30_160100_Desktop客户端阶段实施计划.md)的“双端视觉/交互对照补漏”；真实字体计算、同视口截图与 WebView2 验收仍为 PENDING，不能据此宣称全站已对齐。
+2026-10-08 双端产品面对照：已完成首页、`/free` 基础控件/附件/结果外层、Creator CSS、本地库与设置页框的分批共源修复，并独立修复 Creator RSC 文案入口、构建诊断误报和附件读取状态。13条已交付路由的A–E装配矩阵、剩余范围、提交与实际自动验证见[唯一 Desktop 计划](./plans/2026-09-30_160100_Desktop客户端阶段实施计划.md)的“双端视觉/交互对照补漏”；真实字体计算、同视口截图与 WebView2 验收仍为 PENDING，不能据此宣称全站已对齐。
 
 2026-10-08 Desktop AI Provider 统一：新[产品决策 ADR](./decisions/2026-10-08_173300_DesktopAIProvider选择器与多模型连接体验统一.md)和[DESK-AIP 实施规格](./specs/2026-10-08_173400_DesktopAIProvider共源选择器、快速配置与多模型连接.md)已接受，纳入[唯一 D5.1 计划](./plans/2026-09-30_160100_Desktop客户端阶段实施计划.md)的 AIP-0..5。Client Direct 预设支持在选择器内填 Key/模型「保存并使用」，每连接多模型；Web 只共享 UI，Desktop Server BYOK 后续实施。Desktop 专有执行位置控件将复用 Web 流式切换的 `SegmentedControl` 视觉和生成设置区段布局。本轮仅文档，无代码改动或实机验收。
 
