@@ -880,12 +880,25 @@ test('缓存正文重验证：返回卡 id 匹配才升级为 cloud 选择语义
 });
 
 test('缓存通道自身判撤回时同样终止并即时移除行', async () => {
-  const cache = createCachePort([cachedEntry('card-c')]);
-  cache.loadCachedCard = vi.fn(async () => ({
-    status: 'ready' as const,
-    availability: 'withdrawn' as const,
-    entry: null,
-  }));
+  // native 口径对拍：loadCachedCard 判撤回后，queryCachedCards 也不再
+  // 交付该卡（占位行/进程内屏障都会排除它）。
+  let withdrawn = false;
+  const cache: CardLibraryPublicCachePort = {
+    queryCachedCards: vi.fn(async () => ({
+      status: 'ready' as const,
+      entries: withdrawn ? [] : [cachedEntry('card-c')],
+      total: withdrawn ? 0 : 1,
+      bodyCount: withdrawn ? 0 : 1,
+    })),
+    loadCachedCard: vi.fn(async () => {
+      withdrawn = true;
+      return {
+        status: 'ready' as const,
+        availability: 'withdrawn' as const,
+        entry: null,
+      };
+    }),
+  };
   const { onSelectCard } = await renderCacheBrowse(cache, {
     // 传输层失败（非撤回）→ 回落缓存通道，由缓存的撤回标记终结。
     fetchPublicCardById: vi.fn(async () => ({ ok: false as const, status: 503 })),
@@ -895,14 +908,13 @@ test('缓存通道自身判撤回时同样终止并即时移除行', async () =>
   await settle();
   expect(onSelectCard).not.toHaveBeenCalled();
   expect(document.body.textContent).toContain('已从公开库撤回或不再公开');
-  // K-r2：撤回行直接移出可见集合（mock 重查仍返回它，会话级撤回集合
-  // 挡在视图写入前——迟到/陈旧响应不得重新展示已撤回卡）。
+  // K-r2：撤回行直接移出可见集合且不再出现（native 重查口径一致）。
   expect(document.body.querySelector('[role="button"][aria-label="选择公开角色 card-c"]')).toBeNull();
 });
 
 test('撤回确认前签发的在途缓存列表响应不得重新展示已撤回卡', async () => {
-  // 第二次查询（撤回触发的重查）挂起：模拟「撤回确认前签发、确认后
-  // 才返回」的迟到响应——即使负载里仍带该卡也不得重显。
+  // 第二次查询由用户「刷新快照视图」签发、在撤回确认前已在途：撤回
+  // 登记水位线高于它的签发序号——即使负载迟到且仍带该卡也不得重显。
   const late = deferred<{
     status: 'ready'; entries: ReturnType<typeof cachedEntry>[]; total: number; bodyCount: number;
   }>();
@@ -917,7 +929,13 @@ test('撤回确认前签发的在途缓存列表响应不得重新展示已撤�
           total: 2, bodyCount: 2,
         });
       }
-      return late.promise;
+      if (calls === 2) return late.promise;
+      // 撤回触发的重查及此后查询：native 权威口径已排除撤回卡。
+      return Promise.resolve({
+        status: 'ready' as const,
+        entries: [cachedEntry('card-d')],
+        total: 1, bodyCount: 1,
+      });
     }),
     loadCachedCard: vi.fn(async () => ({
       status: 'ready' as const,
@@ -929,13 +947,19 @@ test('撤回确认前签发的在途缓存列表响应不得重新展示已撤�
     fetchPublicCardById: vi.fn(async () => ({ ok: false as const, status: 503 })),
   });
 
+  // 撤回确认前签发的在途查询：刷新快照视图后保持挂起。
+  await click([...document.body.querySelectorAll('button')].find((b) => b.textContent?.includes('刷新快照视图'))!);
+  await settle();
+  expect(calls).toBe(2);
+
   await selectCachedRow();
   await settle();
-  // 即时移除已生效，重查尚在途。
+  // 即时移除已生效，撤回后重查返回权威全集。
   expect(document.body.querySelector('[role="button"][aria-label="选择公开角色 card-c"]')).toBeNull();
   expect(document.body.textContent).toContain('公开角色 card-d');
 
-  // 迟到响应仍携带已撤回卡——会话级撤回集合必须把它滤掉。
+  // 迟到响应仍携带已撤回卡——abort 使其不被认领，签发世代屏障同样
+  // 把它挡在视图写入前（issueSeq <= 水位线）。
   await act(async () => {
     late.resolve({
       status: 'ready',
@@ -947,6 +971,66 @@ test('撤回确认前签发的在途缓存列表响应不得重新展示已撤�
   expect(document.body.querySelector('[role="button"][aria-label="选择公开角色 card-c"]')).toBeNull();
   expect(document.body.textContent).toContain('公开角色 card-d');
   expect(onSelectCard).not.toHaveBeenCalled();
+});
+
+test('撤回后重新公开：native 重新捕获的卡不关闭弹窗刷新即恢复显示', async () => {
+  // cardGone=true：线上 404 三证齐全判撤回；cardGone=false：作者重新
+  // 公开且 native 已被撤回后签发的新票据带回的真实响应重新捕获——
+  // queryCachedCards 只交付 availability='known' 行，返回即权威确认。
+  let cardGone = false;
+  const fetchPublicCardById = vi.fn(async () => {
+    if (cardGone) {
+      return {
+        ok: false as const, status: 404,
+        data: { success: false, code: 'PUBLIC_DATA_CARD_NOT_FOUND', error: 'not found' },
+      };
+    }
+    return {
+      ok: true as const, status: 200,
+      data: { success: true, card: publicCard('card-c') },
+    };
+  });
+  const cache: CardLibraryPublicCachePort = {
+    queryCachedCards: vi.fn(async () => ({
+      status: 'ready' as const,
+      entries: cardGone ? [] : [cachedEntry('card-c')],
+      total: cardGone ? 0 : 1,
+      bodyCount: cardGone ? 0 : 1,
+    })),
+    loadCachedCard: vi.fn(async () => ({
+      status: 'ready' as const,
+      availability: 'full' as const,
+      entry: {
+        card: { ...publicCard('card-c'), data: JSON.stringify({ codename: 'card-c' }) },
+        bodyUpdatedAt: '2026-10-05T00:00:00Z',
+        lastSuccessAt: '2026-10-05T00:00:00Z',
+      },
+    })),
+  };
+  const { onSelectCard } = await renderCacheBrowse(cache, { fetchPublicCardById });
+  expect(document.body.textContent).toContain('公开角色 card-c');
+
+  // 确认撤回：行即时移出可见/可选集合。
+  cardGone = true;
+  await selectCachedRow();
+  await settle();
+  expect(onSelectCard).not.toHaveBeenCalled();
+  expect(document.body.textContent).toContain('已从公开库撤回或不再公开');
+  expect(document.body.querySelector('[role="button"][aria-label="选择公开角色 card-c"]')).toBeNull();
+
+  // 作者重新公开、native 重新捕获；不关闭弹窗，刷新快照视图。
+  cardGone = false;
+  await click([...document.body.querySelectorAll('button')].find((b) => b.textContent?.includes('刷新快照视图'))!);
+  await settle();
+  // 撤回后签发的查询仍由 native 权威交付该卡 → 会话标记解除，行恢复。
+  expect(document.body.textContent).toContain('公开角色 card-c');
+
+  // 恢复后的行是完整可用快照：重验证成功即按线上已验证事实选择。
+  await selectCachedRow();
+  await settle();
+  expect(onSelectCard).toHaveBeenCalledTimes(1);
+  const [, context] = onSelectCard.mock.calls[0]! as [unknown, { selectionId: string }];
+  expect(context.selectionId).toBe('cloud:card-c');
 });
 
 test('缓存正文读取：unavailable/unsupported-schema 如实报错而非「没有这张卡」', async () => {

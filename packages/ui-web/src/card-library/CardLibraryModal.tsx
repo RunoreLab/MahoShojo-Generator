@@ -482,11 +482,17 @@ export function CardLibraryModal({
   const cacheFetchAbortControllerRef = useRef<AbortController | null>(null);
   const [cacheLoading, setCacheLoading] = useState(false);
   /**
-   * 本次会话内已确认撤回的卡 id：撤回确认之前发起的缓存查询响应不得
-   * 重新展示它们（`DESK-CACHE-006`——「已撤回」是移出可见/可选集合的
-   * 终态，不是「仅摘要」）。弹窗重开即重置，native 读侧本就是权威兜底。
+   * 本次会话内已确认撤回的卡 id → 撤回确认时已签发的最新缓存查询序号
+   * （水位线）。签发序号不超过水位线的响应属「撤回确认之前签发」的迟到
+   * 证据，不得重新展示该卡（`DESK-CACHE-006`——「已撤回」是移出可见/
+   * 可选集合的终态，不是「仅摘要」）；超过水位线的查询是撤回之后签发
+   * 的新证据——native 只交付 `availability='known'` 且未被屏障/占位
+   * 排除的行，它仍返回该卡即视为已用真实公开响应重新捕获的权威确认，
+   * 解除本会话标记。弹窗重开即重置，native 读侧本就是权威兜底。
    */
-  const withdrawnCacheIdsRef = useRef<Set<string>>(new Set());
+  const withdrawnCacheIdsRef = useRef<Map<string, number>>(new Map());
+  /** 缓存列表查询的进程内签发序号——撤回水位线的「签发先后」比较基准。 */
+  const cacheQuerySeqRef = useRef(0);
   /** 连接恢复/窗口回前台的重验证合并节流。 */
   const lastReconnectAtRef = useRef(0);
   const isLocalTab = activeTab === 'local';
@@ -641,6 +647,7 @@ export function CardLibraryModal({
     cacheFetchAbortControllerRef.current?.abort();
     const abortController = new AbortController();
     cacheFetchAbortControllerRef.current = abortController;
+    const issueSeq = (cacheQuerySeqRef.current += 1);
     setCacheLoading(true);
     try {
       const pages = await Promise.all(
@@ -649,11 +656,18 @@ export function CardLibraryModal({
       if (abortController.signal.aborted) return;
       const entries = pages.flatMap((p) =>
         p.entries
-          // 撤回确认晚于本次查询签发：迟到响应不得把已撤回卡重新放回
-          // 可见集合——会话级集合先于视图写入过滤它们。
+          // 签发序号不超过撤回水位线：本次查询在撤回确认之前发出，迟到
+          // 响应不得把已撤回卡重新放回可见集合。超过水位线即撤回之后签发
+          // ——native 权威仍交付该卡说明它已被新公开响应重新捕获，解除
+          // 会话标记而不是永久隐藏合法恢复的资料。
           .filter((entry) => {
             const id = entry.card.id;
-            return typeof id !== 'string' || !withdrawnCacheIdsRef.current.has(id);
+            if (typeof id !== 'string') return true;
+            const barrierSeq = withdrawnCacheIdsRef.current.get(id);
+            if (barrierSeq === undefined) return true;
+            if (issueSeq <= barrierSeq) return false;
+            withdrawnCacheIdsRef.current.delete(id);
+            return true;
           })
           .map((entry) =>
             markCachedDataCardRow(
@@ -1146,15 +1160,16 @@ export function CardLibraryModal({
   /**
    * 确认撤回后立即把该卡从缓存可见/可选集合移除——「已撤回」是终态
    * （`DESK-CACHE-006`），不是「仅摘要」。三步收口：
-   * 1. 记入会话级撤回集合：撤回确认前发起的缓存查询响应即使迟到
-   *    也不得重新展示该卡；
+   * 1. 记入会话级撤回集合，水位线 = 确认时已签发的最新查询序号：
+   *    序号不超过水位线的迟到响应不得重新展示该卡；之后签发的查询
+   *    若仍由 native 权威交付该卡（重新公开已被重新捕获）则解除标记；
    * 2. 中止在途缓存列表查询（abort 信号让该批结果在写 state 前被
    *    丢弃），并把行从当前视图立即移除；
    * 3. 重查 native 缓存集合：total/bodyCount/分页按撤回后的权威
    *    全集重新计算——不再从当前页条目近似推算 bodyCount。
    */
   const markCachedRowWithdrawn = useCallback((cardId: string) => {
-    withdrawnCacheIdsRef.current.add(cardId);
+    withdrawnCacheIdsRef.current.set(cardId, cacheQuerySeqRef.current);
     cacheFetchAbortControllerRef.current?.abort();
     // 中止不释放 ref 引用——被弃用的那次加载在 finally 里看到 ref
     // 已换人便不再清 loading；这里手动复位，避免转圈悬挂。
