@@ -1,5 +1,7 @@
 # 文档导航
 
+2026-10-08 双端产品面对照：已完成首页、`/free` 基础布局/控件、Creator CSS 闭包的首批共源修复，并独立修复 Creator RSC 文案入口、构建诊断误报和附件读取忙碌状态。A–E 分类、提交与实际自动验证见[唯一 Desktop 计划](./plans/2026-09-30_160100_Desktop客户端阶段实施计划.md)的“双端视觉/交互对照补漏”；真实字体计算、同视口截图与 WebView2 验收仍为 PENDING，不能据此宣称全站已对齐。
+
 2026-10-08 Desktop AI Provider 统一：新[产品决策 ADR](./decisions/2026-10-08_173300_DesktopAIProvider选择器与多模型连接体验统一.md)和[DESK-AIP 实施规格](./specs/2026-10-08_173400_DesktopAIProvider共源选择器、快速配置与多模型连接.md)已接受，纳入[唯一 D5.1 计划](./plans/2026-09-30_160100_Desktop客户端阶段实施计划.md)的 AIP-0..5。Client Direct 预设支持在选择器内填 Key/模型「保存并使用」，每连接多模型；Web 只共享 UI，Desktop Server BYOK 后续实施。Desktop 专有执行位置控件将复用 Web 流式切换的 `SegmentedControl` 视觉和生成设置区段布局。本轮仅文档，无代码改动或实机验收。
 
 2026-10-07 调研：[公开数据卡自动审查模型接入调研与方案](./reports/2026-10-07_110910_公开数据卡自动审查模型接入调研与方案.md)——决策模型（Clef/Mercury/Span）与传统审核模型（omni-moderation、Nemotron）的后端抽象、阈值/豁免/不确定处理/路由策略；骨架+全适配器已按方案落地，并经 r1 审查收口加固（无 legacy 回退、快照守卫防过期裁决、`auto_review_decisions` 审计表、输入覆盖门禁，文末实施状态）。
