@@ -3,8 +3,8 @@ import { act, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { RouterProvider } from '@tanstack/react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { FreeGenerationOutcome } from '../src/features/free/generation';
-import { FREE_DRAFT_KEY } from '../src/features/free/session';
+import type { ScenarioGenerationOutcome } from '../src/features/scenario/generation';
+import { SCENARIO_DRAFT_KEY } from '../src/features/scenario/session';
 import { resetDesktopAiConfigStoreForTests } from '../src/features/ai-config/use-desktop-ai-config';
 import { DESKTOP_AI_CONFIG_STORAGE_KEY } from '../src/features/ai-config/desktop-ai-config-store';
 import { createDesktopRouter } from '../src/app/router';
@@ -12,24 +12,35 @@ import { createDesktopRouter } from '../src/app/router';
 const mocks = vi.hoisted(() => ({ execute: vi.fn(), save: vi.fn(), listen: vi.fn(), profiles: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), isTauri: () => true }));
 vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ onCloseRequested: mocks.listen }) }));
-vi.mock('../src/features/free/generation', async (original) => ({ ...await original<object>(), executeFreeGeneration: mocks.execute }));
+vi.mock('../src/features/scenario/generation', async (original) => ({ ...await original<object>(), executeScenarioGeneration: mocks.execute }));
 vi.mock('../src/platform/provider-profile-bridge', () => ({ listProviderProfileIds: async () => ['local'], getProviderProfile: mocks.profiles }));
 vi.mock('../src/platform/local-card-bridge', () => ({ IpcLocalCardRepository: class { putIfAbsent = mocks.save; } }));
 
-const generalCard = { templateId: '通用角色', name: '焰汐', content: '## 角色介绍\n\n怕水的火系少女' };
-const completed: FreeGenerationOutcome = {
-  status: 'completed', mode: 'direct-local', card: generalCard, cardKind: 'general', rawText: JSON.stringify(generalCard),
+const scenarioCard = {
+  title: '雨后采访',
+  scenario_type: '采访',
+  description: '天台上的一次对话',
+  elements: {
+    scene: { time: '傍晚', place: '天台', features: '积水' },
+    roles: [],
+    events: '采访', atmosphere: '安静', development: ['和解'],
+  },
+  metadata: { created_at: '2026-01-01T00:00:00.000Z' },
+};
+const completed: ScenarioGenerationOutcome = {
+  status: 'completed', mode: 'direct-local', card: scenarioCard, cardKind: 'scenario', rawText: JSON.stringify(scenarioCard),
 };
 let root: Root;
 let container: HTMLDivElement;
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 120)); });
 const button = (name: string) => [...container.querySelectorAll('button')].find((item) => item.textContent === name)!;
 const click = async (name: string) => { await act(async () => button(name).click()); await settle(); };
-const storedDraft = (prompt: string) => ({
+const storedDraft = (answers: Record<string, string>) => ({
   version: 1,
-  schemaId: 'general',
+  answers,
+  fieldsToKeepEmpty: [],
+  scenarioTitleHint: '',
   generationMode: 'non-stream',
-  prompt,
   selectedLanguage: 'zh-CN',
 });
 
@@ -50,7 +61,7 @@ beforeEach(() => {
   vi.spyOn(window, 'confirm').mockReturnValue(false);
   HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   HTMLDialogElement.prototype.close = function () { this.open = false; };
-  window.location.hash = '#/free';
+  window.location.hash = '#/scenario';
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
@@ -60,33 +71,45 @@ const mount = async () => {
   await settle(); return router;
 };
 
-describe('Desktop Free route and session UI (native adapter mock)', () => {
-  it('restores prompt draft on explicit action, generates once and saves the card', async () => {
-    window.localStorage.setItem(FREE_DRAFT_KEY, JSON.stringify(storedDraft('怕水的火系少女')));
+describe('Desktop Scenario route and session UI (native adapter mock)', () => {
+  it('restores answers draft on explicit action, generates once and saves the card', async () => {
+    window.localStorage.setItem(SCENARIO_DRAFT_KEY, JSON.stringify(
+      storedDraft({ '故事发生的场景是怎样的？': '雨后的天台' }),
+    ));
     await mount();
-    expect(container.querySelector('[data-testid="page-free"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="page-scenario"]')).toBeTruthy();
     expect(mocks.execute).not.toHaveBeenCalled();
     // 待恢复期间生成门禁关闭。
-    expect(button('生成数据卡').disabled).toBe(true);
+    expect(button('生成情景').disabled).toBe(true);
     await click('恢复草稿');
-    const textarea = container.querySelector('textarea')!;
-    expect(textarea.value).toBe('怕水的火系少女');
-    await click('生成数据卡');
+    const textarea = [...container.querySelectorAll('textarea')].find(
+      (el) => el.getAttribute('aria-label') === '故事发生的场景是怎样的？',
+    )!;
+    expect(textarea.value).toBe('雨后的天台');
+    await click('生成情景');
     expect(mocks.execute).toHaveBeenCalledTimes(1);
-    const callInput = mocks.execute.mock.calls[0]![1] as { prompt: string; schema: string; language: string; attachments: unknown[] };
-    expect(callInput).toMatchObject({ prompt: '怕水的火系少女', schema: 'general', language: 'zh-CN', attachments: [] });
-    expect(container.textContent).toContain('焰汐');
-    expect(container.textContent).toContain('未签名');
+    const callInput = mocks.execute.mock.calls[0]![1] as {
+      answers: Record<string, string>; language: string; fieldsToKeepEmpty: string[]; titleHint: string;
+    };
+    expect(callInput).toMatchObject({
+      answers: { '故事发生的场景是怎样的？': '雨后的天台' },
+      language: 'zh-CN',
+      fieldsToKeepEmpty: [],
+      titleHint: '',
+    });
+    expect(container.textContent).toContain('雨后采访');
     await click('保存到本地卡库');
     expect(mocks.save).toHaveBeenCalledTimes(1);
     expect(container.textContent).toContain('已保存到本地卡库');
   });
 
   it('confirms replacement before regenerating an unsaved result', async () => {
-    window.localStorage.setItem(FREE_DRAFT_KEY, JSON.stringify(storedDraft('x')));
+    window.localStorage.setItem(SCENARIO_DRAFT_KEY, JSON.stringify(
+      storedDraft({ '故事发生的场景是怎样的？': 'x' }),
+    ));
     await mount();
     await click('恢复草稿');
-    await click('生成数据卡');
+    await click('生成情景');
     await click('重新生成');
     expect(container.querySelector('dialog')?.open).toBe(true);
     expect(mocks.execute).toHaveBeenCalledTimes(1);
@@ -96,17 +119,17 @@ describe('Desktop Free route and session UI (native adapter mock)', () => {
     expect(mocks.execute).toHaveBeenCalledTimes(2);
   });
 
-  it('stream generation mode restricts schema to streamable ids and rewrites a structured pick', async () => {
-    window.localStorage.setItem(FREE_DRAFT_KEY, JSON.stringify({
-      version: 1, schemaId: 'magical-girl', generationMode: 'stream', prompt: 'x', selectedLanguage: 'zh-CN',
+  it('client execution disables the stream switch and rewrites a streamed draft back to non-stream', async () => {
+    window.localStorage.setItem(SCENARIO_DRAFT_KEY, JSON.stringify({
+      ...storedDraft({ '故事发生的场景是怎样的？': '钟楼' }),
+      generationMode: 'stream',
+      scenarioTitleHint: '夜雨',
     }));
     await mount();
     await click('恢复草稿');
-    // 草稿里 schemaId=magical-girl 但 generationMode=stream：effect 应回写为 general。
-    const stored = JSON.parse(window.localStorage.getItem(FREE_DRAFT_KEY)!);
-    expect(stored.schemaId).toBe('general');
-    const schemaSelect = [...container.querySelectorAll('select')].find((el) => el.getAttribute('aria-label') === '选择 Schema')!;
-    expect((schemaSelect as HTMLSelectElement).value).toBe('general');
-    expect(schemaSelect.querySelectorAll('option').length).toBe(2);
+    // 草稿 generationMode=stream 但执行位置为客户端：effect 应回写 non-stream。
+    const stored = JSON.parse(window.localStorage.getItem(SCENARIO_DRAFT_KEY)!);
+    expect(stored.generationMode).toBe('non-stream');
+    expect(container.textContent).toContain('客户端执行仅支持结构化（非流式）生成');
   });
 });
