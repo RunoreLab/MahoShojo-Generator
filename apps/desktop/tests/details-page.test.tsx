@@ -15,7 +15,7 @@ import { DESKTOP_AI_CONFIG_STORAGE_KEY } from '../src/features/ai-config/desktop
 import { createDesktopRouter } from '../src/app/router';
 import { describeRegenerateConfirm } from '../src/app/details-page';
 
-const mocks = vi.hoisted(() => ({ execute: vi.fn(), save: vi.fn(), listen: vi.fn(), profiles: vi.fn() }));
+const mocks = vi.hoisted(() => ({ execute: vi.fn(), save: vi.fn(), listen: vi.fn(), profiles: vi.fn(), scrollResult: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), isTauri: () => true }));
 vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ onCloseRequested: mocks.listen }) }));
 vi.mock('../src/features/details/generation', async (original) => ({ ...await original<object>(), executeDetailsGeneration: mocks.execute }));
@@ -54,6 +54,7 @@ beforeEach(() => {
   mocks.listen.mockImplementation(async (handler) => { close = handler; return vi.fn(); });
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => questionnaire })));
   vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+  HTMLElement.prototype.scrollIntoView = mocks.scrollResult;
   vi.spyOn(window, 'confirm').mockReturnValue(false);
   HTMLDialogElement.prototype.showModal = function () { this.open = true; };
   HTMLDialogElement.prototype.close = function () { this.open = false; };
@@ -198,9 +199,13 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     await mount();
     const pendingFieldset = container.querySelector<HTMLFieldSetElement>('fieldset');
     expect(pendingFieldset?.disabled).toBe(true);
+    expect(container.querySelectorAll('.container > .card > fieldset')).toHaveLength(3);
+    expect([...container.querySelectorAll<HTMLFieldSetElement>('.container > .card > fieldset')].every((fieldset) => fieldset.disabled)).toBe(true);
     expect(mocks.execute).not.toHaveBeenCalled();
     await click('恢复草稿');
     expect(button('推荐回答').closest('fieldset')?.disabled).toBe(true);
+    expect(container.querySelectorAll('.container > .card > fieldset')).toHaveLength(3);
+    expect([...container.querySelectorAll<HTMLFieldSetElement>('.container > .card > fieldset')].every((fieldset) => fieldset.disabled)).toBe(true);
     await click('推荐回答'); await click('跳过并生成');
     expect(mocks.execute).not.toHaveBeenCalled();
     expect(container.querySelector<HTMLTextAreaElement>('.ui-web-questionnaire-answer-input')?.value).toBe('');
@@ -230,6 +235,96 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     expect(container.querySelector('img[alt="Questionnaire Logo"]')).toBe(logo);
     expect(container.querySelector('textarea')).toBeTruthy();
     expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it('orders the questionnaire sections like Web and keeps the restored language fallback when expanded', async () => {
+    window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify({ ...draft(), language: '草稿语言' }));
+    await mount(); await click('恢复草稿');
+    const languageToggle = [...container.querySelectorAll('button')].find((item) => item.textContent?.startsWith('生成语言'))!;
+    expect(languageToggle.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelector('select[aria-label="生成语言"]')).toBeNull();
+    const source = container.querySelector('[aria-label="问卷来源"]')!;
+    const orderedSections = [
+      container.querySelector('#question-navigator-select'),
+      source,
+      container.querySelector('.ui-web-questionnaire-answer-input'),
+      languageToggle,
+      container.querySelector('legend'),
+      [...container.querySelectorAll('button')].find((item) => item.textContent?.startsWith('一键填充答案')),
+      [...container.querySelectorAll('button')].find((item) => item.textContent?.startsWith('答案概览')),
+      button('下载 TXT'),
+    ];
+    for (let index = 1; index < orderedSections.length; index += 1) {
+      expect(orderedSections[index - 1]).toBeTruthy();
+      expect(orderedSections[index]).toBeTruthy();
+      expect(orderedSections[index - 1]!.compareDocumentPosition(orderedSections[index]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    expect(source.classList.contains('border')).toBe(false);
+    expect(source.classList.contains('p-4')).toBe(false);
+    await act(async () => languageToggle.click());
+    expect(languageToggle.getAttribute('aria-expanded')).toBe('true');
+    expect(container.querySelector<HTMLSelectElement>('select[aria-label="生成语言"]')?.value).toBe('草稿语言');
+    await act(async () => languageToggle.click());
+    await act(async () => languageToggle.click());
+    expect(container.querySelector<HTMLSelectElement>('select[aria-label="生成语言"]')?.value).toBe('草稿语言');
+    expect(JSON.parse(window.localStorage.getItem(DETAILS_DRAFT_KEY)!).language).toBe('草稿语言');
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it('uses loaded language values without changing draft or generation semantics', async () => {
+    window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify({ ...draft(), language: 'en' }));
+    vi.mocked(fetch).mockImplementation(async (input) => ({
+      ok: true,
+      json: async () => String(input) === '/languages.json'
+        ? [{ code: 'en', name: 'English' }, { code: 'ja', name: '日本語' }]
+        : questionnaire,
+    } as Response));
+    await mount(); await click('恢复草稿');
+    const languageToggle = [...container.querySelectorAll('button')].find((item) => item.textContent?.startsWith('生成语言'))!;
+    await act(async () => languageToggle.click());
+    const language = container.querySelector<HTMLSelectElement>('select[aria-label="生成语言"]')!;
+    expect(language.value).toBe('en');
+    await act(async () => {
+      language.value = 'ja';
+      language.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(JSON.parse(window.localStorage.getItem(DETAILS_DRAFT_KEY)!).language).toBe('ja');
+    await act(async () => languageToggle.click());
+    await act(async () => languageToggle.click());
+    expect(container.querySelector<HTMLSelectElement>('select[aria-label="生成语言"]')?.value).toBe('ja');
+    await click('发送问卷并生成');
+    expect(mocks.execute.mock.calls[0]![1].language).toBe('ja');
+  });
+
+  it('keeps reordered navigation, question, language, source and Provider controls disabled while generating', async () => {
+    window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify(draft()));
+    let finish!: (outcome: DetailsGenerationOutcome) => void;
+    mocks.execute.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    await mount(); await click('恢复草稿');
+    const languageToggle = [...container.querySelectorAll('button')].find((item) => item.textContent?.startsWith('生成语言'))!;
+    const sourceToggle = container.querySelector<HTMLButtonElement>('[aria-label="问卷来源"] button')!;
+    await act(async () => { languageToggle.click(); sourceToggle.click(); });
+    const controls = [
+      button('2'),
+      container.querySelector('#question-navigator-select'),
+      container.querySelector('.ui-web-questionnaire-answer-input'),
+      languageToggle,
+      container.querySelector('select[aria-label="生成语言"]'),
+      container.querySelector('button[role="combobox"]'),
+      button('从问卷数据卡选择'),
+    ];
+    for (const control of controls) {
+      expect(control).toBeTruthy();
+      expect(control!.matches(':disabled')).toBe(false);
+    }
+    await click('发送问卷并生成');
+    for (const control of controls) expect(control!.matches(':disabled')).toBe(true);
+    await act(async () => { button('2').click(); languageToggle.click(); });
+    expect(container.textContent).toContain(`第 1 / ${questionnaire.questions.length} 题`);
+    expect(languageToggle.getAttribute('aria-expanded')).toBe('true');
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    await act(async () => finish(completed));
+    for (const control of controls) expect(control!.matches(':disabled')).toBe(false);
   });
 
   it('shows rounded progress, effective soft limits and skip guidance only for optional questions', async () => {
@@ -333,15 +428,23 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     await click('恢复草稿');
     expect(container.querySelector('img[alt="Questionnaire Logo"]')).toBe(logo);
     expect(container.querySelector('textarea')?.value).toBe('善良');
+    const inputCard = container.querySelector('.container > .card')!;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ top: window.innerHeight + 1 } as DOMRect);
     await click('发送问卷并生成');
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(mocks.execute.mock.calls[0]![2]).toMatchObject({ mode: 'direct-local', modelId: 'model' });
     expect(container.textContent).toContain('百合 · 未签名');
     expect(container.textContent).toContain('礼服');
     expect(container.querySelector('pre')?.textContent).toBe(JSON.stringify(card));
+    const resultSection = container.querySelector('[aria-label="生成结果"]')!;
+    expect(inputCard.contains(resultSection)).toBe(false);
+    expect(resultSection.parentElement?.parentElement).toBe(inputCard.parentElement);
+    expect(mocks.scrollResult).toHaveBeenCalledTimes(1);
+    expect(mocks.scrollResult.mock.instances[0]).toBe(resultSection.parentElement);
     await click('保存到本地卡库');
     expect(mocks.save).toHaveBeenCalledTimes(1);
     expect(container.textContent).toContain('已保存到本地卡库。');
+    expect(mocks.scrollResult).toHaveBeenCalledTimes(1);
   });
   it('synchronous generation locks route/refresh/native close, cancel keeps partial, then leaving is allowed', async () => {
     window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify(draft()));

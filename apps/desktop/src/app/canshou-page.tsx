@@ -48,6 +48,7 @@ import {
   GenerationModeSwitcher,
   JsonSizeIndicator,
   QuestionnaireAnswerExportPanel,
+  QuestionnaireLanguageSection,
   QuestionnairePageCard,
   QuestionNavigator,
   isMobileFormFactor,
@@ -173,6 +174,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
   const pendingActionRef = useRef<PendingRegenerateAction>('generate');
   const [showIntroduction, setShowIntroduction] = useState(true);
   const [showQuestionnaireSettings, setShowQuestionnaireSettings] = useState(false);
+  const [showLanguageSection, setShowLanguageSection] = useState(false);
   const [showPasteImport, setShowPasteImport] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [pasteError, setPasteError] = useState<string | null>(null);
@@ -740,7 +742,16 @@ function CanshouForm({ session }: { session: CanshouSession }) {
               </section>
             ) : (
               <>
-                <section aria-label="问卷来源" className="rounded-lg border border-(--app-border) p-4">
+                <fieldset disabled={busy || blockedDraft || questionnaireLoading || !guard.ready} className="flex min-w-0 flex-col gap-4">
+                  {flow.length > 0 && <QuestionNavigator
+                    theme="app"
+                    items={flow.map((item) => ({ id: item.key, label: item.question.question }))}
+                    currentIndex={currentIndex}
+                    onNavigate={setQuestionIndex}
+                    isAnswered={(index) => Boolean(answersByKey[flow[index]!.key]?.trim())}
+                  />}
+                </fieldset>
+                <section aria-label="问卷来源">
                   <QuestionnaireSelectionPanel
                     theme={CANSHOU_SELECTION_THEME}
                     expanded={showQuestionnaireSettings}
@@ -784,6 +795,27 @@ function CanshouForm({ session }: { session: CanshouSession }) {
                   )}
                 </section>
                 <fieldset disabled={busy || blockedDraft || questionnaireLoading || !guard.ready} className="flex min-w-0 flex-col gap-4">
+                  {flowItem && question && <QuestionnaireQuestionPanel
+                    theme={CANSHOU_QUESTIONNAIRE_THEME} progressLabel={`第 ${currentIndex + 1} / ${flow.length} 题`} progressPercent={Math.round((currentIndex + 1) / flow.length * 100)}
+                    questionText={question.question} questionnaireTitle={flowItem.questionnaireTitle} noticeText="请基于您构想的虚拟档案回答，并确保内容符合公序良俗，请勿使用任何真实信息。" helperText={question.helperText}
+                    isRequired={question.required === true} skipText="本题可跳过，不作答将不会记录" options={question.options} optionsHintText="推荐选项（点击后自动前进，末题生成）" onOptionSelect={handleOptionSelect} suggestions={showTextInput ? question.suggestions : undefined} onSuggestionSelect={updateAnswer}
+                    showTextInput={showTextInput} answer={answer} onAnswerChange={updateAnswer} placeholder={question.placeholder} answerLength={answer.trim().length} maxLength={getAnswerLimitInfo(question.maxLength).limit}
+                    showLimitLabel limitLabel={`建议不超过 ${getAnswerLimitInfo(question.maxLength).limit ?? 500} 字，不限制生成`} isOverLimit={isAnswerOverLimit(answer, question.maxLength)} overLimitText="回答超过建议长度，仍可生成未签名残兽档案。"
+                    prevLabel="上一题" nextButtonContent={nextButtonLabel} onPrev={() => setQuestionIndex((index) => Math.max(0, index - 1))}
+                    onNext={handleNext}
+                    disablePrev={currentIndex === 0} disableNext={busy || (question.required === true && !answer.trim())} prevButtonClass={actionClass} nextButtonClass={actionClass}
+                  />}
+                  <QuestionnaireLanguageSection
+                    variant="canshou"
+                    expanded={showLanguageSection}
+                    onToggle={() => setShowLanguageSection(!showLanguageSection)}
+                    // languages.json 未加载完成前先呈现当前值，避免选择态回空。
+                    languages={languages.length ? languages : [{ code: state.draft.language, name: state.draft.language }]}
+                    value={state.draft.language}
+                    onChange={(language) => updateDraft({ language })}
+                  />
+                </fieldset>
+                <fieldset disabled={busy || blockedDraft || questionnaireLoading || !guard.ready} className="flex min-w-0 flex-col gap-4">
                   <legend className="mb-2 font-semibold">生成设置</legend>
                   <DesktopAiProviderPanel
                     generationMode={generationMode}
@@ -815,34 +847,6 @@ function CanshouForm({ session }: { session: CanshouSession }) {
                       </div>
                     }
                   />
-                  <label className="flex flex-col gap-1">
-                    <span>
-                      <img src="/globe.svg" alt="Language" className="mr-2 inline-block h-4 w-4" />生成语言
-                    </span>
-                    <select aria-label="生成语言" className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)" value={state.draft.language} onChange={(event) => updateDraft({ language: event.target.value })}>
-                      {/* languages.json 未加载完成前先呈现当前值，避免选择态回空。 */}
-                      {(languages.length ? languages : [{ code: state.draft.language, name: state.draft.language }]).map((lang) => (
-                        <option key={lang.code} value={lang.code}>{lang.name}</option>
-                      ))}
-                    </select>
-                  </label>
-                  {flow.length > 0 && <QuestionNavigator
-                    theme="app"
-                    items={flow.map((item) => ({ id: item.key, label: item.question.question }))}
-                    currentIndex={currentIndex}
-                    onNavigate={setQuestionIndex}
-                    isAnswered={(index) => Boolean(answersByKey[flow[index]!.key]?.trim())}
-                  />}
-                  {flowItem && question && <QuestionnaireQuestionPanel
-                    theme={CANSHOU_QUESTIONNAIRE_THEME} progressLabel={`第 ${currentIndex + 1} / ${flow.length} 题`} progressPercent={Math.round((currentIndex + 1) / flow.length * 100)}
-                    questionText={question.question} questionnaireTitle={flowItem.questionnaireTitle} noticeText="请基于您构想的虚拟档案回答，并确保内容符合公序良俗，请勿使用任何真实信息。" helperText={question.helperText}
-                    isRequired={question.required === true} skipText="本题可跳过，不作答将不会记录" options={question.options} optionsHintText="推荐选项（点击后自动前进，末题生成）" onOptionSelect={handleOptionSelect} suggestions={showTextInput ? question.suggestions : undefined} onSuggestionSelect={updateAnswer}
-                    showTextInput={showTextInput} answer={answer} onAnswerChange={updateAnswer} placeholder={question.placeholder} answerLength={answer.trim().length} maxLength={getAnswerLimitInfo(question.maxLength).limit}
-                    showLimitLabel limitLabel={`建议不超过 ${getAnswerLimitInfo(question.maxLength).limit ?? 500} 字，不限制生成`} isOverLimit={isAnswerOverLimit(answer, question.maxLength)} overLimitText="回答超过建议长度，仍可生成未签名残兽档案。"
-                    prevLabel="上一题" nextButtonContent={nextButtonLabel} onPrev={() => setQuestionIndex((index) => Math.max(0, index - 1))}
-                    onNext={handleNext}
-                    disablePrev={currentIndex === 0} disableNext={busy || (question.required === true && !answer.trim())} prevButtonClass={actionClass} nextButtonClass={actionClass}
-                  />}
                 </fieldset>
                 {/* 批量填充/卡导入/答案概览/备份导出——与 Web `/canshou` 同一套共享区段。 */}
                 {!blockedDraft && <BulkAnswerTools

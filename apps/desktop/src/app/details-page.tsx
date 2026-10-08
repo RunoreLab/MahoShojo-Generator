@@ -49,6 +49,7 @@ import {
   GenerationModeSwitcher,
   JsonSizeIndicator,
   QuestionnaireAnswerExportPanel,
+  QuestionnaireLanguageSection,
   QuestionnairePageCard,
   QuestionNavigator,
   isMobileFormFactor,
@@ -179,6 +180,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   const pendingActionRef = useRef<PendingRegenerateAction>('generate');
   const [showIntroduction, setShowIntroduction] = useState(true);
   const [showQuestionnaireSettings, setShowQuestionnaireSettings] = useState(false);
+  const [showLanguageSection, setShowLanguageSection] = useState(false);
   const [showPasteImport, setShowPasteImport] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [pasteError, setPasteError] = useState<string | null>(null);
@@ -739,7 +741,16 @@ function DetailsForm({ session }: { session: DetailsSession }) {
               </section>
             ) : (
               <>
-                <section aria-label="问卷来源" className="rounded-lg border border-(--app-border) p-4">
+                <fieldset disabled={busy || blockedDraft || questionnaireLoading || !guard.ready} className="flex min-w-0 flex-col gap-4">
+                  {flow.length > 0 && <QuestionNavigator
+                    theme="app"
+                    items={flow.map((item) => ({ id: item.key, label: item.question.question }))}
+                    currentIndex={currentIndex}
+                    onNavigate={setQuestionIndex}
+                    isAnswered={(index) => Boolean(answersByKey[flow[index]!.key]?.trim())}
+                  />}
+                </fieldset>
+                <section aria-label="问卷来源">
                   <QuestionnaireSelectionPanel
                     theme={APP_SELECTION_THEME}
                     expanded={showQuestionnaireSettings}
@@ -783,6 +794,27 @@ function DetailsForm({ session }: { session: DetailsSession }) {
                   )}
                 </section>
                 <fieldset disabled={busy || blockedDraft || questionnaireLoading || !guard.ready} className="flex min-w-0 flex-col gap-4">
+                  {flowItem && question && <QuestionnaireQuestionPanel
+                    theme={DETAILS_QUESTIONNAIRE_THEME} progressLabel={`第 ${currentIndex + 1} / ${flow.length} 题`} progressPercent={Math.round((currentIndex + 1) / flow.length * 100)}
+                    questionText={question.question} questionnaireTitle={flowItem.questionnaireTitle} noticeText="请基于您构想的虚拟角色身份回答，并确保内容符合公序良俗，请勿使用任何真实信息。" helperText={question.helperText}
+                    isRequired={question.required === true} skipText="本题可跳过，不作答将不会记录" options={question.options} optionsHintText="推荐选项（点击后自动前进，末题生成）" onOptionSelect={handleOptionSelect} suggestions={showTextInput ? question.suggestions : undefined} onSuggestionSelect={updateAnswer}
+                    showTextInput={showTextInput} answer={answer} onAnswerChange={updateAnswer} placeholder={question.placeholder} answerLength={answer.trim().length} maxLength={getAnswerLimitInfo(question.maxLength).limit}
+                    showLimitLabel limitLabel={`建议不超过 ${getAnswerLimitInfo(question.maxLength).limit ?? 500} 字，不限制生成`} isOverLimit={isAnswerOverLimit(answer, question.maxLength)} overLimitText="回答超过建议长度，仍可生成未签名角色卡。"
+                    prevLabel="上一题" nextButtonContent={nextButtonLabel} onPrev={() => setQuestionIndex((index) => Math.max(0, index - 1))}
+                    onNext={handleNext}
+                    disablePrev={currentIndex === 0} disableNext={busy || (question.required === true && !answer.trim())} prevButtonClass={actionClass} nextButtonClass={actionClass}
+                  />}
+                  <QuestionnaireLanguageSection
+                    variant="details"
+                    expanded={showLanguageSection}
+                    onToggle={() => setShowLanguageSection(!showLanguageSection)}
+                    // languages.json 未加载完成前先呈现当前值，避免选择态回空。
+                    languages={languages.length ? languages : [{ code: state.draft.language, name: state.draft.language }]}
+                    value={state.draft.language}
+                    onChange={(language) => updateDraft({ language })}
+                  />
+                </fieldset>
+                <fieldset disabled={busy || blockedDraft || questionnaireLoading || !guard.ready} className="flex min-w-0 flex-col gap-4">
                   <legend className="mb-2 font-semibold">生成设置</legend>
                   <DesktopAiProviderPanel
                     generationMode={generationMode}
@@ -814,31 +846,6 @@ function DetailsForm({ session }: { session: DetailsSession }) {
                       </div>
                     }
                   />
-                  <label className="flex flex-col gap-1">生成语言
-                    <select aria-label="生成语言" className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)" value={state.draft.language} onChange={(event) => updateDraft({ language: event.target.value })}>
-                      {/* languages.json 未加载完成前先呈现当前值，避免选择态回空。 */}
-                      {(languages.length ? languages : [{ code: state.draft.language, name: state.draft.language }]).map((lang) => (
-                        <option key={lang.code} value={lang.code}>{lang.name}</option>
-                      ))}
-                    </select>
-                  </label>
-                  {flow.length > 0 && <QuestionNavigator
-                    theme="app"
-                    items={flow.map((item) => ({ id: item.key, label: item.question.question }))}
-                    currentIndex={currentIndex}
-                    onNavigate={setQuestionIndex}
-                    isAnswered={(index) => Boolean(answersByKey[flow[index]!.key]?.trim())}
-                  />}
-                  {flowItem && question && <QuestionnaireQuestionPanel
-                    theme={DETAILS_QUESTIONNAIRE_THEME} progressLabel={`第 ${currentIndex + 1} / ${flow.length} 题`} progressPercent={Math.round((currentIndex + 1) / flow.length * 100)}
-                    questionText={question.question} questionnaireTitle={flowItem.questionnaireTitle} noticeText="请基于您构想的虚拟角色身份回答，并确保内容符合公序良俗，请勿使用任何真实信息。" helperText={question.helperText}
-                    isRequired={question.required === true} skipText="本题可跳过，不作答将不会记录" options={question.options} optionsHintText="推荐选项（点击后自动前进，末题生成）" onOptionSelect={handleOptionSelect} suggestions={showTextInput ? question.suggestions : undefined} onSuggestionSelect={updateAnswer}
-                    showTextInput={showTextInput} answer={answer} onAnswerChange={updateAnswer} placeholder={question.placeholder} answerLength={answer.trim().length} maxLength={getAnswerLimitInfo(question.maxLength).limit}
-                    showLimitLabel limitLabel={`建议不超过 ${getAnswerLimitInfo(question.maxLength).limit ?? 500} 字，不限制生成`} isOverLimit={isAnswerOverLimit(answer, question.maxLength)} overLimitText="回答超过建议长度，仍可生成未签名角色卡。"
-                    prevLabel="上一题" nextButtonContent={nextButtonLabel} onPrev={() => setQuestionIndex((index) => Math.max(0, index - 1))}
-                    onNext={handleNext}
-                    disablePrev={currentIndex === 0} disableNext={busy || (question.required === true && !answer.trim())} prevButtonClass={actionClass} nextButtonClass={actionClass}
-                  />}
                 </fieldset>
                 {/* 批量填充/卡导入/答案概览/备份导出——与 Web `/details` 同一套共享区段。 */}
                 {!blockedDraft && <BulkAnswerTools
@@ -913,76 +920,76 @@ function DetailsForm({ session }: { session: DetailsSession }) {
             {actionInfo && <p role="status">{actionInfo}</p>}
             {state.message && <p role={state.phase === 'uncertain' ? 'alert' : 'status'}>{state.message}</p>}
             {state.reasoning && <AiReasoningPanel reasoning={state.reasoning} />}
-            <div ref={resultSectionRef}>
-              {state.card && <section aria-label="生成结果" className="flex flex-col gap-3">
-                <h2 className="text-xl font-semibold">
-                  {state.cardKind === 'general'
-                    ? (typeof state.card.name === 'string' && state.card.name ? state.card.name : '未命名角色')
-                    : (typeof state.card.codename === 'string' && state.card.codename ? state.card.codename : '未命名魔法少女')}
-                  {' · '}{resultSignatureLabel}
-                </h2>
-                {state.cardKind === 'general'
-                  ? <GeneralCharacterCard
-                      general={state.card as GeneralCharacterCardData}
-                      onSaveImage={handleSaveImage}
-                      imageSaveMode={imageSaveMode}
-                      saveButtonLabel={imageSaveButtonLabel}
-                    />
-                  : <MagicalGirlCard
-                      magicalGirl={state.card as unknown as MagicalGirlCardData}
-                      gradientStyle={RESULT_CARD_GRADIENT}
-                      onSaveImage={handleSaveImage}
-                      imageSaveMode={imageSaveMode}
-                      saveButtonLabel={imageSaveButtonLabel}
-                    />}
-                <button className={actionClass} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => { if (guard.ready) void session.saveResult(); }}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>
-                {state.saveStatus === 'saved' && <p role="status">已保存到本地卡库。</p>}
-                {state.saveStatus === 'already-present' && <p role="status">本地卡库已存在相同内容，原记录保持不变。</p>}
-                {state.saveError && <p role="alert">{state.saveError}</p>}
-                <DetailsSavePreferencesPanel
-                  theme={APP_SAVE_PREFERENCES_THEME}
-                  imageSaveMode={imageSaveMode}
-                  onImageSaveModeChange={(next) => updateDraft({ imageSaveMode: next })}
-                  recommendedImageMode={recommendedImageMode}
-                  jsonSaveMode={jsonSaveMode}
-                  onJsonSaveModeChange={(next) => updateDraft({ jsonSaveMode: next })}
-                  recommendedJsonMode={recommendedJsonMode}
-                  footerNote="提示：偏好设置已保存在本机草稿中，下次打开仍会保留；切换不会丢失生成结果。"
-                />
-                <DetailsFieldGuidePanel
-                  theme={APP_FIELD_GUIDE_THEME}
-                  expanded={showDetails}
-                  onToggle={() => updateDraft({ showDetails: !showDetails })}
-                />
-                {/* 保存原始数据——与 Web `/details` 同一共享控件（下载 JSON / 复制文本）。 */}
-                {resolvedResultPayload && <section aria-label="保存原始数据" className="rounded-lg border border-(--app-border) p-4">
-                  <h3 className="text-lg font-medium">保存人物设定</h3>
-                  <div className="mt-3 flex flex-col gap-3">
-                    {state.cardKind === 'general' ? (
-                      <>
-                        <button className={actionClass} onClick={() => downloadTextFile(resolveResultJsonFileName(resolvedResultPayload as Record<string, unknown>, 'general'), JSON.stringify(resolvedResultPayload, null, 2))}>下载通用角色卡</button>
-                        <button className={actionClass} onClick={() => { void navigator.clipboard?.writeText(JSON.stringify(resolvedResultPayload, null, 2)).then(() => setActionInfo('✅ 通用角色卡 JSON 已复制到剪贴板')).catch(() => setActionError('复制失败，请手动选择 JSON 内容后复制。')); }}>复制到剪贴板</button>
-                      </>
-                    ) : (
-                      <SaveJsonButton
-                        data={resolvedResultPayload}
-                        mode={jsonSaveMode}
-                        recommendedMode={recommendedJsonMode}
-                        resolveFileName={(data) => resolveResultJsonFileName(data as Record<string, unknown>, 'magical-girl')}
-                      />
-                    )}
-                  </div>
-                  <JsonSizeIndicator
-                    data={resolvedResultPayload}
-                    maxBytes={MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES}
-                    hintText="按 UTF-8 字节估算，对照本地卡单条记录上限"
-                    warningText="⚠️ 接近本地卡单条上限（4 MiB），保存到本地卡库可能失败，请先精简数据。"
-                  />
-                </section>}
-              </section>}
-            </div>
             {state.rawText && <details open={state.phase !== 'completed'}><summary>原始输出正文</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border p-3">{state.rawText}</pre></details>}
           </QuestionnairePageCard>
+          <div ref={resultSectionRef}>
+            {state.card && <section aria-label="生成结果" className="flex flex-col gap-3">
+              <h2 className="text-xl font-semibold">
+                {state.cardKind === 'general'
+                  ? (typeof state.card.name === 'string' && state.card.name ? state.card.name : '未命名角色')
+                  : (typeof state.card.codename === 'string' && state.card.codename ? state.card.codename : '未命名魔法少女')}
+                {' · '}{resultSignatureLabel}
+              </h2>
+              {state.cardKind === 'general'
+                ? <GeneralCharacterCard
+                    general={state.card as GeneralCharacterCardData}
+                    onSaveImage={handleSaveImage}
+                    imageSaveMode={imageSaveMode}
+                    saveButtonLabel={imageSaveButtonLabel}
+                  />
+                : <MagicalGirlCard
+                    magicalGirl={state.card as unknown as MagicalGirlCardData}
+                    gradientStyle={RESULT_CARD_GRADIENT}
+                    onSaveImage={handleSaveImage}
+                    imageSaveMode={imageSaveMode}
+                    saveButtonLabel={imageSaveButtonLabel}
+                  />}
+              <button className={actionClass} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => { if (guard.ready) void session.saveResult(); }}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>
+              {state.saveStatus === 'saved' && <p role="status">已保存到本地卡库。</p>}
+              {state.saveStatus === 'already-present' && <p role="status">本地卡库已存在相同内容，原记录保持不变。</p>}
+              {state.saveError && <p role="alert">{state.saveError}</p>}
+              <DetailsSavePreferencesPanel
+                theme={APP_SAVE_PREFERENCES_THEME}
+                imageSaveMode={imageSaveMode}
+                onImageSaveModeChange={(next) => updateDraft({ imageSaveMode: next })}
+                recommendedImageMode={recommendedImageMode}
+                jsonSaveMode={jsonSaveMode}
+                onJsonSaveModeChange={(next) => updateDraft({ jsonSaveMode: next })}
+                recommendedJsonMode={recommendedJsonMode}
+                footerNote="提示：偏好设置已保存在本机草稿中，下次打开仍会保留；切换不会丢失生成结果。"
+              />
+              <DetailsFieldGuidePanel
+                theme={APP_FIELD_GUIDE_THEME}
+                expanded={showDetails}
+                onToggle={() => updateDraft({ showDetails: !showDetails })}
+              />
+              {/* 保存原始数据——与 Web `/details` 同一共享控件（下载 JSON / 复制文本）。 */}
+              {resolvedResultPayload && <section aria-label="保存原始数据" className="rounded-lg border border-(--app-border) p-4">
+                <h3 className="text-lg font-medium">保存人物设定</h3>
+                <div className="mt-3 flex flex-col gap-3">
+                  {state.cardKind === 'general' ? (
+                    <>
+                      <button className={actionClass} onClick={() => downloadTextFile(resolveResultJsonFileName(resolvedResultPayload as Record<string, unknown>, 'general'), JSON.stringify(resolvedResultPayload, null, 2))}>下载通用角色卡</button>
+                      <button className={actionClass} onClick={() => { void navigator.clipboard?.writeText(JSON.stringify(resolvedResultPayload, null, 2)).then(() => setActionInfo('✅ 通用角色卡 JSON 已复制到剪贴板')).catch(() => setActionError('复制失败，请手动选择 JSON 内容后复制。')); }}>复制到剪贴板</button>
+                    </>
+                  ) : (
+                    <SaveJsonButton
+                      data={resolvedResultPayload}
+                      mode={jsonSaveMode}
+                      recommendedMode={recommendedJsonMode}
+                      resolveFileName={(data) => resolveResultJsonFileName(data as Record<string, unknown>, 'magical-girl')}
+                    />
+                  )}
+                </div>
+                <JsonSizeIndicator
+                  data={resolvedResultPayload}
+                  maxBytes={MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES}
+                  hintText="按 UTF-8 字节估算，对照本地卡单条记录上限"
+                  warningText="⚠️ 接近本地卡单条上限（4 MiB），保存到本地卡库可能失败，请先精简数据。"
+                />
+              </section>}
+            </section>}
+          </div>
           {/* 页脚与 Web /details 同一共享组件；站外链接走受控外链确认。 */}
           <ProductFooter
             textWhite
