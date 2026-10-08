@@ -76,7 +76,7 @@ export const DesktopLoopbackRedirectUriSchema = z
     if (!isDesktopLoopbackRedirectUri(value)) {
       context.addIssue({
         code: 'custom',
-        message: 'redirectUri must be http://127.0.0.1:<port>/callback or http://[::1]:<port>/callback',
+        message: 'redirectUri must use HTTP, host 127.0.0.1 or [::1], port 1–65535 (default 80), path /callback, and no credentials, query or fragment',
       });
     }
   });
