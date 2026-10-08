@@ -640,6 +640,51 @@ describe('DesktopAiConfigStore', () => {
     expect(store.getSnapshot().modelsByProfileId['p_local']?.selectedModelId).toBe('qwen3:8b');
   });
 
+  it('activates a connection as one atomic overlay write (location + id + model)', async () => {
+    const storage = createStorage();
+    storage.setItem(
+      DESKTOP_AI_CONFIG_STORAGE_KEY,
+      JSON.stringify({
+        version: 3,
+        selection: { executionPreference: 'server', clientConnectionId: 'p_local' },
+        hiddenPresetIds: [],
+        generationOverrides: {},
+        modelsByProfileId: {
+          p_local: { selectedModelId: 'qwen3:14b', customModelIds: ['qwen3:14b'] },
+        },
+      }),
+    );
+    const store = createStore(storage, createNativeStub([profileFixture()]).invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
+
+    const setSpy = vi.spyOn(storage, 'setItem');
+    store.activateConnection('p_local');
+    // DESK-AIP-003.3：执行位置+连接+模型是同一次受检 overlay 更新。
+    expect(setSpy).toHaveBeenCalledTimes(1);
+    expect(store.getSnapshot().selection).toEqual({
+      executionPreference: 'client',
+      clientConnectionId: 'p_local',
+    });
+    // 缺省沿用该连接已存的模型偏好。
+    expect(store.getSnapshot().modelsByProfileId['p_local']?.selectedModelId).toBe('qwen3:14b');
+
+    // 显式模型切换；不在候选清单的模型拒绝写入。
+    store.activateConnection('p_local', 'qwen3:8b');
+    expect(store.getSnapshot().modelsByProfileId['p_local']?.selectedModelId).toBe('qwen3:8b');
+    store.activateConnection('p_local', 'ghost-model');
+    expect(store.getSnapshot().modelsByProfileId['p_local']?.selectedModelId).toBe('qwen3:8b');
+    store.activateConnection('missing');
+    expect(store.getSnapshot().selection.clientConnectionId).toBe('p_local');
+
+    const persisted = JSON.parse(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)!);
+    expect(persisted.selection).toEqual({
+      executionPreference: 'client',
+      clientConnectionId: 'p_local',
+    });
+    expect(persisted.modelsByProfileId.p_local.selectedModelId).toBe('qwen3:8b');
+  });
+
   it('cleans modelsByProfileId entries of deleted profiles on refresh', async () => {
     const storage = createStorage();
     const native = createNativeStub([profileFixture(), profileFixture({ id: 'p_two', name: '二号' })]);
@@ -782,6 +827,57 @@ describe('DesktopAiConfigStore', () => {
     expect(native.profiles.get('p_anthropic')?.adapter).toBe('anthropic');
     expect(native.profiles.get('p_anthropic')?.name).toBe('本地模型');
     expect(native.calls).not.toContain('save_provider_profile');
+  });
+
+  it('clearApiKey removes the apiKeyRef and deletes the old credential after save', async () => {
+    const storage = createStorage();
+    const native = createNativeStub([profileFixture()]);
+    native.secrets.add('provider:p_local:api-key');
+    const store = createStore(storage, native.invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
+
+    await store.saveConnection({
+      id: 'p_local',
+      name: '本地模型',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      modelId: 'qwen3:8b',
+      clearApiKey: true,
+    });
+
+    const saved = native.profiles.get('p_local')!;
+    // Profile 不再携带凭据引用；旧凭据在落盘成功后删除。
+    expect(saved.apiKeyRef).toBeUndefined();
+    expect(native.secrets.has('provider:p_local:api-key')).toBe(false);
+    const deleteIndex = native.calls.lastIndexOf('delete_provider_secret');
+    const saveIndex = native.calls.indexOf('save_provider_profile');
+    expect(deleteIndex).toBeGreaterThan(saveIndex);
+    expect(store.getSnapshot().secretStatus['p_local']).toBe('absent');
+  });
+
+  it('rejects a draft that both clears and replaces the credential', async () => {
+    const storage = createStorage();
+    const native = createNativeStub([profileFixture()]);
+    native.secrets.add('provider:p_local:api-key');
+    const store = createStore(storage, native.invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
+
+    await expect(
+      store.saveConnection({
+        id: 'p_local',
+        name: '本地模型',
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        modelId: 'qwen3:8b',
+        clearApiKey: true,
+        apiKey: 'sk-conflict',
+      }),
+    ).rejects.toThrow('清除凭据');
+
+    // 矛盾输入不落任何盘：Profile 与凭据都保持原样。
+    expect(native.profiles.get('p_local')?.apiKeyRef).toBe('provider:p_local:api-key');
+    expect(native.calls).not.toContain('save_provider_profile');
+    expect(native.calls).not.toContain('set_provider_secret');
   });
 
   it('keeps the existing apiKeyRef and createdAt when editing without a new key', async () => {

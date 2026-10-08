@@ -268,14 +268,57 @@ export class DesktopAiConfigStore {
    * 只改记忆里的客户端连接，**不**顺带切换执行位置。
    * 「选一条连接准备给客户端用」与「现在用客户端执行」是两件事：
    * 服务器偏好下编辑/选择连接不应偷改执行偏好（D5.0c 开放 server 后才有
-   * 现实意义，但解耦现在就冻结进 API）。UI 上「设为当前」这类明确含义
-   * 「立即用它执行」的操作，应同时再调 `selectExecutionLocation('client')`。
+   * 现实意义，但解耦现在就冻结进 API）。「立即用它执行」的完整激活
+   * 语义走 `activateConnection`。
    */
   selectClientConnection = (profileId: string): void => {
     if (!this.overlayWritable) return;
     this.overlay = {
       ...this.overlay,
       selection: { ...this.overlay.selection, clientConnectionId: profileId },
+    };
+    this.persistOverlay();
+    this.publishOverlay();
+  };
+
+  /**
+   * 「设为当前 / 保存并使用」的原子激活（DESK-AIP-003.3）。
+   *
+   * `executionPreference='client'` + `clientConnectionId` + `selectedModelId`
+   * 是**同一次**受检 overlay 更新：一次 mutate → persist → publish，
+   * 不是三个可独立失败的 setter 顺次调用。失败（超限/存储写入失败）时
+   * overlay 不落盘、UI 不发布——由调用方把「已保存但未启用」如实呈现，
+   * 重试永远针对同一个 Profile ID。
+   *
+   * `modelId` 省略时沿用该连接已存的选择偏好；已存偏好悬空则回落默认模型
+   * 重建立效（这是显式激活操作，不属于静默回落）。未知 Profile 或不在
+   * 候选清单的 `modelId` 拒绝写入。
+   */
+  activateConnection = (profileId: string, modelId?: string): void => {
+    if (!this.overlayWritable) return;
+    const profile = this.state.profiles.find((item) => item.id === profileId);
+    if (!profile) return;
+    const entry = this.overlay.modelsByProfileId[profileId];
+    const available = new Set([profile.modelId, ...(entry?.customModelIds ?? [])]);
+    if (modelId !== undefined && !available.has(modelId)) return;
+    const selectedModelId =
+      modelId ??
+      (entry?.selectedModelId !== undefined && available.has(entry.selectedModelId)
+        ? entry.selectedModelId
+        : profile.modelId);
+    this.overlay = {
+      ...this.overlay,
+      selection: { executionPreference: 'client', clientConnectionId: profileId },
+      modelsByProfileId: Object.assign(
+        Object.create(null) as Record<string, DesktopProfileModelSelection>,
+        this.overlay.modelsByProfileId,
+        {
+          [profileId]: {
+            customModelIds: entry?.customModelIds ?? [],
+            selectedModelId,
+          },
+        },
+      ),
     };
     this.persistOverlay();
     this.publishOverlay();
@@ -467,6 +510,10 @@ export class DesktopAiConfigStore {
       const plaintextApiKey = draft.apiKey !== undefined && draft.apiKey.length > 0
         ? draft.apiKey
         : undefined;
+      const clearApiKey = draft.clearApiKey === true;
+      if (clearApiKey && plaintextApiKey !== undefined) {
+        throw new ProfileDraftError('apiKey', '清除凭据与更换凭据不能同时生效');
+      }
       const stagedApiKeyRef =
         plaintextApiKey !== undefined ? `provider-key:${crypto.randomUUID()}` : undefined;
 
@@ -478,7 +525,7 @@ export class DesktopAiConfigStore {
           : rest;
         return Object.keys(merged).length > 0 ? merged : undefined;
       })();
-      const profile: DirectProviderProfileV1 = existing
+      let profile: DirectProviderProfileV1 = existing
         ? {
             ...existing,
             name: built.name,
@@ -492,6 +539,11 @@ export class DesktopAiConfigStore {
         : stagedApiKeyRef !== undefined
           ? { ...built, apiKeyRef: stagedApiKeyRef }
           : built;
+      if (clearApiKey) {
+        // 清除语义：Profile 不再携带凭据引用；旧凭据在落盘成功后由下方孤儿清理删除。
+        const { apiKeyRef: _cleared, ...rest } = profile;
+        profile = rest;
+      }
 
       try {
         // Profile 先过 native 校验（含投影回显）再写凭据：校验失败不动凭据。

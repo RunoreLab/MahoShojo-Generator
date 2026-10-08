@@ -771,8 +771,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
                       onChange={(event) => {
                         // 生成入口选连接=立即用它执行：两个维度一起显式落定。
                         if (event.target.value) {
-                          aiStore.selectClientConnection(event.target.value);
-                          aiStore.selectExecutionLocation('client');
+                          aiStore.activateConnection(event.target.value);
                         }
                       }}
                     >

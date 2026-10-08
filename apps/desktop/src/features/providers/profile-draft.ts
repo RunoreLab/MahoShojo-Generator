@@ -63,6 +63,12 @@ export interface ProfileDraft {
   allowPublicHttp?: boolean;
   /** 明文。只在保存那一刻使用，不进入任何状态之外的持久化路径。 */
   apiKey?: string;
+  /**
+   * 显式清除已保存的 API Key（DESK-AIP-003）。
+   * 保存后 Profile 不再携带 `apiKeyRef`，旧凭据在落盘成功后删除；
+   * 与 `apiKey` 同设属于矛盾输入，store 拒绝。
+   */
+  clearApiKey?: boolean;
 }
 
 export class ProfileDraftError extends Error {

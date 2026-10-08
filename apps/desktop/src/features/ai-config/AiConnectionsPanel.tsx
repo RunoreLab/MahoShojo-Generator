@@ -49,6 +49,8 @@ interface EditingState {
   /** 从预设复制时带入的直连模型清单（供 modelId datalist）；自由连接为 null。 */
   presetModels: readonly AIModelOption[] | null;
   isExisting: boolean;
+  /** 被编辑 Profile 是否携带 apiKeyRef（决定是否提供「清除凭据」选项）。 */
+  hasKeyRef: boolean;
 }
 
 const draftFromProfile = (profile: DirectProviderProfileV1): ProfileDraft => ({
@@ -84,13 +86,37 @@ const ConnectionEditor = ({
     setError(null);
   };
 
+  // DESK-AIP-003.7：存在未保存修改（含易失 Key 输入）时关闭表单需显式确认；
+  // 确认放弃后明文只随 React state 丢弃，不进入任何持久化草稿。
+  const isDirty =
+    draft.name !== editing.draft.name ||
+    draft.baseUrl !== editing.draft.baseUrl ||
+    draft.modelId !== editing.draft.modelId ||
+    (draft.apiKey ?? '') !== '' ||
+    draft.allowPublicHttp !== editing.draft.allowPublicHttp ||
+    draft.clearApiKey === true;
+  const cancelEditing = () => {
+    if (
+      isDirty &&
+      typeof window !== 'undefined' &&
+      !window.confirm('连接配置有未保存的更改（包括已输入的 API Key），确认放弃？')
+    ) {
+      return;
+    }
+    onCancel();
+  };
+
   const submit = async () => {
     setError(null);
     try {
       // 用户明确勾选过 allowPublicHttp 才写入；非 loopback http 未勾选时让 schema 拒绝。
-      const payload: ProfileDraft = needsHttpConfirm
+      let payload: ProfileDraft = needsHttpConfirm
         ? draft
         : { ...draft, allowPublicHttp: undefined };
+      // 清除凭据时丢弃录入框内容，避免与「更换」语义撞车（store 也会拒）。
+      if (payload.clearApiKey === true) {
+        payload = { ...payload, apiKey: undefined };
+      }
       await onSave(payload);
     } catch (cause) {
       setError(
@@ -128,7 +154,7 @@ const ConnectionEditor = ({
         />
       </label>
       <label className="flex flex-col gap-1 text-xs">
-        <span className="battle-lite-muted-text">模型 id</span>
+        <span className="battle-lite-muted-text">默认模型 id</span>
         <input
           className="input-field font-mono"
           value={draft.modelId}
@@ -168,10 +194,13 @@ const ConnectionEditor = ({
           type="password"
           autoComplete="off"
           spellCheck={false}
+          disabled={draft.clearApiKey === true}
           placeholder={
-            editing.isExisting && existingSecretKnown
-              ? '已保存凭据，留空保持不变'
-              : '输入后写入操作系统凭据存储'
+            draft.clearApiKey === true
+              ? '保存时清除已存凭据'
+              : editing.isExisting && existingSecretKnown
+                ? '已保存凭据，留空保持不变'
+                : '输入后写入操作系统凭据存储'
           }
           value={draft.apiKey ?? ''}
           onChange={(event) => patch({ apiKey: event.target.value })}
@@ -180,6 +209,19 @@ const ConnectionEditor = ({
           凭据只写入操作系统凭据存储，保存后本页无法再读回。
         </span>
       </label>
+      {editing.isExisting && editing.hasKeyRef && (
+        <label className="flex items-center gap-2 text-xs">
+          <input
+            type="checkbox"
+            className="h-4 w-4"
+            checked={draft.clearApiKey === true}
+            onChange={(event) => patch({ clearApiKey: event.target.checked })}
+          />
+          <span className="battle-lite-muted-text">
+            清除已保存的 API Key（保存后该连接不再携带凭据）
+          </span>
+        </label>
+      )}
       {error && <p className="battle-lite-subtle-text text-xs">保存失败：{error}</p>}
       <div className="flex gap-2">
         <button
@@ -193,7 +235,7 @@ const ConnectionEditor = ({
         <button
           type="button"
           className="rounded-lg border border-(--app-border-strong) px-3 py-1.5 text-xs"
-          onClick={onCancel}
+          onClick={cancelEditing}
         >
           取消
         </button>
@@ -252,7 +294,7 @@ const ConnectionRow = ({
         </span>
       </div>
       <p className="battle-lite-muted-text break-all font-mono text-xs">
-        {profile.baseUrl} · {profile.modelId} · {profile.adapter}
+        {profile.baseUrl} · 默认模型 {profile.modelId} · {profile.adapter}
       </p>
       <div className="flex flex-wrap gap-2 text-xs">
         {!referenced && (
@@ -418,7 +460,7 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
   const startCopyPreset = (entry: DesktopPresetEntry, modelId: string) => {
     const draft = newDraftFromPreset(entry, modelId);
     if (!draft) return;
-    setEditing({ draft, presetModels: entry.directCapableModels, isExisting: false });
+    setEditing({ draft, presetModels: entry.directCapableModels, isExisting: false, hasKeyRef: false });
   };
 
   const startNewConnection = (baseUrl = '') => {
@@ -426,11 +468,26 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
       draft: { id: newConnectionId(), name: '', baseUrl, modelId: '' },
       presetModels: null,
       isExisting: false,
+      hasKeyRef: false,
     });
   };
 
   const saveEditing = async (draft: ProfileDraft) => {
-    await store.saveConnection(draft);
+    try {
+      await store.saveConnection(draft);
+    } catch (cause) {
+      // 连接本体可能已落盘、只是激活/列表刷新失败：如实呈现 saved-not-activated
+      // （DESK-AIP-003.5），重试沿用同一 draft.id，不产生第二条 Profile。
+      const saved = store.getSnapshot().profiles.some((item) => item.id === draft.id);
+      if (saved) {
+        throw new Error(
+          `连接已保存，但启用为当前连接失败：${
+            cause instanceof Error ? cause.message : '配置写入失败'
+          }。可在连接列表中对该连接「设为当前」。`,
+        );
+      }
+      throw cause;
+    }
     setEditing(null);
   };
 
@@ -550,10 +607,10 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
             disabled={blockedOverlay}
             value={state.selection.clientConnectionId ?? ''}
             onChange={(event) => {
-              // 「当前连接」下拉=立即用它执行：连接选择与执行位置一起显式落定。
+              // 「当前连接」下拉=立即用它执行：连接、执行位置与模型作为
+              // 同一次受检 overlay 更新原子落盘（DESK-AIP-003.3）。
               if (event.target.value) {
-                store.selectClientConnection(event.target.value);
-                store.selectExecutionLocation('client');
+                store.activateConnection(event.target.value);
               }
             }}
           >
@@ -710,12 +767,17 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
               referenced={state.selection.clientConnectionId === profile.id}
               secretStatus={state.secretStatus[profile.id]}
               onSelect={() => {
-                // 「设为当前」明确含义是立即用它执行。
-                store.selectClientConnection(profile.id);
-                store.selectExecutionLocation('client');
+                // 「设为当前」明确含义是立即用它执行：执行位置、连接与模型
+                // 作为同一次受检 overlay 更新原子落盘（DESK-AIP-003.3）。
+                store.activateConnection(profile.id);
               }}
               onEdit={() =>
-                setEditing({ draft: draftFromProfile(profile), presetModels: null, isExisting: true })
+                setEditing({
+                  draft: draftFromProfile(profile),
+                  presetModels: null,
+                  isExisting: true,
+                  hasKeyRef: profile.apiKeyRef !== undefined,
+                })
               }
               onDelete={() => void store.deleteConnection(profile.id)}
             />

@@ -1003,8 +1003,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
           disabled={aiState.overlayState !== 'ready'}
           onChange={(event) => {
             if (event.target.value) {
-              aiStore.selectClientConnection(event.target.value);
-              aiStore.selectExecutionLocation('client');
+              aiStore.activateConnection(event.target.value);
             }
           }}
         >
