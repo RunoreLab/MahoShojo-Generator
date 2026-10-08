@@ -327,6 +327,14 @@ export class DesktopGenerationSession<
   resultSignatureKind(): 'official-signed' | 'signature-unverified' | 'unsigned' {
     return this.signatureDisposition(this.state.cardKind, this.state.card).kind;
   }
+  /**
+   * 当前结果/在途生成所在的执行通路：generate 派发时同步记录、
+   * 草稿恢复时按 output.mode 还原——「通路是否具备官方签名能力」等
+   * 通路事实以它为唯一出处，页面不得按结果字段自行推断。
+   */
+  executionMode(): Mode {
+    return this.mode;
+  }
   async saveResult(): Promise<boolean> {
     if (this.disposed || this.state.saving || this.controller || this.state.phase !== 'completed' || !this.state.card) return false;
     const card = clone(this.state.card);

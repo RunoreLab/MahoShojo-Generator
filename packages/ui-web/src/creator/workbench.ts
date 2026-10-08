@@ -117,16 +117,50 @@ const hasResultSignature = (result: unknown): boolean => {
   return typeof signature === 'string' && signature.trim().length > 0;
 };
 
+/**
+ * 结果签名事实（可选，由宿主按执行通路投影，G3-r1）：
+ * 「问卷原生许可」（快照 nativeAllowed）「通路签名能力」（capable）
+ * 「已获官方签名」（kind）是三层不同事实。Desktop 经
+ * `session.executionMode()`/`session.resultSignatureKind()` 注入；
+ * 不传入时保持按结果是否含签名字段的既有语义（Web）。
+ */
+export type CreatorResultSignatureFact = {
+  /** 产出当前结果的执行通路是否具备官方签名能力（仅 hosted-json）。 */
+  capable: boolean;
+  /** 当前结果的签名可信度：官方已签 / 含签名字段但本机未验证 / 无签名。 */
+  kind: 'official-signed' | 'signature-unverified' | 'unsigned';
+};
+
 type BuildCreatorResultOverviewInput = {
   isSubmitting: boolean;
   snapshot: CreatorWorkbenchSnapshot | null;
   result: unknown | null;
+  signature?: CreatorResultSignatureFact;
+};
+
+const resolveResultNativeHint = (result: unknown, signature?: CreatorResultSignatureFact): string => {
+  if (signature) {
+    if (signature.kind === 'official-signed') {
+      return '当前展示结果具备原生性';
+    }
+    if (signature.kind === 'signature-unverified') {
+      return '结果含签名字段但本机未验证，按非原生处理';
+    }
+    return signature.capable
+      ? '原生性签名失败，当前展示结果已降级为非原生'
+      : '当前执行通路不支持官方签名，结果为非原生';
+  }
+
+  return hasResultSignature(result)
+    ? '当前展示结果具备原生性'
+    : '原生性签名失败，当前展示结果已降级为非原生';
 };
 
 export const buildCreatorResultOverview = ({
   isSubmitting,
   snapshot,
   result,
+  signature,
 }: BuildCreatorResultOverviewInput): {
   stageLabel: string;
   progressLabel: string;
@@ -161,16 +195,16 @@ export const buildCreatorResultOverview = ({
     return {
       stageLabel: '创作进行中',
       progressLabel: `共 ${questionCount} 题，结果仍在生成中`,
-      nativeHint: '当前提交满足原生条件，完成签名后将具备原生性',
+      nativeHint: signature && !signature.capable
+        ? '当前提交满足原生条件，但本通路不支持官方签名，结果将为非原生'
+        : '当前提交满足原生条件，完成签名后将具备原生性',
     };
   }
 
   return {
     stageLabel: '创作完成',
     progressLabel: `共 ${questionCount} 题，已进入结果阶段`,
-    nativeHint: hasResultSignature(result)
-      ? '当前展示结果具备原生性'
-      : '原生性签名失败，当前展示结果已降级为非原生',
+    nativeHint: resolveResultNativeHint(result, signature),
   };
 };
 

@@ -128,6 +128,9 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     expect(mocks.execute.mock.calls[0]![1].buildRuleRequests).toEqual([{ ruleId: 'arena-trpg-lite', version: expect.any(String), inputs: expect.any(Object) }]);
     expect(mocks.execute.mock.calls[0]![2]).toMatchObject({ mode: 'direct-local', modelId: 'model' });
     expect(container.textContent).toContain('百合 · 未签名');
+    // 原生性概览按通路如实投影（G3-r1）：direct 本来就不签名，不是「签名失败」。
+    expect(container.textContent).toContain('当前执行通路不支持官方签名，结果为非原生');
+    expect(container.textContent).not.toContain('签名失败');
     await click('保存到本地卡库');
     expect(mocks.save).toHaveBeenCalledTimes(1);
     expect(container.textContent).toContain('已保存到本地卡库。');
@@ -192,8 +195,39 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
       allowNativeSignature: true,
       selections: [{ source: 'preset', questionnaire: { id: 'magical-girl-default' } }],
     });
-    // 新鲜 hosted-json 响应携带签名字段 → official-signed 标签。
+    // 新鲜 hosted-json 响应携带签名字段 → official-signed 标签与概览一致。
     expect(container.textContent).toContain('官方签名');
+    expect(container.textContent).toContain('当前展示结果具备原生性');
+  });
+
+  it('projects the unsigned-remote pathway honestly in the result overview (G3-r1)', async () => {
+    // direct-remote 也是无签名通路：概览记「不支持官方签名」，与标题「未签名」一致。
+    mocks.profiles.mockResolvedValue({ id: 'local', name: '远端模型', adapter: 'openai-compatible', baseUrl: 'https://api.example.com/v1', modelId: 'model' });
+    mocks.execute.mockResolvedValue(completed('direct-remote'));
+    window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft()));
+    await mount(); await click('恢复草稿'); await click('生成数据卡');
+    expect(mocks.execute.mock.calls[0]![2]).toMatchObject({ mode: 'direct-remote' });
+    expect(container.textContent).toContain('百合 · 未签名');
+    expect(container.textContent).toContain('当前执行通路不支持官方签名，结果为非原生');
+    expect(container.textContent).not.toContain('签名失败');
+  });
+
+  it('describes a restored signed draft as unverified instead of signed (G3-r1)', async () => {
+    // 草稿恢复的结果无本次生成快照：标题如实记「本机未验证」，
+    // 概览回落到中性文案，不冒充「官方签名」也不说「签名失败」。
+    window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft({
+      output: {
+        mode: 'hosted-json',
+        cardKind: 'magical-girl',
+        card: { ...card, signature: 'sig' },
+        rawText: JSON.stringify(card),
+        phase: 'completed',
+      },
+    })));
+    await mount(); await click('恢复草稿');
+    expect(container.textContent).toContain('百合 · 含签名字段（本机未验证）');
+    expect(container.textContent).not.toContain('· 官方签名');
+    expect(container.textContent).toContain('请以当前结果数据为准');
   });
 
   it('dispatches hosted-stream for stream templates on server execution', async () => {
@@ -209,9 +243,11 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(mocks.execute.mock.calls[0]![1].template).toBe('general');
     expect(mocks.execute.mock.calls[0]![2]).toMatchObject({ mode: 'hosted-stream' });
-    expect(container.textContent).toContain('雾都巡夜人');
-    // 流式通路不可携带官方签名标签。
-    expect(container.textContent).not.toContain('官方签名');
+    expect(container.textContent).toContain('雾都巡夜人 · 未签名');
+    // 流式通路不可携带官方签名标签；概览如实记「不支持签名」而非「签名失败」。
+    expect(container.textContent).not.toContain('· 官方签名');
+    expect(container.textContent).toContain('当前执行通路不支持官方签名，结果为非原生');
+    expect(container.textContent).not.toContain('签名失败');
     await click('保存到本地卡库');
     expect(mocks.save).toHaveBeenCalledTimes(1);
     expect(mocks.save.mock.calls[0]![0]).toMatchObject({ cardType: 'character', title: '雾都巡夜人' });

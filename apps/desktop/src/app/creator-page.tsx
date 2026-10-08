@@ -873,11 +873,18 @@ function CreatorForm({ session }: { session: CreatorSession }) {
   useEffect(() => {
     if (!state.card && state.phase !== 'generating') resultSnapshotRef.current = null;
   }, [state.card, state.phase]);
+  // 原生性文案按实际签名通路投影（G3-r1）：官方签名仅 hosted-json 新鲜
+  // 响应可记；direct/hosted-stream 本来就不走签名，如实说「不支持签名」
+  // 而非「签名失败」；恢复草稿中混入的签名字段经会话投影记「本机未验证」。
   const resultOverview = useMemo(() => buildCreatorResultOverview({
     isSubmitting: state.phase === 'generating',
     snapshot: resultSnapshotRef.current,
     result: resolvedResultPayload,
-  }), [busy, state.phase, resolvedResultPayload]);
+    signature: {
+      capable: session.executionMode() === 'hosted-json',
+      kind: session.resultSignatureKind(),
+    },
+  }), [busy, state.phase, state.resultRestored, resolvedResultPayload]);
 
   // —— 工作台装配（与 Web `renderWorkbenchPage` 同一组区段） ——
 
