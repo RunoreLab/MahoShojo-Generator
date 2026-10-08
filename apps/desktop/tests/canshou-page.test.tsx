@@ -71,6 +71,43 @@ const mount = async () => {
 };
 
 describe('Desktop Canshou real route and session UI (native adapter mock)', () => {
+  it('shows rounded progress, effective soft limits and skip guidance only for optional questions', async () => {
+    const custom = {
+      id: 'answer-hints', kind: 'canshou', title: '作答提示问卷', description: 'd',
+      questions: [
+        { id: 'required', question: '必答档案设定', required: true, maxLength: 4 },
+        { id: 'optional', question: '选答档案设定', required: false, maxLength: 800 },
+        { id: 'default', question: '默认上限设定', required: false },
+      ],
+    };
+    window.localStorage.setItem(CANSHOU_DRAFT_KEY, JSON.stringify({
+      version: 1, language: '简体中文', answers: { 'preset:answer-hints::required': '初始答案' },
+      questionnaireSelections: [{ source: 'preset', questionnaire: custom, selectionId: 'preset:answer-hints' }],
+    }));
+    await mount(); await click('恢复草稿');
+    expect(container.textContent).toContain('进度 33%');
+    expect(container.textContent).toContain('请基于您构想的虚拟档案回答，并确保内容符合公序良俗，请勿使用任何真实信息。');
+    expect(container.textContent).not.toContain('其他题目可以跳过');
+    expect(container.textContent).not.toContain('本题可跳过');
+    const textarea = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="必答档案设定"]')!;
+    expect(textarea.hasAttribute('maxlength')).toBe(false);
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, '  保留超限回答  ');
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(textarea.value).toBe('  保留超限回答  ');
+    expect(container.textContent).toContain('有效字数：6/4');
+    expect(container.textContent).toContain('回答超过建议长度，仍可生成未签名残兽档案。');
+    await click('下一题');
+    expect(container.textContent).toContain('进度 67%');
+    expect(container.textContent).toContain('有效字数：0/500');
+    expect(container.textContent).toContain('本题可跳过，不作答将不会记录');
+    await click('下一题');
+    expect(container.textContent).toContain('进度 100%');
+    expect(container.textContent).toContain('有效字数：0/500');
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
   it('restores only on explicit action then generates once and saves the canshou result', async () => {
     window.localStorage.setItem(CANSHOU_DRAFT_KEY, JSON.stringify(draft()));
     await mount();
