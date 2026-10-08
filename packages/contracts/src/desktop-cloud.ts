@@ -318,12 +318,13 @@ export const HostedGenerationEventSchema = z.object({
 }).strict();
 export type HostedGenerationEvent = z.infer<typeof HostedGenerationEventSchema>;
 
-/** hosted 适配层允许选择的路由标识白名单（D5.0c 起，D5.1-G1 增残兽，D5.1-G2 增自由/情景）。 */
+/** hosted 适配层允许选择的路由标识白名单（D5.0c 起，D5.1-G1 增残兽，D5.1-G2 增自由/情景，D5.1-G3 增创作工房）。 */
 export const HostedGenerationRouteIdSchema = z.enum([
   'generate-magical-girl-details-stream',
   'generate-canshou-stream',
   'generate-free-stream',
   'generate-scenario-stream',
+  'generate-creator-stream',
 ]);
 export type HostedGenerationRouteId = z.infer<typeof HostedGenerationRouteIdSchema>;
 
@@ -354,6 +355,7 @@ export const HostedJsonGenerationRouteIdSchema = z.enum([
   'generate-canshou',
   'generate-free',
   'generate-scenario',
+  'generate-creator',
 ]);
 export type HostedJsonGenerationRouteId = z.infer<typeof HostedJsonGenerationRouteIdSchema>;
 

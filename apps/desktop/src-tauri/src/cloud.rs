@@ -90,6 +90,10 @@ const HOSTED_GENERATE_SCENARIO_STREAM_PATH: &str = "/api/generate-scenario-strea
 const HOSTED_ROUTE_SCENARIO_STREAM: &str = "generate-scenario-stream";
 const HOSTED_GENERATE_SCENARIO_PATH: &str = "/api/generate-scenario";
 const HOSTED_ROUTE_SCENARIO: &str = "generate-scenario";
+const HOSTED_GENERATE_CREATOR_STREAM_PATH: &str = "/api/creator/generate-stream";
+const HOSTED_ROUTE_CREATOR_STREAM: &str = "generate-creator-stream";
+const HOSTED_GENERATE_CREATOR_PATH: &str = "/api/creator/generate";
+const HOSTED_ROUTE_CREATOR: &str = "generate-creator";
 
 /// hosted 流式生成命令开放的 routeId 集合（renderer 传入，native 校验）。
 const HOSTED_STREAM_ROUTES: &[&str] = &[
@@ -97,6 +101,7 @@ const HOSTED_STREAM_ROUTES: &[&str] = &[
     HOSTED_ROUTE_CANSHOU_STREAM,
     HOSTED_ROUTE_FREE_STREAM,
     HOSTED_ROUTE_SCENARIO_STREAM,
+    HOSTED_ROUTE_CREATOR_STREAM,
 ];
 /// hosted 非流式 JSON 生成命令开放的 routeId 集合。
 const HOSTED_JSON_ROUTES: &[&str] = &[
@@ -104,6 +109,7 @@ const HOSTED_JSON_ROUTES: &[&str] = &[
     HOSTED_ROUTE_CANSHOU,
     HOSTED_ROUTE_FREE,
     HOSTED_ROUTE_SCENARIO,
+    HOSTED_ROUTE_CREATOR,
 ];
 
 /// routeId → 固定上游路径（仅流式生成；`?format=sse` 由调用方追加）。
@@ -113,6 +119,7 @@ fn hosted_stream_path(route_id: &str) -> Option<&'static str> {
         HOSTED_ROUTE_CANSHOU_STREAM => Some(HOSTED_GENERATE_CANSHOU_STREAM_PATH),
         HOSTED_ROUTE_FREE_STREAM => Some(HOSTED_GENERATE_FREE_STREAM_PATH),
         HOSTED_ROUTE_SCENARIO_STREAM => Some(HOSTED_GENERATE_SCENARIO_STREAM_PATH),
+        HOSTED_ROUTE_CREATOR_STREAM => Some(HOSTED_GENERATE_CREATOR_STREAM_PATH),
         _ => None,
     }
 }
@@ -124,6 +131,7 @@ fn hosted_json_path(route_id: &str) -> Option<&'static str> {
         HOSTED_ROUTE_CANSHOU => Some(HOSTED_GENERATE_CANSHOU_PATH),
         HOSTED_ROUTE_FREE => Some(HOSTED_GENERATE_FREE_PATH),
         HOSTED_ROUTE_SCENARIO => Some(HOSTED_GENERATE_SCENARIO_PATH),
+        HOSTED_ROUTE_CREATOR => Some(HOSTED_GENERATE_CREATOR_PATH),
         _ => None,
     }
 }
@@ -3023,6 +3031,14 @@ mod tests {
         assert_eq!(
             fixture["paths"]["hostedGenerateScenario"].as_str(),
             Some(HOSTED_GENERATE_SCENARIO_PATH)
+        );
+        assert_eq!(
+            fixture["paths"]["hostedGenerateCreatorStream"].as_str(),
+            Some(HOSTED_GENERATE_CREATOR_STREAM_PATH)
+        );
+        assert_eq!(
+            fixture["paths"]["hostedGenerateCreator"].as_str(),
+            Some(HOSTED_GENERATE_CREATOR_PATH)
         );
         let event_names: Vec<&str> = fixture["hostedGenerationEventNames"]
             .as_array()

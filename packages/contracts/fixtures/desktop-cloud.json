@@ -20,6 +20,8 @@
     "hostedGenerateFree": "/api/generate-free",
     "hostedGenerateScenarioStream": "/api/generate-scenario-stream",
     "hostedGenerateScenario": "/api/generate-scenario",
+    "hostedGenerateCreatorStream": "/api/creator/generate-stream",
+    "hostedGenerateCreator": "/api/creator/generate",
     "loopbackCallback": "/callback"
   },
   "limits": {
@@ -66,13 +68,15 @@
     "generate-magical-girl-details-stream",
     "generate-canshou-stream",
     "generate-free-stream",
-    "generate-scenario-stream"
+    "generate-scenario-stream",
+    "generate-creator-stream"
   ],
   "hostedJsonRouteIds": [
     "generate-magical-girl-details",
     "generate-canshou",
     "generate-free",
-    "generate-scenario"
+    "generate-scenario",
+    "generate-creator"
   ],
   "hostedBodyLimits": {
     "defaultMaxBytes": 262144,
