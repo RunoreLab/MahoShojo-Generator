@@ -13,6 +13,7 @@ import {
   useResultAutoScroll,
 } from '@mahoshojo/ui-web/details-controls';
 import { MarkdownBlock } from '@mahoshojo/ui-web/markdown';
+import { EncyclopediaLinks } from '@mahoshojo/ui-web/encyclopedia-views';
 import {
   SCENARIO_OPTIONAL_FIELDS as OPTIONAL_FIELDS,
   SCENARIO_QUESTIONS,
@@ -204,11 +205,20 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
       <section data-testid="page-scenario" className="magic-background-white">
         <div className="container">
           <div className="card flex flex-col gap-5">
-            <header>
-              <h1 className="text-2xl font-semibold">箱庭物语 · 情景生成器</h1>
-              <p className="mt-2 text-sm text-(--app-text-muted)">
-                回答几个引导性问题，创建独一无二的舞台，上演属于你的故事。
-              </p>
+            {/* 页首品牌图与百科入口与 Web `/scenario` 同构（差距收口）。 */}
+            <header className="text-center">
+              <div className="flex items-center justify-center" style={{ marginBottom: '1rem' }}>
+                <img src="/scenario-shadow.webp" width={360} height={40} alt="箱庭物语" />
+              </div>
+              <p className="subtitle mt-2">情景生成器，创建独一无二的舞台，上演属于你的故事</p>
+              <EncyclopediaLinks
+                items={[
+                  { slug: 'scenario-generator', text: '百科：箱庭物语（情景生成器）' },
+                  { slug: 'scenario-advanced', text: '百科：情景卡进阶（继承与长线）' },
+                ]}
+                onNavigate={(href) => navigateByProductHref(router, href)}
+                resolveInternalHref={resolveInternalHrefForHashHistory}
+              />
             </header>
             <section aria-label="草稿" className="rounded-lg border border-(--app-border) p-4">
               <p>回答、生成方式与结果自动保存在本机页面草稿中，恢复草稿不会自动重新生成。</p>
@@ -314,9 +324,12 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
                         />
                       </label>
                     )}
-                    <label className="flex flex-col gap-1">输出语言
+                    <label className="flex flex-col gap-1">
+                      <span>
+                        <img src="/globe.svg" alt="Language" className="mr-2 inline-block h-4 w-4" />生成语言
+                      </span>
                       <select
-                        aria-label="输出语言"
+                        aria-label="生成语言"
                         className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)"
                         value={draft.selectedLanguage}
                         onChange={(event) => updateDraft({ selectedLanguage: event.target.value })}

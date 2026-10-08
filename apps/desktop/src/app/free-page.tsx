@@ -316,10 +316,10 @@ function FreeForm({ session }: { session: FreeSession }) {
               />
               <div className="flex flex-col gap-1">
                 <button type="button" className="flex items-center justify-between text-left font-medium" onClick={() => updateDraft({ showLanguageSection: !draft.showLanguageSection })}>
-                  <span>输出语言</span><span className="ml-2">{draft.showLanguageSection ? '▼' : '▶'}</span>
+                  <span>生成语言</span><span className="ml-2">{draft.showLanguageSection ? '▼' : '▶'}</span>
                 </button>
                 {draft.showLanguageSection && (
-                  <select aria-label="输出语言" className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)" value={draft.selectedLanguage} onChange={(event) => updateDraft({ selectedLanguage: event.target.value })}>
+                  <select aria-label="生成语言" className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)" value={draft.selectedLanguage} onChange={(event) => updateDraft({ selectedLanguage: event.target.value })}>
                     {(languages.length ? languages : [{ code: draft.selectedLanguage, name: draft.selectedLanguage }]).map((lang) => (
                       <option key={lang.code} value={lang.code}>{lang.name}</option>
                     ))}

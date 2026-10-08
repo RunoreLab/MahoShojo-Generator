@@ -99,6 +99,7 @@ import {
 import { revokeBlobUrl } from '@mahoshojo/ui-web/client';
 import { CardLibraryModal, type BattleSelectionPayload, type CardLibrarySelectionContext } from '@mahoshojo/ui-web/card-library';
 import { ImagePreviewModal, useEscapeLayer } from '@mahoshojo/ui-web/modal';
+import { EncyclopediaLinks } from '@mahoshojo/ui-web/encyclopedia-views';
 import { ProductFooter } from '@mahoshojo/ui-web/shell';
 import type { HomeAssetSource } from '@mahoshojo/ui-web/home';
 import { CREATOR_DRAFT_DEFAULT_RULE_IDS, CreatorSession } from '../features/creator/session';
@@ -1002,8 +1003,8 @@ function CreatorForm({ session }: { session: CreatorSession }) {
           </>
         }
       />
-      <label className="flex flex-col gap-1">输出语言
-        <select aria-label="输出语言" className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)" value={draft.language} onChange={(event) => updateDraft({ language: event.target.value })}>
+      <label className="flex flex-col gap-1">生成语言
+        <select aria-label="生成语言" className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)" value={draft.language} onChange={(event) => updateDraft({ language: event.target.value })}>
           {(languages.length ? languages : [{ code: draft.language, name: draft.language }]).map((lang) => (
             <option key={lang.code} value={lang.code}>{lang.name}</option>
           ))}
@@ -1466,6 +1467,16 @@ function CreatorForm({ session }: { session: CreatorSession }) {
             <p className="font-bold">{CREATOR_PAGE_COPY.noticeTitle}</p>
             <p className="mt-1">{CREATOR_PAGE_COPY.noticeBody}</p>
           </div>
+          {/* 百科入口与 Web `/creator` 介绍页同构（差距收口）。 */}
+          <EncyclopediaLinks
+            items={[
+              { slug: 'creator', text: '百科：创作工房使用说明' },
+              { slug: 'character-generator', text: '百科：角色生成入口说明' },
+              { slug: 'archive', text: '百科：档案馆（角色管理）' },
+            ]}
+            onNavigate={(href) => navigateByProductHref(router, href)}
+            resolveInternalHref={resolveInternalHrefForHashHistory}
+          />
           <div className="mt-6 flex flex-col justify-center gap-4 sm:flex-row">
             <button onClick={() => setShowIntroduction(false)} className="generate-button text-lg flex-1">
               开始回答问卷

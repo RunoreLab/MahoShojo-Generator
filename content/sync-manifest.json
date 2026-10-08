@@ -11,20 +11,22 @@
       "character-manager.svg",
       "encyclopedia.svg",
       "favicon.svg",
+      "free-generator-white.svg",
+      "globe.svg",
       "logo-white.svg",
       "logo-white-qrcode.svg",
       "logo.svg",
       "questionnaire-logo.svg",
-      "questionnaire-title.svg"
+      "questionnaire-title.svg",
+      "scenario-shadow.webp",
+      "scenario.webp"
     ],
     "web": [
       "arena-card-white.webp",
       "arena-white.svg",
       "card-forge-white.svg",
-      "free-generator-white.svg",
       "magic-tea-party-white.svg",
       "party-white.svg",
-      "scenario.webp",
       "sublimation-white.svg",
       "tavern-white.svg"
     ]

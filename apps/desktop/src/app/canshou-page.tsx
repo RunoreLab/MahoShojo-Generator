@@ -773,8 +773,11 @@ function CanshouForm({ session }: { session: CanshouSession }) {
                       <GenerationModeSwitcher value={generationMode} onChange={setGenerationMode} helper={false} />
                     }
                   />
-                  <label className="flex flex-col gap-1">输出语言
-                    <select aria-label="输出语言" className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)" value={state.draft.language} onChange={(event) => updateDraft({ language: event.target.value })}>
+                  <label className="flex flex-col gap-1">
+                    <span>
+                      <img src="/globe.svg" alt="Language" className="mr-2 inline-block h-4 w-4" />生成语言
+                    </span>
+                    <select aria-label="生成语言" className="w-full rounded border border-(--app-border) bg-(--app-surface) px-3 py-2 text-(--app-text)" value={state.draft.language} onChange={(event) => updateDraft({ language: event.target.value })}>
                       {/* languages.json 未加载完成前先呈现当前值，避免选择态回空。 */}
                       {(languages.length ? languages : [{ code: state.draft.language, name: state.draft.language }]).map((lang) => (
                         <option key={lang.code} value={lang.code}>{lang.name}</option>
