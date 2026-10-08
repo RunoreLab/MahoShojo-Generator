@@ -55,6 +55,11 @@
       "import": "./src/canshou-generation.ts",
       "default": "./src/canshou-generation.ts"
     },
+    "./creator-generation": {
+      "types": "./src/creator-generation.ts",
+      "import": "./src/creator-generation.ts",
+      "default": "./src/creator-generation.ts"
+    },
     "./reference-attachments": {
       "types": "./src/reference-attachments.ts",
       "import": "./src/reference-attachments.ts",

@@ -14,7 +14,12 @@ type BuildCreatorStreamPromptInput = {
   loreText: string;
 };
 
-const buildContextSections = ({
+/**
+ * 创作工房的三个上下文小节（创作约束 → 参考设定 → 问卷回答）。
+ * 流式 prompt 与 Desktop direct 通路的结构化 prompt（JSON 形态的通用卡）
+ * 共用同一小节序列，保证两通路送入模型的业务上下文一致。
+ */
+export const buildCreatorContextSections = ({
   creatorPromptText,
   questionnaireAnswerText,
   loreText,
@@ -53,7 +58,7 @@ const buildGeneralCharacterPrompt = (input: BuildCreatorStreamPromptInput): stri
 5) 正文建议包含：外观、性格与信念、能力与限制、背景与动机、关系与羁绊、行动风格、关键经历或常用台词（可选）。
 6) 若【创作约束】中已给出规则事实（如属性、专长、派生值），请把它们当作确定事实，不要擅自改写。
 
-${buildContextSections(input)}
+${buildCreatorContextSections(input)}
 `.trim();
 };
 
@@ -70,7 +75,7 @@ const buildGeneralScenarioPrompt = (input: BuildCreatorStreamPromptInput): strin
 5) 正文建议包含：场景概览、时间、地点、环境特征、关键角色或势力（可选）、核心事件、整体氛围、发展方向或可触发冲突。
 6) 若【创作约束】中已给出规则事实，请将其视作背景硬约束或边界条件，而不是角色档案字段。
 
-${buildContextSections(input)}
+${buildCreatorContextSections(input)}
 `.trim();
 };
 

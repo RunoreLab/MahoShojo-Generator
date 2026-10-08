@@ -100,6 +100,56 @@ export type QuestionnaireExecutor<
   onPartialText?: (text: string) => void,
 ) => Promise<QuestionnaireGenerationOutcome<TStructuredKind>>;
 
+/**
+ * 问卷草稿字段解析器工厂（D5.1-G3）：`/details`/`/canshou` 的草稿协议
+ * （answers/language 必填面 + 选择集归一化 + 偏好字段）是问卷类页面的
+ * 公共面，`/creator` 草稿在其上叠加创作工房字段后仍复用同一解析。
+ */
+export const createQuestionnaireDraftFieldsParser = (
+  draftFallbackKind: QuestionnaireKind,
+) =>
+  (value: Record<string, unknown>): QuestionnaireDraft => {
+    if (!object(value.answers) || typeof value.language !== 'string' || !Object.values(value.answers).every((answer) => typeof answer === 'string')) throw new Error('草稿版本不受支持或内容损坏');
+    const draft: QuestionnaireDraft = { answers: value.answers as Record<string, string>, language: value.language };
+    // 选择集逐条经共源归一化：损坏条目丢弃而不是让整个草稿报废（D5.1-P2）。
+    const seenScopes = new Set<string>();
+    const questionnaireSelections = (Array.isArray(value.questionnaireSelections) ? value.questionnaireSelections : [])
+      .map((entry) => normalizeStoredQuestionnaireSelection(entry, {
+        normalize: normalizeQuestionnaireDefinition,
+        resolveFallback: (rawQuestionnaire, source) => {
+          const record = rawQuestionnaire && typeof rawQuestionnaire === 'object'
+            ? rawQuestionnaire as Record<string, unknown>
+            : {};
+          return {
+            // 已声明的 kind 优先于兜底（normalize 口径一致），缺省按本家族。
+            fallbackKind: record.kind === 'canshou' || record.kind === 'magical-girl' ? record.kind : draftFallbackKind,
+            fallbackId: typeof record.id === 'string' ? record.id : 'questionnaire',
+            fallbackTitle: typeof record.title === 'string' ? record.title : '未命名问卷',
+            nativeAllowed: resolveQuestionnaireSelectionNativeAllowedFallback(source, rawQuestionnaire),
+          };
+        },
+      }))
+      .filter((selection): selection is QuestionnaireSelection => selection !== null)
+      // 篡改的草稿可以把本地副本（wire 'upload'）内嵌 questionnaire.nativeAllowed 写成 true：
+      // 归一化优先采纳声明值，这里与卡库选择器对本地卡的强制口径保持一致（D5.1-P2-r1）。
+      .map((selection) => selection.source === 'upload'
+        ? { ...selection, questionnaire: { ...selection.questionnaire, nativeAllowed: false } }
+        : selection)
+      // 同一作用域的重复选择会让两份问卷的答案键互相覆盖——保留第一条，丢弃其余。
+      .filter((selection) => {
+        const scope = questionnaireSelectionScopeId(selection);
+        if (seenScopes.has(scope)) return false;
+        seenScopes.add(scope);
+        return true;
+      });
+    if (questionnaireSelections.length) draft.questionnaireSelections = questionnaireSelections;
+    if (value.allowMultipleQuestionnaires === true) draft.allowMultipleQuestionnaires = true;
+    if (value.imageSaveMode === 'download' || value.imageSaveMode === 'modal') draft.imageSaveMode = value.imageSaveMode;
+    if (value.jsonSaveMode === 'download' || value.jsonSaveMode === 'text') draft.jsonSaveMode = value.jsonSaveMode;
+    if (value.showDetails === true) draft.showDetails = true;
+    return draft;
+  };
+
 type Card = QuestionnaireResultCardData;
 type StoredDraft<TStructuredKind extends string = string> =
   StoredGenerationDraft<QuestionnaireDraft, QuestionnaireCardKind<TStructuredKind>>;
@@ -139,47 +189,7 @@ const adaptQuestionnaireSessionFamily = <
     return card;
   };
 
-  const parseDraftFields = (value: Record<string, unknown>): QuestionnaireDraft => {
-    if (!object(value.answers) || typeof value.language !== 'string' || !Object.values(value.answers).every((answer) => typeof answer === 'string')) throw new Error('草稿版本不受支持或内容损坏');
-    const draft: QuestionnaireDraft = { answers: value.answers as Record<string, string>, language: value.language };
-    // 选择集逐条经共源归一化：损坏条目丢弃而不是让整个草稿报废（D5.1-P2）。
-    const seenScopes = new Set<string>();
-    const questionnaireSelections = (Array.isArray(value.questionnaireSelections) ? value.questionnaireSelections : [])
-      .map((entry) => normalizeStoredQuestionnaireSelection(entry, {
-        normalize: normalizeQuestionnaireDefinition,
-        resolveFallback: (rawQuestionnaire, source) => {
-          const record = rawQuestionnaire && typeof rawQuestionnaire === 'object'
-            ? rawQuestionnaire as Record<string, unknown>
-            : {};
-          return {
-            // 已声明的 kind 优先于兜底（normalize 口径一致），缺省按本家族。
-            fallbackKind: record.kind === 'canshou' || record.kind === 'magical-girl' ? record.kind : family.draftFallbackKind,
-            fallbackId: typeof record.id === 'string' ? record.id : 'questionnaire',
-            fallbackTitle: typeof record.title === 'string' ? record.title : '未命名问卷',
-            nativeAllowed: resolveQuestionnaireSelectionNativeAllowedFallback(source, rawQuestionnaire),
-          };
-        },
-      }))
-      .filter((selection): selection is QuestionnaireSelection => selection !== null)
-      // 篡改的草稿可以把本地副本（wire 'upload'）内嵌 questionnaire.nativeAllowed 写成 true：
-      // 归一化优先采纳声明值，这里与卡库选择器对本地卡的强制口径保持一致（D5.1-P2-r1）。
-      .map((selection) => selection.source === 'upload'
-        ? { ...selection, questionnaire: { ...selection.questionnaire, nativeAllowed: false } }
-        : selection)
-      // 同一作用域的重复选择会让两份问卷的答案键互相覆盖——保留第一条，丢弃其余。
-      .filter((selection) => {
-        const scope = questionnaireSelectionScopeId(selection);
-        if (seenScopes.has(scope)) return false;
-        seenScopes.add(scope);
-        return true;
-      });
-    if (questionnaireSelections.length) draft.questionnaireSelections = questionnaireSelections;
-    if (value.allowMultipleQuestionnaires === true) draft.allowMultipleQuestionnaires = true;
-    if (value.imageSaveMode === 'download' || value.imageSaveMode === 'modal') draft.imageSaveMode = value.imageSaveMode;
-    if (value.jsonSaveMode === 'download' || value.jsonSaveMode === 'text') draft.jsonSaveMode = value.jsonSaveMode;
-    if (value.showDetails === true) draft.showDetails = true;
-    return draft;
-  };
+  const parseDraftFields = createQuestionnaireDraftFieldsParser(family.draftFallbackKind);
 
   /**
    * 「残余草稿」：自动写回的空壳——没有非空回答、没有生成结果或中断正文、
