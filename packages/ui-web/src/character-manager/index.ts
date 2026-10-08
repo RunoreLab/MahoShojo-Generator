@@ -91,3 +91,4 @@ export {
   type CharacterManagerPageDraftPayload,
   type RestoredCharacterManagerPageDraft,
 } from './page-draft';
+export { CharacterManagerPreviewPanel } from './preview-panel';

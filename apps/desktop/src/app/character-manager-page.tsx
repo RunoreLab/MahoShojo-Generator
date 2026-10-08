@@ -2,8 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core';
 import { useRouter, useSearch } from '@tanstack/react-router';
 import { setDataCardFieldValue, type DataCardFieldAddon, type DataCardFieldPath } from '@mahoshojo/ui-web/card-editor';
-import { CanshouCard, GeneralCharacterCard } from '@mahoshojo/ui-web/character-card';
-import { MagicalGirlResultBody } from '@mahoshojo/ui-web/character-result';
+import { CanshouCard, GeneralCharacterCard, MagicalGirlCard, resolveMagicalGirlGradient } from '@mahoshojo/ui-web/character-card';
 import { LOCAL_CARD_TYPE_LABELS, LocalCardsPanel, useLocalCardsController, type LocalCardsHost } from '@mahoshojo/ui-web/local-cards';
 import { buildSafeFileName } from '@mahoshojo/ui-web/client';
 import { ProductFooter } from '@mahoshojo/ui-web/shell';
@@ -20,6 +19,7 @@ import {
   CharacterManagerGuide,
   CharacterManagerImportSection,
   CharacterManagerPageHeader,
+  CharacterManagerPreviewPanel,
   CharacterManagerTemplateSelect,
   cardTopName,
   characterManagerNameFieldAddon,
@@ -825,21 +825,19 @@ export function DesktopCharacterManager() {
                   </>
                 )}
               />
-              {preview !== null && (
-                <details>
-                  <summary className="cursor-pointer text-sm font-medium">角色卡预览</summary>
-                  <div className="mt-2">
-                    {preview.kind === 'magical-girl' && <MagicalGirlResultBody magicalGirl={preview.data} />}
-                    {preview.kind === 'general' && <GeneralCharacterCard general={preview.data} />}
-                    {preview.kind === 'canshou' && <CanshouCard canshou={preview.data} />}
-                  </div>
-                </details>
-              )}
+
             </section>
           )}
             </>
           )}
         </div>
+        {draftRestoreReady && preview !== null && (
+          <CharacterManagerPreviewPanel>
+            {preview.kind === 'magical-girl' && <MagicalGirlCard magicalGirl={preview.data} gradientStyle={resolveMagicalGirlGradient(preview.data.appearance.colorScheme)} />}
+            {preview.kind === 'general' && <GeneralCharacterCard general={preview.data} />}
+            {preview.kind === 'canshou' && <CanshouCard canshou={preview.data} />}
+          </CharacterManagerPreviewPanel>
+        )}
         {/* 「我的数据卡」选择器：本地页签离线可用；确认会话 active 后默认落到
             「我的数据卡」页签（入口名称与所有权一致），本地库保持显式页签。 */}
         <CardLibraryModal

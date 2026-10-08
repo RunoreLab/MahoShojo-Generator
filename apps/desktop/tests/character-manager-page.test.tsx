@@ -563,3 +563,38 @@ describe('Desktop 本地角色管理（IPC mock，仍需真机重启验收）', 
     confirm.mockRestore();
   });
 });
+
+
+it('shows the complete magical-girl preview outside the editor without changing the local record', async () => {
+  const data = { codename: '蓝铃', appearance: { colorScheme: '蓝色' }, magicConstruct: {}, wonderlandRule: {}, blooming: {}, analysis: {} };
+  const record = await makeRecord(data);
+  rows.set(record.id, record);
+  const router = await mount();
+  await act(async () => { await router.navigate({ to: '/character-manager', search: { card: record.id } }); });
+  await waitFor(() => container.querySelector('section[aria-label="角色卡片预览"] .result-card') !== null);
+  const preview = container.querySelector('section[aria-label="角色卡片预览"]')!;
+  expect(preview.querySelector('img[src="/questionnaire-title.svg"]')).not.toBeNull();
+  expect(preview.querySelector<HTMLElement>('.result-card')!.style.background).toContain('linear-gradient');
+  expect(container.querySelector('.container > .card')!.contains(preview)).toBe(false);
+  expect(rows.get(record.id)?.data).toEqual(data);
+  expect(bridge.invoke.mock.calls.filter(([command]) => command === SAVE_LOCAL_CARD_COMMAND)).toHaveLength(0);
+});
+
+
+it.each([{ summary: 1 }, { summary: '摘要', fields: [null] }])('keeps malformed optional metadata editable when showing a complete preview %j', async (currentState) => {
+  const data = { codename: '待修复', appearance: {}, magicConstruct: {}, wonderlandRule: {}, blooming: {}, analysis: {}, current_state: currentState, arena_history: { entries: [null, { id: 1, title: '合法旧记录', type: 'classic', impact: '正文' }] } };
+  const snapshot = JSON.stringify(data);
+  const record = await makeRecord(data);
+  rows.set(record.id, record);
+  const router = await mount();
+  await act(async () => { await router.navigate({ to: '/character-manager', search: { card: record.id } }); });
+  await waitFor(() => container.querySelector('section[aria-label="角色卡片预览"] .result-card') !== null);
+  const preview = container.querySelector('section[aria-label="角色卡片预览"]')!;
+  expect(preview.textContent).toContain('当前状态格式暂不支持预览');
+  const history = [...preview.querySelectorAll('button')].find((item) => item.textContent?.includes('历战记录'))!;
+  await click(history);
+  expect(preview.textContent).toContain('合法旧记录');
+  expect(preview.textContent).toContain('1 条历战记录格式暂不支持预览');
+  expect(JSON.stringify(rows.get(record.id)?.data)).toBe(snapshot);
+  expect(bridge.invoke.mock.calls.filter(([command]) => command === SAVE_LOCAL_CARD_COMMAND)).toHaveLength(0);
+});

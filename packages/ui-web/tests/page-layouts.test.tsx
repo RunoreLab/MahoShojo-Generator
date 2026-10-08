@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import { LocalLibraryPageLayout } from '../src/local-cards/index';
 import { SettingsPage } from '../src/settings/index';
+import { CharacterManagerPreviewPanel } from '../src/character-manager/index';
 
 let container: HTMLDivElement;
 let root: Root;
@@ -31,4 +32,13 @@ it('places an injected settings footer outside the groups in the same width as t
   expect(footer.parentElement?.className).toContain('max-w-3xl');
   expect(footer.querySelector('a')?.getAttribute('href')).toBe('/');
   expect(container.querySelector('#settings-appearance')?.textContent).toContain('外观');
+});
+
+
+it('shows the shared character preview as a named region without hiding its host content', () => {
+  act(() => root.render(<CharacterManagerPreviewPanel><p>完整角色卡</p></CharacterManagerPreviewPanel>));
+  const preview = container.querySelector('section[aria-label="角色卡片预览"]')!;
+  expect(preview.className).toBe('card mt-6');
+  expect(preview.querySelector('details')).toBeNull();
+  expect(preview.textContent).toContain('完整角色卡');
 });

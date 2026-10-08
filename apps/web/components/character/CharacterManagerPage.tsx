@@ -24,7 +24,7 @@ import CanshouCard from '@/components/CanshouCard';
 import GeneralCharacterCard from '@/components/GeneralCharacterCard';
 import { CharacterPortraitAssetPanel } from '@/components/shared/CharacterPortraitAssetPanel';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
-import { MainColor } from '@/lib/main-color';
+import { resolveMagicalGirlGradient } from '@mahoshojo/ui-web/character-card';
 import { useAuth } from '@/lib/useAuth';
 import { dataCardApi, authStorage } from '@/lib/auth';
 import { loadAuthMigrationStatus, type AuthMigrationStatus } from '@/components/me/authMigrationStatus';
@@ -48,6 +48,7 @@ import {
     CharacterManagerGuide,
     CharacterManagerImportSection,
     CharacterManagerPageHeader,
+    CharacterManagerPreviewPanel,
     CharacterManagerTemplateSelect,
     DEFAULT_NATIVENESS_REPLACE_HINT,
     NAME_REPLACE_NATIVE_MAX_CHARS,
@@ -257,18 +258,6 @@ const collectSensitiveIssues = async (value: any, path = '', parentPath = ''): P
     }
 
     return issues;
-};
-
-// 【新增】定义渐变色，用于魔法少女卡片背景
-const gradientColors: Record<string, { first: string; second: string }> = {
-    [MainColor.Red]: { first: '#ff6b6b', second: '#ee5a6f' },
-    [MainColor.Orange]: { first: '#ff922b', second: '#ffa94d' },
-    [MainColor.Cyan]: { first: '#22b8cf', second: '#66d9e8' },
-    [MainColor.Blue]: { first: '#5c7cfa', second: '#748ffc' },
-    [MainColor.Purple]: { first: '#9775fa', second: '#b197fc' },
-    [MainColor.Pink]: { first: '#ff9a9e', second: '#fecfef' },
-    [MainColor.Yellow]: { first: '#f59f00', second: '#fcc419' },
-    [MainColor.Green]: { first: '#51cf66', second: '#8ce99a' }
 };
 
 /** Web 端角色管理页能力快照：全量功能均已交付（DESK-PARITY-001 的投影基准）。 */
@@ -1987,19 +1976,11 @@ export const CharacterManagerPage: React.FC = () => {
 
                     {/* 角色卡片预览与生成区域 */}
                     {characterData && !isLoading && (currentTemplate === 'magical-girl' || currentTemplate === 'canshou' || currentTemplate === 'general') && (
-                        <div className="card mt-6">
-                            <h3 className="text-xl font-bold text-gray-800 text-center mb-4">
-                                角色卡片预览与生成
-                            </h3>
+                        <CharacterManagerPreviewPanel title="角色卡片预览与生成">
                             {currentTemplate === 'magical-girl' ? (
                                 <MagicalGirlCard
                                     magicalGirl={characterData}
-                                    gradientStyle={(() => {
-                                        const colorScheme = characterData.appearance?.colorScheme || "粉色";
-                                        const mainColorName = Object.values(MainColor).find(color => colorScheme.includes(color)) || MainColor.Pink;
-                                        const colors = gradientColors[mainColorName] || gradientColors[MainColor.Pink];
-                                        return `linear-gradient(135deg, ${colors.first} 0%, ${colors.second} 100%)`;
-                                    })()}
+                                    gradientStyle={resolveMagicalGirlGradient(characterData.appearance?.colorScheme)}
                                     onSaveImage={handleSaveImageCallback}
                                     portraitAsset={characterPortraitAsset}
                                 />
@@ -2016,7 +1997,7 @@ export const CharacterManagerPage: React.FC = () => {
                                     portraitAsset={characterPortraitAsset}
                                 />
                             )}
-                        </div>
+                        </CharacterManagerPreviewPanel>
                     )}
 
                     {/* 立绘生成 - 只对角色数据显示 */}
