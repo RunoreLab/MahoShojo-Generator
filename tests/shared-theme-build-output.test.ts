@@ -59,6 +59,21 @@ const expectSharedOutput = (css: string, artifact: string): void => {
   for (const token of SHARED_THEME_TOKENS) {
     expect(css, `${artifact} 缺少共源主题 token ${token}`).toContain(token);
   }
+  // Creator 共享 JSX 的自定义布局也必须进入两端产物；仅有 token/utility 不足以证明闭包。
+  const requireFromApp = createRequire(path.join(WEB_ROOT, 'package.json'));
+  const postcss = createRequire(requireFromApp.resolve('@tailwindcss/postcss'))('postcss') as typeof import('postcss');
+  const stylesheet = postcss.parse(css);
+  const declarationsFor = (selector: string): Record<string, string> => {
+    const declarations: Record<string, string> = {};
+    stylesheet.walkRules(selector, (rule) => {
+      rule.walkDecls((declaration) => { declarations[declaration.prop] = declaration.value; });
+    });
+    return declarations;
+  };
+  expect(declarationsFor('.creator-workbench-shell .container'), artifact).toMatchObject({ 'max-width': 'none', padding: '0' });
+  expect(declarationsFor('.creator-workbench-shell .card'), artifact).toMatchObject({ 'max-width': 'none', 'margin-top': '1rem' });
+  expect(declarationsFor('.creator-workbench-shell .result-card'), artifact).toMatchObject({ 'max-width': 'none' });
+  expect(declarationsFor('.creator-workbench-shell .creator-workbench-sidebar'), artifact).toMatchObject({ position: 'sticky', top: '24px', 'align-self': 'start' });
 };
 
 const compileWebCss = async (): Promise<string> => {
