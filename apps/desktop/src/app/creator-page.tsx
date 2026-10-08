@@ -635,13 +635,27 @@ function CreatorForm({ session }: { session: CreatorSession }) {
     setPickerError(null);
     setPickerOpen(false);
   };
+  // 预设手动加载竞态防护（G3-r1）：每一次发起都作废旧请求的未完成回调
+  // （世代 + abort 双保险——响应已返回但尚未应用的情形世代检查兜底）；
+  // 应用前再核对模板未切换，快速连点/切模板时先到期的响应不得污染当前选择集。
+  const presetLoadGenerationRef = useRef(0);
+  const presetLoadControllerRef = useRef<AbortController | null>(null);
   const handleAddPreset = async (presetId: string) => {
     const preset = presetEntries.find((item) => item.id === presetId);
     if (!preset) return;
+    const generation = ++presetLoadGenerationRef.current;
+    presetLoadControllerRef.current?.abort();
+    const controller = new AbortController();
+    presetLoadControllerRef.current = controller;
+    const templateAtRequest = template;
+    const isStale = () => controller.signal.aborted
+      || generation !== presetLoadGenerationRef.current
+      || session.getSnapshot().draft.template !== templateAtRequest;
     try {
-      const response = await fetch(preset.path, { credentials: 'omit', redirect: 'error' });
+      const response = await fetch(preset.path, { signal: controller.signal, credentials: 'omit', redirect: 'error' });
       if (!response.ok) throw new Error('加载预设问卷失败');
       const data: unknown = await response.json();
+      if (isStale()) return;
       const normalized = normalizeQuestionnaireDefinition(data, {
         fallbackId: preset.id,
         fallbackKind: preset.kind,
@@ -652,6 +666,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
       const used = new Set<string>();
       applySelection(ensureQuestionnaireSelectionId({ source: 'preset', questionnaire: normalized }, used, createSelectionSuffix));
     } catch (error) {
+      if (isStale()) return;
       setPresetError(error instanceof Error ? error.message : '加载预设问卷失败');
     }
   };

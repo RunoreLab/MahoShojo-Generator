@@ -279,6 +279,58 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     ]);
   });
 
+  it('suppresses stale preset-load responses when manual adds race (G3-r1)', async () => {
+    // 两个预设请求乱序返回：后发起的是较新意图，先到的旧响应不得覆盖当前选择集。
+    const questionnaireA = { ...questionnaire, id: 'preset-a-questionnaire', title: '预设问卷A' };
+    const questionnaireB = { ...questionnaire, id: 'preset-b-questionnaire', title: '预设问卷B' };
+    const deferreds = new Map<string, () => void>();
+    const racingIndex = {
+      version: 1,
+      presets: [
+        { id: 'preset-a', kind: 'magical-girl', title: '预设A', path: '/questionnaires/presets/a.json' },
+        { id: 'preset-b', kind: 'magical-girl', title: '预设B', path: '/questionnaires/presets/b.json' },
+        presetIndex.presets[0],
+      ],
+    };
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (url === '/languages.json') return Promise.resolve({ ok: true, json: async () => [] });
+      if (url === '/questionnaires/presets/index.json') return Promise.resolve({ ok: true, json: async () => racingIndex });
+      if (url === '/questionnaires/presets/a.json') {
+        return new Promise((resolve) => deferreds.set('a', () => resolve({ ok: true, json: async () => questionnaireA })));
+      }
+      if (url === '/questionnaires/presets/b.json') {
+        return new Promise((resolve) => deferreds.set('b', () => resolve({ ok: true, json: async () => questionnaireB })));
+      }
+      return Promise.resolve({ ok: true, json: async () => questionnaire });
+    }));
+    await mount();
+    await click('开始回答问卷');
+    await clickText('问卷设置');
+    const select = [...container.querySelectorAll('select')].find((item) =>
+      [...item.options].some((option) => option.value === 'preset-a'))! as HTMLSelectElement;
+    const pick = async (presetId: string) => {
+      await act(async () => {
+        select.value = presetId;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    };
+    await pick('preset-a');
+    await pick('preset-b');
+    // 后到期的 B 是较新意图：先应用。
+    await act(async () => deferreds.get('b')!());
+    await settle();
+    const stored = () => (JSON.parse(window.localStorage.getItem(CREATOR_DRAFT_KEY)!) as {
+      questionnaireSelections?: { questionnaire: { id: string } }[];
+    }).questionnaireSelections ?? [];
+    expect(stored().some((item) => item.questionnaire.id === 'preset-b-questionnaire')).toBe(true);
+    // 旧请求 A 晚到：已被 B 作废，不得覆盖/追加进当前选择集。
+    await act(async () => deferreds.get('a')!());
+    await settle();
+    expect(stored().some((item) => item.questionnaire.id === 'preset-a-questionnaire')).toBe(false);
+    expect(stored().some((item) => item.questionnaire.id === 'preset-b-questionnaire')).toBe(true);
+  });
+
   it('refuses the un-wired scenario template with an explanatory error instead of dispatching', async () => {
     aiConfig('server');
     window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft({ template: 'scenario' })));

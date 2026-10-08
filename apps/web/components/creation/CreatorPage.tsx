@@ -1120,13 +1120,29 @@ export const CreatorPage: React.FC = () => {
     }
   };
 
+  // 预设手动加载竞态防护（G3-r1，与 Desktop 同口径）：新一代请求作废
+  // 旧请求的未完成回调；应用前核对模板未切换，快速连点/切模板时先到期
+  // 的响应不得污染当前选择集。
+  const creatorTemplateRef = useRef(creatorTemplate);
+  creatorTemplateRef.current = creatorTemplate;
+  const presetLoadGenerationRef = useRef(0);
+  const presetLoadControllerRef = useRef<AbortController | null>(null);
   const handleAddPreset = async (presetId: string) => {
     const preset = visiblePresetEntries.find((item) => item.id === presetId);
     if (!preset) return;
+    const generation = ++presetLoadGenerationRef.current;
+    presetLoadControllerRef.current?.abort();
+    const controller = new AbortController();
+    presetLoadControllerRef.current = controller;
+    const templateAtRequest = creatorTemplate;
+    const isStale = () => controller.signal.aborted
+      || generation !== presetLoadGenerationRef.current
+      || creatorTemplateRef.current !== templateAtRequest;
     try {
-      const response = await fetch(preset.path);
+      const response = await fetch(preset.path, { signal: controller.signal });
       if (!response.ok) throw new Error('加载预设问卷失败');
       const data = await response.json();
+      if (isStale()) return;
       const nativeAllowed = typeof (data as any)?.nativeAllowed === 'boolean' ? Boolean((data as any).nativeAllowed) : true;
       const normalized = normalizeQuestionnaireDefinition(data, {
         fallbackId: preset.id,
@@ -1137,6 +1153,7 @@ export const CreatorPage: React.FC = () => {
       if (!normalized) throw new Error('预设问卷解析失败');
       applySelection({ source: 'preset', questionnaire: normalized });
     } catch (error) {
+      if (isStale()) return;
       setError(error instanceof Error ? error.message : '加载预设问卷失败');
     }
   };
