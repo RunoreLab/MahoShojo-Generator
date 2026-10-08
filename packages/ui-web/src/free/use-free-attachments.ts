@@ -83,7 +83,10 @@ export const useFreeAttachments = (
   const remove = useCallback((id: string) => {
     epochRef.current += 1;
     commit(itemsRef.current.filter((entry) => entry.id !== id));
-  }, [commit]);
+    // 本次读取已被代际失效，迟到 finally 不会再解除忙碌状态，必须同步收束。
+    setIsReading(false);
+    resetInput();
+  }, [commit, resetInput]);
 
   const clear = useCallback(() => {
     epochRef.current += 1;

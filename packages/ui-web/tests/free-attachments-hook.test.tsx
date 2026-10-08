@@ -101,8 +101,10 @@ describe('useFreeAttachments', () => {
     await act(async () => { await ctl.addFiles([file('p1.txt', 'x')]); });
     await act(async () => { void ctl.addFiles([file('p2.txt', 'y')]); });
     await act(() => { ctl.remove('a'); });
+    expect(ctl.isReading).toBe(false);
     await act(async () => { resolveLate({ added: [mkAttachment('late')], skipped: 0 }); await late; });
     expect(ctl.items).toHaveLength(0);
+    expect(ctl.isReading).toBe(false);
   });
 
   it('合并前复核真实余量：放不下的候选如实丢弃并提示', async () => {
