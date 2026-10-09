@@ -58,6 +58,11 @@ describe('Web / Desktop 真实管理模态框共源控制', () => {
     expect((host.loadFullCard as ReturnType<typeof vi.fn>).mock.calls[0][2].aborted).toBe(true);
     await act(async () => { pending.resolve(row); }); expect(replace).not.toHaveBeenCalled(); expect(document.body.textContent).not.toContain('雾灯');
   });
+  it('元信息响应省略卡片时不触发无限重试', async () => {
+    host.fetchCardMetaBatch = vi.fn(async () => ({}));
+    await render(); expect(host.fetchCardMetaBatch).toHaveBeenCalledOnce();
+    expect(document.body.textContent).toContain('雾灯');
+  });
   it('原生异步下载失败显示错误并保留卡列表，可再次操作', async () => {
     host.downloadJson = vi.fn().mockRejectedValueOnce(new Error('磁盘写入失败')).mockResolvedValueOnce(undefined);
     await render(); await click(button('下载')); expect(document.querySelector('[role=alert]')?.textContent).toContain('磁盘写入失败');

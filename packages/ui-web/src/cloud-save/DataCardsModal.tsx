@@ -517,7 +517,12 @@ function DataCardsModalScope({
     const run = async () => {
       try {
         const items = await host.fetchCardMetaBatch(pendingIds, abortController.signal);
-        if (items && !abortController.signal.aborted) setCardMetaById((prev) => ({ ...prev, ...items }));
+        if (items && !abortController.signal.aborted) setCardMetaById((prev) => {
+          const next = { ...prev };
+          // 服务端可省略暂无指标/不可见的条目；空结果也是本次查询已完成，不能无限重查。
+          for (const id of pendingIds) next[id] = items[id] ?? { techScore: null, techLevel: null, strictTier: null, isNative: null };
+          return next;
+        });
       } catch (error) {
         if (abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
           return;
