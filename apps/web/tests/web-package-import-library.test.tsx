@@ -25,12 +25,17 @@ import { SoloArenaWebPackageSection } from '@/components/arena/editor/features/w
  * 故障注入：这两个开关让用例能精准触发"读列表失败"和"读 ZIP 字节失败"。
  * 未开启时 mock 完整透传，因此不影响同文件其它用例。
  */
-const injected = { readArchive: null as Error | null, listLibrary: null as Error | null };
+const injected = { readArchive: null as Error | null, listLibrary: null as Error | null, saveGate: null as Promise<void> | null, saveStarted: false };
 
 vi.mock('@/lib/local-library/web-package-library', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/local-library/web-package-library')>();
   return {
     ...actual,
+    saveWebPackageToLibrary: async (input: Parameters<typeof actual.saveWebPackageToLibrary>[0]) => {
+      injected.saveStarted = true;
+      if (injected.saveGate) await injected.saveGate;
+      return actual.saveWebPackageToLibrary(input);
+    },
     readWebPackageFromLibrary: (record: Parameters<typeof actual.readWebPackageFromLibrary>[0]) =>
       injected.readArchive
         ? Promise.reject(injected.readArchive)
@@ -101,7 +106,13 @@ const importZip = async (file: File): Promise<void> => {
     Object.defineProperty(input, 'files', { value: [file], configurable: true });
     input.dispatchEvent(new Event('change', { bubbles: true }));
   });
-  await flushAsyncWork();
+  // Wait for the controller's completion signal, not a guessed number of event-loop ticks.
+  // The remaining assertions still verify the actual stored record and visible selection.
+  await vi.waitFor(async () => {
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(importInput()?.disabled).toBe(false);
+    expect(document.querySelector('[data-testid="web-package-import-feedback"]')).not.toBeNull();
+  }, { timeout: 5_000 });
 };
 
 const showLibraryTab = async (): Promise<void> => {
@@ -124,6 +135,8 @@ beforeEach(async () => {
   resetLocalWebPackageRepository();
   injected.readArchive = null;
   injected.listLibrary = null;
+  injected.saveGate = null;
+  injected.saveStarted = false;
   await deleteDatabase(LOCAL_LIBRARY_DB_NAME);
   window.localStorage.clear();
   container = document.createElement('div');
@@ -191,6 +204,26 @@ it('开启偏好后导入会写入本地库，并在列表中去掉「仅本次�
   expect(document.body.textContent).not.toContain('仅本次会话');
   // 已落库的条目可删除。
   expect(document.querySelector(`[title="从本地库删除：${pkg.manifest.name}"]`)).toBeTruthy();
+});
+
+
+it('导入断言等待真实异步写入完成，不把固定宏任务次数当作已落库', async () => {
+  window.localStorage.setItem(LOCAL_LIBRARY_PREFERENCE_STORAGE_KEY, JSON.stringify({ saveImportedWebPackages: true }));
+  let release!: () => void;
+  injected.saveGate = new Promise<void>((resolve) => { release = resolve; });
+  const pkg = await makePackage('local.delayed-save');
+  await act(async () => root.render(<SoloArenaWebPackageSection reportFormat="web" />));
+  await openPicker();
+  let settled = false;
+  const pending = importZip(await zipFile(await packWebPackageZip(pkg))).then(() => { settled = true; });
+  await vi.waitFor(() => expect(injected.saveStarted).toBe(true));
+  await flushAsyncWork();
+  expect(settled).toBe(false);
+  expect(importInput().disabled).toBe(true);
+  expect((await getLocalWebPackageRepository().list({ limit: 10 })).items).toHaveLength(0);
+  release();
+  await pending;
+  expect((await getLocalWebPackageRepository().list({ limit: 10 })).items.map((item) => item.ref.digest)).toContain(pkg.ref.digest);
 });
 
 it('重复导入同一份 ZIP 不会在本地库堆出第二行', async () => {
