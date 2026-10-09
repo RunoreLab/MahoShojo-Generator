@@ -74,6 +74,11 @@
       "types": "./src/scenario-generation.ts",
       "import": "./src/scenario-generation.ts",
       "default": "./src/scenario-generation.ts"
+    },
+    "./sublimation-generation": {
+      "types": "./src/sublimation-generation.ts",
+      "import": "./src/sublimation-generation.ts",
+      "default": "./src/sublimation-generation.ts"
     }
   },
   "scripts": {

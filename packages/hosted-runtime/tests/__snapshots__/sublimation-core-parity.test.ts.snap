@@ -1,0 +1,145 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > canshou: state=false, preserve=false > schema-result 1`] = `"d03f03c0a4c947ae8bda924251054dee34ddc99e408fba94286466d714b90033"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > canshou: state=false, preserve=false > schema-result 2`] = `"bffa5b7155eeda947a34f09983969febe42dc776bce1a4fa926c2ffa48d49b53"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > canshou: state=false, preserve=false > schema-result 3`] = `"39238fd1f62180030b4fd044b6a6a28bccf934e590d3bdff3d7f498f1cecea49"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > canshou: state=false, preserve=false > schema-result 4`] = `"6d6517bc2627fd8bfa3a2236935a2efdecc2a79b99f9e0030e166cf54101a5a4"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > canshou: state=false, preserve=false > stream-prompt 1`] = `"2b1fe3a4b27a20486969d5ad0df95d1af0348123034119b2b54ac224ffacf57f"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > canshou: state=false, preserve=false > structured-prompt 1`] = `"63b52901638c86347183034246db12692b7aa6a314ead435ac31541e074abbd8"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > canshou: state=false, preserve=true > schema-result 1`] = `"d03f03c0a4c947ae8bda924251054dee34ddc99e408fba94286466d714b90033"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > canshou: state=false, preserve=true > schema-result 2`] = `"bffa5b7155eeda947a34f09983969febe42dc776bce1a4fa926c2ffa48d49b53"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > canshou: state=false, preserve=true > schema-result 3`] = `"6d6517bc2627fd8bfa3a2236935a2efdecc2a79b99f9e0030e166cf54101a5a4"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > canshou: state=false, preserve=true > schema-result 4`] = `"6d6517bc2627fd8bfa3a2236935a2efdecc2a79b99f9e0030e166cf54101a5a4"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > canshou: state=false, preserve=true > stream-prompt 1`] = `"f935e6343fd675993ac11482d667fc5a161cf0cc257ae49c53e02219bb01cf0d"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > canshou: state=false, preserve=true > structured-prompt 1`] = `"184c8ed9f194d8f32525d0e0758f63e24968e5e7c6b7b86ae11a2dbed55bc561"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > canshou: state=true, preserve=false > schema-result 1`] = `"d03f03c0a4c947ae8bda924251054dee34ddc99e408fba94286466d714b90033"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > canshou: state=true, preserve=false > schema-result 2`] = `"bffa5b7155eeda947a34f09983969febe42dc776bce1a4fa926c2ffa48d49b53"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > canshou: state=true, preserve=false > schema-result 3`] = `"39238fd1f62180030b4fd044b6a6a28bccf934e590d3bdff3d7f498f1cecea49"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > canshou: state=true, preserve=false > schema-result 4`] = `"6d6517bc2627fd8bfa3a2236935a2efdecc2a79b99f9e0030e166cf54101a5a4"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > canshou: state=true, preserve=false > stream-prompt 1`] = `"e7e5dda9cf8b7bc3fa06d682617f1ac22b4330d0648281ff65614cdcd3bfb7dc"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > canshou: state=true, preserve=false > structured-prompt 1`] = `"c1ab62886a9ae4f6e26644c39748a57035f3cc87512632d0cffce67fa982c2a0"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > canshou: state=true, preserve=true > schema-result 1`] = `"d03f03c0a4c947ae8bda924251054dee34ddc99e408fba94286466d714b90033"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > canshou: state=true, preserve=true > schema-result 2`] = `"bffa5b7155eeda947a34f09983969febe42dc776bce1a4fa926c2ffa48d49b53"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > canshou: state=true, preserve=true > schema-result 3`] = `"6d6517bc2627fd8bfa3a2236935a2efdecc2a79b99f9e0030e166cf54101a5a4"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > canshou: state=true, preserve=true > schema-result 4`] = `"6d6517bc2627fd8bfa3a2236935a2efdecc2a79b99f9e0030e166cf54101a5a4"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > canshou: state=true, preserve=true > stream-prompt 1`] = `"0289741bd3952a956da51257886d117ddbf7d1e8ca5b3f1e0355da5d8bfc0d8d"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > canshou: state=true, preserve=true > structured-prompt 1`] = `"22a2b29602abd041c2140dc51c8b89da04b66a9bb186904d40449a6e181d5f23"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > general: state=false, preserve=false > schema-result 1`] = `"d03f03c0a4c947ae8bda924251054dee34ddc99e408fba94286466d714b90033"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > general: state=false, preserve=false > schema-result 2`] = `"bffa5b7155eeda947a34f09983969febe42dc776bce1a4fa926c2ffa48d49b53"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > general: state=false, preserve=false > schema-result 3`] = `"40716a0d78ffd4068534282afd265eaca1a49a1444a6f1d3baa421bac8e871d2"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > general: state=false, preserve=false > schema-result 4`] = `"86704d00c505c950be8f931f63f64f14fbdca7753ac7fa477b9f93659fb2a24d"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > general: state=false, preserve=false > stream-prompt 1`] = `"eb58fa2be8932b23f521dccd24f9cb692f3e11fe3df67ea928bbdb9ff70c8c83"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > general: state=false, preserve=false > structured-prompt 1`] = `"ef8fbc58a15e1dc62e4b22191c39016ca39c03715bf538ed7ae26008fe546c27"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > general: state=false, preserve=true > schema-result 1`] = `"d03f03c0a4c947ae8bda924251054dee34ddc99e408fba94286466d714b90033"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > general: state=false, preserve=true > schema-result 2`] = `"bffa5b7155eeda947a34f09983969febe42dc776bce1a4fa926c2ffa48d49b53"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > general: state=false, preserve=true > schema-result 3`] = `"5acfea52f4767a2283b325a635c33b4d37c2cabcaf984cf9043fdef02c130e95"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > general: state=false, preserve=true > schema-result 4`] = `"4b1d082f8d6b97c07a2d397be64dd686d7251f0d5ac52edb2c1c4c68fe4c2ac0"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > general: state=false, preserve=true > stream-prompt 1`] = `"5ba12f6f8b2e0070379820a22fe3cd869af4028cd5383d2bb9c72486dca091ff"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > general: state=false, preserve=true > structured-prompt 1`] = `"577655c38ca946d598c438490ed75a1271a0fbd938d6af64c6bf9f9fb6a8fd1e"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > general: state=true, preserve=false > schema-result 1`] = `"d03f03c0a4c947ae8bda924251054dee34ddc99e408fba94286466d714b90033"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > general: state=true, preserve=false > schema-result 2`] = `"bffa5b7155eeda947a34f09983969febe42dc776bce1a4fa926c2ffa48d49b53"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > general: state=true, preserve=false > schema-result 3`] = `"40716a0d78ffd4068534282afd265eaca1a49a1444a6f1d3baa421bac8e871d2"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > general: state=true, preserve=false > schema-result 4`] = `"86704d00c505c950be8f931f63f64f14fbdca7753ac7fa477b9f93659fb2a24d"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > general: state=true, preserve=false > stream-prompt 1`] = `"6b81562c5b29c677c861eebb3099bf42ab7b0e900ce4b2e6ccca9ed0ab41eda4"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > general: state=true, preserve=false > structured-prompt 1`] = `"83fff083f6c89633745b3a87728ae42e503001b780869f5def1348272c7c7fe9"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > general: state=true, preserve=true > schema-result 1`] = `"d03f03c0a4c947ae8bda924251054dee34ddc99e408fba94286466d714b90033"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > general: state=true, preserve=true > schema-result 2`] = `"bffa5b7155eeda947a34f09983969febe42dc776bce1a4fa926c2ffa48d49b53"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > general: state=true, preserve=true > schema-result 3`] = `"5acfea52f4767a2283b325a635c33b4d37c2cabcaf984cf9043fdef02c130e95"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > general: state=true, preserve=true > schema-result 4`] = `"4b1d082f8d6b97c07a2d397be64dd686d7251f0d5ac52edb2c1c4c68fe4c2ac0"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > general: state=true, preserve=true > stream-prompt 1`] = `"702498c41bf1e10f37ab13325a22687808cdd032ef92b569c3cd621ab7d82a73"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > general: state=true, preserve=true > structured-prompt 1`] = `"c33f366cea66b89f63047def615763bbab912c47167054977189bacf5df673d8"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > magical-girl: state=false, preserve=false > schema-result 1`] = `"d03f03c0a4c947ae8bda924251054dee34ddc99e408fba94286466d714b90033"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > magical-girl: state=false, preserve=false > schema-result 2`] = `"bffa5b7155eeda947a34f09983969febe42dc776bce1a4fa926c2ffa48d49b53"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > magical-girl: state=false, preserve=false > schema-result 3`] = `"93eb82594c40d042858f52036c4227699c0f02eff48dd3bc4bce8902df4cefc1"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > magical-girl: state=false, preserve=false > schema-result 4`] = `"93eb82594c40d042858f52036c4227699c0f02eff48dd3bc4bce8902df4cefc1"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > magical-girl: state=false, preserve=false > stream-prompt 1`] = `"d307f23b2c82f82f157cc7aeec6a4f46ba7957722cf6a3b8c9b807056875d1ff"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > magical-girl: state=false, preserve=false > structured-prompt 1`] = `"e32d9a7ddc5fe6f3af1d10ff2bbeb130594ea9a7478dde086b3ae629bc24c87e"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > magical-girl: state=false, preserve=true > schema-result 1`] = `"d03f03c0a4c947ae8bda924251054dee34ddc99e408fba94286466d714b90033"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > magical-girl: state=false, preserve=true > schema-result 2`] = `"bffa5b7155eeda947a34f09983969febe42dc776bce1a4fa926c2ffa48d49b53"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > magical-girl: state=false, preserve=true > schema-result 3`] = `"a301eea7b21a37b8014a50ea546460e5c6c01ed79e49d0c91882b52600131947"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > magical-girl: state=false, preserve=true > schema-result 4`] = `"a301eea7b21a37b8014a50ea546460e5c6c01ed79e49d0c91882b52600131947"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > magical-girl: state=false, preserve=true > stream-prompt 1`] = `"3d3d9655573fcf94b086bda038cc21a4e6fbbc6387f0e0f38ae50daae23d0f14"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > magical-girl: state=false, preserve=true > structured-prompt 1`] = `"231d20c9e1f254eaa86a9bd49eb8dc5a524a65b1202c8e4c8028ab37e4661dc0"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > magical-girl: state=true, preserve=false > schema-result 1`] = `"d03f03c0a4c947ae8bda924251054dee34ddc99e408fba94286466d714b90033"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > magical-girl: state=true, preserve=false > schema-result 2`] = `"bffa5b7155eeda947a34f09983969febe42dc776bce1a4fa926c2ffa48d49b53"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > magical-girl: state=true, preserve=false > schema-result 3`] = `"93eb82594c40d042858f52036c4227699c0f02eff48dd3bc4bce8902df4cefc1"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > magical-girl: state=true, preserve=false > schema-result 4`] = `"93eb82594c40d042858f52036c4227699c0f02eff48dd3bc4bce8902df4cefc1"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > magical-girl: state=true, preserve=false > stream-prompt 1`] = `"7216e2e7758c900afab2171365f6e2c3c9965611d47dcb13d5667fb4ae6a452c"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > magical-girl: state=true, preserve=false > structured-prompt 1`] = `"ef29a3a244f828d49d4d22ea2363fc59a0c1639c7237c8b9ea663078dcd7ed09"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > magical-girl: state=true, preserve=true > schema-result 1`] = `"d03f03c0a4c947ae8bda924251054dee34ddc99e408fba94286466d714b90033"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > magical-girl: state=true, preserve=true > schema-result 2`] = `"bffa5b7155eeda947a34f09983969febe42dc776bce1a4fa926c2ffa48d49b53"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > magical-girl: state=true, preserve=true > schema-result 3`] = `"a301eea7b21a37b8014a50ea546460e5c6c01ed79e49d0c91882b52600131947"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > magical-girl: state=true, preserve=true > schema-result 4`] = `"a301eea7b21a37b8014a50ea546460e5c6c01ed79e49d0c91882b52600131947"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > magical-girl: state=true, preserve=true > stream-prompt 1`] = `"d429f42d262a7c903e3858b46ac462fc28629fa537ece76f9754e2f482c9f522"`;
+
+exports[`Sublimation 生成核迁移与 Hosted 行为保真 > magical-girl: state=true, preserve=true > structured-prompt 1`] = `"955eb19c42d33945ee524b2b72a14782c5688caca8410104fbea77016a51c0fc"`;
