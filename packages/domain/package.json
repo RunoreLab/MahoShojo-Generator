@@ -231,7 +231,10 @@
     "./team-merge": "./src/team-merge.ts",
     "./team-input": "./src/team-input.ts",
     "./questionnaire-editor": "./src/questionnaire-editor.ts",
-    "./questionnaire-logo": "./src/questionnaire-logo.ts"
+    "./questionnaire-logo": "./src/questionnaire-logo.ts",
+    "./card-forge-document": "./src/card-forge-document.ts",
+    "./game-card-image-crop": "./src/game-card-image-crop.ts",
+    "./game-card-presentation": "./src/game-card-presentation.ts"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",
