@@ -582,7 +582,10 @@ export const dataCardApi = {
       const acknowledged = guard
         ? response.status === 201 && acknowledgement?.success && acknowledgement.data.ownerUserId === guard.expectedUserId
         : response.ok && result?.success === true && typeof result.id === 'string' && result.id.trim();
-      if (acknowledged) return { success: true, id: result.id };
+      if (acknowledged) {
+        if (guard && !await matchesOwnedWriteGuard(guard)) return { success: false, uncertain: true, error: '登录状态已改变，请检查原账号云端卡，确认本次创建结果。' };
+        return { success: true, id: result.id };
+      }
       if (guard && [404, 405].includes(response.status)) {
         return { success: false, error: '服务端暂不支持安全账号保存，请保留草稿并等待服务更新。' };
       }

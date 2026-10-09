@@ -119,7 +119,7 @@ function DesktopCloudCardActionsView({ data, cardType = 'character', isBlocked, 
   };
   const chooseTarget = async (card: DesktopOwnedCard) => {
     if (!available() || uncertain || !freeze()) return;
-    if (card.type !== cardType) { setError('请选择与当前内容类型相同的数据卡'); return; }
+    if (card.type !== cardType) { setError('请选择与当前内容类型相同的数据卡'); throw new Error('请选择与当前内容类型相同的数据卡'); }
     preparingRef.current = true; setPreparing(true); setError(null);
     const ticket = ++operation.current;
     const result = await readCloudReplaceTarget(invokeFn, userId!, card.id);

@@ -113,3 +113,13 @@ describe('guarded create-owned strict acknowledgement and mixed deployment', () 
   });
 
 });
+
+it('guarded create late ack after same-owner credential rotation is uncertain', async () => {
+  const fetcher = vi.fn().mockImplementation(async () => {
+    vi.spyOn(authStorage, 'getAuth').mockResolvedValue({ ...auth, authKey: 'rotated-mock' });
+    return Response.json({ success: true, id: 'created', ownerUserId: 7, accountFenceVersion: 1 }, { status: 201 });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const result = await dataCardApi.createCard('character', 'name', '', {}, 0, { expectedUserId: 7, expectedAuth: auth, isCurrent: () => true });
+  expect(result).toMatchObject({ success: false, uncertain: true }); expect(fetcher).toHaveBeenCalledOnce();
+});
