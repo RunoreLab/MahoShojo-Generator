@@ -215,7 +215,19 @@
       "import": "./src/adjudicator-normalize.ts",
       "default": "./src/adjudicator-normalize.ts"
     },
-    "./sublimation-stream-result": "./src/sublimation-stream-result.ts"
+    "./sublimation-stream-result": "./src/sublimation-stream-result.ts",
+    "./tavern-card": "./src/tavern-card/index.ts",
+    "./tavern-card/types": "./src/tavern-card/types.ts",
+    "./tavern-card/base64": "./src/tavern-card/base64.ts",
+    "./tavern-card/crc32": "./src/tavern-card/crc32.ts",
+    "./tavern-card/parse": "./src/tavern-card/parse.ts",
+    "./tavern-card/normalize": "./src/tavern-card/normalize.ts",
+    "./tavern-card/png": "./src/tavern-card/png.ts",
+    "./tavern-card/v3": "./src/tavern-card/v3.ts",
+    "./tavern-card/worldbook": "./src/tavern-card/worldbook.ts",
+    "./tavern-card/scenario": "./src/tavern-card/scenario.ts",
+    "./tavern-card/limits": "./src/tavern-card/limits.ts",
+    "./tavern-card/recommend": "./src/tavern-card/recommend.ts"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",
@@ -224,7 +236,8 @@
   },
   "dependencies": {
     "@mahoshojo/contracts": "workspace:*",
-    "zod": "^4.1.13"
+    "zod": "^4.1.13",
+    "fflate": "^0.8.2"
   },
   "devDependencies": {
     "@types/node": "^20",

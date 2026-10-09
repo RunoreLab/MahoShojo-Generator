@@ -615,6 +615,9 @@ importers:
       zod:
         specifier: ^4.1.13
         version: 4.3.6
+      fflate:
+        specifier: ^0.8.2
+        version: 0.8.3
     devDependencies:
       '@types/node':
         specifier: ^20

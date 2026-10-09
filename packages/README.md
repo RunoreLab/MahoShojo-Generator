@@ -50,3 +50,8 @@ D3.1b/c：`ui-web/questionnaire` 与 `ui-web/character-result` 为 Web/Desktop �
 D3.2a：`ui-web/local-cards` 为两端 `/local-library` 共源的本地数据卡列表、详情与回收站，只消费 `CardRepository` 的 `list/delete/restore` 与两端仓储已有的 `purge`；读代次丢弃切换视图后的晚到响应，写操作单飞，维护互斥由宿主负责。
 
 D3.2b-1：`ui-web/card-editor` 为 Web 角色管理与 Desktop 本地编辑共源的递归字段编辑器与路径写入规则；模板转换、schema 校验、原生性、敏感词与万途往返仍归 Web，宿主经插槽注入附件与样式类。
+
+D5.1-T 首片：`domain/tavern-card` 提供 Tavern PNG 编解码、候选选择、规范化、V3
+构造、世界书/情景片段与推荐字段纯规则，Web 原出口直接回用。`File` 读取与默认
+Logo 的 fetch/canvas 栅格化仍是 Web adapter；cloud/AI 上传与服务端权限不进入纯核。
+原始 Tavern JSON 与规范化显示分离，编解码保留未知字段，不提供签名验证或来源提权。
