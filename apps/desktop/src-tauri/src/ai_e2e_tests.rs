@@ -1508,3 +1508,174 @@ async fn reasoning_usage_prefers_standard_nested_tokens_and_falls_back_to_legacy
         );
     }
 }
+
+/// 回归：上游会在认证失败消息中回显请求凭据，native 错误投影不得带回 renderer。
+#[tokio::test]
+async fn audit_provider_error_must_not_echo_stored_credentials_to_renderer() {
+    let fake_secret = "sk-audit-secret-never-render";
+    let payload = serde_json::json!({
+        "error": {"type": "authentication_error", "message": format!("Invalid API key: {fake_secret}")}
+    });
+    let server = spawn_sse_server(Scenario::RawBytes(
+        format!("data: {payload}\n\n").into_bytes(),
+    ))
+    .await;
+    let store = LocalStore::open_in_memory().unwrap();
+    let secrets = TestSecretStore::default();
+    secrets
+        .set("provider:loopback:api-key", fake_secret)
+        .unwrap();
+    store
+        .put(
+            "loopback",
+            &stored_profile("loopback", &server.base_url, true),
+            "t",
+        )
+        .unwrap();
+    let registry = RequestRegistry::default();
+    let sink = CollectingSink::default();
+    stream_direct_ai(
+        "loopback",
+        request("audit-error-secret"),
+        &store,
+        &secrets,
+        &registry,
+        &sink,
+    )
+    .await
+    .unwrap();
+    let events = sink.snapshot();
+    assert_well_formed(&events, "audit-error-secret");
+    assert!(
+        matches!(terminals(&events)[0], AiExecutionResult::Failed(result) if result.error.code == "authentication-failed")
+    );
+    assert!(
+        !serde_json::to_string(&events)
+            .unwrap()
+            .contains(fake_secret),
+        "stored key crossed renderer event boundary"
+    );
+    assert!(server.observation.await.unwrap().saw_authorization);
+}
+
+/// 回归：serde 的 invalid-type 说明会包含上游传入的字符串，不能作为安全错误正文。
+#[tokio::test]
+async fn audit_invalid_provider_event_must_not_echo_arbitrary_payload_to_renderer() {
+    let fake_secret = "sk-audit-secret-inside-malformed-field";
+    let payload = serde_json::json!({ "choices": fake_secret });
+    let server = spawn_sse_server(Scenario::RawBytes(
+        format!("data: {payload}\n\n").into_bytes(),
+    ))
+    .await;
+    let store = LocalStore::open_in_memory().unwrap();
+    let secrets = TestSecretStore::default();
+    secrets
+        .set("provider:loopback:api-key", fake_secret)
+        .unwrap();
+    store
+        .put(
+            "loopback",
+            &stored_profile("loopback", &server.base_url, true),
+            "t",
+        )
+        .unwrap();
+    let registry = RequestRegistry::default();
+    let sink = CollectingSink::default();
+    stream_direct_ai(
+        "loopback",
+        request("audit-parse-secret"),
+        &store,
+        &secrets,
+        &registry,
+        &sink,
+    )
+    .await
+    .unwrap();
+    let events = sink.snapshot();
+    assert_well_formed(&events, "audit-parse-secret");
+    assert!(
+        matches!(terminals(&events)[0], AiExecutionResult::Failed(result) if result.error.code == "invalid-response")
+    );
+    assert!(
+        !serde_json::to_string(&events)
+            .unwrap()
+            .contains(fake_secret),
+        "malformed upstream value crossed renderer error boundary"
+    );
+}
+
+/// 回归：空白 reasoning 省略；有效推理仍逐字保留，空白正文不能制造非法 completed DTO。
+#[tokio::test]
+async fn audit_blank_output_matches_the_typescript_contract_without_trimming_valid_text() {
+    for (label, text, reasoning, expected_reasoning) in [
+        ("space-reasoning", "usable answer", " \n\t", None),
+        ("bom-reasoning", "usable answer", " \u{feff}", None),
+        (
+            "valid-reasoning",
+            " usable answer ",
+            " \nthought\n ",
+            Some(" \nthought\n "),
+        ),
+        (
+            "nel-reasoning",
+            "usable answer",
+            "\u{0085}",
+            Some("\u{0085}"),
+        ),
+        ("blank-text", "\u{feff} ", "thought", None),
+    ] {
+        let payload = serde_json::json!({
+            "choices": [{"delta": {"content": text, "reasoning_content": reasoning}, "finish_reason": "stop"}]
+        });
+        let server = spawn_sse_server(Scenario::RawBytes(
+            format!("data: {payload}\n\ndata: [DONE]\n\n").into_bytes(),
+        ))
+        .await;
+        let store = LocalStore::open_in_memory().unwrap();
+        let secrets = TestSecretStore::default();
+        store
+            .put(
+                "loopback",
+                &stored_profile("loopback", &server.base_url, false),
+                "t",
+            )
+            .unwrap();
+        let registry = RequestRegistry::default();
+        let sink = CollectingSink::default();
+        stream_direct_ai(
+            "loopback",
+            request("audit-blank-output"),
+            &store,
+            &secrets,
+            &registry,
+            &sink,
+        )
+        .await
+        .unwrap();
+        let events = sink.snapshot();
+        assert_well_formed(&events, "audit-blank-output");
+        if label == "blank-text" {
+            assert!(
+                matches!(terminals(&events)[0], AiExecutionResult::Failed(result)
+                if result.error.code == "invalid-response")
+            );
+        } else {
+            match terminals(&events)[0] {
+                AiExecutionResult::Completed(result) => {
+                    assert_eq!(result.output.text.as_deref(), Some(text));
+                    assert_eq!(result.output.reasoning.as_deref(), expected_reasoning);
+                }
+                other => panic!("usable answer should complete, got {other:?}"),
+            }
+        }
+        if let Ok(directory) = std::env::var("MAHO_NATIVE_EVENT_FIXTURE_DIR") {
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::write(
+                std::path::Path::new(&directory).join(format!("blank-output-{label}.json")),
+                serde_json::to_vec_pretty(&events).unwrap(),
+            )
+            .unwrap();
+        }
+        assert_eq!(registry.len(), 0);
+    }
+}

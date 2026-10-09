@@ -447,8 +447,6 @@ struct UpstreamDelta {
 #[derive(Debug, Deserialize)]
 struct UpstreamError {
     #[serde(default)]
-    message: Option<String>,
-    #[serde(default)]
     r#type: Option<String>,
     #[serde(default)]
     code: Option<String>,
@@ -473,18 +471,19 @@ impl UpstreamStreamState {
         on_event: &dyn EventSink,
     ) -> Result<(), DirectAiError> {
         let SseFrame::Data(payload) = frame;
-        let chunk: UpstreamChunk = serde_json::from_str(&payload).map_err(|error| {
+        let chunk: UpstreamChunk = serde_json::from_str(&payload).map_err(|_| {
+            // serde invalid-type 错误可能引用任意上游值，包括回显的凭据。
             DirectAiError::new(
                 DirectAiErrorCode::StreamProtocol,
-                format!("upstream sent an unreadable event: {error}"),
+                "upstream sent an unreadable event",
             )
         })?;
         if let Some(error) = chunk.error {
             return Err(DirectAiError {
                 code: DirectAiErrorCode::UpstreamRejected,
-                message: error
-                    .message
-                    .unwrap_or_else(|| "upstream reported an error".to_string()),
+                // 上游诊断不可信，可能回显 Authorization 或自定义 secret header。
+                message: "upstream reported an error; check the provider settings or try again"
+                    .to_string(),
                 contract_code: Some(map_error_code(
                     error.r#type.as_deref().or(error.code.as_deref()),
                 )),
@@ -520,6 +519,17 @@ impl UpstreamStreamState {
         }
         Ok(())
     }
+}
+
+/// 对齐 TS 权威 schema 的 `String.trim()` 空白判定，不改写有效输出。
+fn is_blank_output(value: &str) -> bool {
+    value.chars().all(|c| {
+        matches!(c,
+            '\u{0009}'..='\u{000d}' | '\u{0020}' | '\u{00a0}' | '\u{1680}' |
+            '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' |
+            '\u{205f}' | '\u{3000}' | '\u{feff}'
+        )
+    })
 }
 
 fn map_finish_reason(value: Option<&str>) -> AiExecutionFinishReason {
@@ -942,10 +952,10 @@ pub async fn run_stream(
         let Some(chunk) = chunk else { break };
         let chunk = match chunk {
             Ok(chunk) => chunk,
-            Err(error) => {
+            Err(_) => {
                 failure = Some(DirectAiError::new(
                     DirectAiErrorCode::UpstreamUnavailable,
-                    format!("upstream stream failed: {error}"),
+                    "upstream stream failed",
                 ));
                 break;
             }
@@ -1029,7 +1039,7 @@ pub async fn run_stream(
     saw_done = saw_done || parser.is_done();
     drop(stream);
 
-    if failure.is_none() && saw_done && state.text.trim().is_empty() {
+    if failure.is_none() && saw_done && is_blank_output(&state.text) {
         let (code, message) = match state.finish_reason {
             AiExecutionFinishReason::ContentFilter => (
                 "content-filtered",
@@ -1129,7 +1139,7 @@ pub async fn run_stream(
         mode,
         output: AiExecutionOutput {
             text: Some(state.text.clone()).filter(|value| !value.is_empty()),
-            reasoning: Some(state.reasoning.clone()).filter(|value| !value.is_empty()),
+            reasoning: Some(state.reasoning.clone()).filter(|value| !is_blank_output(value)),
         },
         finish_reason: state.finish_reason,
         resolved_model_id: Some(resolved_model_id.to_string()),
@@ -1370,12 +1380,13 @@ async fn stream_direct_ai_inner(
 
     let upstream = match upstream {
         Ok(response) => response,
-        Err(error) => {
+        Err(_) => {
             return emit_pre_stream_error_terminal(
                 request,
                 DirectAiError::new(
                     DirectAiErrorCode::UpstreamUnavailable,
-                    format!("cannot reach the provider endpoint: {error}"),
+                    // 传输错误可能携带包含凭据数据的上游重定向 URL。
+                    "cannot reach the provider endpoint",
                 ),
                 on_event,
             );
