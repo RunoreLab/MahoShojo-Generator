@@ -41,8 +41,10 @@ it('renders text safely, and a later card refreshes both preview and full source
   render({ description: '<img src=x onerror=alert(1)>', elements: {} });
   expect(container.querySelector('img')).toBeNull();
   expect(container.querySelector('dd')?.textContent).toBe('<img src=x onerror=alert(1)>');
+  act(() => { container.querySelector('details')!.open = true; });
   const next = { description: '新结果', elements: { events: '继续' }, extra: '完整保留' };
   render(next);
   expect(container.querySelector('dd')?.textContent).toBe('新结果');
+  expect(container.querySelector('details')?.open).toBe(true);
   expect(container.querySelector('pre')?.textContent).toBe(JSON.stringify(next, null, 2));
 });
