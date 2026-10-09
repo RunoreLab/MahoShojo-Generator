@@ -254,3 +254,77 @@ export const composeSublimationNarrativeHistoryReference = (
   });
   return mergeNarrativeHistoryText(arenaNarrativeText, narrativeHistory);
 };
+
+export const normalizeNarrativeHistoryTitleFallback = (content: string): string => {
+  const firstLine = content.split(/\r?\n/).find((line) => line.trim()) ?? '';
+  const stripped = firstLine.replace(/^#{1,6}\s*/, '').trim();
+  const candidate = stripped || firstLine.trim();
+  return candidate ? candidate.slice(0, 60) : '未命名战报';
+};
+
+export type NarrativeHistoryAppendInput = Readonly<{
+  title: string;
+  content: string;
+  generationId?: string | null;
+}>;
+
+/** Pure entry projection. The host owns IDs, time, persistence and completion eligibility. */
+export const appendNarrativeHistoryEntry = (
+  entries: NarrativeHistoryEntry[],
+  payload: NarrativeHistoryAppendInput,
+  context: Readonly<{ fallbackId: string; createdAt: string }>,
+): { entry: NarrativeHistoryEntry | null; entries: NarrativeHistoryEntry[]; appended: boolean } => {
+  const trimmedContent = (payload.content ?? '').toString().trim();
+  if (!trimmedContent) return { entry: null, entries, appended: false };
+  const trimmedTitle = (payload.title ?? '').toString().trim() || normalizeNarrativeHistoryTitleFallback(trimmedContent);
+  const stableGenerationId = typeof payload.generationId === 'string' && payload.generationId.trim()
+    ? `arena-generation:${payload.generationId.trim()}`
+    : null;
+  const existing = stableGenerationId ? entries.find((entry) => entry.id === stableGenerationId) : null;
+  if (existing) return { entry: existing, entries, appended: false };
+  const entry: NarrativeHistoryEntry = {
+    id: stableGenerationId ?? context.fallbackId,
+    title: trimmedTitle.slice(0, 120),
+    content: trimmedContent,
+    createdAt: context.createdAt,
+    updatedAt: context.createdAt,
+  };
+  return { entry, entries: [...entries, entry], appended: true };
+};
+
+export type ArenaNarrativeHistoryRequestEntry = Readonly<{
+  title: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+}>;
+
+export type ArenaNarrativeHistoryRequestMaterialization = Readonly<{
+  readLimit: number | null | undefined;
+  entries: readonly ArenaNarrativeHistoryRequestEntry[] | undefined;
+}>;
+
+export const materializeArenaNarrativeHistoryForRequest = (
+  settings: Readonly<{ readNarrativeHistory: boolean; readNarrativeHistoryLimit: number; isNarrativeHistoryUnlimited: boolean }>,
+  entries: readonly NarrativeHistoryEntry[],
+): ArenaNarrativeHistoryRequestMaterialization => {
+  if (!settings.readNarrativeHistory) {
+    return Object.freeze({ readLimit: undefined, entries: undefined });
+  }
+  const readLimit = settings.isNarrativeHistoryUnlimited
+    ? null
+    : Math.max(1, settings.readNarrativeHistoryLimit);
+  const ordered = entries.filter((entry) => (
+    typeof entry?.content === 'string' && entry.content.trim().length > 0
+  ));
+  const limited = limitNarrativeHistoryEntriesForPrompt([...ordered], readLimit);
+  return Object.freeze({
+    readLimit,
+    entries: Object.freeze(limited.map((entry) => Object.freeze({
+      title: entry.title,
+      content: entry.content,
+      createdAt: entry.createdAt,
+      updatedAt: entry.updatedAt,
+    }))),
+  });
+};

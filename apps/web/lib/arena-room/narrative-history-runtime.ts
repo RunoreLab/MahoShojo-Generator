@@ -1,50 +1,8 @@
-import type { SharedHistorySettings } from '@mahoshojo/contracts/arena-room';
-
 import { quickCheck } from '@/lib/sensitive-word-filter';
-import { limitNarrativeHistoryEntriesForPrompt } from '@/lib/narrative-history';
 import { useNarrativeHistoryStore } from '@/components/arena/stores/useNarrativeHistoryStore';
-import type { NarrativeHistoryEntry } from '@/types/arena';
 import type { ArenaRoomControllerState } from './controller';
 
-export type ArenaNarrativeHistoryRequestEntry = Readonly<{
-  title: string;
-  content: string;
-  createdAt: string;
-  updatedAt: string;
-}>;
-
-export type ArenaNarrativeHistoryRequestMaterialization = Readonly<{
-  readLimit: number | null | undefined;
-  entries: readonly ArenaNarrativeHistoryRequestEntry[] | undefined;
-}>;
-
-export const materializeArenaNarrativeHistoryForRequest = (
-  settings: Pick<
-    SharedHistorySettings,
-    'readNarrativeHistory' | 'readNarrativeHistoryLimit' | 'isNarrativeHistoryUnlimited'
-  >,
-  entries: readonly NarrativeHistoryEntry[],
-): ArenaNarrativeHistoryRequestMaterialization => {
-  if (!settings.readNarrativeHistory) {
-    return Object.freeze({ readLimit: undefined, entries: undefined });
-  }
-  const readLimit = settings.isNarrativeHistoryUnlimited
-    ? null
-    : Math.max(1, settings.readNarrativeHistoryLimit);
-  const ordered = entries.filter((entry) => (
-    typeof entry?.content === 'string' && entry.content.trim().length > 0
-  ));
-  const limited = limitNarrativeHistoryEntriesForPrompt([...ordered], readLimit);
-  return Object.freeze({
-    readLimit,
-    entries: Object.freeze(limited.map((entry) => Object.freeze({
-      title: entry.title,
-      content: entry.content,
-      createdAt: entry.createdAt,
-      updatedAt: entry.updatedAt,
-    }))),
-  });
-};
+export { materializeArenaNarrativeHistoryForRequest, type ArenaNarrativeHistoryRequestEntry, type ArenaNarrativeHistoryRequestMaterialization } from '@mahoshojo/domain/narrative-history-operations';
 
 export type ArenaNarrativeHistoryResultWrite = Readonly<{
   title: string;

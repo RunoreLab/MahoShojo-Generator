@@ -3,6 +3,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+import { appendNarrativeHistoryEntry, normalizeNarrativeHistoryTitleFallback } from '@mahoshojo/domain/narrative-history-operations';
+
 import { randomUUID } from '@/lib/crypto';
 import {
   migrateLegacyNarrativeHistoryOrder,
@@ -52,13 +54,6 @@ const createStorage = (): Storage => {
 
 const nowIso = (): string => new Date().toISOString();
 
-const normalizeTitleFallback = (content: string): string => {
-  const firstLine = content.split(/\r?\n/).find((line) => line.trim()) ?? '';
-  const stripped = firstLine.replace(/^#{1,6}\s*/, '').trim();
-  const candidate = stripped || firstLine.trim();
-  return candidate ? candidate.slice(0, 60) : '未命名战报';
-};
-
 export const useNarrativeHistoryStore = create<NarrativeHistoryStoreState>()(
   persist(
     (set, get) => ({
@@ -68,36 +63,15 @@ export const useNarrativeHistoryStore = create<NarrativeHistoryStoreState>()(
 
       setSort: (sort) => set({ sort }),
 
-      appendEntry: ({ title, content, generationId }) => {
-        const trimmedContent = (content ?? '').toString().trim();
-        if (!trimmedContent) {
-          return null;
-        }
-
-        const trimmedTitle = (title ?? '').toString().trim() || normalizeTitleFallback(trimmedContent);
-        const createdAt = nowIso();
-        const stableGenerationId = typeof generationId === 'string' && generationId.trim()
-          ? `arena-generation:${generationId.trim()}`
-          : null;
-        const existing = stableGenerationId
-          ? get().entries.find((entry) => entry.id === stableGenerationId)
-          : null;
-        if (existing) return existing;
-
-        const entry: NarrativeHistoryEntry = {
-          id: stableGenerationId ?? randomUUID(),
-          title: trimmedTitle.slice(0, 120),
-          content: trimmedContent,
-          createdAt,
-          updatedAt: createdAt,
-        };
-
-        set({
-          entries: [...get().entries, entry],
-          lastUpdatedAt: entry.updatedAt,
+      appendEntry: (payload) => {
+        const result = appendNarrativeHistoryEntry(get().entries, payload, {
+          fallbackId: randomUUID(),
+          createdAt: nowIso(),
         });
-
-        return entry;
+        if (result.appended && result.entry) {
+          set({ entries: result.entries, lastUpdatedAt: result.entry.updatedAt });
+        }
+        return result.entry;
       },
 
       updateEntry: (id, patch) => {
@@ -110,7 +84,7 @@ export const useNarrativeHistoryStore = create<NarrativeHistoryStoreState>()(
             const updatedAt = nowIso();
             return {
               ...entry,
-              ...(nextTitle !== undefined ? { title: nextTitle || normalizeTitleFallback(entry.content) } : {}),
+              ...(nextTitle !== undefined ? { title: nextTitle || normalizeNarrativeHistoryTitleFallback(entry.content) } : {}),
               ...(nextContent !== undefined ? { content: nextContent } : {}),
               updatedAt,
             };
