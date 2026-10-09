@@ -1,6 +1,7 @@
 import { z } from './zod';
 
 import { SafeJsonValueSchema } from './json-value';
+import { ProviderModelIdSchema, ProviderPresetIdSchema } from './provider-target';
 
 /**
  * Desktop ↔ 项目服务的云端窄契约（D5.0c，`SPEC-desktop-online-ai-integration-v1`
@@ -334,8 +335,7 @@ export type HostedGenerationRouteId = z.infer<typeof HostedGenerationRouteIdSche
  * 系统通道的模型选择与逐模型生成覆盖——`modelId` 从公开系统模型清单选择
  * （'default' = 服务器默认顺序），生成覆盖按 `UserGenerationOverrides`
  * wire 形状镜像。凭据从定义上不存在：native 注入 `customProvider` 时固定
- * `providerId:'system'` + 空 `apiKey`，renderer 无服务端 BYOK 通道
- * （DESK-093 继续成立）。字段均为 additive-optional——缺省即普通系统默认，
+ * `providerId:'system'` + 空 `apiKey`，服务端 BYOK 另由 presetConfig 显式选择。字段均为 additive-optional——缺省即普通系统默认，
  * 与 Web 折叠语义一致。
  */
 
@@ -378,6 +378,14 @@ export const DesktopHostedSystemConfigSchema = z.object({
 }).strict();
 export type DesktopHostedSystemConfig = z.infer<typeof DesktopHostedSystemConfigSchema>;
 
+/** 服务器 BYOK 只声明目录身份；URL/Key/secretRef 均由 native 决定。 */
+export const DesktopHostedPresetConfigSchema = z.object({
+  providerId: ProviderPresetIdSchema,
+  modelId: ProviderModelIdSchema,
+  generationOverrides: DesktopHostedGenerationOverridesSchema.optional(),
+}).strict();
+export type DesktopHostedPresetConfig = z.infer<typeof DesktopHostedPresetConfigSchema>;
+
 /**
  * hosted 生成 IPC 输入。`body` 是目标路由的业务载荷（如
  * `{answers, questionnaires, language}`），**不得**携带 `customProvider`——
@@ -385,7 +393,7 @@ export type DesktopHostedSystemConfig = z.infer<typeof DesktopHostedSystemConfig
  *
  * `systemConfig` 是「使用系统默认配置」通道的非秘密偏好（additive-optional），
  * 与 Web `customProvider:{providerId:'system'}` 同语义；服务器 BYOK 在
- * native 持有并校验的 Provider 绑定落地前保持关闭（DESK-093）：本契约不提供
+ * native 持有并校验的 presetConfig 绑定下开放；本契约不提供
  * `byok`/`secretRef`/`providerId`/`apiKey` 等凭据字段，renderer 携带这些字段
  * 即被 strict 校验拒绝。
  */
@@ -394,7 +402,10 @@ export const DesktopHostedGenerateRequestSchema = z.object({
   routeId: HostedGenerationRouteIdSchema,
   body: SafeJsonValueSchema,
   systemConfig: DesktopHostedSystemConfigSchema.optional(),
-}).strict();
+  presetConfig: DesktopHostedPresetConfigSchema.optional(),
+}).strict().refine((value) => !(value.systemConfig && value.presetConfig), {
+  message: 'systemConfig 与 presetConfig 不可同时指定',
+});
 export type DesktopHostedGenerateRequest = z.infer<typeof DesktopHostedGenerateRequestSchema>;
 
 /* ── hosted 非流式 JSON 生成（D5.1a，`/details` 双执行的服务器端非流式通路） ── */
@@ -415,15 +426,18 @@ export type HostedJsonGenerationRouteId = z.infer<typeof HostedJsonGenerationRou
 /**
  * hosted 非流式生成 IPC 输入。与 `DesktopHostedGenerateRequestSchema` 同形、
  * 同一套凭据边界：`body` 不得携带 `customProvider`（native 是唯一注入方），
- * `systemConfig` 同为「使用系统默认配置」通道的非秘密偏好；
- * `byok`/`secretRef`/`providerId`/`apiKey` 等字段由 strict 校验拒绝。
+ * systemConfig / presetConfig 二选一；前者系统默认，后者受信任目录 BYOK。
+ * 顶层 `byok`/`secretRef`/`providerId`/`apiKey` 及预设内的秘密/URL 均拒绝。
  */
 export const DesktopHostedJsonRequestSchema = z.object({
   requestId: z.string().min(1).max(128),
   routeId: HostedJsonGenerationRouteIdSchema,
   body: SafeJsonValueSchema,
   systemConfig: DesktopHostedSystemConfigSchema.optional(),
-}).strict();
+  presetConfig: DesktopHostedPresetConfigSchema.optional(),
+}).strict().refine((value) => !(value.systemConfig && value.presetConfig), {
+  message: 'systemConfig 与 presetConfig 不可同时指定',
+});
 export type DesktopHostedJsonRequest = z.infer<typeof DesktopHostedJsonRequestSchema>;
 
 /**

@@ -11,6 +11,7 @@ import type { AIReasoningEnvelope } from '@mahoshojo/contracts/ai-reasoning';
 import {
   hostedGenerationBodyMaxBytes,
   type DesktopHostedSystemConfig,
+  type DesktopHostedPresetConfig,
   type HostedGenerationRouteId,
   type HostedJsonGenerationRouteId,
 } from '@mahoshojo/contracts/desktop-cloud';
@@ -266,12 +267,14 @@ const createHostedCancellation = (invoke: DesktopAiExecutionOptions['invoke'], r
  *
  * `intent.modelId` 是系统通道的模型选择（'default' = 服务器默认顺序）；
  * `intent.overrides` 为逐模型生成覆盖。字段均非秘密——native 注入
- * `customProvider` 时固定 `providerId:'system'` + 空 `apiKey`，DESK-093
- * 的 BYOK 边界不变。
+ * `customProvider` 时固定 `providerId:'system'` + 空 `apiKey`。
+ * BYOK 另经 presetConfig，仅传非秘密的可信目录身份。
  *
  * Web 折叠语义：'default' 且无任何生成覆盖时返回 undefined（普通系统
  * 默认），不携带冗余字段。
  */
+type HostedProviderConfig = { systemConfig?: DesktopHostedSystemConfig; presetConfig?: DesktopHostedPresetConfig };
+
 const buildHostedSystemConfig = (
   intent: DesktopGenerationIntent,
 ): DesktopHostedSystemConfig | undefined => {
@@ -302,7 +305,7 @@ const executeHostedStreamGeneration = async <
   intent: TIntent,
   signal: AbortSignal,
   body: Record<string, JsonValue>,
-  systemConfig: DesktopHostedSystemConfig | undefined,
+  providerConfig: HostedProviderConfig,
   onPartialText?: (text: string) => void,
 ): Promise<DesktopGenerationOutcome<TCardKind>> => {
   let markdown = '';
@@ -322,7 +325,7 @@ const executeHostedStreamGeneration = async <
         requestId: intent.requestId,
         routeId: family.streamRouteId,
         body,
-        ...(systemConfig === undefined ? {} : { systemConfig }),
+        ...providerConfig,
       },
       (event) => {
         if (!isRecord(event.data)) return;
@@ -456,7 +459,7 @@ const executeHostedJsonGeneration = async <
   intent: TIntent,
   signal: AbortSignal,
   body: Record<string, JsonValue>,
-  systemConfig: DesktopHostedSystemConfig | undefined,
+  providerConfig: HostedProviderConfig,
 ): Promise<DesktopGenerationOutcome<TCardKind>> => {
   const cancel = createHostedCancellation(options.invoke, intent.requestId);
   const onAbort = () => cancel();
@@ -467,7 +470,7 @@ const executeHostedJsonGeneration = async <
       requestId: intent.requestId,
       routeId: family.jsonRouteId,
       body,
-      ...(systemConfig === undefined ? {} : { systemConfig }),
+      ...providerConfig,
     });
     if (signal.aborted) {
       // 响应已返回但用户已要求取消：请求肯定到达过服务器，不能声称干净取消。
@@ -585,10 +588,20 @@ export const executeDesktopGeneration = async <
     }
     // 「使用系统默认配置」通道的模型选择/生成覆盖随请求一起过 IPC；
     // 折叠语义与 Web 一致（'default' 且无覆盖 → 不携带字段）。
-    const systemConfig = buildHostedSystemConfig(intent);
+    const target = options.providerTarget;
+    if (target?.kind === 'custom') {
+      return { status: 'failed', mode: intent.mode, rawText: '', message: '自定义连接仅支持客户端执行', code: 'invalid-request' };
+    }
+    const providerConfig: HostedProviderConfig = target?.kind === 'preset'
+      ? { presetConfig: {
+        providerId: target.providerId,
+        modelId: intent.modelId?.trim() ?? '',
+        ...(intent.overrides ? { generationOverrides: intent.overrides } : {}),
+      } }
+      : { systemConfig: buildHostedSystemConfig(intent) };
     return intent.mode === 'hosted-stream'
-      ? executeHostedStreamGeneration(family, options, input, intent, signal, body, systemConfig, onPartialText)
-      : executeHostedJsonGeneration(family, options, input, intent, signal, body, systemConfig);
+      ? executeHostedStreamGeneration(family, options, input, intent, signal, body, providerConfig, onPartialText)
+      : executeHostedJsonGeneration(family, options, input, intent, signal, body, providerConfig);
   }
   return executeDirectGeneration(family, options, input, intent, signal, onPartialText);
 };

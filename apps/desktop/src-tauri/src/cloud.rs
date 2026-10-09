@@ -1224,24 +1224,11 @@ pub async fn cloud_online_status(
     )
 }
 
-/* ── hosted 生成适配（系统默认通道 + 非秘密系统通道偏好） ─────────────────
- *
- * renderer 只能声明 requestId / routeId / body / systemConfig：
- * - `body` 不得携带 `customProvider`——native 是唯一注入方；
- * - `systemConfig` 是「使用系统默认配置」通道的非秘密偏好（D5.1-AIP-r1，
- *   与 Web `customProvider:{providerId:'system'}` 同语义）：模型选择与
- *   生成覆盖。注入时 native 固定写 `providerId:'system'` + 空 `apiKey`，
- *   renderer 没有指定其他 Provider 或携带凭据的通道；
- * - `generationOverrides` 走严格受检结构（字段/类型/范围/大小受 wire
- *   契约约束，native 独立复核而非透传 renderer 输入），且注入完成后
- *   按最终 HTTP body 的 UTF-8 字节数重新校验路由预算——注入导致超限时
- *   在出站前拒绝（D5.1-AIP-r1-r1）；
- * - 服务器 BYOK 在 native 持有并校验的 Provider 绑定落地前保持关闭（DESK-093）：
- *   `byok`/`secretRef`/`providerId`/`apiKey` 等字段由 `deny_unknown_fields`
- *   在 IPC 反序列化时直接拒绝，renderer 没有自选服务端凭据的通道；
- * - 「模型 ID 是否在系统公开清单内」由服务端 `resolveCustomProviderRuntime`
- *   裁决——系统目录的唯一事实源在服务端，native 不复制清单；
- * - native 不依赖 renderer 侧的 schema 校验，输入在 Rust 侧独立 fail-closed。
+/* ── hosted 生成适配（系统默认 + 受信任预设 BYOK） ─────────────────
+ * renderer 只声明 requestId / routeId / body 与互斥的 systemConfig / presetConfig。
+ * body.customProvider 与任意 URL/secretRef/apiKey 均拒绝；native 按生成目录解析
+ * 预设并同步读取安全凭据，然后仅向固定项目 origin/路由注入 Web 同形载荷。
+ * 系统模型仍由服务器裁决；自定义连接不能成为服务器代理。
  */
 
 /// hosted 生成请求 body 序列化后的字节上限（bounded input），按路由区分。
@@ -1329,6 +1316,16 @@ pub struct CloudHostedSystemConfig {
     pub generation_overrides: Option<serde_json::Value>,
 }
 
+/// 服务器 BYOK 的公开选择。固定目录身份，不接受 URL 或秘密引用。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloudHostedPresetConfig {
+    pub provider_id: String,
+    pub model_id: String,
+    #[serde(default, deserialize_with = "de_optional_non_null")]
+    pub generation_overrides: Option<serde_json::Value>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CloudHostedGenerateRequest {
@@ -1338,6 +1335,8 @@ pub struct CloudHostedGenerateRequest {
     /// 显式 `null` 与缺省不同待遇（契约 `.optional()` 只接受缺省）。
     #[serde(default, deserialize_with = "de_optional_non_null")]
     pub system_config: Option<CloudHostedSystemConfig>,
+    #[serde(default, deserialize_with = "de_optional_non_null")]
+    pub preset_config: Option<CloudHostedPresetConfig>,
 }
 
 fn invalid_request(message: impl Into<String>) -> CloudError {
@@ -1406,9 +1405,7 @@ fn normalize_hosted_generation_overrides(
                 );
             }
             _ => {
-                return Err(invalid_request(format!(
-                    "generationOverrides 含未知字段 {key:?}"
-                )));
+                return Err(invalid_request("generationOverrides 含未知字段"));
             }
         }
     }
@@ -1470,6 +1467,9 @@ fn normalize_hosted_thinking_override(
 fn build_hosted_request_body(
     request: &CloudHostedGenerateRequest,
 ) -> Result<serde_json::Value, CloudError> {
+    if request.system_config.is_some() && request.preset_config.is_some() {
+        return Err(invalid_request("systemConfig 与 presetConfig 不可同时指定"));
+    }
     let serde_json::Value::Object(body) = &request.body else {
         return Err(invalid_request("生成请求 body 必须是 JSON 对象"));
     };
@@ -1531,15 +1531,51 @@ fn build_hosted_request_body(
     // 注入后复核：customProvider 会扩大 body，renderer 侧的大小预算只在注入
     // 前成立。最终 HTTP body 的 UTF-8 字节数必须重新对照路由上限，否则
     // oversized systemConfig 能绕过有界输入保证（D5.1-AIP-r1-r1）。
-    let final_size = serde_json::to_vec(&result)
+    check_hosted_body_budget(&result, &request.route_id)?;
+    Ok(result)
+}
+
+fn check_hosted_body_budget(body: &serde_json::Value, route_id: &str) -> Result<(), CloudError> {
+    let final_size = serde_json::to_vec(body)
         .map_err(|_| invalid_request("生成请求 body 无法序列化"))?
         .len();
-    if final_size > hosted_body_max_bytes(&request.route_id) {
+    if final_size > hosted_body_max_bytes(route_id) {
         return Err(invalid_request(
-            "生成请求 body 注入系统通道配置后超出大小上限",
+            "生成请求 body 注入供应商配置后超出大小上限",
         ));
     }
-    Ok(result)
+    Ok(())
+}
+
+/// 在任何 await 之前捕获凭据；之后的 Key 更换不会改变已经准备的请求。
+fn inject_hosted_preset(
+    body: &mut serde_json::Value,
+    config: Option<&CloudHostedPresetConfig>,
+    secrets: &dyn SecretStore,
+) -> Result<(), CloudError> {
+    let Some(config) = config else { return Ok(()) };
+    let model_id =
+        crate::provider_target::resolve_preset_model_id(&config.provider_id, &config.model_id)
+            .map_err(|_| invalid_request("服务器 BYOK 供应商或模型不可用"))?;
+    let secret_ref = crate::provider_target::preset_secret_ref(&config.provider_id)
+        .map_err(|_| invalid_request("服务器 BYOK 供应商不可用"))?;
+    let key = secrets
+        .resolve(&secret_ref)
+        .map_err(|_| CloudError::new(CloudErrorCode::StorageUnavailable, "无法读取供应商安全凭据"))?
+        .filter(|key| !key.trim().is_empty())
+        .ok_or_else(|| invalid_request("请先填写供应商 API Key"))?;
+    let mut provider = serde_json::json!({
+        "providerId": config.provider_id,
+        "modelId": model_id,
+        "apiKey": key.trim(),
+    });
+    if let Some(overrides) = &config.generation_overrides {
+        if let Some(normalized) = normalize_hosted_generation_overrides(overrides)? {
+            provider["generationOverrides"] = normalized;
+        }
+    }
+    body["customProvider"] = provider;
+    Ok(())
 }
 
 /// 增量 SSE 帧解析器：按 `\n\n` 或 `\r\n\r\n` 切帧，每帧取 `event:`/`data:` 行。
@@ -1629,6 +1665,22 @@ fn hosted_error_event(message: &str, code: &str) -> HostedSseEvent {
 }
 
 /// 服务端 `done`/`error` 是流上唯一的两种终态。
+/// BYOK 上游错误仅投影固定文案和有界重试秒数，不回显任意 diagnostics。
+fn sanitize_hosted_error(mut event: HostedSseEvent, is_byok: bool) -> HostedSseEvent {
+    if is_byok && event.event == "error" {
+        let retry_after = event
+            .data
+            .get("retryAfterSeconds")
+            .and_then(serde_json::Value::as_u64);
+        event.data = serde_json::json!({"ok": false, "code": "server-rejected",
+            "error": "供应商生成失败，请检查凭据、模型或稍后重试"});
+        if let Some(seconds) = retry_after.filter(|seconds| *seconds <= 86400) {
+            event.data["retryAfterSeconds"] = serde_json::json!(seconds);
+        }
+    }
+    event
+}
+
 fn is_hosted_terminal_event(event: &HostedSseEvent) -> bool {
     matches!(event.event.as_str(), "done" | "error")
 }
@@ -1663,8 +1715,8 @@ impl HostedEventSink for tauri::ipc::Channel<HostedSseEvent> {
 
 /// hosted 生成的公共 dispatch 前导：路由白名单、requestId 形态、body 边界
 /// 校验（`customProvider` 注入拒绝 + 大小上限）、会话装载与 DESK-094 契约
-/// 兼容门禁。流式与非流式两条命令共用——门禁失败在 requestId 注册之前返回，
-/// 不产生注册表残留。
+/// 兼容门禁。流式与非流式两条命令共用——requestId 在首次 await 前占有，
+/// 所有门禁失败都会由调用者释放注册表记录。
 ///
 /// DESK-094 门禁收在 dispatch 本身：任何调用方发起 hosted 生成前都必须先过
 /// 契约兼容探测，而不是依赖 UI 自觉先点「检查连通性」。探测只发生在用户主动
@@ -1683,7 +1735,9 @@ async fn prepare_hosted_dispatch(
     if request.request_id.is_empty() || request.request_id.len() > 128 {
         return Err(invalid_request("requestId 非法"));
     }
-    let body = build_hosted_request_body(request)?;
+    let mut body = build_hosted_request_body(request)?;
+    inject_hosted_preset(&mut body, request.preset_config.as_ref(), secrets)?;
+    check_hosted_body_budget(&body, &request.route_id)?;
     let session = load_session(secrets)?;
     match probe_hosted_compatibility(state, session.as_ref()).await? {
         HostedCompatibility::Ready { .. } => {}
@@ -1711,7 +1765,7 @@ async fn prepare_hosted_dispatch(
     Ok((body, session))
 }
 
-/// `stream_hosted_ai`：固定路由的 hosted 生成流（当前只开放系统默认通道）。
+/// `stream_hosted_ai`：固定路由的 hosted 生成流（系统默认或受信任预设 BYOK）。
 ///
 /// - 会话 cookie 只在已登录时附加（该路由对匿名也按公开规则放行）；
 /// - 取消经 `ai::RequestRegistry`，drop 上游连接立即生效；
@@ -1725,12 +1779,18 @@ pub async fn stream_hosted_ai(
     request: CloudHostedGenerateRequest,
     on_event: &dyn HostedEventSink,
 ) -> Result<(), CloudError> {
-    let (body, session) =
-        prepare_hosted_dispatch(state, secrets, &request, HOSTED_STREAM_ROUTES).await?;
-
+    // 首次 await 前占有请求身份，兼容探测期间重复点击也不能二次 dispatch。
     let token = registry
         .register(&request.request_id)
         .map_err(|_| CloudError::new(CloudErrorCode::InvalidRequest, "requestId 已在执行中"))?;
+    let prepared = prepare_hosted_dispatch(state, secrets, &request, HOSTED_STREAM_ROUTES).await;
+    let (body, session) = match prepared {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            registry.finish(&request.request_id);
+            return Err(error);
+        }
+    };
 
     let emit = |event: HostedSseEvent| on_event.send(event).ok();
 
@@ -1802,7 +1862,12 @@ pub async fn stream_hosted_ai(
                         .map(|s| s.to_string())
                 })
                 .unwrap_or_else(|| format!("生成服务拒绝请求（HTTP {status}）"));
-            emit(hosted_error_event(&message, "server-rejected"));
+            let message = if request.preset_config.is_some() {
+                "供应商生成失败，请检查凭据、模型或稍后重试"
+            } else {
+                &message
+            };
+            emit(hosted_error_event(message, "server-rejected"));
             return Ok(());
         }
 
@@ -1847,6 +1912,7 @@ pub async fn stream_hosted_ai(
                 return Ok(());
             }
             for event in events {
+                let event = sanitize_hosted_error(event, request.preset_config.is_some());
                 let terminal = is_hosted_terminal_event(&event);
                 if emit(event).is_none() {
                     // renderer 已断开：视同取消，中止上游。
@@ -1876,6 +1942,7 @@ pub async fn stream_hosted_ai(
         // 终态检查只覆盖正常 EOF 路径（上面遇到终态已提前退出循环）。
         let mut terminal_seen = false;
         for event in events {
+            let event = sanitize_hosted_error(event, request.preset_config.is_some());
             terminal_seen |= is_hosted_terminal_event(&event);
             if emit(event).is_none() {
                 return Ok(());
@@ -1923,12 +1990,18 @@ pub async fn hosted_ai_request(
     registry: &crate::ai::RequestRegistry,
     request: CloudHostedGenerateRequest,
 ) -> Result<CloudHostedJsonResponse, CloudError> {
-    let (body, session) =
-        prepare_hosted_dispatch(state, secrets, &request, HOSTED_JSON_ROUTES).await?;
-
+    // 首次 await 前占有请求身份，兼容探测期间重复点击也不能二次 dispatch。
     let token = registry
         .register(&request.request_id)
         .map_err(|_| CloudError::new(CloudErrorCode::InvalidRequest, "requestId 已在执行中"))?;
+    let prepared = prepare_hosted_dispatch(state, secrets, &request, HOSTED_JSON_ROUTES).await;
+    let (body, session) = match prepared {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            registry.finish(&request.request_id);
+            return Err(error);
+        }
+    };
 
     // allowed_routes 门禁已保证 route_id 在表内；unwrap 不会触发。
     let upstream_path = hosted_json_path(&request.route_id)
@@ -1969,7 +2042,10 @@ pub async fn hosted_ai_request(
         let response = response.map_err(|error| CloudError::network("生成请求", &error))?;
 
         let status = response.status().as_u16();
-        let body = if (200..300).contains(&status) {
+        let body = if request.preset_config.is_some() && !(200..300).contains(&status) {
+            // 不转发可能包含上游凭据的原始失败正文。HTTP 状态仍供错误/限速分类。
+            serde_json::json!({"error": "供应商生成失败，请检查凭据、模型或稍后重试"})
+        } else if (200..300).contains(&status) {
             read_bounded_json(response, "生成请求", HOSTED_JSON_RESPONSE_MAX_BYTES).await?
         } else {
             let text = read_bounded_text(response, HOSTED_JSON_RESPONSE_MAX_BYTES).await;
@@ -2846,8 +2922,9 @@ mod tests {
                         })),
                     }
                 }
-                path if path == HOSTED_GENERATE_DETAILS_STREAM_PATH
-                    || path == HOSTED_GENERATE_CANSHOU_STREAM_PATH =>
+                path if HOSTED_STREAM_ROUTES
+                    .iter()
+                    .any(|route| hosted_stream_path(route) == Some(path)) =>
                 {
                     *self.last_generate_headers.lock().unwrap() = Some(head.to_string());
                     *self.last_generate_body.lock().unwrap() = serde_json::from_slice(body).ok();
@@ -2884,8 +2961,9 @@ mod tests {
                         body: sse,
                     }
                 }
-                path if path == HOSTED_GENERATE_DETAILS_PATH
-                    || path == HOSTED_GENERATE_CANSHOU_PATH =>
+                path if HOSTED_JSON_ROUTES
+                    .iter()
+                    .any(|route| hosted_json_path(route) == Some(path)) =>
                 {
                     *self.last_generate_headers.lock().unwrap() = Some(head.to_string());
                     *self.last_generate_body.lock().unwrap() = serde_json::from_slice(body).ok();
@@ -3509,6 +3587,7 @@ mod tests {
             route_id: HOSTED_ROUTE_DETAILS_STREAM.to_string(),
             body: serde_json::json!({"answers": [{"questionId": "q1", "answer": "a"}]}),
             system_config: None,
+            preset_config: None,
         }
     }
 
@@ -3709,8 +3788,7 @@ mod tests {
         assert!(serde_json::from_value::<CloudHostedGenerateRequest>(with_top_level).is_err());
     }
 
-    /// BYOK 在 native Provider 绑定落地前保持关闭：`deny_unknown_fields`
-    /// 让任何凭据字段在 IPC 反序列化阶段就 fail-closed，进不了命令体。
+    /// BYOK 仅由 presetConfig 选择，任意秘密引用仍在 IPC 反序列化阶段拒绝。
     #[test]
     fn hosted_request_denies_credential_fields() {
         let with_byok = serde_json::json!({
@@ -3906,6 +3984,243 @@ mod tests {
         assert_eq!(
             build_hosted_request_body(&edge).unwrap_err().code,
             CloudErrorCode::InvalidRequest
+        );
+    }
+
+    #[test]
+    fn hosted_duplicate_is_rejected_while_compatibility_probe_is_pending() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            let registry = crate::ai::RequestRegistry::default();
+            let first_sink = VecSink::new();
+            let second_sink = VecSink::new();
+            let (first, second) = tokio::join!(
+                biased;
+                stream_hosted_ai(&state, &secrets, &registry, hosted_request(), &first_sink),
+                stream_hosted_ai(&state, &secrets, &registry, hosted_request(), &second_sink),
+            );
+            assert!(first.is_ok());
+            assert_eq!(second.unwrap_err().code, CloudErrorCode::InvalidRequest);
+            assert!(second_sink.events.lock().unwrap().is_empty());
+        });
+    }
+
+    #[test]
+    fn hosted_byok_five_families_use_fixed_routes_and_native_secret() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            secrets.set(&crate::provider_target::preset_secret_ref("deepseek").unwrap(), "fake-only-key").unwrap();
+            let registry = crate::ai::RequestRegistry::default();
+            for (stream_route, json_route) in HOSTED_STREAM_ROUTES.iter().zip(HOSTED_JSON_ROUTES) {
+                for (route, is_stream) in [(*stream_route, true), (*json_route, false)] {
+                    let mut request = hosted_request();
+                    request.route_id = route.into();
+                    request.preset_config = Some(CloudHostedPresetConfig {
+                        provider_id: "deepseek".into(), model_id: "custom-model".into(), generation_overrides: None,
+                    });
+                    if is_stream {
+                        let sink = VecSink::new();
+                        stream_hosted_ai(&state, &secrets, &registry, request, &sink).await.unwrap();
+                        assert!(!serde_json::to_string(&*sink.events.lock().unwrap()).unwrap().contains("fake-only-key"));
+                    } else {
+                        let response = hosted_ai_request(&state, &secrets, &registry, request).await.unwrap();
+                        assert_eq!(response.status, 200);
+                        assert!(!response.body.to_string().contains("fake-only-key"));
+                    }
+                    let sent = server.last_generate_body.lock().unwrap().clone().unwrap();
+                    assert_eq!(sent["customProvider"], serde_json::json!({
+                        "providerId": "deepseek", "modelId": "custom-model", "apiKey": "fake-only-key"
+                    }));
+                    assert!(!server.last_generate_headers.lock().unwrap().as_ref().unwrap().contains("fake-only-key"));
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn hosted_byok_http_failure_drops_echoed_credentials() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            *server.hosted_json_response.lock().unwrap() = Some((
+                401,
+                r#"{"error":"fake-only-key","details":{"key":"fake-only-key"}}"#.into(),
+            ));
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            secrets
+                .set(
+                    &crate::provider_target::preset_secret_ref("deepseek").unwrap(),
+                    "fake-only-key",
+                )
+                .unwrap();
+            let registry = crate::ai::RequestRegistry::default();
+            let mut request = hosted_request();
+            request.route_id = HOSTED_ROUTE_DETAILS.into();
+            request.preset_config = Some(CloudHostedPresetConfig {
+                provider_id: "deepseek".into(),
+                model_id: "custom".into(),
+                generation_overrides: None,
+            });
+            let response = hosted_ai_request(&state, &secrets, &registry, request)
+                .await
+                .unwrap();
+            assert_eq!(response.status, 401);
+            assert!(!response.body.to_string().contains("fake-only-key"));
+        });
+    }
+
+    #[test]
+    fn hosted_preset_injects_snapshot_without_profile_or_renderer_secret() {
+        let secrets = MemorySecrets::new();
+        let secret_ref = crate::provider_target::preset_secret_ref("deepseek").unwrap();
+        secrets.set(&secret_ref, "fake-before").unwrap();
+        let mut request = hosted_request();
+        request.preset_config = Some(CloudHostedPresetConfig {
+            provider_id: "deepseek".into(),
+            model_id: "\u{feff} custom-model \u{feff}".into(),
+            generation_overrides: Some(serde_json::json!({"temperature": 0.4})),
+        });
+        let mut body = build_hosted_request_body(&request).unwrap();
+        inject_hosted_preset(&mut body, request.preset_config.as_ref(), &secrets).unwrap();
+        secrets.set(&secret_ref, "fake-after").unwrap();
+        assert_eq!(body["customProvider"]["apiKey"], "fake-before");
+        assert_eq!(body["customProvider"]["modelId"], "custom-model");
+        assert_eq!(body["customProvider"]["providerId"], "deepseek");
+        assert!(body["customProvider"].get("baseUrl").is_none());
+        secrets.delete(&secret_ref).unwrap();
+        assert!(inject_hosted_preset(&mut body, request.preset_config.as_ref(), &secrets).is_err());
+        request.system_config = Some(CloudHostedSystemConfig {
+            model_id: None,
+            generation_overrides: None,
+        });
+        assert!(build_hosted_request_body(&request).is_err());
+    }
+
+    #[test]
+    fn hosted_preset_sends_shared_canonical_model_alias() {
+        let secrets = MemorySecrets::new();
+        secrets
+            .set(
+                &crate::provider_target::preset_secret_ref("deepseek").unwrap(),
+                "fake-key",
+            )
+            .unwrap();
+        let config = CloudHostedPresetConfig {
+            provider_id: "deepseek".into(),
+            model_id: "\u{feff} DEEPSEEK-V4-FLASH-0731 ".into(),
+            generation_overrides: None,
+        };
+        let mut body = serde_json::json!({});
+        inject_hosted_preset(&mut body, Some(&config), &secrets).unwrap();
+        assert_eq!(body["customProvider"]["modelId"], "deepseek-v4-flash");
+    }
+
+    #[test]
+    fn hosted_parameter_error_never_echoes_unknown_field_name() {
+        let error = normalize_hosted_generation_overrides(&serde_json::json!({
+            "fake-credential-in-field-name": "fake-secret-value"
+        }))
+        .unwrap_err();
+        assert_eq!(error.code, CloudErrorCode::InvalidRequest);
+        assert!(!error.message.contains("fake-"));
+    }
+
+    #[test]
+    fn hosted_preset_rejects_null_and_rechecks_final_body_budget() {
+        for preset in [
+            serde_json::Value::Null,
+            serde_json::json!({
+                "providerId": "deepseek", "modelId": "custom", "generationOverrides": null
+            }),
+        ] {
+            assert!(
+                serde_json::from_value::<CloudHostedGenerateRequest>(serde_json::json!({
+                    "requestId": "req-null", "routeId": HOSTED_ROUTE_DETAILS_STREAM,
+                    "body": {}, "presetConfig": preset,
+                }))
+                .is_err()
+            );
+        }
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            secrets
+                .set(
+                    &crate::provider_target::preset_secret_ref("deepseek").unwrap(),
+                    &"k".repeat(1024),
+                )
+                .unwrap();
+            let mut request = hosted_request();
+            request.body =
+                serde_json::json!({"pad": "x".repeat(HOSTED_BODY_DEFAULT_MAX_BYTES - 100)});
+            request.preset_config = Some(CloudHostedPresetConfig {
+                provider_id: "deepseek".into(),
+                model_id: "custom".into(),
+                generation_overrides: None,
+            });
+            assert!(build_hosted_request_body(&request).is_ok());
+            let registry = crate::ai::RequestRegistry::default();
+            let sink = VecSink::new();
+            let error = stream_hosted_ai(&state, &secrets, &registry, request, &sink)
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, CloudErrorCode::InvalidRequest);
+            assert!(server.last_generate_body.lock().unwrap().is_none());
+        });
+    }
+
+    #[test]
+    fn hosted_preset_rejects_unknown_provider_models_and_parameters() {
+        let secrets = MemorySecrets::new();
+        for (provider_id, model_id) in [
+            ("system", "default"),
+            ("missing", "m"),
+            ("deepseek", ""),
+            ("deepseek", "a\nb"),
+            ("deepseek", "a\u{85}b"),
+            ("deepseek", "a\u{9f}b"),
+        ] {
+            let config = CloudHostedPresetConfig {
+                provider_id: provider_id.into(),
+                model_id: model_id.into(),
+                generation_overrides: None,
+            };
+            assert!(
+                inject_hosted_preset(&mut serde_json::json!({}), Some(&config), &secrets).is_err()
+            );
+        }
+        for invalid in [
+            serde_json::json!({"baseUrl": "https://evil.invalid"}),
+            serde_json::json!({"maxOutputTokens": 0}),
+            serde_json::json!({"thinking": {"mode": "disabled", "effort": "high"}}),
+        ] {
+            assert!(normalize_hosted_generation_overrides(&invalid).is_err());
+        }
+        assert!(normalize_hosted_generation_overrides(
+            &serde_json::json!({"thinking": {"mode": "enabled", "effort": "high"}})
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn hosted_byok_error_never_forwards_provider_diagnostics() {
+        let event = HostedSseEvent {
+            event: "error".into(),
+            data: serde_json::json!({
+                "error": "fake-secret", "details": {"authorization": "fake-secret"}, "future": "fake-secret", "retryAfterSeconds": 20
+            }),
+        };
+        let result = sanitize_hosted_error(event, true);
+        assert!(!result.data.to_string().contains("fake-secret"));
+        assert_eq!(result.data["retryAfterSeconds"], 20);
+        assert_eq!(
+            sanitize_hosted_error(hosted_error_event("已取消", "cancelled"), false).data["code"],
+            "cancelled"
         );
     }
 
@@ -4243,6 +4558,7 @@ mod tests {
                 "allowNativeSignature": true,
             }),
             system_config: None,
+            preset_config: None,
         }
     }
 

@@ -364,3 +364,34 @@ describe('通用生成会话（草稿公共件与家族钩子）', () => {
     expect(record2.provenance.kind).toBe('unsigned');
   });
 });
+
+describe('hosted 目标与生成资格分离', () => {
+  it.each(['hosted-json', 'hosted-stream'] as const)('%s 使用预设身份及即时模型，不伪造Profile', async (mode) => {
+    const invoke = vi.fn(async (_command: string, args?: Record<string, unknown>) => {
+      if (mode === 'hosted-stream') {
+        const channel = args!.onEvent as { onmessage: (event: HostedGenerationEvent) => void };
+        channel.onmessage({ event: 'markdown', data: { chunk: '正文' } });
+        channel.onmessage({ event: 'done', data: { ok: true } });
+        return undefined;
+      }
+      return { status: 200, body: { title: 'card' } };
+    });
+    const outcome = await executeDesktopGeneration(fakeExecutorFamily(), {
+      invoke: invoke as never, profileId: '', providerTarget: { kind: 'preset', providerId: 'deepseek' }, createChannel: () => ({}),
+    }, { prompt: 'test' }, { requestId: 'byok-1', mode, modelId: 'custom-new', overrides: { temperature: 0.3 } }, new AbortController().signal);
+    expect(outcome.status).toBe('completed');
+    expect(invoke.mock.calls[0]?.[1]?.request).toMatchObject({
+      presetConfig: { providerId: 'deepseek', modelId: 'custom-new', generationOverrides: { temperature: 0.3 } },
+    });
+    expect(invoke.mock.calls[0]?.[1]?.request).not.toHaveProperty('systemConfig');
+    expect(JSON.stringify(invoke.mock.calls)).not.toContain('apiKey');
+  });
+  it('自定义Endpoint连接不可迁移成服务器代理', async () => {
+    const invoke = vi.fn();
+    const outcome = await executeDesktopGeneration(fakeExecutorFamily(), {
+      invoke, profileId: 'custom-1', providerTarget: { kind: 'custom', profileId: 'custom-1' },
+    }, { prompt: 'test' }, { requestId: 'byok-2', mode: 'hosted-json', modelId: 'custom' }, new AbortController().signal);
+    expect(outcome).toMatchObject({ status: 'failed', code: 'invalid-request' });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+});

@@ -154,3 +154,14 @@ describe('custom provider runtime helper', () => {
     expect(legacyResult.modelOverride).toBe('canonical-model');
   });
 });
+
+describe('Desktop BYOK 复用 Web 可信目录边界', () => {
+  it('请求提供任意 Endpoint 也不能改写服务器目录端点', () => {
+    const input = { providerId: 'deepseek', modelId: 'instant-model', apiKey: 'fake-key',
+      baseUrl: 'http://127.0.0.1/private', endpoint: 'https://untrusted.invalid', type: 'google' };
+    const resolved = resolveCustomProviderRuntime(input, dependencies);
+    expect(resolved.options?.providerOverride).toMatchObject({
+      baseUrl: 'https://api.deepseek.com', type: 'deepseek', model: 'instant-model',
+    });
+  });
+});

@@ -564,3 +564,31 @@ describe('公开库持久缓存投影（D5.1-K1）', () => {
     }).success).toBe(false);
   });
 });
+
+describe('hosted preset BYOK 安全选择', () => {
+  for (const [schema, routeId] of [
+    [DesktopHostedGenerateRequestSchema, 'generate-free-stream'],
+    [DesktopHostedJsonRequestSchema, 'generate-free'],
+  ] as const) {
+    it(`${routeId}: 接受稳定预设身份及即时模型，不接受秘密、URL 或双目标`, () => {
+      const base = { requestId: 'byok-1', routeId, body: {}, presetConfig: {
+        providerId: 'deepseek', modelId: ' custom-model ', generationOverrides: { temperature: 0.4 },
+      } };
+      expect(schema.parse(base).presetConfig?.modelId).toBe('custom-model');
+      expect(schema.parse({ ...base, presetConfig: { ...base.presetConfig, modelId: '\uFEFF custom-model \uFEFF' } }).presetConfig?.modelId).toBe('custom-model');
+      expect(schema.safeParse({ ...base, presetConfig: null }).success).toBe(false);
+      expect(schema.safeParse({ ...base, presetConfig: { ...base.presetConfig, generationOverrides: null } }).success).toBe(false);
+      expect(schema.parse({ ...base, presetConfig: { ...base.presetConfig, modelId: '😀'.repeat(100) } }).presetConfig?.modelId).toHaveLength(200);
+      for (const providerId of ['DeepSeek', 'deep.seek', 'deep_seek', 'a'.repeat(101)]) {
+        expect(schema.safeParse({ ...base, presetConfig: { ...base.presetConfig, providerId } }).success).toBe(false);
+      }
+      for (const forbidden of ['apiKey', 'secretRef', 'baseUrl', 'endpoint', 'profileId']) {
+        expect(schema.safeParse({ ...base, presetConfig: { ...base.presetConfig, [forbidden]: 'secret' } }).success).toBe(false);
+      }
+      expect(schema.safeParse({ ...base, systemConfig: { modelId: 'default' } }).success).toBe(false);
+      for (const modelId of ['', 'a\nb', 'x'.repeat(201), 'a\u0085b', 'a\u009fb', '😀'.repeat(101)]) {
+        expect(schema.safeParse({ ...base, presetConfig: { ...base.presetConfig, modelId } }).success).toBe(false);
+      }
+    });
+  }
+});
