@@ -9,6 +9,9 @@ export { copyTextToClipboard } from './clipboard';
 export {
   clearPageDraft,
   readPageDraft,
+  readPageDraftState,
+  type PageDraftBlockedReason,
+  type PageDraftReadState,
   writePageDraft,
   type StoredPageDraft,
 } from './pageDraft';
@@ -20,3 +23,4 @@ export {
   WEB_SNAPDOM_MEDIA,
   type SnapdomMediaAdapter,
 } from './snapdomCapture';
+export { useUnsavedPageGuard } from './useUnsavedPageGuard';

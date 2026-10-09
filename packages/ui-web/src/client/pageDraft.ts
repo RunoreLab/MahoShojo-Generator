@@ -102,3 +102,31 @@ export const readPageDraft = <T>(key: string, options: ReadPageDraftOptions): St
     return null;
   }
 };
+
+
+export type PageDraftBlockedReason = 'read-failed' | 'invalid' | 'version-mismatch' | 'expired';
+export type PageDraftReadState<T> =
+  | { readonly kind: 'missing' }
+  | { readonly kind: 'ready'; readonly stored: StoredPageDraft<T> }
+  | { readonly kind: 'blocked'; readonly reason: PageDraftBlockedReason };
+
+/** 非破坏读取：损坏、陌生版本、过期及不可读都保留原字节，交由调用方显式清理。 */
+export const readPageDraftState = <T>(key: string, options: ReadPageDraftOptions): PageDraftReadState<T> => {
+  const storage = getLocalStorage();
+  if (!storage) return { kind: 'blocked', reason: 'read-failed' };
+  let raw: string | null;
+  try { raw = storage.getItem(key); }
+  catch { return { kind: 'blocked', reason: 'read-failed' }; }
+  if (raw === null) return { kind: 'missing' };
+  let parsed: Partial<StoredPageDraft<T>> | null;
+  try { parsed = JSON.parse(raw) as Partial<StoredPageDraft<T>> | null; }
+  catch { return { kind: 'blocked', reason: 'invalid' }; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)
+    || typeof parsed.version !== 'number' || !Number.isFinite(parsed.version)
+    || typeof parsed.updatedAt !== 'number' || !Number.isFinite(parsed.updatedAt) || !('payload' in parsed)) {
+    return { kind: 'blocked', reason: 'invalid' };
+  }
+  if (parsed.version !== options.version) return { kind: 'blocked', reason: 'version-mismatch' };
+  if (Date.now() - parsed.updatedAt > options.ttlMs) return { kind: 'blocked', reason: 'expired' };
+  return { kind: 'ready', stored: parsed as StoredPageDraft<T> };
+};
