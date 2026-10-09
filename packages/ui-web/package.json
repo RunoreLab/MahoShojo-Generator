@@ -200,7 +200,9 @@
     "./tavern": "./src/tavern/index.ts",
     "./tavern-default-base": "./src/tavern/default-base.ts",
     "./team": "./src/team/index.ts",
-    "./questionnaire-editor": "./src/questionnaire-editor/index.ts"
+    "./questionnaire-editor": "./src/questionnaire-editor/index.ts",
+    "./card-forge": "./src/card-forge/index.ts",
+    "./card-forge.css": "./src/card-forge/styles.css"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",

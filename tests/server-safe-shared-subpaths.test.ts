@@ -240,6 +240,7 @@ describe('server-safe shared entrypoints stay free of React hooks', () => {
       './ai-provider',
       './announcement',
       './card-editor',
+      './card-forge',
       './card-library',
       './character-card',
       './character-manager',

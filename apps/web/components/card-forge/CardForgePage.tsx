@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { CardForgeThemeEditor } from '@mahoshojo/ui-web/card-forge';
 import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -94,11 +95,6 @@ const SAMPLE_CARD_JSON = JSON.stringify(
   null,
   2,
 );
-
-const PRESET_COLORS = [
-  '#ff6b9d', '#ef4444', '#f59e0b', '#10b981',
-  '#3b82f6', '#8b5cf6', '#ec4899', '#06b6d4',
-];
 
 const MODELSCOPE_SIZE_OPTIONS = [
   { value: '928x1664', label: '16:9 竖屏（928×1664）' },
@@ -847,41 +843,7 @@ export function CardForgePage() {
 
             {/* 主题色 */}
             {effectiveFaceData && (
-              <section className="card-forge-panel rounded-2xl p-5 space-y-4">
-                <h2 className="text-lg font-semibold text-[var(--app-text)]">主题色</h2>
-                <div className="flex flex-wrap gap-2">
-                  {PRESET_COLORS.map((color) => (
-                    <button
-                      key={color}
-                      type="button"
-                      onClick={() => setThemeColorOverride(color)}
-                      className="w-8 h-8 rounded-full border-2 transition-transform hover:scale-110"
-                      style={{
-                        backgroundColor: color,
-                        borderColor:
-                          (themeColorOverride ?? effectiveFaceData.themeColor) === color
-                            ? '#fff'
-                            : 'transparent',
-                        boxShadow:
-                          (themeColorOverride ?? effectiveFaceData.themeColor) === color
-                            ? `0 0 0 2px ${color}`
-                            : 'none',
-                      }}
-                    />
-                  ))}
-                  <label className="w-8 h-8 rounded-full border-2 border-gray-300 dark:border-gray-600 cursor-pointer flex items-center justify-center overflow-hidden relative">
-                    <input
-                      type="color"
-                      value={themeColorOverride ?? effectiveFaceData.themeColor}
-                      onChange={(e) => setThemeColorOverride(e.target.value)}
-                      className="opacity-0 absolute w-8 h-8"
-                      aria-label="自定义主题色"
-                    />
-                    <span className="text-xs">+</span>
-                  </label>
-                </div>
-
-              </section>
+              <CardForgeThemeEditor color={themeColorOverride ?? effectiveFaceData.themeColor} onChange={setThemeColorOverride} />
             )}
 
             {/* 卡面存档 */}
