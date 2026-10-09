@@ -11,6 +11,8 @@ import {
   CHARACTER_MANAGER_TEMPLATE_PLACEHOLDER_VALUE,
   CharacterManagerAccountPanel,
   CharacterManagerDraftBar,
+  CharacterManagerEditorActions,
+  formatCharacterManagerRestoredDraftMessage,
   CharacterManagerGuide,
   CharacterManagerImportSection,
   CharacterManagerPageHeader,
@@ -278,5 +280,40 @@ describe('character-manager page-draft 共源封装', () => {
     expect(
       restoreCharacterManagerPageDraft({ pastedJson: '', characterData: 'not-object' }),
     ).toBeNull();
+  });
+});
+
+
+describe('CharacterManagerEditorActions', () => {
+  it('保存、下载、复制与重新加载回用 Web 的完整动作布局，并调用各宿主动作', () => {
+    const actions = { onSaveLocal: vi.fn(), onDownload: vi.fn(), onCopy: vi.fn(), onLoadOtherData: vi.fn() };
+    render(<CharacterManagerEditorActions {...actions} cloudActions={<p>云端能力</p>} exportExtra={<p>附加导出</p>} />);
+    const buttons = [...container.querySelectorAll('button')];
+    expect(buttons.map((item) => item.textContent)).toEqual(['保存到本地库', '保存修改并下载', '复制到剪贴板', '加载其他数据']);
+    expect(buttons.slice(0, 3).every((item) => item.className === 'generate-button w-full')).toBe(true);
+    expect(buttons[2].style.backgroundImage).toContain('rgb(37, 99, 235)');
+    expect(buttons[3].className).toBe('footer-link mt-4 w-full text-center');
+    for (const item of buttons) act(() => item.click());
+    for (const action of Object.values(actions)) expect(action).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain('云端能力');
+    expect(container.textContent).toContain('附加导出');
+  });
+
+  it('保存或导出在途禁止公共动作；保存单独不可用不阻止导出', () => {
+    const actions = { onSaveLocal: vi.fn(), onDownload: vi.fn(), onCopy: vi.fn(), onLoadOtherData: vi.fn() };
+    for (const busy of [{ localSaveBusy: true }, { exportBusy: true }]) {
+      render(<CharacterManagerEditorActions {...actions} {...busy} />);
+      expect([...container.querySelectorAll('button')].every((item) => item.disabled)).toBe(true);
+    }
+    render(<CharacterManagerEditorActions {...actions} localSaveDisabled copied />);
+    const buttons = [...container.querySelectorAll('button')];
+    expect(buttons[0].disabled).toBe(true);
+    expect(buttons.slice(1).every((item) => !item.disabled)).toBe(true);
+    expect(buttons[2].textContent).toBe('已复制！');
+  });
+
+  it('恢复提示使用传入的原草稿时间', () => {
+    const timestamp = Date.parse('2026-10-08T08:01:02Z');
+    expect(formatCharacterManagerRestoredDraftMessage(timestamp)).toBe(`已恢复本地草稿（${new Date(timestamp).toLocaleTimeString()}）`);
   });
 });

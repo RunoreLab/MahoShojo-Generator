@@ -5,7 +5,7 @@ import { setDataCardFieldValue, type DataCardFieldAddon, type DataCardFieldPath 
 import { CanshouCard, GeneralCharacterCard, MagicalGirlCard, resolveMagicalGirlGradient } from '@mahoshojo/ui-web/character-card';
 import { LOCAL_CARD_TYPE_LABELS, LocalCardsPanel, useLocalCardsController, type LocalCardsHost } from '@mahoshojo/ui-web/local-cards';
 import { buildSafeFileName } from '@mahoshojo/ui-web/client';
-import { ProductFooter } from '@mahoshojo/ui-web/shell';
+import { BackHomeLink, ProductFooter } from '@mahoshojo/ui-web/shell';
 import type { HomeAssetSource } from '@mahoshojo/ui-web/home';
 import {
   CardLibraryModal,
@@ -16,6 +16,8 @@ import {
   CharacterManagerAccountPanel,
   CharacterManagerDraftBar,
   CharacterManagerEditorBody,
+  CharacterManagerEditorActions,
+  formatCharacterManagerRestoredDraftMessage,
   CharacterManagerGuide,
   CharacterManagerImportSection,
   CharacterManagerPageHeader,
@@ -144,6 +146,14 @@ export function DesktopCharacterManager() {
   const [originalData, setOriginalData] = useState<Record<string, unknown> | null>(null);
   const [baseline, setBaseline] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const exportingRef = useRef(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 2000);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [outcome, setOutcome] = useState<SaveOutcome | null>(null);
@@ -224,9 +234,10 @@ export function DesktopCharacterManager() {
         if (shouldAbort()) return;
         restore(storedDraft, original);
         setAutoSaveTimestamp(updatedAt);
-        const restoredText = original === null && storedDraft.originalId !== null
-          ? '已恢复浏览器内的编辑草稿；原本地库记录已不可用，草稿按未保存的导入卡处理。'
-          : '已恢复浏览器内的编辑草稿。';
+        const restoredText = formatCharacterManagerRestoredDraftMessage(updatedAt)
+          + (original === null && storedDraft.originalId !== null
+            ? '；原本地库记录已不可用，草稿按未保存的导入卡处理。'
+            : '');
         setNotice(prefix === null
           ? { tone: 'status', text: restoredText }
           : { tone: 'alert', text: `${prefix} ${restoredText}` });
@@ -254,6 +265,10 @@ export function DesktopCharacterManager() {
     setBaseline(null);
     setOutcome(null);
     setReplacedOriginalId(null);
+    setPasted('');
+    setPasteOpen(false);
+    setCopied(false);
+    setNotice(null);
     cards.controller.actions.reload();
   }, [cards.controller.actions]);
 
@@ -387,6 +402,30 @@ export function DesktopCharacterManager() {
     }
     if (needsLeaveGuard && !window.confirm('当前内容尚未写入本地库，或有未保存的修改。确认放弃并关闭？')) return;
     closeEditor();
+  };
+
+  // 导出当前草稿，不隐式写入本地库或改变未保存标记。Desktop 不发起补签请求。
+  const exportDraft = async (mode: 'download' | 'copy') => {
+    if (draft === null || savingRef.current || exportingRef.current) return;
+    exportingRef.current = true;
+    setExporting(true);
+    setCopied(false);
+    try {
+      const json = JSON.stringify(draft.data, null, 2);
+      if (mode === 'download') {
+        downloadTextFile(cardExportFileName(draft.title), json);
+        setNotice({ tone: 'status', text: '已发起文件下载。' });
+      } else {
+        await navigator.clipboard.writeText(json);
+        setCopied(true);
+        setNotice({ tone: 'status', text: '已复制到剪贴板。' });
+      }
+    } catch (cause) {
+      setNotice({ tone: 'alert', text: `操作失败：${cause instanceof Error ? cause.message : '无法导出当前内容，请重试。'}` });
+    } finally {
+      exportingRef.current = false;
+      setExporting(false);
+    }
   };
 
   const importText = (text: string) => {
@@ -646,7 +685,7 @@ export function DesktopCharacterManager() {
           <CharacterManagerGuide
             capabilities={DESKTOP_CHARACTER_MANAGER_CAPABILITIES}
             saveAndExportText={(
-              <>保存写入这台设备的本地库；也可以把当前编辑中的内容导出为 <code>.json</code> 文件。</>
+              <>保存写入这台设备的本地库；也可以把当前编辑中的内容下载为 <code>.json</code> 文件或复制到剪贴板。</>
             )}
             loadExtraText={<>也可以通过上方「我的数据卡」从本地库或云端数据卡载入。</>}
             extraSections={(
@@ -771,28 +810,16 @@ export function DesktopCharacterManager() {
                 currentStateSummaryHint="当前状态只写入本机本地库；本机不校验数字签名。请尽量统一使用状态摘要，避免随意增加自定义字段。"
                 bottomActions={(
                   <>
-                    <div className="mt-8 pt-4 border-t flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        className={actionClass}
-                        disabled={!guard.ready || saving || (draft.original !== null && !hasUnsavedChanges)}
-                        onClick={() => void save()}
-                      >
-                        {saving ? '正在保存…' : '保存到本地库'}
-                      </button>
-                      <button
-                        type="button"
-                        className={actionClass}
-                        disabled={saving}
-                        title="导出的是当前编辑中的内容，不要求先保存到本地库"
-                        onClick={() => downloadTextFile(cardExportFileName(draft.title), JSON.stringify(draft.data, null, 2))}
-                      >
-                        导出为 JSON 文件
-                      </button>
-                      <button type="button" className={actionClass} disabled={saving} onClick={leaveEditor}>
-                        {needsLeaveGuard ? '放弃修改并关闭' : '关闭'}
-                      </button>
-                    </div>
+                    <CharacterManagerEditorActions
+                      onSaveLocal={() => void save()}
+                      localSaveBusy={saving}
+                      localSaveDisabled={!guard.ready || (draft.original !== null && !hasUnsavedChanges)}
+                      onDownload={() => void exportDraft('download')}
+                      onCopy={() => void exportDraft('copy')}
+                      exportBusy={exporting}
+                      copied={copied}
+                      onLoadOtherData={leaveEditor}
+                    />
                     {outcome?.kind === 'unchanged' && <p role="status" className="text-sm">没有需要保存的修改。</p>}
                     {outcome?.kind === 'updated' && <p role="status" className="text-sm">已更新本地库中的记录。</p>}
                     {outcome?.kind === 'created' && (
@@ -851,6 +878,9 @@ export function DesktopCharacterManager() {
           titleOverride="我的数据卡"
           allowDeckImport={false}
         />
+        <div className="text-center mt-8">
+          <BackHomeLink href="#/" onNavigate={() => void router.navigate({ to: '/' })} />
+        </div>
         {/* 页脚与 Web 角色管理页同一共享组件；站外链接走受控外链确认。 */}
         <ProductFooter
           assetSource={DESKTOP_ASSET_SOURCE}

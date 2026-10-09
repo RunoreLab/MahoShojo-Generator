@@ -1,5 +1,9 @@
 import type { ReactNode } from 'react';
 
+/** 恢复时间来自已读取的草稿，不使用随后自动保存的新时间。 */
+export const formatCharacterManagerRestoredDraftMessage = (timestamp: number): string =>
+  `已恢复本地草稿（${new Date(timestamp).toLocaleTimeString()}）`;
+
 export interface CharacterManagerDraftBarProps {
   /** 最近一次自动保存的时间戳（epoch ms）；`null` 表示尚无已保存草稿。 */
   readonly savedAt: number | null;

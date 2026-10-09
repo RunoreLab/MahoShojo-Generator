@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Download } from 'lucide-react';
@@ -18,6 +18,9 @@ import {
     WANTU_ROUND_TRIP_EXPORT_PREFERENCE_KEY,
 } from '@/lib/wantu-card/character-manager';
 import Footer from '@/components/Footer';
+import { BackHomeLink } from '@mahoshojo/ui-web/shell';
+import { getLocalCardRepository } from '@/lib/local-library/card-repository';
+import { saveLocalDataCard } from '@/lib/local-library/save-local-data-card';
 // 【新增】导入卡片组件和颜色配置
 import MagicalGirlCard from '@/components/MagicalGirlCard';
 import CanshouCard from '@/components/CanshouCard';
@@ -45,6 +48,8 @@ import {
     CharacterManagerAccountPanel,
     CharacterManagerDraftBar,
     CharacterManagerEditorBody,
+    CharacterManagerEditorActions,
+    formatCharacterManagerRestoredDraftMessage,
     CharacterManagerGuide,
     CharacterManagerImportSection,
     CharacterManagerPageHeader,
@@ -320,6 +325,12 @@ export const CharacterManagerPage: React.FC = () => {
     const [isNative, setIsNative] = useState(false);
     const [hasLostNativeness, setHasLostNativeness] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
+    const [isSavingLocal, setIsSavingLocal] = useState(false);
+    const localSavingRef = useRef(false);
+    const currentLocalDataRef = useRef(characterData);
+    currentLocalDataRef.current = characterData;
+    const [localSaveNotice, setLocalSaveNotice] = useState<{ error: boolean; text: string } | null>(null);
+    useEffect(() => { setLocalSaveNotice(null); }, [characterData]);
     const [message, setMessage] = useState<{ type: 'info' | 'error' | 'success', text: string } | null>(null);
     const [copiedStatus, setCopiedStatus] = useState(false);
     const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
@@ -586,6 +597,40 @@ export const CharacterManagerPage: React.FC = () => {
         });
         setSaveCardError(null);
         setShowSaveCardModal(true);
+    };
+
+    // 本地保存沿用 Web IndexedDB 仓储与既有内容摘要协议；无需登录、补签或网络。
+    // 保留正文中的未知字段和签名证据，库记录的 provenance 仍由既有 helper 标为 unsigned。
+    const handleSaveToLocalLibrary = async () => {
+        if (!characterData || localSavingRef.current || isLoading) return;
+        localSavingRef.current = true;
+        setIsSavingLocal(true);
+        setLocalSaveNotice(null);
+        const input = characterData;
+        try {
+            const payload = JSON.parse(JSON.stringify(characterData));
+            const name = [payload.codename, payload.name, payload.title]
+                .find((value) => typeof value === 'string' && value.trim());
+            const result = await saveLocalDataCard(getLocalCardRepository(), {
+                cardType: isScenarioData(payload) ? 'scenario' : 'character',
+                title: typeof name === 'string' ? name : '未命名数据卡',
+                payload,
+                execution: 'edited',
+            });
+            setLocalSaveNotice({
+                error: result.inRecycleBin,
+                text: result.inRecycleBin
+                    ? '内容相同的数据卡在本地库回收站中，请先恢复后再保存。'
+                    : currentLocalDataRef.current !== input
+                        ? '已保存点击时的内容；后续修改尚未写入本地库。'
+                        : result.updated ? '已更新本地库中的同内容数据卡。' : '已保存到本地库。',
+            });
+        } catch (error) {
+            setLocalSaveNotice({ error: true, text: `保存到本地库失败：${error instanceof Error ? error.message : '本地存储不可用，请重试。'}` });
+        } finally {
+            localSavingRef.current = false;
+            setIsSavingLocal(false);
+        }
     };
 
     // 确认保存数据卡
@@ -931,7 +976,7 @@ export const CharacterManagerPage: React.FC = () => {
         setAutoSaveTimestamp(restored.updatedAt);
         setMessage({
             type: 'info',
-            text: `已恢复本地草稿（${new Date(restored.updatedAt).toLocaleTimeString()}）`,
+            text: formatCharacterManagerRestoredDraftMessage(restored.updatedAt),
         });
         setDraftRestoreReady(true);
     }, []);
@@ -1703,7 +1748,7 @@ export const CharacterManagerPage: React.FC = () => {
                             linkComponent={Link}
                             saveAndExportText={(
                                 <>
-                                    完成修改后，可下载新的 <code>.json</code> 文件或将内容复制到剪贴板。
+                                    完成修改后，可保存到本地库、下载新的 <code>.json</code> 文件或将内容复制到剪贴板。
                                 </>
                             )}
                         />
@@ -1761,8 +1806,16 @@ export const CharacterManagerPage: React.FC = () => {
                                 classes={CHARACTER_MANAGER_FIELD_CLASSES}
                                 renderFieldAddon={renderFieldAddon}
                                 bottomActions={(
-                                    <div className="mt-8 pt-4 border-t space-y-2">
-                                        {isAuthenticated && characterData && (
+                                    <CharacterManagerEditorActions
+                                        onSaveLocal={() => void handleSaveToLocalLibrary()}
+                                        localSaveBusy={isSavingLocal}
+                                        onDownload={() => void handleSaveChanges('download')}
+                                        onCopy={() => void handleSaveChanges('copy')}
+                                        exportBusy={isLoading}
+                                        exportDisabled={message?.type === 'error'}
+                                        copied={copiedStatus}
+                                        onLoadOtherData={handleLoadOtherData}
+                                        cloudActions={isAuthenticated && characterData && (
                                             validationResult?.success ? (
                                                 <div className="space-y-2">
                                                     <button
@@ -1784,13 +1837,7 @@ export const CharacterManagerPage: React.FC = () => {
                                                 </div>
                                             )
                                         )}
-                                        <button onClick={() => handleSaveChanges('download')} disabled={message?.type === 'error' || isLoading} className="generate-button w-full">
-                                            {isLoading ? '处理中...' : '保存修改并下载'}
-                                        </button>
-                                        <button onClick={() => handleSaveChanges('copy')} disabled={message?.type === 'error' || isLoading} className="generate-button w-full" style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}>
-                                            {isLoading ? '处理中...' : copiedStatus ? '已复制！' : '复制到剪贴板'}
-                                        </button>
-                                        {!isScenarioData(characterData) && (
+                                        exportExtra={!isScenarioData(characterData) && (
                                             <div className="space-y-2">
                                                 <button
                                                     type="button"
@@ -1820,10 +1867,12 @@ export const CharacterManagerPage: React.FC = () => {
                                                 </label>
                                             </div>
                                         )}
-                                        <button onClick={handleLoadOtherData} className="footer-link mt-4 w-full text-center">
-                                            加载其他数据
-                                        </button>
-                                    </div>
+                                        feedback={localSaveNotice && (
+                                            <p role={localSaveNotice.error ? 'alert' : 'status'} className={`text-sm ${localSaveNotice.error ? 'text-red-700' : 'text-green-700'}`}>
+                                                {localSaveNotice.text}
+                                            </p>
+                                        )}
+                                    />
                                 )}
                             />
                         )}
@@ -2021,7 +2070,7 @@ export const CharacterManagerPage: React.FC = () => {
                     )}
 
                     <div className="text-center mt-8">
-                        <Link href="/" className="footer-link">返回首页</Link>
+                        <BackHomeLink renderLink={(props) => <Link {...props} />} />
                     </div>
                     <Footer />
                 </div>

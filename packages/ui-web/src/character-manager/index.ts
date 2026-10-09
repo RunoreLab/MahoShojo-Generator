@@ -24,6 +24,7 @@ export {
 } from './guide';
 export {
   CharacterManagerDraftBar,
+  formatCharacterManagerRestoredDraftMessage,
   type CharacterManagerDraftBarProps,
 } from './draft-bar';
 export {
@@ -92,3 +93,8 @@ export {
   type RestoredCharacterManagerPageDraft,
 } from './page-draft';
 export { CharacterManagerPreviewPanel } from './preview-panel';
+
+export {
+  CharacterManagerEditorActions,
+  type CharacterManagerEditorActionsProps,
+} from './editor-actions';

@@ -293,7 +293,7 @@ describe('Desktop 本地角色管理（IPC mock，仍需真机重启验收）', 
     await click(button('从文本加载数据'));
     await waitFor(() => container.textContent?.includes('编辑角色: 导出角色') === true);
 
-    await click(button('导出为 JSON 文件'));
+    await click(button('保存修改并下载'));
     expect(createObjectURL).toHaveBeenCalledOnce();
     expect(anchorClick).toHaveBeenCalledOnce();
     // 文件名按记录标题生成（与共享卡库下载同一口径）。
@@ -303,6 +303,33 @@ describe('Desktop 本地角色管理（IPC mock，仍需真机重启验收）', 
     const blob = createObjectURL.mock.calls[0][0] as Blob;
     expect(JSON.parse(await blob.text())).toEqual(imported);
     expect(rows.size).toBe(1);
+  });
+
+  it('复制当前草稿保留扩展和签名证据，失败可重试且不写库；加载其他数据仍有放弃保护', async () => {
+    const writeText = vi.fn().mockRejectedValueOnce(new Error('剪贴板不可用')).mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    window.location.hash = '#/character-manager';
+    await mount();
+    await expandPasteArea();
+    const imported = { codename: '复制角色', appearance: { outfit: '白裙' }, signature: 'opaque', future: { entries: [1, '保真'] } };
+    await type(container.querySelector<HTMLTextAreaElement>('textarea')!, JSON.stringify(imported));
+    await click(button('从文本加载数据'));
+    await waitFor(() => container.textContent?.includes('编辑角色: 复制角色') === true);
+    await click(button('复制到剪贴板'));
+    expect(container.textContent).toContain('操作失败：剪贴板不可用');
+    await click(button('复制到剪贴板'));
+    expect(JSON.parse(writeText.mock.calls[1][0])).toEqual(imported);
+    expect(button('已复制！')).toBeDefined();
+    expect(rows.size).toBe(1);
+    expect(container.textContent).toContain('尚未保存到本地库');
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+    await click(button('加载其他数据'));
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain('编辑角色: 复制角色');
+    await click(button('加载其他数据'));
+    expect(container.textContent).not.toContain('编辑角色: 复制角色');
+    await expandPasteArea();
+    expect(container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('');
   });
 
   it('非法导入给出原因且不进入编辑', async () => {
@@ -347,7 +374,7 @@ describe('Desktop 本地角色管理（IPC mock，仍需真机重启验收）', 
     window.location.hash = '#/character-manager';
     await mount();
     await waitFor(() => container.textContent?.includes('编辑角色: 草稿角色') === true);
-    expect(container.textContent).toContain('已恢复浏览器内的编辑草稿');
+    expect(container.textContent).toContain('已恢复本地草稿');
     expect(container.textContent).toContain('尚未保存到本地库');
   });
 
@@ -377,7 +404,7 @@ describe('Desktop 本地角色管理（IPC mock，仍需真机重启验收）', 
     await waitFor(() => button('我的数据卡') !== undefined);
     await settle();
     expect(container.textContent).not.toContain('编辑角色: 草稿角色');
-    expect(container.textContent).not.toContain('已恢复浏览器内的编辑草稿');
+    expect(container.textContent).not.toContain('已恢复本地草稿');
     expect(window.localStorage.getItem(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY)).toBeNull();
   });
 
@@ -397,7 +424,7 @@ describe('Desktop 本地角色管理（IPC mock，仍需真机重启验收）', 
     root = createRoot(container);
     window.location.hash = `#/character-manager?card=${original.id}`;
     await mount();
-    await waitFor(() => container.textContent?.includes('已恢复浏览器内的编辑草稿') === true);
+    await waitFor(() => container.textContent?.includes('已恢复本地草稿') === true);
     // baseline 是本地库原记录而不是草稿自身：恢复出的草稿保持 dirty 与离开保护。
     expect(container.textContent).toContain('本地库记录 · 有未保存的修改');
     expect(fieldByLabel('记录标题').value).toBe('星光·草稿');
@@ -431,7 +458,7 @@ describe('Desktop 本地角色管理（IPC mock，仍需真机重启验收）', 
     await mount();
     await waitFor(() => container.textContent?.includes('本地库中没有这张数据卡') === true);
     await waitFor(() => container.textContent?.includes('编辑角色: 草稿角色') === true);
-    expect(container.textContent).toContain('已恢复浏览器内的编辑草稿');
+    expect(container.textContent).toContain('已恢复本地草稿');
     expect(window.localStorage.getItem(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY)).not.toBeNull();
   });
 
@@ -482,7 +509,7 @@ describe('Desktop 本地角色管理（IPC mock，仍需真机重启验收）', 
     // 仲裁落定后恢复草稿，工作区入口随之开放。
     await releaseGets();
     await waitFor(() => container.textContent?.includes('编辑角色: 草稿角色') === true);
-    expect(container.textContent).toContain('已恢复浏览器内的编辑草稿');
+    expect(container.textContent).toContain('已恢复本地草稿');
     expect(button('我的数据卡')).not.toBeUndefined();
   });
 
@@ -496,7 +523,7 @@ describe('Desktop 本地角色管理（IPC mock，仍需真机重启验收）', 
 
     await releaseGets();
     await waitFor(() => container.textContent?.includes('编辑角色: 草稿角色') === true);
-    expect(container.textContent).toContain('已恢复浏览器内的编辑草稿');
+    expect(container.textContent).toContain('已恢复本地草稿');
     expect(fieldByLabel('记录标题').value).toBe('草稿标题');
   });
 
