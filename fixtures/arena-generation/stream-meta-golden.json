@@ -1,0 +1,296 @@
+{
+  "no-marker": {
+    "start": null,
+    "strip": null,
+    "markdown": "# 雨城\n\n普通正文 {不解析} <!-- ordinary -->\n",
+    "update": null,
+    "telemetry": null
+  },
+  "arena-comment": {
+    "start": {
+      "index": 9,
+      "kind": "comment",
+      "marker": "MAHOSHOJO_ARENA_META"
+    },
+    "strip": {
+      "rawComment": "<!-- MAHOSHOJO_ARENA_META {\"version\":1,\"report\":{\"headline\":\" H \",\"winner\":\" A \"},\"impacts\":[{\"characterName\":\" A \",\"impact\":\" 约定 \",\"currentStateSummary\":\" 平静 \"}]} -->",
+      "strippedMarkdown": "# 标题\n\n正文",
+      "marker": "MAHOSHOJO_ARENA_META"
+    },
+    "markdown": "# 标题\n\n正文",
+    "update": {
+      "meta": {
+        "version": 1,
+        "report": {
+          "headline": "H",
+          "winner": "A"
+        },
+        "impacts": [
+          {
+            "characterName": "A",
+            "impact": "约定",
+            "currentStateSummary": "平静"
+          }
+        ]
+      },
+      "rawComment": "<!-- MAHOSHOJO_ARENA_META {\"version\":1,\"report\":{\"headline\":\" H \",\"winner\":\" A \"},\"impacts\":[{\"characterName\":\" A \",\"impact\":\" 约定 \",\"currentStateSummary\":\" 平静 \"}]} -->",
+      "strippedMarkdown": "# 标题\n\n正文"
+    },
+    "telemetry": null
+  },
+  "legacy-alias-malformed": {
+    "start": {
+      "index": 3,
+      "kind": "comment",
+      "marker": "MAHOSHOJO_META"
+    },
+    "strip": {
+      "rawComment": "<!-- MAHOSHOJO_META {version:1, impacts:[{name:'A', impact:'成长', current_state_summary:'平静',},],} -->",
+      "strippedMarkdown": "正文",
+      "marker": "MAHOSHOJO_META"
+    },
+    "markdown": "正文",
+    "update": {
+      "meta": {
+        "version": 1,
+        "impacts": [
+          {
+            "characterName": "A",
+            "impact": "成长",
+            "currentStateSummary": "平静"
+          }
+        ]
+      },
+      "rawComment": "<!-- MAHOSHOJO_META {version:1, impacts:[{name:'A', impact:'成长', current_state_summary:'平静',},],} -->",
+      "strippedMarkdown": "正文"
+    },
+    "telemetry": null
+  },
+  "stream-alias-loose": {
+    "start": {
+      "index": 3,
+      "kind": "loose",
+      "marker": "MAHOSHOJO_STREAM_META"
+    },
+    "strip": {
+      "rawComment": "--- MAHOSHOJO_STREAM_META = {\"impacts\":[{\"character\":\"A\",\"impact\":\"新\"}]}",
+      "strippedMarkdown": "正文\n\n后续正文",
+      "marker": "MAHOSHOJO_STREAM_META"
+    },
+    "markdown": "正文\n\n后续正文",
+    "update": {
+      "meta": {
+        "impacts": [
+          {
+            "characterName": "A",
+            "impact": "新"
+          }
+        ]
+      },
+      "rawComment": "--- MAHOSHOJO_STREAM_META = {\"impacts\":[{\"character\":\"A\",\"impact\":\"新\"}]}",
+      "strippedMarkdown": "正文\n\n后续正文"
+    },
+    "telemetry": null
+  },
+  "array-curly-quotes-ellipsis": {
+    "start": {
+      "index": 0,
+      "kind": "comment",
+      "marker": "mahoshojo_arena_meta"
+    },
+    "strip": {
+      "rawComment": "<!--- mahoshojo_arena_meta [{“characterNameZh”:“A”,“impact”:“旧”},……,{“name”:“A”,“current_state_summary”:“新”},...,{“name”:“B”,“flag”:True}] -->",
+      "strippedMarkdown": "",
+      "marker": "MAHOSHOJO_ARENA_META"
+    },
+    "markdown": "",
+    "update": {
+      "meta": {
+        "version": 1,
+        "impacts": [
+          {
+            "characterName": "A",
+            "impact": "旧",
+            "currentStateSummary": "新"
+          },
+          {
+            "characterName": "B"
+          }
+        ]
+      },
+      "rawComment": "<!--- mahoshojo_arena_meta [{“characterNameZh”:“A”,“impact”:“旧”},……,{“name”:“A”,“current_state_summary”:“新”},...,{“name”:“B”,“flag”:True}] -->",
+      "strippedMarkdown": ""
+    },
+    "telemetry": null
+  },
+  "wrapped-string": {
+    "start": {
+      "index": 3,
+      "kind": "comment",
+      "marker": "MAHOSHOJO_ARENA_META"
+    },
+    "strip": {
+      "rawComment": "<!-- MAHOSHOJO_ARENA_META {\"json\":\"{\\\"payload\\\":{\\\"report\\\":{\\\"winner\\\":\\\"A\\\"},\\\"impacts\\\":[{\\\"name\\\":\\\"A\\\",\\\"impact\\\":\\\"约定\\\"}]}}\"} -->",
+      "strippedMarkdown": "正文",
+      "marker": "MAHOSHOJO_ARENA_META"
+    },
+    "markdown": "正文",
+    "update": {
+      "meta": {
+        "report": {
+          "winner": "A"
+        },
+        "impacts": [
+          {
+            "characterName": "A",
+            "impact": "约定"
+          }
+        ]
+      },
+      "rawComment": "<!-- MAHOSHOJO_ARENA_META {\"json\":\"{\\\"payload\\\":{\\\"report\\\":{\\\"winner\\\":\\\"A\\\"},\\\"impacts\\\":[{\\\"name\\\":\\\"A\\\",\\\"impact\\\":\\\"约定\\\"}]}}\"} -->",
+      "strippedMarkdown": "正文"
+    },
+    "telemetry": null
+  },
+  "unclosed-comment": {
+    "start": {
+      "index": 3,
+      "kind": "comment",
+      "marker": "MAHOSHOJO_ARENA_META"
+    },
+    "strip": {
+      "rawComment": "<!-- MAHOSHOJO_ARENA_META {version:1,impacts:[{name:\"A\",current_state_summary:\"继续\"}",
+      "strippedMarkdown": "正文",
+      "marker": "MAHOSHOJO_ARENA_META"
+    },
+    "markdown": "正文",
+    "update": {
+      "meta": {
+        "version": 1,
+        "impacts": [
+          {
+            "characterName": "A",
+            "currentStateSummary": "继续"
+          }
+        ]
+      },
+      "rawComment": "<!-- MAHOSHOJO_ARENA_META {version:1,impacts:[{name:\"A\",current_state_summary:\"继续\"}",
+      "strippedMarkdown": "正文"
+    },
+    "telemetry": null
+  },
+  "multiple-markers-with-telemetry": {
+    "start": {
+      "index": 3,
+      "kind": "comment",
+      "marker": "MAHOSHOJO_META"
+    },
+    "strip": {
+      "rawComment": "<!-- MAHOSHOJO_TELEMETRY_META {\"aiModel\":\" local \",\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":5,\"reasoning_tokens\":2},\"narrativeHistoryReadCount\":3} -->",
+      "strippedMarkdown": "前文\n<!-- MAHOSHOJO_META {\"impacts\":[{\"name\":\"A\",\"impact\":\"旧\"}]} -->\n中段\nMAHOSHOJO_STREAM_META {\"report\":{\"headline\":\"新\"},\"impacts\":[{\"name\":\"A\",\"impact\":\"新\"}]}",
+      "marker": "MAHOSHOJO_TELEMETRY_META"
+    },
+    "markdown": "前文\n\n中段",
+    "update": {
+      "meta": {
+        "report": {
+          "headline": "新"
+        },
+        "impacts": [
+          {
+            "characterName": "A",
+            "impact": "新"
+          }
+        ]
+      },
+      "rawComment": "MAHOSHOJO_STREAM_META {\"report\":{\"headline\":\"新\"},\"impacts\":[{\"name\":\"A\",\"impact\":\"新\"}]}",
+      "strippedMarkdown": "前文\n<!-- MAHOSHOJO_META {\"impacts\":[{\"name\":\"A\",\"impact\":\"旧\"}]} -->\n中段\n\n<!-- MAHOSHOJO_TELEMETRY_META {\"aiModel\":\" local \",\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":5,\"reasoning_tokens\":2},\"narrativeHistoryReadCount\":3} -->"
+    },
+    "telemetry": {
+      "meta": {
+        "aiModel": "local",
+        "usage": {
+          "promptTokens": 8,
+          "completionTokens": 5,
+          "reasoningTokens": 2
+        },
+        "narrativeHistoryReadCount": 3
+      },
+      "rawComment": "<!-- MAHOSHOJO_TELEMETRY_META {\"aiModel\":\" local \",\"usage\":{\"prompt_tokens\":8,\"completion_tokens\":5,\"reasoning_tokens\":2},\"narrativeHistoryReadCount\":3} -->",
+      "strippedMarkdown": "前文\n<!-- MAHOSHOJO_META {\"impacts\":[{\"name\":\"A\",\"impact\":\"旧\"}]} -->\n中段\nMAHOSHOJO_STREAM_META {\"report\":{\"headline\":\"新\"},\"impacts\":[{\"name\":\"A\",\"impact\":\"新\"}]}"
+    }
+  },
+  "invalid-update-schema": {
+    "start": {
+      "index": 3,
+      "kind": "comment",
+      "marker": "MAHOSHOJO_ARENA_META"
+    },
+    "strip": {
+      "rawComment": "<!-- MAHOSHOJO_ARENA_META {\"version\":-1} -->",
+      "strippedMarkdown": "正文",
+      "marker": "MAHOSHOJO_ARENA_META"
+    },
+    "markdown": "正文",
+    "update": {
+      "error": "Schema validation failed: version: Number must be greater than or equal to 1"
+    },
+    "telemetry": null
+  },
+  "invalid-telemetry-schema": {
+    "start": null,
+    "strip": {
+      "rawComment": "<!-- MAHOSHOJO_TELEMETRY_META {\"usage\":{\"totalTokens\":-1}} -->",
+      "strippedMarkdown": "正文",
+      "marker": "MAHOSHOJO_TELEMETRY_META"
+    },
+    "markdown": "正文",
+    "update": null,
+    "telemetry": {
+      "meta": {},
+      "rawComment": "<!-- MAHOSHOJO_TELEMETRY_META {\"usage\":{\"totalTokens\":-1}} -->",
+      "strippedMarkdown": "正文"
+    }
+  },
+  "telemetry-parse-failure": {
+    "start": null,
+    "strip": {
+      "rawComment": "<!-- MAHOSHOJO_TELEMETRY_META : : : -->",
+      "strippedMarkdown": "正文",
+      "marker": "MAHOSHOJO_TELEMETRY_META"
+    },
+    "markdown": "正文",
+    "update": null,
+    "telemetry": {
+      "meta": {},
+      "rawComment": "<!-- MAHOSHOJO_TELEMETRY_META : : : -->",
+      "strippedMarkdown": "正文"
+    }
+  },
+  "remove-invalid-update-fields": {
+    "start": {
+      "index": 3,
+      "kind": "comment",
+      "marker": "MAHOSHOJO_ARENA_META"
+    },
+    "strip": {
+      "rawComment": "<!-- MAHOSHOJO_ARENA_META {\"report\":{\"winner\":true},\"impacts\":[null,2,{\"name\":\"A\",\"impact\":false},{\"name\":\"A\",\"impact\":\"新\"},{\"name\":\" \",\"impact\":\"丢弃\"}]} -->",
+      "strippedMarkdown": "正文",
+      "marker": "MAHOSHOJO_ARENA_META"
+    },
+    "markdown": "正文",
+    "update": {
+      "meta": {
+        "impacts": [
+          {
+            "characterName": "A",
+            "impact": "新"
+          }
+        ]
+      },
+      "rawComment": "<!-- MAHOSHOJO_ARENA_META {\"report\":{\"winner\":true},\"impacts\":[null,2,{\"name\":\"A\",\"impact\":false},{\"name\":\"A\",\"impact\":\"新\"},{\"name\":\" \",\"impact\":\"丢弃\"}]} -->",
+      "strippedMarkdown": "正文"
+    },
+    "telemetry": null
+  }
+}

@@ -7,6 +7,11 @@ const readSharedRuntimeSource = (file: string) => readFileSync(
   'utf8',
 );
 
+const readSharedPromptAssembly = () => readFileSync(
+  join(process.cwd(), '../../packages/ai-core/src/arena-generation/prompt-assembly.ts'),
+  'utf8',
+);
+
 describe('generate-battle-story context wiring', () => {
   test('companion endpoint 复用 shared Arena materials/prompt pipeline', () => {
     const executor = readSharedRuntimeSource('node-executor.ts');
@@ -14,8 +19,12 @@ describe('generate-battle-story context wiring', () => {
 
     expect(executor).toContain('normalizeNodeArenaMaterials(rawMaterials)');
     expect(executor).toContain('payload.materialSourceTypes');
-    expect(prompt).toContain('materials,');
-    expect(prompt).toContain('!strictRankedMatch');
+    expect(prompt).toContain("from '@mahoshojo/ai-core/arena-generation'");
+    expect(prompt).toContain('return assembleArenaGenerationPrompt({');
+    expect(prompt).toContain('payload: { ...payload, userGuidance }');
+    const assembly = readSharedPromptAssembly();
+    expect(assembly).toContain('materials,');
+    expect(assembly).toContain('!strictRankedMatch');
   });
 
   test('companion endpoint 复用 shared Arena 聚合引用预算', () => {
@@ -24,6 +33,7 @@ describe('generate-battle-story context wiring', () => {
 
     expect(runtime).toContain('countArenaReferenceItems(payload)');
     expect(runtime).toContain("'ARENA_REFERENCE_ITEMS_LIMIT'");
-    expect(prompt).toContain('Array.isArray(payload.auxScenarios)');
+    expect(prompt).toContain('return assembleArenaGenerationPrompt({');
+    expect(readSharedPromptAssembly()).toContain('Array.isArray(payload.auxScenarios)');
   });
 });

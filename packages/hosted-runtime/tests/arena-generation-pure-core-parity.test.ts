@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { arenaModes, arenaDeliveries, arenaParityPayload } from '../../../fixtures/arena-generation/input';
+import { assembleArenaGenerationPrompt, type ArenaPromptAdjudicationResult } from '@mahoshojo/ai-core/arena-generation';
 import { buildArenaGenerationPrompt } from '../src/arena-generation/prompt';
 
 // Captured from the unmodified production builder at 76acdab3; never regenerated in tests.
@@ -23,6 +24,23 @@ describe('Arena production prompt frozen parity (76acdab3)', () => {
       expect(result.prompt).toContain('旧约定仍有效');
       expect(result.prompt).not.toContain('excluded-signature');
       expect(digest).toBe(golden[`${mode}/${delivery}`]);
+      const { __arenaServerContextV1: _context, adjudicationResults, ...payload } = arenaParityPayload(mode, delivery);
+      void _context;
+      expect(assembleArenaGenerationPrompt({
+        payload,
+        outputContract: delivery === 'non-stream' ? 'structured-report' : 'stream-markdown',
+        reporterInfo: { name: '蓝星单推人', publication: '兽扑' },
+        adjudicationResults: adjudicationResults as ArenaPromptAdjudicationResult[],
+      })).toEqual(result);
     });
+  }
+});
+
+it('keeps delivery-specific guidance truncation in Hosted, including boundary whitespace', async () => {
+  const guidance = `${'字'.repeat(199)} 尾部完整保留`;
+  for (const delivery of arenaDeliveries) {
+    const payload = { ...arenaParityPayload('classic', delivery), userGuidance: `  ${guidance}  ` };
+    const result = await buildArenaGenerationPrompt({ actorKey: 'fixture', payload, random: () => 0 });
+    expect(result.metadata.userGuidance).toBe(delivery === 'non-stream' ? guidance.slice(0, 200) : guidance);
   }
 });
