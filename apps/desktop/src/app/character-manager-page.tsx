@@ -60,6 +60,8 @@ import {
   type StoredDesktopCardDraft,
 } from '../features/character-manager/draft-persistence';
 import { useDesktopCloudSession } from '../features/account/use-desktop-cloud-session';
+import { DesktopCloudCardActions } from '../features/cloud-save/private-result-save';
+import type { DesktopOwnedCard } from '../features/cloud-save/owned-cards-modal';
 import { useDesktopCardLibraryHost } from '../platform/card-library-host';
 import { downloadTextFile } from '../platform/download-text-file';
 import { IpcLocalCardRepository, describeLocalCardError } from '../platform/local-card-bridge';
@@ -73,12 +75,12 @@ import { navigateByProductHref, resolveInternalHrefForHashHistory } from './hash
 const DESKTOP_ASSET_SOURCE: HomeAssetSource = { baseUrl: '/' };
 
 /**
- * Desktop 的角色管理能力快照（DESK-PARITY-001/005）：已交付的是浏览+载入云端卡、
+ * Desktop 的角色管理能力快照（DESK-PARITY-001/005）：已交付的是浏览、载入、显式上传与替换云端卡、
  * 模板选择、结构化情景编辑器与本地库编辑；未交付的（立绘、问卷编辑器、原生性
  * 签名、敏感词）一律不渲染入口，与 Web 喂给同一组组件的只是不同快照。
  */
 const DESKTOP_CHARACTER_MANAGER_CAPABILITIES: CharacterManagerCapabilities = {
-  cloudCards: 'browse',
+  cloudCards: 'write',
   tachie: false,
   questionnaireEditor: false,
   templateSelect: true,
@@ -124,7 +126,7 @@ const isScenarioTemplate = (template: string): boolean =>
  * 页面骨架（Logo/标题/账号区/使用指南/模板选择/草稿条/导入区/编辑主体/页脚）与
  * Web `/character-manager` 共用 `@mahoshojo/ui-web/character-manager` 同一组实现；
  * 差异经 `CharacterManagerCapabilities` 与宿主插槽投影：本机保存写入本地库（IPC），
- * 云端数据卡只可浏览并载入副本，立绘/问卷编辑器/原生性签名/敏感词这些尚未交付的
+ * 云端卡经共源模态框显式新建或版本替换；立绘/问卷编辑器/原生性签名/敏感词这些尚未交付的
  * 能力不渲染入口。
  *
  * 保存规则见 `features/character-manager/editor`。页面草稿自动落到 localStorage
@@ -168,6 +170,11 @@ export function DesktopCharacterManager() {
   const [pasted, setPasted] = useState('');
   const [pasteOpen, setPasteOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [manageScope, setManageScope] = useState<string | null>(null);
+  const cloudScope = `${cloudSession.account?.userId ?? ''}:${cloudSessionStore.getCredentialEpoch()}`;
+  const [cloudBusy, setCloudBusy] = useState(false);
+  const cloudBusyRef = useRef(false);
+  const handleCloudBusyChange = useCallback((busy: boolean) => { cloudBusyRef.current = busy; setCloudBusy(busy); }, []);
   const [autoSaveTimestamp, setAutoSaveTimestamp] = useState<number | null>(null);
   const [autoSaveFailed, setAutoSaveFailed] = useState(false);
   const [draftBlocked, setDraftBlocked] = useState<PageDraftBlockedReason | null>(null);
@@ -193,10 +200,10 @@ export function DesktopCharacterManager() {
   const pendingStoredDraftRef = useRef<{ draft: StoredDesktopCardDraft; updatedAt: number } | null>(null);
 
   const guard = useLeaveGuard(
-    () => savingRef.current || unsavedGuardRef.current,
+    () => savingRef.current || cloudBusyRef.current || unsavedGuardRef.current,
     '有尚未保存到本地库的内容或未保存的修改，或保存仍在进行。请保存、等待完成，或确认放弃后再离开。',
     '窗口关闭保护初始化失败，保存暂不可用。请重新打开页面后重试。',
-    () => !savingRef.current && window.confirm('有尚未保存到本地库的内容或未保存的修改。确认放弃并离开？'),
+    () => !savingRef.current && !cloudBusyRef.current && window.confirm('有尚未保存到本地库的内容或未保存的修改。确认放弃并离开？'),
   );
 
   const open = useCallback((next: CardDraft) => {
@@ -411,6 +418,7 @@ export function DesktopCharacterManager() {
     void router.navigate({ to: '/character-manager', search: { card: id } });
   };
   const leaveEditor = () => {
+    if (cloudBusyRef.current) return;
     if (cardParam !== undefined) {
       void router.navigate({ to: '/character-manager', search: {} });
       return;
@@ -456,6 +464,7 @@ export function DesktopCharacterManager() {
   };
 
   const handleFieldChange = useCallback((path: CharacterManagerFieldPath, value: unknown) => {
+    if (cloudBusyRef.current) return;
     // 字符串路径按点分段展开（与 Web `handleFieldChange` 同一语义：ScenarioEditor
     // 等旧调用方发 `elements.scene.time` 形态）；数组路径来自共源字段编辑器逐段键名。
     const segments: DataCardFieldPath = typeof path === 'string' ? path.split('.') : path;
@@ -571,7 +580,7 @@ export function DesktopCharacterManager() {
   }, [open, openRecord, draftRestoreReady, loading]);
 
   const save = async () => {
-    if (draft === null || savingRef.current || !guard.ready) return;
+    if (draft === null || savingRef.current || cloudBusyRef.current || !guard.ready) return;
     savingRef.current = true;
     requestRef.current += 1;
     setSaving(true);
@@ -636,6 +645,24 @@ export function DesktopCharacterManager() {
     }
   };
 
+  const handleSelectOwnedCard = async (card: DesktopOwnedCard) => {
+    if (!draftRestoreReady || loading || savingRef.current || cloudBusyRef.current) throw new Error('当前操作尚未完成，请稍后载入');
+    if (card.type !== 'character' && card.type !== 'scenario') throw new Error('请使用对应的专用编辑器加载此数据卡');
+    if (unsavedGuardRef.current && !window.confirm('载入新数据卡将放弃当前尚未保存到本地库的内容。继续？')) throw new Error('已取消载入，当前编辑内容保留');
+    const parsed = parseImportedCard(card.data);
+    if (!parsed.ok) throw new Error(parsed.error);
+    requestRef.current++;
+    // 在 source 更换令旧云写scope卸载之前关闭其受控列表，不能等旧scope回调认领。
+    setManageScope(null);
+    open({ ...parsed.draft, title: card.name.slice(0, 512) || parsed.draft.title });
+    setNotice({ tone: 'status', text: '已从云端载入数据卡副本，尚未保存到本地库；上传与替换须另行确认。' });
+  };
+  const cloudActions = <DesktopCloudCardActions data={draft?.data ?? null}
+    cardType={draft?.cardType === 'scenario' ? 'scenario' : 'character'} defaultName={draft?.title}
+    disabled={!guard.ready || saving || loading || !draftRestoreReady} isBlocked={() => savingRef.current}
+    className="generate-button w-full" externalLeaveGuard={guard} onBusyChange={handleCloudBusyChange}
+    manageOpen={manageScope === cloudScope} onManageClose={() => setManageScope(null)} onSelectCard={handleSelectOwnedCard} />;
+
   const preview = draft === null ? null : asCharacterCardPreview(draft);
 
   // 云会话 → 共享账号面板投影（与顶栏/卡库宿主同一口径，D5.1-P2-r5-r1 → D5.2）：
@@ -669,8 +696,8 @@ export function DesktopCharacterManager() {
               <div className="flex mb-3 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-800 text-left">
                 <div className="mr-2">⚠️ </div>
                 <div>
-                  本页只操作这台设备上的本地库：编辑不需要账号，也不会访问项目服务器（除非你主动浏览云端数据卡）。
-                  云端保存、原生性校验与敏感词检测目前只在网页版提供。
+                  本地编辑、保存和导出不需要账号。登录后可显式上传公开或私有云端卡，或选择已有卡确认替换。
+                  云端审核由服务器处理；本机不申请原生签名。
                 </div>
               </div>
             )}
@@ -688,13 +715,19 @@ export function DesktopCharacterManager() {
                   退出登录
                 </button>
               )}
-              myDataCards={draftRestoreReady && !loading && !saving ? {
-                // 主动使用 = 探测时机（DESK-ONLINE-013，与 /details 同一模式）：
-                // 冷启动 `idle` 下机器上可能已有有效凭据，先 refresh 再开选择器，
-                // 确认 active 后「我的数据卡」默认落到 `my` 页签而不是本地库。
+              myDataCards={draftRestoreReady && !loading && !saving && !cloudBusy ? {
+                // 未登录仍保留本地/公开库入口；已验证账号打开真实共源管理面。
                 onOpen: () => {
-                  void cloudSessionStore.refresh();
-                  setLibraryOpen(true);
+                  const request = ++requestRef.current;
+                  const openingUserId = cloudSessionStore.getSnapshot().account?.userId ?? null;
+                  void cloudSessionStore.refresh().then(() => {
+                    if (!mountedRef.current || request !== requestRef.current || savingRef.current || cloudBusyRef.current) return;
+                    const current = cloudSessionStore.getSnapshot();
+                    if (openingUserId !== null && current.account?.userId !== openingUserId) return;
+                    if (current.account !== null && current.verification === 'verified') setManageScope(`${current.account.userId}:${cloudSessionStore.getCredentialEpoch()}`);
+                    else if (current.account === null) setLibraryOpen(true);
+                    else setNotice({ tone: 'alert', text: '云端账号尚未验证，请重试连接；本地编辑与导出不受影响。' });
+                  });
                 },
                 label: '我的数据卡',
               } : undefined}
@@ -703,11 +736,12 @@ export function DesktopCharacterManager() {
                   ? '云端服务暂时不可用；本地编辑与本地库不受影响，可稍后重试登录。'
                   : accountStatus === 'unknown'
                     ? '本页无需登录即可编辑本地数据卡；尚未查询云端账号状态。'
-                    : '本页无需登录即可编辑本地数据卡；登录后可浏览并载入你的云端数据卡。',
+                    : '本页无需登录即可编辑本地数据卡；登录后可浏览、载入、上传或替换你的云端数据卡。',
                 actionLabel: cloudUnreachable ? '重试' : '登录',
                 onAction: () => void (cloudUnreachable ? cloudSessionStore.refresh() : cloudSessionStore.requestAuth()),
               }}
             />
+            {activeCloudAccount !== null && draftRestoreReady && !loading && !saving && !cloudBusy && <button type="button" className={`${actionClass} mt-3`} onClick={() => setLibraryOpen(true)}>浏览本地与公开库</button>}
           </CharacterManagerPageHeader>
 
           {!guard.ready && !guard.message && <p role="status">正在初始化窗口关闭保护…</p>}
@@ -716,7 +750,7 @@ export function DesktopCharacterManager() {
           <CharacterManagerGuide
             capabilities={DESKTOP_CHARACTER_MANAGER_CAPABILITIES}
             saveAndExportText={(
-              <>保存写入这台设备的本地库；也可以把当前编辑中的内容下载为 <code>.json</code> 文件或复制到剪贴板。</>
+              <>保存写入这台设备的本地库；也可以把当前编辑中的内容下载为 <code>.json</code> 文件或复制到剪贴板。登录后还可选择公开或私有上传，并确认替换已有云端卡。</>
             )}
             loadExtraText={<>也可以通过上方「我的数据卡」从本地库或云端数据卡载入。</>}
             extraSections={(
@@ -738,7 +772,7 @@ export function DesktopCharacterManager() {
             <p role="status" className="mb-4 text-sm">正在恢复页面草稿或读取目标数据卡…</p>
           ) : (
             <>
-          <fieldset disabled={saving} className="min-w-0">
+          <fieldset disabled={saving || cloudBusy} className="min-w-0">
           <CharacterManagerTemplateSelect
             value={selectedTemplate}
             hasContent={draft !== null}
@@ -805,6 +839,7 @@ export function DesktopCharacterManager() {
             </>
           ) : (
             <section className="flex flex-col gap-4" aria-labelledby="character-editor-heading">
+              <fieldset disabled={cloudBusy} className="min-w-0">
               <CharacterManagerEditorBody
                 data={draft.data}
                 onFieldChange={handleFieldChange}
@@ -860,6 +895,7 @@ export function DesktopCharacterManager() {
                       onCopy={() => void exportDraft('copy')}
                       exportBusy={exporting}
                       copied={copied}
+                      cloudActions={cloudActions}
                       onLoadOtherData={leaveEditor}
                     />
                     {outcome?.kind === 'unchanged' && <p role="status" className="text-sm">没有需要保存的修改。</p>}
@@ -894,6 +930,7 @@ export function DesktopCharacterManager() {
                   </>
                 )}
               />
+              </fieldset>
 
             </section>
           )}
@@ -907,8 +944,8 @@ export function DesktopCharacterManager() {
             {preview.kind === 'canshou' && <CanshouCard canshou={preview.data} />}
           </CharacterManagerPreviewPanel>
         )}
-        {/* 「我的数据卡」选择器：本地页签离线可用；确认会话 active 后默认落到
-            「我的数据卡」页签（入口名称与所有权一致），本地库保持显式页签。 */}
+        {draft === null && cloudActions}
+        {/* 本地与公开库维持独立数据源选择器；云端所有权管理使用上方共源管理模态框。 */}
         <CardLibraryModal
           host={cardLibraryHost}
           isOpen={libraryOpen}
@@ -916,8 +953,8 @@ export function DesktopCharacterManager() {
           onSelectCard={handleSelectLibraryCard}
           selectedType="all"
           allowedTypes={['character', 'scenario']}
-          initialTab={activeCloudAccount !== null ? 'my' : 'local'}
-          titleOverride="我的数据卡"
+          initialTab="local"
+          titleOverride="本地与公开库"
           allowDeckImport={false}
         />
         <div className="text-center mt-8">

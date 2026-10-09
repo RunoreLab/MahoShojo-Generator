@@ -9,10 +9,11 @@ export interface CharacterManagerCapabilities {
   /**
    * 云端数据卡入口深度：
    * - `'manage'`：Web 的完整管理台（浏览、增删改、回收站、公开设置）；
+   * - `'write'`：浏览、显式新建与版本替换，未包含云端删除/回收站治理；
    * - `'browse'`：可浏览并载入编辑，但不能在页内管理云端记录；
    * - `'none'`：不出现任何云端入口。
    */
-  readonly cloudCards: 'manage' | 'browse' | 'none';
+  readonly cloudCards: 'manage' | 'write' | 'browse' | 'none';
   /** 立绘生成模块（Web 独有切片；Desktop 未交付）。 */
   readonly tachie: boolean;
   /** 自定义问卷编辑器入口（指南中 `/questionnaire-editor` 链接）。 */
