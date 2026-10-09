@@ -35,6 +35,10 @@ import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-car
 import { buildStreamedSublimationResultCard } from '@/lib/sublimation/stream-result';
 import { DEFAULT_ARENA_HISTORY_RETENTION_STRATEGY } from '@/lib/sublimation/arena-history';
 import {
+  SUBLIMATION_STATE_PREF_KEY,
+  SUBLIMATION_PREFERENCE_KEY,
+  parseSublimationPreferencesDocument,
+  writeSublimationPreferences,
   readSublimationStatePreferences,
   writeSublimationStatePreferences,
 } from '@/lib/sublimation/preferences';
@@ -168,8 +172,6 @@ const getDefaultTargetTemplate = (source: InferableTemplate): SupportedTargetTem
     return 'general';
 };
 
-const SUBLIMATION_STATE_PREF_KEY = 'sublimation-history-state-preferences-v1';
-const SUBLIMATION_PREFERENCE_KEY = 'mahoshojo.sublimation.preferences.v1';
 
 
 export const SublimationPage: React.FC = () => {
@@ -211,6 +213,9 @@ export const SublimationPage: React.FC = () => {
     // [新增] 用于管理高级选项的状态
     const [fieldsToPreserve, setFieldsToPreserve] = useState<string[]>([]);
     const [isAdvancedVisible, setIsAdvancedVisible] = useState(false);
+    const [preferencesReady, setPreferencesReady] = useState(false);
+    const [preferencesError, setPreferencesError] = useState<string | null>(null);
+    const [statePreferencesError, setStatePreferencesError] = useState<string | null>(null);
     const [allowReshapeNames, setAllowReshapeNames] = useState(false);
     const [isDowngrade] = useState(false); // 是否使用轻量模型
     const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
@@ -330,7 +335,7 @@ export const SublimationPage: React.FC = () => {
         try {
             const saved = window.localStorage.getItem(SUBLIMATION_PREFERENCE_KEY);
             if (!saved) return;
-            const parsed = JSON.parse(saved);
+            const parsed = parseSublimationPreferencesDocument(saved);
             hasStoredSublimationPrefsRef.current = true;
             if (parsed?.generationMode === 'stream' || parsed?.generationMode === 'non-stream') {
                 setGenerationMode(parsed.generationMode);
@@ -347,8 +352,8 @@ export const SublimationPage: React.FC = () => {
             if (typeof parsed?.allowReshapeNames === 'boolean') {
                 setAllowReshapeNames(parsed.allowReshapeNames);
             }
-            if (parsed?.targetTemplate && TARGET_TEMPLATE_OPTIONS.includes(parsed.targetTemplate)) {
-                setTargetTemplate(parsed.targetTemplate);
+            if (typeof parsed.targetTemplate === 'string' && TARGET_TEMPLATE_OPTIONS.some((template) => template === parsed.targetTemplate)) {
+                setTargetTemplate(parsed.targetTemplate as SupportedTargetTemplate);
             }
             if (Array.isArray(parsed?.fieldsToPreserve)) {
                 const filtered = parsed.fieldsToPreserve.filter((value: unknown) => typeof value === 'string');
@@ -367,32 +372,38 @@ export const SublimationPage: React.FC = () => {
             }
         } catch (error) {
             console.warn('读取升华偏好失败', error);
-        }
+            setPreferencesError('偏好无法读取，原数据已保留；本页修改可能无法保存。');
+        } finally { setPreferencesReady(true); }
     }, [ensureSelectionId]);
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
-        const restored = readSublimationStatePreferences(window.localStorage, SUBLIMATION_STATE_PREF_KEY);
-        setReadArenaHistory(restored.readArenaHistory);
-        setWriteArenaHistory(restored.writeArenaHistory);
-        setReadCurrentState(restored.readCurrentState);
-        setWriteCurrentState(restored.writeCurrentState);
-        setArenaHistoryRetentionStrategy(restored.arenaHistoryRetentionStrategy);
+        try {
+            const restored = readSublimationStatePreferences(window.localStorage, SUBLIMATION_STATE_PREF_KEY);
+            setReadArenaHistory(restored.readArenaHistory);
+            setWriteArenaHistory(restored.writeArenaHistory);
+            setReadCurrentState(restored.readCurrentState);
+            setWriteCurrentState(restored.writeCurrentState);
+            setArenaHistoryRetentionStrategy(restored.arenaHistoryRetentionStrategy);
+        } catch { setStatePreferencesError('历史/状态偏好无法读取，原数据已保留。'); }
     }, []);
 
     useEffect(() => {
-        if (typeof window === 'undefined') return;
-        writeSublimationStatePreferences(window.localStorage, SUBLIMATION_STATE_PREF_KEY, {
-            readArenaHistory,
-            writeArenaHistory,
-            readCurrentState,
-            writeCurrentState,
-            arenaHistoryRetentionStrategy,
-        });
-    }, [readArenaHistory, writeArenaHistory, readCurrentState, writeCurrentState, arenaHistoryRetentionStrategy]);
+        if (typeof window === 'undefined' || !preferencesReady) return;
+        try {
+            const saved = writeSublimationStatePreferences(window.localStorage, SUBLIMATION_STATE_PREF_KEY, {
+                readArenaHistory,
+                writeArenaHistory,
+                readCurrentState,
+                writeCurrentState,
+                arenaHistoryRetentionStrategy,
+            });
+            setStatePreferencesError(saved ? null : '历史/状态偏好写入失败，原数据已保留。');
+        } catch { setStatePreferencesError('历史/状态偏好写入失败，原数据已保留。'); }
+    }, [preferencesReady, readArenaHistory, writeArenaHistory, readCurrentState, writeCurrentState, arenaHistoryRetentionStrategy]);
 
     useEffect(() => {
-        if (typeof window === 'undefined') return;
+        if (typeof window === 'undefined' || !preferencesReady) return;
         try {
             const payload = {
                 generationMode,
@@ -405,12 +416,11 @@ export const SublimationPage: React.FC = () => {
                 showQuestionnaireSettings,
                 questionnaireSelections: selectedQuestionnaires,
             };
-            window.localStorage.setItem(SUBLIMATION_PREFERENCE_KEY, JSON.stringify(payload));
-            hasStoredSublimationPrefsRef.current = true;
-        } catch {
-            // localStorage 可能不可用，忽略
-        }
+            if (writeSublimationPreferences(window.localStorage, payload)) { hasStoredSublimationPrefsRef.current = true; setPreferencesError(null); }
+            else setPreferencesError('升华偏好写入失败，原数据已保留。');
+        } catch { setPreferencesError('升华偏好写入失败，原数据已保留。'); }
     }, [
+        preferencesReady,
         generationMode,
         selectedLanguage,
         userGuidance,
@@ -1479,6 +1489,7 @@ export const SublimationPage: React.FC = () => {
                             </div>
                         ) : null}
                         {streamNotice ? <div className="mt-3 text-center text-sm text-amber-700">{streamNotice}</div> : null}
+                        {preferencesError || statePreferencesError ? <p role="alert" className="text-sm text-red-600">{[preferencesError, statePreferencesError].filter(Boolean).join(' ')}</p> : null}
                         {error && <ErrorMessage message={error} className="error-message mt-4" />}
                     </div>
 

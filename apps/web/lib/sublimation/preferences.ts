@@ -5,7 +5,11 @@ import {
 } from '@/lib/sublimation/arena-history';
 
 type PreferencesStorageReader = Pick<Storage, 'getItem'>;
-type PreferencesStorageWriter = Pick<Storage, 'setItem'>;
+type PreferencesStorageWriter = Pick<Storage, 'getItem' | 'setItem'>;
+
+export const SUBLIMATION_STATE_PREF_KEY = 'sublimation-history-state-preferences-v1';
+export const SUBLIMATION_PREFERENCE_KEY = 'mahoshojo.sublimation.preferences.v1';
+const MAX_PREFERENCES_CHARACTERS = 4 * 1024 * 1024;
 
 export type SublimationStatePreferences = {
   readArenaHistory: boolean;
@@ -74,11 +78,59 @@ export const writeSublimationStatePreferences = (
   storage: PreferencesStorageWriter,
   key: string,
   value: SublimationStatePreferences,
-): void => {
+): boolean => {
   const normalized = normalizeSublimationStatePreferences(value);
   try {
-    storage.setItem(key, JSON.stringify(normalized));
-  } catch {
-    // localStorage 可能不可用，忽略写入错误
+    const raw = storage.getItem(key);
+    const previous = raw === null ? {} : parseSublimationStatePreferencesDocument(raw);
+    const serialized = JSON.stringify({ ...previous, ...normalized });
+    parseSublimationStatePreferencesDocument(serialized);
+    storage.setItem(key, serialized);
+    return true;
+  } catch { return false; }
+};
+
+
+const parsePreferenceObject = (raw: string): Record<string, unknown> => {
+  if (raw.length > MAX_PREFERENCES_CHARACTERS) throw new Error('偏好超过大小限制');
+  const value: unknown = JSON.parse(raw);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('偏好损坏');
+  return value as Record<string, unknown>;
+};
+
+/** 既有无 version 对象；未知扩展（包括 version）不新增协议语义。 */
+export const parseSublimationStatePreferencesDocument = (raw: string): Record<string, unknown> => {
+  const record = parsePreferenceObject(raw);
+  for (const key of ['readArenaHistory', 'writeArenaHistory', 'readCurrentState', 'writeCurrentState']) {
+    if (record[key] !== undefined && typeof record[key] !== 'boolean') throw new Error('历史/状态偏好损坏');
   }
+  if (record.arenaHistoryRetentionStrategy !== undefined && normalizeArenaHistoryRetentionStrategy(record.arenaHistoryRetentionStrategy) !== record.arenaHistoryRetentionStrategy) throw new Error('历史保留策略损坏');
+  return record;
+};
+
+/** general preferences 混有用户内容，验证后只允许字段级合并，不能整键清除。 */
+export const parseSublimationPreferencesDocument = (raw: string): Record<string, unknown> => {
+  const record = parsePreferenceObject(raw);
+  for (const key of ['isAdvancedVisible', 'allowReshapeNames', 'showQuestionnaireSettings']) {
+    if (record[key] !== undefined && typeof record[key] !== 'boolean') throw new Error('展开偏好损坏');
+  }
+  for (const key of ['selectedLanguage', 'userGuidance']) {
+    if (record[key] !== undefined && typeof record[key] !== 'string') throw new Error('升华偏好损坏');
+  }
+  if ((record.generationMode !== undefined && !['stream', 'non-stream'].includes(String(record.generationMode)))
+    || (record.targetTemplate !== undefined && !['magical-girl', 'canshou', 'general'].includes(String(record.targetTemplate)))
+    || (record.fieldsToPreserve !== undefined && (!Array.isArray(record.fieldsToPreserve) || !record.fieldsToPreserve.every((field) => typeof field === 'string')))
+    || (record.questionnaireSelections !== undefined && !Array.isArray(record.questionnaireSelections))) throw new Error('升华偏好损坏');
+  return record;
+};
+
+export const writeSublimationPreferences = (storage: PreferencesStorageWriter, value: Record<string, unknown>): boolean => {
+  try {
+    const raw = storage.getItem(SUBLIMATION_PREFERENCE_KEY);
+    const previous = raw === null ? {} : parseSublimationPreferencesDocument(raw);
+    const serialized = JSON.stringify({ ...previous, ...value });
+    parseSublimationPreferencesDocument(serialized);
+    storage.setItem(SUBLIMATION_PREFERENCE_KEY, serialized);
+    return true;
+  } catch { return false; }
 };

@@ -5,6 +5,7 @@ import {
 import type { CardRepository } from '@mahoshojo/local-library/repository';
 import {
   DesktopGenerationSession,
+  parseStoredGenerationDraft,
   type GenerationDraftStorage,
   type GenerationSessionFamily,
   type GenerationSessionState,
@@ -13,6 +14,7 @@ import {
 import type { GenerationExecutor } from '../generation/session';
 import {
   createQuestionnaireDraftFieldsParser,
+  QUESTIONNAIRE_DRAFT_DEFAULT_LANGUAGE,
   type QuestionnaireDraft,
 } from '../questionnaire/session';
 import {
@@ -46,6 +48,16 @@ export interface CreatorDraft extends QuestionnaireDraft {
   ruleInputsById?: Record<string, Record<string, unknown>>;
   primaryRuleId?: string | null;
 }
+
+
+/** 页面真实初值；设置首写复用，Creator 默认流式且与 general 模板配对。 */
+export const createInitialCreatorDraft = (): CreatorDraft => ({
+  answers: {}, language: QUESTIONNAIRE_DRAFT_DEFAULT_LANGUAGE,
+  template: 'general', generationMode: 'stream', freeformBrief: '',
+  selectedRuleIds: [...CREATOR_DRAFT_DEFAULT_RULE_IDS],
+  primaryRuleId: CREATOR_DRAFT_DEFAULT_RULE_IDS[0] ?? null,
+});
+export const createEmptyCreatorDraftDocument = () => ({ version: 1 as const, ...createInitialCreatorDraft() });
 
 export type CreatorDraftStorage = GenerationDraftStorage;
 
@@ -86,6 +98,14 @@ const parseDraftFields = (value: Record<string, unknown>): CreatorDraft => {
   const base = createQuestionnaireDraftFieldsParser(
     template === 'canshou' ? 'canshou' : 'magical-girl',
   )(value);
+  // Creator 的设置手术与页面恢复采用同一合法性判断；枚举沿问卷 parser
+  // 认可的值，不另写一份列表。缺失/false 仍合法，非法显式值保留原文。
+  if ((value.imageSaveMode !== undefined && value.imageSaveMode !== base.imageSaveMode)
+    || (value.jsonSaveMode !== undefined && value.jsonSaveMode !== base.jsonSaveMode)
+    || (value.showDetails !== undefined && typeof value.showDetails !== 'boolean')
+    || (value.allowMultipleQuestionnaires !== undefined && typeof value.allowMultipleQuestionnaires !== 'boolean')) {
+    throw new Error('草稿偏好损坏');
+  }
   const draft: CreatorDraft = {
     ...base,
     template,
@@ -179,6 +199,9 @@ const CREATOR_SESSION_FAMILY: GenerationSessionFamily<
   stripSignature: (card) => { delete card.signature; },
   executeGeneration: executeCreatorGeneration,
 };
+
+/** 校验复用会话 owner，规范化结果绝不用于设置写回。 */
+export const validateCreatorDraftDocument = (raw: string): void => { parseStoredGenerationDraft(raw, CREATOR_SESSION_FAMILY); };
 
 /**
  * /creator 会话：草稿闸门、取消/uncertain 投影与保存 provenance 走

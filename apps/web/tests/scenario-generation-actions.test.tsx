@@ -131,3 +131,42 @@ it('clearing in a memory-only Scenario session leaves corrupt original bytes unt
   expect(container.textContent).toContain('自动保存暂不可用');
   const leave = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(leave); expect(leave.defaultPrevented).toBe(true);
 });
+
+it('keeps settings reset false through actual page autosave and repeated visits when legacy cleanup fails', async () => {
+  const { createScenarioPagePreferenceAdapter } = await import('@/lib/settings/page-preferences');
+  localStorage.clear(); localStorage.setItem('mahoshojo.scenario.preferences.v1', '{"isAdvancedVisible":true}');
+  vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => { throw new Error('cleanup denied'); });
+  const adapter = createScenarioPagePreferenceAdapter(localStorage);
+  expect(adapter.read()).toEqual({ status: 'ready', values: { isAdvancedVisible: true } }); expect(adapter.reset()).toBe(true);
+  for (let visit = 0; visit < 2; visit++) {
+    await act(async () => root.render(<ScenarioPage />));
+    expect(container.textContent).toContain('▶ 高级选项：强制留空字段');
+    expect(adapter.read()).toEqual({ status: 'ready', values: { isAdvancedVisible: false } });
+    expect(JSON.parse(localStorage.getItem('mahoshojo.scenario.page-draft.v1')!).payload.isAdvancedVisible).toBe(false);
+    await act(async () => root.render(null));
+  }
+  expect(mocks.dispatch).not.toHaveBeenCalled();
+});
+
+it('keeps the legacy expanded choice in memory when canonical migration cannot be saved', async () => {
+  const { createEmptyScenarioPageDraftDocument } = await import('@/lib/scenario-page-draft');
+  const base = createEmptyScenarioPageDraftDocument(); const { isAdvancedVisible: _advanced, ...payload } = base.payload;
+  const raw = JSON.stringify({ ...base, payload: { ...payload, scenarioTitleHint: '真实草稿' } });
+  localStorage.setItem('mahoshojo.scenario.page-draft.v1', raw);
+  localStorage.setItem('mahoshojo.scenario.preferences.v1', '{"isAdvancedVisible":true}');
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
+  await act(async () => root.render(<ScenarioPage />));
+  expect(container.textContent).toContain('▼ 高级选项：强制留空字段');
+  expect(container.textContent).toContain('自动保存暂不可用');
+  expect(localStorage.getItem('mahoshojo.scenario.page-draft.v1')).toBe(raw);
+  expect(localStorage.getItem('mahoshojo.scenario.preferences.v1')).toBe('{"isAdvancedVisible":true}');
+});
+
+it('page changes are immediately visible to the settings adapter at the canonical key', async () => {
+  const { createScenarioPagePreferenceAdapter } = await import('@/lib/settings/page-preferences');
+  await act(async () => root.render(<ScenarioPage />));
+  const button = [...container.querySelectorAll('button')].find((node) => node.textContent?.includes('高级选项：强制留空字段'))!;
+  await act(async () => button.click());
+  expect(createScenarioPagePreferenceAdapter(localStorage).read()).toEqual({ status: 'ready', values: { isAdvancedVisible: true } });
+  expect(JSON.parse(localStorage.getItem('mahoshojo.scenario.preferences.v1')!)).not.toHaveProperty('isAdvancedVisible');
+});

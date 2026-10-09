@@ -183,3 +183,24 @@ describe('成长升华结果导航（真实页面）', () => {
     expect(container.textContent).toContain('衍生数据');
   });
 });
+
+it('restores settings changes through actual Sublimation owner effects and preserves both owner extensions', async () => {
+  const { createPagePreferencesAdapter } = await import('@mahoshojo/ui-web/settings');
+  const { WEB_SUBLIMATION_PREFERENCES, WEB_SUBLIMATION_STATE_PREFERENCES } = await import('@/lib/settings/page-preferences');
+  localStorage.setItem('mahoshojo.sublimation.preferences.v1', JSON.stringify({ userGuidance: '保留指导语', fieldsToPreserve: [], questionnaireSelections: [], extension: 'general-owner' }));
+  localStorage.setItem('sublimation-history-state-preferences-v1', JSON.stringify({ extension: 'strategy-owner' }));
+  const advanced = createPagePreferencesAdapter(WEB_SUBLIMATION_PREFERENCES, localStorage);
+  const state = createPagePreferencesAdapter(WEB_SUBLIMATION_STATE_PREFERENCES, localStorage);
+  expect(advanced.writeField('isAdvancedVisible', true)).toBe(true);
+  expect(state.writeField('readArenaHistory', false)).toBe(true);
+  expect(state.writeField('arenaHistoryRetentionStrategy', 'reset-all')).toBe(true);
+  await act(async () => root.render(<SublimationPage />));
+  expect(JSON.parse(localStorage.getItem('mahoshojo.sublimation.preferences.v1')!)).toMatchObject({ isAdvancedVisible: true, userGuidance: '保留指导语', extension: 'general-owner' });
+  expect(JSON.parse(localStorage.getItem('sublimation-history-state-preferences-v1')!)).toMatchObject({ readArenaHistory: false, arenaHistoryRetentionStrategy: 'reset-all', extension: 'strategy-owner' });
+  await act(async () => root.render(null));
+  expect(advanced.reset()).toBe(true); expect(state.reset()).toBe(true);
+  await act(async () => root.render(<SublimationPage />));
+  expect(advanced.read()).toMatchObject({ status: 'ready', values: { isAdvancedVisible: false } });
+  expect(state.read()).toMatchObject({ status: 'ready', values: { readArenaHistory: true, writeArenaHistory: true, readCurrentState: true, writeCurrentState: true, arenaHistoryRetentionStrategy: 'keep-sublimation-only' } });
+  expect(JSON.parse(localStorage.getItem('mahoshojo.sublimation.preferences.v1')!)).toMatchObject({ userGuidance: '保留指导语', extension: 'general-owner' });
+});

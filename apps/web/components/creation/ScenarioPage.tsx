@@ -30,6 +30,8 @@ import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-lat
 import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
 import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import {
+  SCENARIO_PREFERENCE_KEY,
+  migrateScenarioAdvancedPreference,
   clearScenarioPageDraft,
   readScenarioPageDraftState,
   buildScenarioPageDraftPayload,
@@ -54,7 +56,6 @@ import {
   createInitialScenarioAnswers,
 } from '@mahoshojo/ui-web/scenario';
 
-const SCENARIO_PREFERENCE_KEY = 'mahoshojo.scenario.preferences.v1';
 
 type RateLimitError = Error & {
   retryAfterSeconds?: number;
@@ -126,9 +127,6 @@ export const ScenarioPage: React.FC = () => {
       if (typeof parsed?.selectedLanguage === 'string') {
         setSelectedLanguage(parsed.selectedLanguage);
       }
-      if (typeof parsed?.isAdvancedVisible === 'boolean') {
-        setIsAdvancedVisible(parsed.isAdvancedVisible);
-      }
       if (Array.isArray(parsed?.fieldsToKeepEmpty)) {
         const allowed = new Set(optionalFields.map(field => field.value));
         const filtered = parsed.fieldsToKeepEmpty.filter((value: unknown) => typeof value === 'string' && allowed.has(value));
@@ -140,8 +138,10 @@ export const ScenarioPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    const advanced = migrateScenarioAdvancedPreference();
+    if (advanced.value !== undefined) setIsAdvancedVisible(advanced.value);
     const result = readScenarioPageDraftState();
-    if (result.status === 'unreadable') {
+    if (result.status === 'unreadable' || advanced.failed) {
       draftStorageBlocked.current = true;
       setDraftError('旧草稿无法读取，已保留原数据；可以继续填写和生成，当前新内容请先保存或复制。');
     }
@@ -154,7 +154,7 @@ export const ScenarioPage: React.FC = () => {
     setAnswers({ ...createInitialScenarioAnswers(), ...restored.payload.answers });
     setScenarioTitleHint(restored.payload.scenarioTitleHint);
     setFieldsToKeepEmpty(restored.payload.fieldsToKeepEmpty);
-    setIsAdvancedVisible(restored.payload.isAdvancedVisible);
+    setIsAdvancedVisible(advanced.value ?? restored.payload.isAdvancedVisible);
     setSelectedLanguage(restored.payload.selectedLanguage);
     setGenerationMode(restored.payload.generationMode);
     setGeneralScenarioDraft(restored.payload.generalScenarioDraft);
@@ -170,14 +170,16 @@ export const ScenarioPage: React.FC = () => {
         generationMode,
         scenarioTitleHint,
         selectedLanguage,
-        isAdvancedVisible,
         fieldsToKeepEmpty,
       };
-      window.localStorage.setItem(SCENARIO_PREFERENCE_KEY, JSON.stringify(payload));
+      const raw = window.localStorage.getItem(SCENARIO_PREFERENCE_KEY);
+      const previous = raw === null ? {} : JSON.parse(raw);
+      if (!previous || typeof previous !== 'object' || Array.isArray(previous)) return;
+      window.localStorage.setItem(SCENARIO_PREFERENCE_KEY, JSON.stringify({ ...previous, ...payload }));
     } catch {
       // localStorage 可能不可用，忽略
     }
-  }, [draftRestoreReady, generationMode, scenarioTitleHint, selectedLanguage, isAdvancedVisible, fieldsToKeepEmpty]);
+  }, [draftRestoreReady, generationMode, scenarioTitleHint, selectedLanguage, fieldsToKeepEmpty]);
 
   useEffect(() => {
     if (!draftRestoreReady) return;
@@ -195,8 +197,7 @@ export const ScenarioPage: React.FC = () => {
     const snapshot = JSON.stringify(buildScenarioPageDraftPayload(input));
     if (draftStorageBlocked.current) { blockedDraftBaseline.current ??= snapshot; unsavedDraft.current = snapshot !== blockedDraftBaseline.current; return; }
     const stored = writeScenarioPageDraft(input);
-    const hasContent = buildScenarioPageDraftPayload(input) !== null;
-    unsavedDraft.current = hasContent ? stored === null : !clearScenarioPageDraft();
+    unsavedDraft.current = stored === null;
     if (!unsavedDraft.current) { setDraftError(null); }
     else setDraftError('草稿写入失败，当前内容仅保留在此页面。请先保存或复制内容。');
     setAutoSaveTimestamp(stored?.updatedAt ?? null);

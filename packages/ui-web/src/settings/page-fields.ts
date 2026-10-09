@@ -10,6 +10,7 @@
  * 展示——保存方式与页面同一 UA 推导（`recommendedSaveModes`），不存在
  * 第二套「设置页默认」。
  */
+import { ARENA_HISTORY_RETENTION_LABELS } from '@mahoshojo/domain/sublimation';
 import { recommendedSaveModes } from '../details-controls/save-mode-defaults';
 import type { PagePreferenceField } from './page-preferences';
 
@@ -141,3 +142,21 @@ export const formatPagePreferenceValue = (
   }
   return typeof value === 'string' ? value : '未设置';
 };
+
+/** 三个已迁生成页的既有高级选项展开偏好。 */
+export const ADVANCED_VISIBLE_FIELD: PagePreferenceField = {
+  key: 'isAdvancedVisible', label: '默认展开「高级选项」', kind: 'boolean', defaultValue: false,
+};
+
+/** 标签/选项共用；默认与 reset 值由真实 owner 注入，避免第二套策略默认。 */
+export const SUBLIMATION_HISTORY_STATE_FIELDS: readonly PagePreferenceField[] = [
+  { key: 'readArenaHistory', label: '升华时读取历战记录', kind: 'boolean' },
+  { key: 'writeArenaHistory', label: '升华后写入历战记录', kind: 'boolean' },
+  { key: 'readCurrentState', label: '升华时读取当前状态', kind: 'boolean' },
+  { key: 'writeCurrentState', label: '升华后写入当前状态', kind: 'boolean', description: '流式升华仍仅保留原卡状态；此偏好保留供非流式使用。' },
+  {
+    key: 'arenaHistoryRetentionStrategy', label: '历史保留策略', kind: 'select',
+    description: '开启历史写入后，于升华结果中应用此策略；设置本身不会清除任何历史。',
+    options: Object.entries(ARENA_HISTORY_RETENTION_LABELS).map(([value, label]) => ({ value, label })),
+  },
+];

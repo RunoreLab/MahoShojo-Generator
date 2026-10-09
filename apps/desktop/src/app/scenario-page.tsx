@@ -36,7 +36,7 @@ import { BackHomeLink, ProductFooter } from '@mahoshojo/ui-web/shell';
 import type { HomeAssetSource } from '@mahoshojo/ui-web/home';
 import {
   ScenarioSession,
-  SCENARIO_DRAFT_DEFAULT_LANGUAGE,
+  SCENARIO_DRAFT_DEFAULT_LANGUAGE, createInitialScenarioDraft,
   type ScenarioDraft,
 } from '../features/scenario/session';
 import type { ScenarioCardKind, ScenarioExecutionMode } from '../features/scenario/generation';
@@ -412,13 +412,7 @@ export function DesktopScenario() {
     const owner = new ScenarioSession({
       storage: { getItem: (key) => window.localStorage.getItem(key), setItem: (key, value) => window.localStorage.setItem(key, value), removeItem: (key) => window.localStorage.removeItem(key) },
       repository: new IpcLocalCardRepository(invoke),
-      initialDraft: {
-        answers: createInitialAnswers(),
-        fieldsToKeepEmpty: [],
-        scenarioTitleHint: '',
-        generationMode: 'non-stream',
-        selectedLanguage: SCENARIO_DRAFT_DEFAULT_LANGUAGE,
-      },
+      initialDraft: createInitialScenarioDraft(),
     });
     owner.restoreDraft(false);
     setSession(owner);

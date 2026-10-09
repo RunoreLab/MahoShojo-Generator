@@ -4,6 +4,7 @@ import { mergeNarrativeHistoryText } from '@mahoshojo/domain/narrative-history-o
 import { SafeJsonValueSchema } from '@mahoshojo/contracts/json-value';
 import {
   DesktopGenerationSession,
+  parseStoredGenerationDraft,
   type GenerationDraftStorage,
   type GenerationExecutor,
   type GenerationSessionFamily,
@@ -53,6 +54,7 @@ export const createInitialSublimationDraft = (): SublimationDraft => ({
   writeCurrentState: true,
   arenaHistoryRetentionStrategy: 'keep-sublimation-only',
 });
+export const createEmptySublimationDraftDocument = () => ({ version: 1 as const, ...createInitialSublimationDraft() });
 export const buildSublimationInput = (draft: SublimationDraft): SublimationGenerationInput => {
   if (draft.originalData === null) throw new Error('请先选择原始数据卡。');
   const { selectedLanguage, generationMode: _mode, isAdvancedVisible: _advanced, selectedHistoryReference, sourceLabel: _sourceLabel, ...fields } = draft;
@@ -76,6 +78,7 @@ const SUBLIMATION_SESSION_FAMILY: GenerationSessionFamily<SublimationDraft, Subl
       || !['keep-all', 'keep-sublimation-only', 'reset-all'].includes(String(value.arenaHistoryRetentionStrategy))
       || (value.selectedHistoryReference !== undefined && typeof value.selectedHistoryReference !== 'string')
       || (value.sourceLabel !== undefined && typeof value.sourceLabel !== 'string')
+      || (value.isAdvancedVisible !== undefined && typeof value.isAdvancedVisible !== 'boolean')
       || (value.isDowngrade !== undefined && typeof value.isDowngrade !== 'boolean')) throw new Error('草稿版本不受支持或内容损坏');
     const selectedQuestionnaires = parseSublimationLoreSelections(value.selectedQuestionnaires);
     const keys = Object.keys(createInitialSublimationDraft());
@@ -99,6 +102,8 @@ const SUBLIMATION_SESSION_FAMILY: GenerationSessionFamily<SublimationDraft, Subl
   stripSignature: stripSublimationSignature,
   executeGeneration: executeSublimationGeneration,
 };
+
+export const validateSublimationDraftDocument = (raw: string): void => { parseStoredGenerationDraft(raw, SUBLIMATION_SESSION_FAMILY); };
 
 /** 草稿、取消、重复生成、墓碑、保存及签名来源均复用通用会话。 */
 export class SublimationSession extends DesktopGenerationSession<SublimationDraft, SublimationGenerationInput, SublimationGenerationIntent, SublimationCardKind> {

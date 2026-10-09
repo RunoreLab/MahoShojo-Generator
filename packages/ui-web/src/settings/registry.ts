@@ -142,6 +142,39 @@ export const SETTINGS_FIELD_REGISTRY: readonly SettingsFieldRecord[] = [
     notes: '仅字段速览/生成语言展开偏好；草稿模式、语言、内容与结果不在重置范围。',
   },
   {
+    id: 'generation.creatorPreferences', group: 'generation', label: '创作工房记忆偏好', hosts: 'desktop', scope: 'device',
+    owner: { kind: 'page-preferences', byHost: { desktop: { storageKey: 'mahoshojo.desktop.creator.draft.v1', scope: 'fields' } } },
+    defaultValue: '各页现有默认', status: 'wired',
+    notes: 'Desktop 只改保存方式、设定说明和多问卷；语言/模式只读。Web Creator 共用 Details owner。',
+  },
+  {
+    id: 'generation.scenarioPreferences', group: 'generation', label: '情景生成记忆偏好', hosts: 'shared', scope: 'device',
+    owner: { kind: 'page-preferences', byHost: {
+      web: { storageKey: 'mahoshojo.scenario.page-draft.v1', scope: 'fields' },
+      desktop: { storageKey: 'mahoshojo.desktop.scenario.draft.v1', scope: 'fields' },
+    } },
+    defaultValue: '高级选项展开为 false', status: 'wired',
+    notes: 'Web payload.isAdvancedVisible 是唯一权威，旧 preferences 同字段仅为迁移源。',
+  },
+  {
+    id: 'generation.sublimationPreferences', group: 'generation', label: '升华展开偏好', hosts: 'shared', scope: 'device',
+    owner: { kind: 'page-preferences', byHost: {
+      web: { storageKey: 'mahoshojo.sublimation.preferences.v1', scope: 'fields' },
+      desktop: { storageKey: 'mahoshojo.desktop.sublimation.draft.v1', scope: 'fields' },
+    } },
+    defaultValue: '高级选项展开为 false', status: 'wired',
+    notes: '只操作展开项，保留同文档的指导语、问卷、保留字段、卡与结果。',
+  },
+  {
+    id: 'generation.sublimationStatePreferences', group: 'generation', label: '升华历史与状态策略', hosts: 'shared', scope: 'device',
+    owner: { kind: 'page-preferences', byHost: {
+      web: { storageKey: 'sublimation-history-state-preferences-v1', scope: 'fields' },
+      desktop: { storageKey: 'mahoshojo.desktop.sublimation.draft.v1', scope: 'fields' },
+    } },
+    defaultValue: '四读写项 true；keep-sublimation-only', status: 'wired',
+    notes: '沿各自现有 owner；Desktop 重置写回必填默认，Web 仅移除五个可选偏好字段。',
+  },
+  {
     id: 'desktop.escapeMenu.enabled',
     group: 'appearance',
     label: 'Esc 快捷菜单',

@@ -196,7 +196,8 @@ export const PagePreferencesCard = ({
       description={
         <>
           存储于本机 <code className="text-[11px]">{adapter.source.storageKey}</code>
-          {adapter.source.scope === 'fields' ? '（草稿文档内的偏好字段）' : null}
+          {adapter.source.scope === 'fields' ? '（文档内的偏好字段）' : null}
+          {adapter.source.description ? <span className="block mt-1">{adapter.source.description}</span> : null}
         </>
       }
       actions={pageLink}

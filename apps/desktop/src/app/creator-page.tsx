@@ -105,10 +105,9 @@ import { ImagePreviewModal, useEscapeLayer } from '@mahoshojo/ui-web/modal';
 import { EncyclopediaLinks } from '@mahoshojo/ui-web/encyclopedia-views';
 import { BackHomeLink, ProductFooter } from '@mahoshojo/ui-web/shell';
 import type { HomeAssetSource } from '@mahoshojo/ui-web/home';
-import { CREATOR_DRAFT_DEFAULT_RULE_IDS, CreatorSession } from '../features/creator/session';
+import { CREATOR_DRAFT_DEFAULT_RULE_IDS, createInitialCreatorDraft, CreatorSession } from '../features/creator/session';
 import type { CreatorExecutionMode } from '../features/creator/generation';
 import { parseCreatorQuestionnaireCardSelection, toQuestionnaireSelection } from '../features/creator/questionnaire';
-import { QUESTIONNAIRE_DRAFT_DEFAULT_LANGUAGE } from '../features/questionnaire/session';
 import { resolveDesktopAiTarget } from '../features/ai-config/desktop-ai-config';
 import { DesktopAiProviderPanel } from '../features/ai-config/desktop-ai-provider-panel';
 import { useDesktopAiConfig } from '../features/ai-config/use-desktop-ai-config';
@@ -1558,15 +1557,7 @@ export function DesktopCreator() {
         removeItem: (key) => window.localStorage.removeItem(key),
       },
       repository: new IpcLocalCardRepository(invoke),
-      initialDraft: {
-        answers: {},
-        language: QUESTIONNAIRE_DRAFT_DEFAULT_LANGUAGE,
-        template: 'general',
-        generationMode: 'stream',
-        freeformBrief: '',
-        selectedRuleIds: [...CREATOR_DRAFT_DEFAULT_RULE_IDS],
-        primaryRuleId: CREATOR_DRAFT_DEFAULT_RULE_IDS[0] ?? null,
-      },
+      initialDraft: createInitialCreatorDraft(),
     });
     // 已解析的草稿在默认问卷与表单副作用启动前应用；不会发起生成。
     const restored = owner.getSnapshot().pendingRestore;

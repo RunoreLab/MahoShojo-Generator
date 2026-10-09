@@ -1,9 +1,11 @@
+import { createInitialScenarioAnswers } from '@mahoshojo/ui-web/scenario';
 import { parseDataCardByTemplate } from '@mahoshojo/domain/data-card-schemas';
 import { deriveLocalDataCardIdV1, digestLocalCardPayloadV1 } from '@mahoshojo/local-library/digest';
 import { LocalCardRecordV1Schema } from '@mahoshojo/local-library/record';
 import type { CardRepository } from '@mahoshojo/local-library/repository';
 import {
   DesktopGenerationSession,
+  parseStoredGenerationDraft,
   type GenerationDraftStorage,
   type GenerationSessionFamily,
   type GenerationSessionState,
@@ -45,6 +47,11 @@ export type ScenarioSessionState = GenerationSessionState<ScenarioDraft, Scenari
 export type ScenarioExecutor = GenerationExecutor<ScenarioGenerationInput, ScenarioGenerationIntent, ScenarioCardKind>;
 
 export const SCENARIO_DRAFT_DEFAULT_LANGUAGE = 'zh-CN';
+export const createInitialScenarioDraft = (): ScenarioDraft => ({
+  answers: createInitialScenarioAnswers(), fieldsToKeepEmpty: [], scenarioTitleHint: '',
+  generationMode: 'non-stream', selectedLanguage: SCENARIO_DRAFT_DEFAULT_LANGUAGE,
+});
+export const createEmptyScenarioDraftDocument = () => ({ version: 1 as const, ...createInitialScenarioDraft() });
 
 type StoredScenarioDraft = StoredGenerationDraft<ScenarioDraft, ScenarioCardKind>;
 
@@ -72,7 +79,8 @@ const SCENARIO_SESSION_FAMILY: GenerationSessionFamily<
       || !value.fieldsToKeepEmpty.every((item) => typeof item === 'string')
       || typeof value.scenarioTitleHint !== 'string'
       || (value.generationMode !== 'stream' && value.generationMode !== 'non-stream')
-      || typeof value.selectedLanguage !== 'string') {
+      || typeof value.selectedLanguage !== 'string'
+      || (value.isAdvancedVisible !== undefined && typeof value.isAdvancedVisible !== 'boolean')) {
       throw new Error('草稿版本不受支持或内容损坏');
     }
     const draft: ScenarioDraft = {
@@ -113,6 +121,8 @@ const SCENARIO_SESSION_FAMILY: GenerationSessionFamily<
   },
   executeGeneration: executeScenarioGeneration,
 };
+
+export const validateScenarioDraftDocument = (raw: string): void => { parseStoredGenerationDraft(raw, SCENARIO_SESSION_FAMILY); };
 
 /**
  * /scenario 会话：草稿闸门、取消/uncertain 投影与保存 provenance 走

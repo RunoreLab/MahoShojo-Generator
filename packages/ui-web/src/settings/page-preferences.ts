@@ -12,7 +12,7 @@
  * - `blob`：整个 JSON blob 就是偏好对象（Web `mahoshojo.details.preferences.v1`
  *   等）。`reset()` = removeItem——blob 内没有草稿/结果可以误伤。
  * - `fields`：偏好字段嵌在更大的文档里（Desktop 草稿键，与 answers/output
- *   同存）。`reset()` 只删除登记的偏好键，`version`/`answers`/`output` 与
+ *   同存）。`reset()` 只删除登记的可选偏好键或写回 owner 指定的必填默认，`version`/`answers`/`output` 与
  *   任何未知字段原样保留（DESK-SET-003：未知字段不得被静默删掉）。
  *   文档损坏无法解析时拒绝修改/重置——字段级手术要求先读懂文档，
  *   宁可在设置页报错，也不碰看不懂的草稿。
@@ -47,6 +47,8 @@ export interface PagePreferenceField {
   defaultValue?: unknown | (() => unknown);
   /** `fields` 形态且不可由设置页清除（如草稿自有字段）。缺省视为偏好键。 */
   notResettable?: boolean;
+  /** 必填偏好重置时显式写回 owner 既有默认；未登记时只删除可选字段。 */
+  resetValue?: unknown;
 }
 
 export interface PagePreferenceSource {
@@ -58,6 +60,9 @@ export interface PagePreferenceSource {
   storageKey: string;
   scope: 'blob' | 'fields';
   fields: readonly PagePreferenceField[];
+  /** 既有文档的一层字段容器（如 page-draft.payload）；不创建缺失容器。 */
+  fieldsContainer?: string;
+  description?: string;
   /**
    * `fields` 形态对空存储做首写时建立合法文档的工厂——必须由字段 owner
    * 的领域层提供（如问卷草稿的 `version`/`answers`/`language` 必填面），
@@ -84,7 +89,7 @@ export interface PagePreferencesAdapter {
    */
   writeField(key: string, value: unknown): boolean;
   /**
-   * 清除该页偏好。`blob` 形态删除整个键；`fields` 形态只删登记字段，
+   * 清除该页偏好。`blob` 形态删除整个键；`fields` 形态只重置登记字段（删除或显式默认），
    * 草稿/结果与未知字段原样保留。文档损坏且需要手术时拒绝并返回
    * `false`（`blob` 形态损坏则可安全整键移除）。
    */
@@ -126,8 +131,20 @@ const validateFieldValue = (field: PagePreferenceField, value: unknown): void =>
   }
 };
 
-const preferenceKeysOf = (source: PagePreferenceSource): string[] =>
-  source.fields.filter((field) => field.notResettable !== true).map((field) => field.key);
+const preferenceFieldsOf = (source: PagePreferenceSource): readonly PagePreferenceField[] =>
+  source.fields.filter((field) => field.notResettable !== true);
+
+const fieldsDocument = (source: PagePreferenceSource, document: Record<string, unknown>): Record<string, unknown> => {
+  if (!source.fieldsContainer) return document;
+  const fields = document[source.fieldsContainer];
+  if (!isPlainObject(fields)) throw new Error('偏好字段容器缺失或损坏');
+  return fields;
+};
+
+const cloneForFieldPatch = (source: PagePreferenceSource, document: Record<string, unknown>): Record<string, unknown> => ({
+  ...document,
+  ...(source.fieldsContainer ? { [source.fieldsContainer]: { ...fieldsDocument(source, document) } } : {}),
+});
 
 /** 解析字段的空态展示默认：惰性函数每次调用解析，静态值原样返回。 */
 export const resolvePagePreferenceFieldDefault = (
@@ -144,8 +161,9 @@ const pickDeclaredValues = (
   document_: Record<string, unknown>,
 ): Record<string, unknown> => {
   const values: Record<string, unknown> = {};
+  const fields = fieldsDocument(source, document_);
   for (const field of source.fields) {
-    if (field.key in document_) values[field.key] = document_[field.key];
+    if (field.key in fields) values[field.key] = fields[field.key];
   }
   return values;
 };
@@ -169,6 +187,7 @@ export const createPagePreferencesAdapter = (
       const parsed: unknown = JSON.parse(raw);
       if (!isPlainObject(parsed)) return { kind: 'corrupted' };
       source.validateDocument?.(raw);
+      fieldsDocument(source, parsed);
       return { kind: 'ready', document: parsed };
     } catch {
       return { kind: 'corrupted' };
@@ -180,6 +199,7 @@ export const createPagePreferencesAdapter = (
     try {
       const serialized = JSON.stringify(document);
       source.validateDocument?.(serialized);
+      fieldsDocument(source, document);
       storage.setItem(source.storageKey, serialized);
       return true;
     } catch {
@@ -208,7 +228,7 @@ export const createPagePreferencesAdapter = (
       if (document_.kind === 'corrupted') return false;
       let nextDocument: Record<string, unknown>;
       if (document_.kind === 'ready') {
-        nextDocument = { ...document_.document };
+        nextDocument = cloneForFieldPatch(source, document_.document);
       } else if (source.scope === 'blob') {
         // 整 blob 即偏好对象，首写只含本字段即合法。
         nextDocument = {};
@@ -216,9 +236,11 @@ export const createPagePreferencesAdapter = (
         // fields 文档嵌在更大宿主文档里：首写必须经 owner 领域层工厂
         // 建立合法空壳，缺失工厂时 fail-closed 而不是裸写偏好键。
         if (!source.createDocumentForFirstWrite) return false;
-        nextDocument = source.createDocumentForFirstWrite();
+        try { nextDocument = source.createDocumentForFirstWrite(); }
+        catch { return false; }
       }
-      nextDocument[key] = value;
+      try { fieldsDocument(source, nextDocument)[key] = value; }
+      catch { return false; }
       if (!writeDocument(nextDocument)) return false;
       notify();
       return true;
@@ -238,10 +260,16 @@ export const createPagePreferencesAdapter = (
           ok = false;
         }
       } else {
-        const nextDocument = { ...document_.document };
-        for (const key of preferenceKeysOf(source)) {
-          delete nextDocument[key];
-        }
+        const nextDocument = cloneForFieldPatch(source, document_.document);
+        const fields = fieldsDocument(source, nextDocument);
+        try {
+          for (const field of preferenceFieldsOf(source)) {
+            if ('resetValue' in field) {
+              validateFieldValue(field, field.resetValue);
+              fields[field.key] = field.resetValue;
+            } else delete fields[field.key];
+          }
+        } catch { return false; }
         ok = writeDocument(nextDocument);
       }
       if (ok) notify();

@@ -370,8 +370,34 @@ describe('settings field registry', () => {
       const declared = r.hosts === 'shared' ? ['web', 'desktop'] : [r.hosts];
       expect(Object.keys(r.owner.byHost).sort()).toEqual([...declared].sort());
       for (const facts of Object.values(r.owner.byHost)) {
-        expect(facts?.storageKey).toMatch(/^mahoshojo\./);
+        // 历史/状态 owner 已使用此旧键；登记不能顺手重命名或创建第二 owner。
+        if (r.id === 'generation.sublimationStatePreferences' && facts === r.owner.byHost.web) expect(facts?.storageKey).toBe('sublimation-history-state-preferences-v1');
+        else expect(facts?.storageKey).toMatch(/^mahoshojo\./);
       }
     }
+  });
+});
+
+describe('nested fields and required preference reset values', () => {
+  const source: PagePreferenceSource = {
+    ...FIELDS_SOURCE, fieldsContainer: 'payload',
+    fields: [{ key: 'expanded', label: '展开', kind: 'boolean', resetValue: false }],
+    createDocumentForFirstWrite: () => ({ version: 1, payload: { expanded: true, answers: {} } }),
+  };
+  it('patches one container and resets an explicit default without touching the envelope', () => {
+    const storage = createMemoryStorage(); const original = { version: 1, updatedAt: 123, extension: [1], payload: { expanded: true, answers: { q: '答案' }, result: { text: '原文' } } };
+    storage.setItem(source.storageKey, JSON.stringify(original)); const adapter = createPagePreferencesAdapter(source, storage);
+    expect(adapter.reset()).toBe(true); expect(JSON.parse(storage.getItem(source.storageKey)!)).toEqual({ ...original, payload: { ...original.payload, expanded: false } });
+  });
+  it.each([{}, { payload: null }, { payload: [] }])('does not invent a missing/invalid container', (document) => {
+    const storage = createMemoryStorage(); const raw = JSON.stringify(document); storage.setItem(source.storageKey, raw);
+    const adapter = createPagePreferencesAdapter(source, storage); expect(adapter.read()).toEqual({ status: 'corrupted' }); expect(adapter.writeField('expanded', false)).toBe(false); expect(adapter.reset()).toBe(false); expect(storage.getItem(source.storageKey)).toBe(raw);
+  });
+  it('refuses an invalid owner reset default and validates the final document', () => {
+    const storage = createMemoryStorage(); const raw = '{"payload":{"expanded":true}}'; storage.setItem(source.storageKey, raw);
+    const adapter = createPagePreferencesAdapter({ ...source, fields: [{ ...source.fields[0], resetValue: 'bad' }] }, storage);
+    expect(adapter.reset()).toBe(false); expect(storage.getItem(source.storageKey)).toBe(raw);
+    const guarded = createPagePreferencesAdapter({ ...source, validateDocument: (value) => { if (!JSON.parse(value).payload.expanded) throw new Error('owner constraint'); } }, storage);
+    expect(guarded.reset()).toBe(false); expect(storage.getItem(source.storageKey)).toBe(raw);
   });
 });
