@@ -64,3 +64,8 @@ Desktop `/tavern` 本片只交付 PNG/JSON 原件与通用角色规则旅程，�
 D5.1-T 组队：`domain/team-merge` 与 `ui-web/team` 由 Web 原合并入口和编排页面实际消费，
 Desktop 本地旅程注入既有仓储与下载端口。`domain/team-input` 仅约束本地输入和合成预算，
 不把来源签名转换为权威；Web 在线验签/重签名、云保存与立绘仍由宿主持有。
+
+D5.1-T 卡牌工坊共源：`domain/card-forge-document`、`domain/game-card-image-crop`、
+`domain/game-card-presentation` 为既有文档/裁剪/常量纯核；`ui-web/card-forge` 与
+`ui-web/card-forge.css` 提供卡面、裁剪及主题色区段，Web 原入口真实回用。
+Desktop 的媒体输入/画布预算与原件下载属于宿主，不能下沉为共享字段长度限制。
