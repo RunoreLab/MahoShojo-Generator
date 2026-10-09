@@ -9,7 +9,7 @@ export interface ScenarioPageLayoutProps {
   readonly resolveInternalHref?: (href: string) => string;
 }
 
-/** 箱庭物语的品牌、单列页框与结果位置；宿主仅装配真实状态和能力。 */
+/** 箱庭物语的品牌、单列页框与结果位置；语义结果边界由宿主使用 ScenarioResultSurface 装配。 */
 export function ScenarioPageLayout({ controls, results, footer, onNavigate, resolveInternalHref }: ScenarioPageLayoutProps) {
   return (
     <div data-testid="page-scenario" className="magic-background-white">

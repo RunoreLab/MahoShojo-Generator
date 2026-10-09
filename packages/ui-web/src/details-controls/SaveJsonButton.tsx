@@ -4,6 +4,13 @@ import { downloadBlob } from '../client/blob';
 
 export type SaveJsonMode = 'download' | 'text';
 
+/** 宿主只接管文件下载通道；序列化、文件名和保存模式仍由共享控件统一处理。 */
+export type SaveJsonDownload = (fileName: string, jsonPayload: string) => void;
+
+const downloadJsonInBrowser: SaveJsonDownload = (fileName, jsonPayload) => {
+  downloadBlob(new Blob([jsonPayload], { type: 'application/json' }), fileName);
+};
+
 export interface SaveJsonButtonProps<T> {
   data: T;
   mode: SaveJsonMode;
@@ -12,6 +19,8 @@ export interface SaveJsonButtonProps<T> {
   resolveFileName: (data: T) => string;
   /** `recommendedMode === 'download'` 时的按钮文案；缺省为「💾 下载设定文件」。 */
   downloadLabel?: ReactNode;
+  /** 缺省使用 Web 的 Blob 下载；Desktop 可注入自己的 WebView 下载生命周期。 */
+  downloadJson?: SaveJsonDownload;
 }
 
 /**
@@ -20,13 +29,12 @@ export interface SaveJsonButtonProps<T> {
  * 由 DetailsPage / CanshouPage / CreatorPage 三份逐字变体收敛而来；文案统一为
  * DetailsPage 口径，文件名与推荐按钮文案由宿主注入。
  */
-export function SaveJsonButton<T>({ data, mode, recommendedMode, resolveFileName, downloadLabel }: SaveJsonButtonProps<T>) {
+export function SaveJsonButton<T>({ data, mode, recommendedMode, resolveFileName, downloadLabel, downloadJson: downloadJsonFile = downloadJsonInBrowser }: SaveJsonButtonProps<T>) {
   const [copyStatus, setCopyStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const jsonPayload = useMemo(() => JSON.stringify(data, null, 2), [data]);
 
   const downloadJson = () => {
-    const blob = new Blob([jsonPayload], { type: 'application/json' });
-    downloadBlob(blob, resolveFileName(data));
+    downloadJsonFile(resolveFileName(data), jsonPayload);
     setCopyStatus('idle');
   };
 

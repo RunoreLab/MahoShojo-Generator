@@ -330,7 +330,7 @@ function FreeForm({ session }: { session: FreeSession }) {
             {state.reasoning && <AiReasoningPanel reasoning={state.reasoning} />}
             <div ref={resultSectionRef}>
               {card && <section aria-label="生成结果" className="flex flex-col gap-3">
-                <h2 className="text-xl font-semibold">生成结果 · 未签名（自由生成为非原生卡）</h2>
+                <p className="text-sm text-(--app-text-muted)">生成结果 · 未签名（自由生成为非原生卡）</p>
                 {cardKind === 'magical-girl' && <MagicalGirlCard magicalGirl={card as unknown as MagicalGirlCardData} gradientStyle="linear-gradient(135deg, #9775fa 0%, #b197fc 100%)" />}
                 {cardKind === 'canshou' && <CanshouCard canshou={card as unknown as CanshouDetails} />}
                 {cardKind === 'general' && <GeneralCharacterCard general={card as unknown as GeneralCharacterCardData} />}
@@ -357,6 +357,7 @@ function FreeForm({ session }: { session: FreeSession }) {
                       mode={jsonSaveMode}
                       recommendedMode={recommended.jsonSaveMode}
                       resolveFileName={() => resultJsonName}
+                      downloadJson={downloadTextFile}
                     />
                   </div>
                   <FreeResultActions sizeIndicator={(
@@ -367,8 +368,7 @@ function FreeForm({ session }: { session: FreeSession }) {
                     warningText="⚠️ 接近本地卡单条上限（4 MiB），保存到本地卡库可能失败，请先精简数据。"
                   />
                   )}>
-
-                    <button className="generate-button flex-1" onClick={() => downloadTextFile(resultJsonName, JSON.stringify(card, null, 2))}>下载 JSON 文件</button>
+                    {jsonSaveMode === 'text' && <button className={`${actionClass} flex-1`} onClick={() => downloadTextFile(resultJsonName, JSON.stringify(card, null, 2))}>下载 JSON 文件</button>}
                     <button className="generate-button flex-1" onClick={() => { void navigator.clipboard?.writeText(JSON.stringify(card, null, 2)).then(() => setActionInfo('✅ 数据卡 JSON 已复制到剪贴板')).catch(() => setActionError('复制失败，请手动选择 JSON 内容后复制。')); }}>复制到剪贴板</button>
                   </FreeResultActions>
                 </FreeResultPanel>

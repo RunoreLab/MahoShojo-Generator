@@ -9,7 +9,8 @@ import { resetDesktopAiConfigStoreForTests } from '../src/features/ai-config/use
 import { DESKTOP_AI_CONFIG_STORAGE_KEY } from '../src/features/ai-config/desktop-ai-config-store';
 import { createDesktopRouter } from '../src/app/router';
 
-const mocks = vi.hoisted(() => ({ execute: vi.fn(), save: vi.fn(), listen: vi.fn(), profiles: vi.fn(), scrollResult: vi.fn() }));
+const mocks = vi.hoisted(() => ({ execute: vi.fn(), download: vi.fn(), save: vi.fn(), listen: vi.fn(), profiles: vi.fn(), scrollResult: vi.fn() }));
+vi.mock('../src/platform/download-text-file', () => ({ downloadTextFile: mocks.download }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), isTauri: () => true }));
 vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ onCloseRequested: mocks.listen }) }));
 vi.mock('../src/features/scenario/generation', async (original) => ({ ...await original<object>(), executeScenarioGeneration: mocks.execute }));
@@ -103,12 +104,69 @@ describe('Desktop Scenario route and session UI (native adapter mock)', () => {
     expect(container.textContent).toContain('雨后采访');
     const resultSection = container.querySelector('[aria-label="生成结果"]')!;
     expect(inputCard.contains(resultSection)).toBe(false);
+    expect(resultSection.classList.contains('card')).toBe(true);
+    expect(resultSection.querySelectorAll('.card')).toHaveLength(0);
+    expect(resultSection.querySelectorAll('h2')).toHaveLength(1);
+    expect(resultSection.querySelector('h2')?.textContent).toBe('雨后采访');
+    expect(resultSection.querySelector('pre')?.textContent).toBe(JSON.stringify(scenarioCard, null, 2));
+    expect([...resultSection.querySelectorAll('button')].filter((item) => item.textContent?.includes('下载'))).toHaveLength(1);
+    await click('💾 下载设定文件');
+    expect(mocks.download).toHaveBeenCalledExactlyOnceWith('情景_雨后采访.json', JSON.stringify(scenarioCard, null, 2));
+    expect(button('复制到剪贴板')).toBeTruthy();
     expect(mocks.scrollResult).toHaveBeenCalledTimes(1);
     expect(mocks.scrollResult.mock.instances[0]).toBe(resultSection.parentElement);
     await click('保存到本地卡库');
     expect(mocks.save).toHaveBeenCalledTimes(1);
     expect(container.textContent).toContain('已保存到本地卡库');
     expect(mocks.scrollResult).toHaveBeenCalledTimes(1);
+  });
+
+  it('restores a general scenario onto one surface without changing Markdown or export bytes', async () => {
+    const general = { templateId: '通用情景', title: '雨夜', content: '# 雨夜\n\n保留 Markdown 正文' };
+    window.localStorage.setItem(SCENARIO_DRAFT_KEY, JSON.stringify({
+      ...storedDraft({ '故事发生的场景是怎样的？': '钟楼' }),
+      output: { mode: 'hosted-stream', cardKind: 'general-scenario', card: general, rawText: general.content, phase: 'completed' },
+    }));
+    await mount();
+    await click('恢复草稿');
+    const result = container.querySelector('[aria-label="生成结果"]')!;
+    expect(result.classList.contains('card')).toBe(true);
+    expect(result.querySelector('.card')).toBeNull();
+    expect(result.querySelector('h2')?.textContent).toBe('雨夜');
+    expect(result.querySelectorAll('h2')[1]?.textContent).toBe('雨夜');
+    expect(result.textContent).toContain('保留 Markdown 正文');
+    expect(mocks.execute).not.toHaveBeenCalled();
+    await click('💾 下载设定文件');
+    expect(mocks.download).toHaveBeenCalledExactlyOnceWith('通用情景_雨夜.json', JSON.stringify(general, null, 2));
+  });
+
+  it('keeps one download and full JSON copy when a mobile UA recommends text mode', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', {
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile',
+      clipboard: { writeText },
+    });
+    window.localStorage.setItem(SCENARIO_DRAFT_KEY, JSON.stringify(storedDraft({ '故事发生的场景是怎样的？': '钟楼' })));
+    await mount();
+    await click('恢复草稿');
+    await click('生成情景');
+    const exports = container.querySelector('[aria-label="保存原始数据"]')!;
+    const text = exports.querySelector('textarea')!;
+    const payload = JSON.stringify(scenarioCard, null, 2);
+    expect(text.value).toBe(payload);
+    expect(text.readOnly).toBe(true);
+    expect([...exports.querySelectorAll('button')].filter((item) => item.textContent?.includes('下载'))).toHaveLength(1);
+    expect(exports.textContent).not.toContain('💾 下载设定文件');
+    await click('下载 JSON 文件');
+    expect(mocks.download).toHaveBeenCalledExactlyOnceWith('情景_雨后采访.json', payload);
+    await click('复制 JSON');
+    expect(writeText).toHaveBeenCalledExactlyOnceWith(payload);
+    expect(exports.textContent).toContain('JSON 已复制到剪贴板');
+    await click('复制到剪贴板');
+    expect(writeText).toHaveBeenCalledTimes(2);
+    expect(writeText).toHaveBeenLastCalledWith(payload);
+    expect(text.value).toBe(payload);
+    expect(mocks.download).toHaveBeenCalledTimes(1);
   });
 
   it('confirms replacement before regenerating an unsaved result', async () => {
@@ -216,8 +274,9 @@ describe('Desktop Scenario route and session UI (native adapter mock)', () => {
     await click('生成情景');
     expect((mocks.execute.mock.calls[0]![2] as { mode: string }).mode).toBe('direct-local');
     // 只断言结果标题区：页面静态文案（客户端说明「结果不带官方签名」）自带该词。
-    const heading = container.querySelector('section[aria-label="生成结果"] h2');
-    expect(heading?.textContent).toBe('生成结果 · 未签名（非原生卡）');
+    const result = container.querySelector('section[aria-label="生成结果"]')!;
+    expect(result.querySelector('p')?.textContent).toBe('生成结果 · 未签名（非原生卡）');
+    expect(result.querySelector('h2')?.textContent).toBe('雨后采访');
     await click('保存到本地卡库');
     const record = mocks.save.mock.calls[0]![0] as {
       data: { metadata?: Record<string, unknown> };

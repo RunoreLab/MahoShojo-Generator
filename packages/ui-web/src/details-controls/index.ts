@@ -35,6 +35,7 @@ export {
 export {
   SaveJsonButton,
   type SaveJsonButtonProps,
+  type SaveJsonDownload,
   type SaveJsonMode,
 } from './SaveJsonButton';
 export {

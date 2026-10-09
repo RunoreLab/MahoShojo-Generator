@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { ScenarioPageLayout, ScenarioTitleField, ScenarioQuestionFields, ScenarioBlankFields, ScenarioLanguageField, SCENARIO_QUESTIONS } from '../src/scenario/index';
+import { ScenarioPageLayout, ScenarioResultSurface, ScenarioTitleField, ScenarioQuestionFields, ScenarioBlankFields, ScenarioLanguageField, SCENARIO_QUESTIONS } from '../src/scenario/index';
 
 let container: HTMLDivElement;
 let root: Root;
@@ -55,4 +55,25 @@ it('keeps optional-field paths and language callbacks host-controlled', () => {
   const select = container.querySelector('select')!;
   act(() => { select.value = 'en'; select.dispatchEvent(new Event('change', { bubbles: true })); });
   expect(language).toHaveBeenCalledWith('en');
+});
+
+
+it('surfaces structured output and the general editor individually without double cards around the result slot', () => {
+  act(() => root.render(<ScenarioPageLayout onNavigate={vi.fn()} controls={<button>生成</button>} results={<>
+    <p aria-label="推理">推理说明</p>
+    <ScenarioResultSurface label="结构化情景结果"><h2>结构化标题</h2><pre>完整 JSON</pre></ScenarioResultSurface>
+    <ScenarioResultSurface label="通用情景卡编辑器"><h2>通用卡编辑器</h2><textarea defaultValue="可编辑 Markdown" /></ScenarioResultSurface>
+    <a href="/">返回首页</a>
+  </>} />));
+  const surfaces = [...container.querySelectorAll('[data-testid="scenario-result-surface"]')];
+  expect(surfaces).toHaveLength(2);
+  expect(container.querySelectorAll('.card')).toHaveLength(3);
+  for (const surface of surfaces) {
+    expect(surface.className).toBe('card mt-6');
+    expect(surface.parentElement?.closest('.card')).toBeNull();
+    expect(surface.querySelector('.card')).toBeNull();
+  }
+  expect(container.querySelector('[aria-label="推理"]')?.closest('.card')).toBeNull();
+  expect(container.querySelector('a[href="/"]')?.closest('.card')).toBeNull();
+  expect(container.querySelector('textarea')?.value).toBe('可编辑 Markdown');
 });

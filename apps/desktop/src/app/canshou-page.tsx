@@ -1035,6 +1035,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
                         mode={jsonSaveMode}
                         recommendedMode={recommendedJsonMode}
                         resolveFileName={(data) => resolveResultJsonFileName(data as Record<string, unknown>, 'canshou')}
+                        downloadJson={downloadTextFile}
                       />
                     )}
                   </div>

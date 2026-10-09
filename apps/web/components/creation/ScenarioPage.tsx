@@ -36,6 +36,7 @@ import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 // answers 以 label 为键直接进 prompt，双端口径必须一致。
 import {
   ScenarioPageLayout,
+  ScenarioResultSurface,
   ScenarioTitleField,
   ScenarioQuestionFields,
   ScenarioBlankFields,
@@ -582,7 +583,7 @@ export const ScenarioPage: React.FC = () => {
                   compact
                 />
               )}
-              <div className="card mt-6">
+              <ScenarioResultSurface label="结构化情景结果">
                 <h2 className="text-2xl font-bold text-center mb-4">{resultData.title}</h2>
                 <div className="bg-gray-100 p-4 rounded-lg font-mono text-xs overflow-x-auto">
                   <pre>{JSON.stringify(resultData, null, 2)}</pre>
@@ -605,11 +606,11 @@ export const ScenarioPage: React.FC = () => {
                   data={resultData}
                   warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
                 />
-              </div>
+              </ScenarioResultSurface>
             </>
           )}
 
-          <div className="card mt-6">
+          <ScenarioResultSurface label="通用情景卡编辑器">
             <div className="flex flex-col gap-3">
               <div className="flex flex-col md:flex-row justify-between gap-2">
                 <h2 className="text-xl font-bold">通用情景卡（Markdown）</h2>
@@ -695,7 +696,7 @@ export const ScenarioPage: React.FC = () => {
                 </p>
               )}
             </div>
-          </div>
+          </ScenarioResultSurface>
 
           <div className="text-center" style={{ marginTop: '2rem' }}>
             <Link href="/" className="footer-link">返回首页</Link>

@@ -994,6 +994,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
                       mode={jsonSaveMode}
                       recommendedMode={recommendedJsonMode}
                       resolveFileName={(data) => resolveResultJsonFileName(data as Record<string, unknown>, 'magical-girl')}
+                      downloadJson={downloadTextFile}
                     />
                   )}
                 </div>

@@ -9,7 +9,8 @@ import { resetDesktopAiConfigStoreForTests } from '../src/features/ai-config/use
 import { DESKTOP_AI_CONFIG_STORAGE_KEY } from '../src/features/ai-config/desktop-ai-config-store';
 import { createDesktopRouter } from '../src/app/router';
 
-const mocks = vi.hoisted(() => ({ execute: vi.fn(), save: vi.fn(), listen: vi.fn(), profiles: vi.fn(), readAttachments: vi.fn() }));
+const mocks = vi.hoisted(() => ({ execute: vi.fn(), download: vi.fn(), save: vi.fn(), listen: vi.fn(), profiles: vi.fn(), readAttachments: vi.fn() }));
+vi.mock('../src/platform/download-text-file', () => ({ downloadTextFile: mocks.download }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), isTauri: () => true }));
 vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ onCloseRequested: mocks.listen }) }));
 vi.mock('../src/features/free/generation', async (original) => ({ ...await original<object>(), executeFreeGeneration: mocks.execute }));
@@ -78,10 +79,44 @@ describe('Desktop Free route and session UI (native adapter mock)', () => {
     const callInput = mocks.execute.mock.calls[0]![1] as { prompt: string; schema: string; language: string; attachments: unknown[] };
     expect(callInput).toMatchObject({ prompt: '怕水的火系少女', schema: 'general', language: 'zh-CN', attachments: [] });
     expect(container.textContent).toContain('焰汐');
-    expect(container.textContent).toContain('未签名');
+    expect(container.querySelector('[aria-label="生成结果"] > p')?.textContent).toBe('生成结果 · 未签名（自由生成为非原生卡）');
+    const exports = container.querySelector('[aria-label="保存原始数据"]')!;
+    expect([...exports.querySelectorAll('button')].filter((item) => item.textContent?.includes('下载'))).toHaveLength(1);
+    await click('💾 下载设定文件');
+    expect(mocks.download).toHaveBeenCalledExactlyOnceWith('数据卡_角色_焰汐.json', JSON.stringify(generalCard, null, 2));
+    expect(button('复制到剪贴板')).toBeTruthy();
     await click('保存到本地卡库');
     expect(mocks.save).toHaveBeenCalledTimes(1);
     expect(container.textContent).toContain('已保存到本地卡库');
+  });
+
+  it('keeps one download and full JSON copy when a mobile UA recommends text mode', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', {
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile',
+      clipboard: { writeText },
+    });
+    window.localStorage.setItem(FREE_DRAFT_KEY, JSON.stringify(storedDraft('怕水的火系少女')));
+    await mount();
+    await click('恢复草稿');
+    await click('生成数据卡');
+    const exports = container.querySelector('[aria-label="保存原始数据"]')!;
+    const text = exports.querySelector('textarea')!;
+    const payload = JSON.stringify(generalCard, null, 2);
+    expect(text.value).toBe(payload);
+    expect(text.readOnly).toBe(true);
+    expect([...exports.querySelectorAll('button')].filter((item) => item.textContent?.includes('下载'))).toHaveLength(1);
+    expect(exports.textContent).not.toContain('💾 下载设定文件');
+    await click('下载 JSON 文件');
+    expect(mocks.download).toHaveBeenCalledExactlyOnceWith('数据卡_角色_焰汐.json', payload);
+    await click('复制 JSON');
+    expect(writeText).toHaveBeenCalledExactlyOnceWith(payload);
+    expect(exports.textContent).toContain('JSON 已复制到剪贴板');
+    await click('复制到剪贴板');
+    expect(writeText).toHaveBeenCalledTimes(2);
+    expect(writeText).toHaveBeenLastCalledWith(payload);
+    expect(text.value).toBe(payload);
+    expect(mocks.download).toHaveBeenCalledTimes(1);
   });
 
   it('confirms replacement before regenerating an unsaved result', async () => {

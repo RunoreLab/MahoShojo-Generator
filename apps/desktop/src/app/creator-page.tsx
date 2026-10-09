@@ -112,6 +112,7 @@ import { useDesktopAiConfig } from '../features/ai-config/use-desktop-ai-config'
 import { useDesktopCloudSession } from '../features/account/use-desktop-cloud-session';
 import { useDesktopCardLibraryHost } from '../platform/card-library-host';
 import { IpcLocalCardRepository } from '../platform/local-card-bridge';
+import { downloadTextFile } from '../platform/download-text-file';
 import { useExternalLinks } from '../features/external-links/external-links-provider';
 import { navigateByProductHref, resolveInternalHrefForHashHistory } from './hash-history-fragment';
 import { useLeaveGuard } from './useLeaveGuard';
@@ -1230,6 +1231,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
               mode={jsonSaveMode}
               recommendedMode={recommendedJsonMode}
               resolveFileName={(data) => resolveResultJsonFileName(data as Record<string, unknown>, state.cardKind ?? 'magical-girl')}
+              downloadJson={downloadTextFile}
             />
             <button className={actionClass} onClick={() => { void navigator.clipboard?.writeText(JSON.stringify(resolvedResultPayload, null, 2)).then(() => setActionInfo('✅ 数据卡 JSON 已复制到剪贴板')).catch(() => setActionError('复制失败，请手动选择 JSON 内容后复制。')); }}>复制到剪贴板</button>
           </div>

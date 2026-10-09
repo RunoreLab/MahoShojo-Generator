@@ -8,3 +8,4 @@ export {
 } from './product';
 export { ScenarioPageLayout, type ScenarioPageLayoutProps } from './ScenarioPageLayout';
 export { ScenarioTitleField, ScenarioQuestionFields, ScenarioBlankFields, ScenarioLanguageField } from './ScenarioFields';
+export { ScenarioResultSurface, type ScenarioResultSurfaceProps } from './ScenarioResultSurface';
