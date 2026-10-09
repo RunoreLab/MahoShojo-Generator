@@ -22,6 +22,9 @@ const generalCard = { templateId: '通用角色', name: '焰汐', content: '## �
 const completed: FreeGenerationOutcome = {
   status: 'completed', mode: 'direct-local', card: generalCard, cardKind: 'general', rawText: JSON.stringify(generalCard),
 };
+import { createPagePreferencesAdapter, PagePreferencesCard } from '@mahoshojo/ui-web/settings';
+import { DESKTOP_FREE_PREFERENCES } from '../src/app/settings-page-preferences';
+
 let root: Root;
 let container: HTMLDivElement;
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 120)); });
@@ -387,4 +390,53 @@ it.each(['route', 'close'] as const)('confirms leaving a memory-only Free draft 
   if (kind === 'route') expect(container.querySelector('[data-testid="page-free"]')).toBeNull();
   else expect(accepted).not.toHaveBeenCalled();
   expect(window.localStorage.getItem(FREE_DRAFT_KEY)).toBe(corrupt);
+});
+
+
+it('reads and writes the two preferences through the real page and settings card across remounts', async () => {
+  const adapter = createPagePreferencesAdapter(DESKTOP_FREE_PREFERENCES);
+  const settings = () => act(async () => root.render(<PagePreferencesCard adapter={adapter} />));
+  const toggle = (label: string) => container.querySelector<HTMLButtonElement>(`[role="switch"][aria-label="${label}"]`)!;
+  const pageToggle = (label: string) => [...container.querySelectorAll('button')].find((item) => item.textContent?.startsWith(label))!;
+  await settings();
+  expect(toggle('默认展开「字段速览」').getAttribute('aria-checked')).toBe('false');
+  await act(async () => toggle('默认展开「字段速览」').click());
+  await act(async () => toggle('默认展开「生成语言」').click());
+  await mount();
+  expect(pageToggle('Schema 字段说明').getAttribute('aria-expanded')).toBe('true');
+  expect(container.querySelector('select[aria-label="生成语言"]')).not.toBeNull();
+  expect(mocks.execute).not.toHaveBeenCalled();
+  await act(async () => pageToggle('Schema 字段说明').click());
+  await act(async () => pageToggle('生成语言').click());
+  await settings();
+  expect(toggle('默认展开「字段速览」').getAttribute('aria-checked')).toBe('false');
+  expect(toggle('默认展开「生成语言」').getAttribute('aria-checked')).toBe('false');
+  await act(async () => toggle('默认展开「字段速览」').click());
+  await act(async () => pageToggle('重置该页偏好').click());
+  await act(async () => pageToggle('确认重置').click());
+  await mount();
+  expect(pageToggle('Schema 字段说明').getAttribute('aria-expanded')).toBe('false');
+  expect(container.querySelector('select[aria-label="生成语言"]')).toBeNull();
+  expect(mocks.execute).not.toHaveBeenCalled();
+});
+
+it('shows the settings error and preserves storage when a preference cannot be written', async () => {
+  const adapter = createPagePreferencesAdapter(DESKTOP_FREE_PREFERENCES);
+  await act(async () => root.render(<PagePreferencesCard adapter={adapter} />));
+  const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="默认展开「字段速览」"]')!.click());
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('修改未保存');
+  expect(localStorage.getItem(DESKTOP_FREE_PREFERENCES.storageKey)).toBeNull();
+  write.mockRestore();
+});
+
+
+it('shows protected-source feedback in settings without replacing malformed draft bytes', async () => {
+  const raw = '{protected-settings-source'; localStorage.setItem(DESKTOP_FREE_PREFERENCES.storageKey, raw);
+  const adapter = createPagePreferencesAdapter(DESKTOP_FREE_PREFERENCES);
+  await act(async () => root.render(<PagePreferencesCard adapter={adapter} />));
+  expect(container.textContent).toContain('为保护内容暂不可在此修改');
+  expect(container.querySelector('[role="switch"]')).toBeNull();
+  expect([...container.querySelectorAll('button')].find((item) => item.textContent === '重置该页偏好')?.disabled).toBe(true);
+  expect(localStorage.getItem(DESKTOP_FREE_PREFERENCES.storageKey)).toBe(raw);
 });

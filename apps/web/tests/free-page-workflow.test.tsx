@@ -18,6 +18,9 @@ vi.mock('@/components/shared/CharacterPortraitAssetPanel', () => ({ CharacterPor
 vi.mock('@/components/GeneralCharacterCard', () => ({ default: ({ general }: { general: { content: string } }) => <div aria-label="生成结果">{general.content}</div> }));
 import { FreePage } from '@/components/creation/FreePage';
 
+import { createPagePreferencesAdapter, PagePreferencesCard } from '@mahoshojo/ui-web/settings';
+import { WEB_FREE_PREFERENCES } from '@/lib/settings/page-preferences';
+
 let root: Root; let container: HTMLDivElement;
 const KEY = 'mahoshojo.free-generator.draft.v1';
 const draft = { schemaId: 'general', generationMode: 'non-stream', prompt: '恢复的完整提示词', selectedLanguage: 'en', showFieldGuide: true, showLanguageSection: true };
@@ -74,4 +77,65 @@ it('preserves unknown stored fields while current inputs remain authoritative, a
   expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ ...extended, prompt: '修改后的提示词' });
   await act(async () => byText('清空存档').click());
   expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ ...draft, prompt: '' });
+});
+
+
+it('reads and writes the two preferences through the real page and settings card across remounts', async () => {
+  const adapter = createPagePreferencesAdapter(WEB_FREE_PREFERENCES);
+  const settings = () => act(async () => root.render(<PagePreferencesCard adapter={adapter} />));
+  const toggle = (label: string) => container.querySelector<HTMLButtonElement>(`[role="switch"][aria-label="${label}"]`)!;
+  const pageToggle = (label: string) => [...container.querySelectorAll('button')].find((item) => item.textContent?.startsWith(label))!;
+  await settings();
+  expect(toggle('默认展开「字段速览」').getAttribute('aria-checked')).toBe('false');
+  await act(async () => toggle('默认展开「字段速览」').click());
+  await act(async () => toggle('默认展开「生成语言」').click());
+  await mount();
+  expect(pageToggle('Schema 字段说明').getAttribute('aria-expanded')).toBe('true');
+  expect(container.querySelector('select[aria-label="生成语言"]')).not.toBeNull();
+  expect(mocks.dispatch).not.toHaveBeenCalled();
+  await act(async () => pageToggle('Schema 字段说明').click());
+  await act(async () => pageToggle('生成语言').click());
+  await settings();
+  expect(toggle('默认展开「字段速览」').getAttribute('aria-checked')).toBe('false');
+  expect(toggle('默认展开「生成语言」').getAttribute('aria-checked')).toBe('false');
+  await act(async () => toggle('默认展开「字段速览」').click());
+  await act(async () => pageToggle('重置该页偏好').click());
+  await act(async () => pageToggle('确认重置').click());
+  await mount();
+  expect(pageToggle('Schema 字段说明').getAttribute('aria-expanded')).toBe('false');
+  expect(container.querySelector('select[aria-label="生成语言"]')).toBeNull();
+  expect(mocks.dispatch).not.toHaveBeenCalled();
+});
+
+it('shows the settings error and preserves storage when a preference cannot be written', async () => {
+  const adapter = createPagePreferencesAdapter(WEB_FREE_PREFERENCES);
+  await act(async () => root.render(<PagePreferencesCard adapter={adapter} />));
+  const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="默认展开「字段速览」"]')!.click());
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('修改未保存');
+  expect(localStorage.getItem(WEB_FREE_PREFERENCES.storageKey)).toBeNull();
+  write.mockRestore();
+});
+
+
+it('keeps the extension snapshot when clearing the stored draft fails', async () => {
+  const extended = { ...draft, extension: { retained: true } };
+  localStorage.setItem(KEY, JSON.stringify(extended)); await mount();
+  const remove = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => { throw new Error('denied'); });
+  await act(async () => byText('清空存档').click());
+  expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual(extended);
+  expect(container.textContent).toContain('清空存档失败');
+  remove.mockRestore(); await edit('失败后继续编辑');
+  expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ ...extended, prompt: '失败后继续编辑' });
+});
+
+
+it('shows protected-source feedback in settings without replacing malformed draft bytes', async () => {
+  const raw = '{protected-settings-source'; localStorage.setItem(WEB_FREE_PREFERENCES.storageKey, raw);
+  const adapter = createPagePreferencesAdapter(WEB_FREE_PREFERENCES);
+  await act(async () => root.render(<PagePreferencesCard adapter={adapter} />));
+  expect(container.textContent).toContain('为保护内容暂不可在此修改');
+  expect(container.querySelector('[role="switch"]')).toBeNull();
+  expect([...container.querySelectorAll('button')].find((item) => item.textContent === '重置该页偏好')?.disabled).toBe(true);
+  expect(localStorage.getItem(WEB_FREE_PREFERENCES.storageKey)).toBe(raw);
 });

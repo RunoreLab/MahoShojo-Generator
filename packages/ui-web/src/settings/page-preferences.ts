@@ -66,6 +66,8 @@ export interface PagePreferenceSource {
    * `blob` 形态不需要——整 blob 即偏好对象，`{key: value}` 天然合法。
    */
   createDocumentForFirstWrite?: () => Record<string, unknown>;
+  /** Owner 原有的版本/结构校验；抛错即拒绝手术，不能用规范化结果覆盖原文档。 */
+  validateDocument?: (raw: string) => void;
 }
 
 export type PagePreferencesReadResult =
@@ -166,6 +168,7 @@ export const createPagePreferencesAdapter = (
     try {
       const parsed: unknown = JSON.parse(raw);
       if (!isPlainObject(parsed)) return { kind: 'corrupted' };
+      source.validateDocument?.(raw);
       return { kind: 'ready', document: parsed };
     } catch {
       return { kind: 'corrupted' };
@@ -175,7 +178,9 @@ export const createPagePreferencesAdapter = (
   const writeDocument = (document: Record<string, unknown>): boolean => {
     if (storage === null) return false;
     try {
-      storage.setItem(source.storageKey, JSON.stringify(document));
+      const serialized = JSON.stringify(document);
+      source.validateDocument?.(serialized);
+      storage.setItem(source.storageKey, serialized);
       return true;
     } catch {
       return false;

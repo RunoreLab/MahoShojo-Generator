@@ -125,6 +125,23 @@ export const SETTINGS_FIELD_REGISTRY: readonly SettingsFieldRecord[] = [
     status: 'wired',
   },
   {
+    id: 'generation.freePreferences',
+    group: 'generation',
+    label: '自由生成页记忆偏好',
+    hosts: 'shared',
+    scope: 'device',
+    owner: {
+      kind: 'page-preferences',
+      byHost: {
+        web: { storageKey: 'mahoshojo.free-generator.draft.v1', scope: 'fields' },
+        desktop: { storageKey: 'mahoshojo.desktop.free.draft.v1', scope: 'fields' },
+      },
+    },
+    defaultValue: '两个展开开关均为 false',
+    status: 'wired',
+    notes: '仅字段速览/生成语言展开偏好；草稿模式、语言、内容与结果不在重置范围。',
+  },
+  {
     id: 'desktop.escapeMenu.enabled',
     group: 'appearance',
     label: 'Esc 快捷菜单',

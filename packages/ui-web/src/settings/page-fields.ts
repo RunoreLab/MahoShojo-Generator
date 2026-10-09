@@ -57,6 +57,13 @@ export const JSON_SAVE_MODE_FIELD: PagePreferenceField = {
   defaultValue: () => recommendedSaveModes().jsonSaveMode,
 };
 
+export const SHOW_FIELD_GUIDE_FIELD: PagePreferenceField = {
+  key: 'showFieldGuide',
+  label: '默认展开「字段速览」',
+  kind: 'boolean',
+  defaultValue: false,
+};
+
 export const SHOW_LANGUAGE_SECTION_FIELD: PagePreferenceField = {
   key: 'showLanguageSection',
   label: '默认展开「生成语言」',

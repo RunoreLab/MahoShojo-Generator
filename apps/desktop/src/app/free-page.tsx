@@ -49,7 +49,7 @@ import {
 import { MarkdownBlock } from '@mahoshojo/ui-web/markdown';
 import { BackHomeLink, ProductFooter } from '@mahoshojo/ui-web/shell';
 import type { HomeAssetSource } from '@mahoshojo/ui-web/home';
-import { FreeSession, FREE_DRAFT_DEFAULT_LANGUAGE, type FreeDraft } from '../features/free/session';
+import { FreeSession, createEmptyFreeDraftDocument, type FreeDraft } from '../features/free/session';
 import type { FreeExecutionMode } from '../features/free/generation';
 import { resolveDesktopAiTarget } from '../features/ai-config/desktop-ai-config';
 import { DesktopAiProviderPanel } from '../features/ai-config/desktop-ai-provider-panel';
@@ -411,7 +411,7 @@ export function DesktopFree() {
     const owner = new FreeSession({
       storage: { getItem: (key) => window.localStorage.getItem(key), setItem: (key, value) => window.localStorage.setItem(key, value), removeItem: (key) => window.localStorage.removeItem(key) },
       repository: new IpcLocalCardRepository(invoke),
-      initialDraft: { schemaId: 'general', generationMode: 'non-stream', prompt: '', selectedLanguage: FREE_DRAFT_DEFAULT_LANGUAGE },
+      initialDraft: createEmptyFreeDraftDocument(),
     });
     owner.restoreDraft(false);
     setSession(owner);

@@ -697,6 +697,7 @@ describe('desktop settings page preferences', () => {
 
     expect(container.textContent).toContain('设定生成（/details）');
     expect(container.textContent).toContain('残兽生成（/canshou）');
+    expect(container.textContent).toContain('自由生成（/free）');
     // fields 形态如实告知：偏好与草稿同存一个键。
     expect(container.textContent).toContain(DETAILS_DRAFT_KEY);
   });

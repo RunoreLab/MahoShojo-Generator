@@ -2,6 +2,7 @@ import { FREE_GENERATION_SCHEMA_IDS, type FreeSchemaId } from '@mahoshojo/ai-cor
 import type { CardRepository } from '@mahoshojo/local-library/repository';
 import {
   DesktopGenerationSession,
+  parseStoredGenerationDraft,
   type GenerationDraftStorage,
   type GenerationSessionFamily,
   type GenerationSessionState,
@@ -41,6 +42,15 @@ export type FreeSessionState = GenerationSessionState<FreeDraft, FreeCardKind>;
 export type FreeExecutor = GenerationExecutor<FreeGenerationInput, FreeGenerationIntent, FreeCardKind>;
 
 export const FREE_DRAFT_DEFAULT_LANGUAGE = 'zh-CN';
+
+/** 页面原初始化；设置首写复用，false 沿原 schema 规范化为缺省。 */
+export const createEmptyFreeDraftDocument = () => ({
+  version: 1 as const,
+  schemaId: 'general' as FreeSchemaId,
+  generationMode: 'non-stream' as const,
+  prompt: '',
+  selectedLanguage: FREE_DRAFT_DEFAULT_LANGUAGE,
+});
 
 type StoredFreeDraft = StoredGenerationDraft<FreeDraft, FreeCardKind>;
 
@@ -103,6 +113,11 @@ const FREE_SESSION_FAMILY: GenerationSessionFamily<
     if (isRecord(card.metadata)) delete (card.metadata as Record<string, unknown>).signature;
   },
   executeGeneration: executeFreeGeneration,
+};
+
+/** 只校验、不采用规范化输出；设置修改须保留原文档的未知字段与结果。 */
+export const validateFreeDraftDocument = (raw: string): void => {
+  parseStoredGenerationDraft(raw, FREE_SESSION_FAMILY);
 };
 
 /**

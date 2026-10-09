@@ -158,7 +158,7 @@ export class DesktopGenerationSession<
     try {
       const raw = dependencies.storage.getItem(family.draftKey);
       if (raw !== null) {
-        const saved = this.parseDraft(raw);
+        const saved = parseStoredGenerationDraft(raw, family);
         // 残余草稿（空壳自动写回）直接应用，不占用「恢复/清除」门禁。
         if (family.isResidueDraft(saved)) this.applyRestoredDraft(saved, false);
         else { this.pending = saved; this.state.pendingRestore = true; }
@@ -385,26 +385,28 @@ export class DesktopGenerationSession<
     finally { this.publish({ saving: false }); }
   }
   dispose(): void { if (!this.state.draftSaved) this.retryDraftSave(); this.disposed = true; this.controller?.abort(); this.listeners.clear(); }
-
-  /* ── 草稿解析（公共件：version/output 校验；家族字段走 parseDraftFields） ── */
-
-  private parseDraft(raw: string): StoredGenerationDraft<TDraft, TCardKind> {
-    if (raw.length > MAX_DRAFT_CHARACTERS) throw new Error('草稿超过大小限制');
-    const value: unknown = JSON.parse(raw);
-    if (!object(value) || value.version !== 1) throw new Error('草稿版本不受支持或内容损坏');
-    const fields = this.family.parseDraftFields(value);
-    const draft: StoredGenerationDraft<TDraft, TCardKind> = { ...fields, version: 1 };
-    if (typeof value.savedAt === 'number' && Number.isFinite(value.savedAt) && value.savedAt > 0) draft.savedAt = value.savedAt;
-    if (value.output !== undefined) {
-      const output = value.output;
-      if (!object(output) || !EXECUTION_MODES.includes(output.mode as Mode) || typeof output.rawText !== 'string' || !STORED_PHASES.includes(String(output.phase))) throw new Error('草稿输出损坏');
-      const cardKind = this.family.normalizeStoredCardKind(output.cardKind);
-      const card = output.card === null ? null : this.family.validateCard(cardKind, output.card);
-      // 签名只可能来自 hosted-json 通路；direct/流式草稿中混入的签名字段一律剥除。
-      if (card && output.mode !== 'hosted-json') this.family.stripSignature(card);
-      if ((output.phase === 'completed') !== (card !== null)) throw new Error('草稿结果状态不一致');
-      draft.output = { mode: output.mode as Mode, cardKind, card, rawText: output.rawText, phase: output.phase as Exclude<Phase, 'generating'> };
-    }
-    return draft;
-  }
 }
+
+/** 既有草稿解析规则；页面恢复与设置合法性判断共用，返回值不用于设置重写。 */
+export const parseStoredGenerationDraft = <TDraft, TInput, TIntent extends DesktopGenerationIntent, TCardKind extends string>(
+  raw: string,
+  family: GenerationSessionFamily<TDraft, TInput, TIntent, TCardKind>,
+): StoredGenerationDraft<TDraft, TCardKind> => {
+  if (raw.length > MAX_DRAFT_CHARACTERS) throw new Error('草稿超过大小限制');
+  const value: unknown = JSON.parse(raw);
+  if (!object(value) || value.version !== 1) throw new Error('草稿版本不受支持或内容损坏');
+  const fields = family.parseDraftFields(value);
+  const draft: StoredGenerationDraft<TDraft, TCardKind> = { ...fields, version: 1 };
+  if (typeof value.savedAt === 'number' && Number.isFinite(value.savedAt) && value.savedAt > 0) draft.savedAt = value.savedAt;
+  if (value.output !== undefined) {
+    const output = value.output;
+    if (!object(output) || !EXECUTION_MODES.includes(output.mode as Mode) || typeof output.rawText !== 'string' || !STORED_PHASES.includes(String(output.phase))) throw new Error('草稿输出损坏');
+    const cardKind = family.normalizeStoredCardKind(output.cardKind);
+    const card = output.card === null ? null : family.validateCard(cardKind, output.card);
+    // 签名只可能来自 hosted-json 通路；direct/流式草稿中混入的签名字段一律剥除。
+    if (card && output.mode !== 'hosted-json') family.stripSignature(card);
+    if ((output.phase === 'completed') !== (card !== null)) throw new Error('草稿结果状态不一致');
+    draft.output = { mode: output.mode as Mode, cardKind, card, rawText: output.rawText, phase: output.phase as Exclude<Phase, 'generating'> };
+  }
+  return draft;
+};

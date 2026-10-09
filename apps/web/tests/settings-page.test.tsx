@@ -145,6 +145,7 @@ const click = async (element: Element | null): Promise<void> => {
 describe('web /settings page', () => {
   it('renders the shared grouped shell; device fields are visible without sign-in', async () => {
     await render(<WebSettingsPage />);
+    expect(container.textContent).toContain('自由生成（/free）');
 
     expect(container.querySelector('[data-testid="settings-page"]')).not.toBeNull();
     for (const group of ['account', 'appearance', 'generation', 'data']) {
@@ -221,6 +222,10 @@ describe('web /settings page', () => {
     expect(ownerOf('generation.canshouPreferences')).toEqual({
       storageKey: CANSHOU_PREFERENCES_STORAGE_KEY,
       scope: 'blob',
+    });
+    expect(ownerOf('generation.freePreferences')).toEqual({
+      storageKey: 'mahoshojo.free-generator.draft.v1',
+      scope: 'fields',
     });
   });
 

@@ -61,7 +61,7 @@ import {
 } from '@mahoshojo/ui-web/free';
 import { isFreeStreamSchemaId, type FreeSchemaId } from '@mahoshojo/ai-core/free-generation';
 
-const LOCAL_STORAGE_KEY = 'mahoshojo.free-generator.draft.v1';
+import { createEmptyFreeDraftDocument, FREE_DRAFT_KEY, parseFreeDraftDocument } from '@/lib/free/draft';
 
 const SENSITIVE_CHECK_MAX_CHARS = 50_000;
 
@@ -186,10 +186,11 @@ export function FreePage() {
   const attachmentState = useFreeAttachments();
   const { items: attachments, isReading: isReadingAttachments, error: attachmentError, clear: clearAttachments } = attachmentState;
 
+  const [initialDraft] = useState(createEmptyFreeDraftDocument);
   const storedDraftDocument = useRef<Record<string, unknown>>({});
-  const [schemaId, setSchemaId] = useState<FreeSchemaId>('general');
-  const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
-  const [prompt, setPrompt] = useState<string>('');
+  const [schemaId, setSchemaId] = useState<FreeSchemaId>(initialDraft.schemaId);
+  const [generationMode, setGenerationMode] = useState<GenerationMode>(initialDraft.generationMode);
+  const [prompt, setPrompt] = useState<string>(initialDraft.prompt);
   const [draftReady, setDraftReady] = useState(false);
   const [draftError, setDraftError] = useState<string | null>(null);
   const draftStorageBlocked = useRef(false);
@@ -208,10 +209,10 @@ export function FreePage() {
   const streamAbortControllerRef = useRef<AbortController | null>(null);
   const [characterPortraitAsset, setCharacterPortraitAsset] = useState<CharacterCardPortraitAsset | null>(null);
 
-  const [showFieldGuide, setShowFieldGuide] = useState(false);
-  const [showLanguageSection, setShowLanguageSection] = useState(false);
+  const [showFieldGuide, setShowFieldGuide] = useState(initialDraft.showFieldGuide);
+  const [showLanguageSection, setShowLanguageSection] = useState(initialDraft.showLanguageSection);
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
-  const [selectedLanguage, setSelectedLanguage] = useState('zh-CN');
+  const [selectedLanguage, setSelectedLanguage] = useState(initialDraft.selectedLanguage);
 
   const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
   const isUserCustomKey = isUsingUserProvidedKey(userProviderConfig);
@@ -257,7 +258,7 @@ export function FreePage() {
       };
       const serialized = JSON.stringify(payload);
       if (draftStorageBlocked.current) { blockedDraftBaseline.current ??= serialized; unsavedDraft.current = serialized !== blockedDraftBaseline.current; return; }
-      window.localStorage.setItem(LOCAL_STORAGE_KEY, serialized);
+      window.localStorage.setItem(FREE_DRAFT_KEY, serialized);
       unsavedDraft.current = false;
       setDraftError(null);
     } catch {
@@ -269,10 +270,9 @@ export function FreePage() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
-      const saved = window.localStorage.getItem(LOCAL_STORAGE_KEY);
+      const saved = window.localStorage.getItem(FREE_DRAFT_KEY);
       if (saved === null) return;
-      const parsed = JSON.parse(saved) as any;
-      if (!parsed || typeof parsed !== 'object' || !FREE_SCHEMA_OPTIONS.some((option) => option.id === parsed.schemaId) || !['stream', 'non-stream'].includes(parsed.generationMode) || typeof parsed.prompt !== 'string' || (parsed.selectedLanguage !== undefined && typeof parsed.selectedLanguage !== 'string') || (parsed.showFieldGuide !== undefined && typeof parsed.showFieldGuide !== 'boolean') || (parsed.showLanguageSection !== undefined && typeof parsed.showLanguageSection !== 'boolean')) throw new Error('invalid draft');
+      const parsed = parseFreeDraftDocument(saved);
       storedDraftDocument.current = parsed;
       if (parsed?.schemaId) setSchemaId(parsed.schemaId);
       if (parsed?.generationMode) setGenerationMode(parsed.generationMode);
@@ -293,7 +293,7 @@ export function FreePage() {
 
   const handleClearDraft = () => {
     if (typeof window !== 'undefined' && !draftStorageBlocked.current) {
-      try { window.localStorage.removeItem(LOCAL_STORAGE_KEY); storedDraftDocument.current = {}; } catch { setDraftError('清空存档失败，当前提示词仍保留。'); return; }
+      try { window.localStorage.removeItem(FREE_DRAFT_KEY); storedDraftDocument.current = {}; } catch { setDraftError('清空存档失败，当前提示词仍保留。'); return; }
     }
     if (!draftStorageBlocked.current) { unsavedDraft.current = false; setDraftError(null); }
     setPrompt('');
