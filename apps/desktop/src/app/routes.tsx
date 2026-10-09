@@ -100,7 +100,7 @@ const ESCAPE_MENU_ENTRIES: readonly ShellEscapeMenuEntry[] = (
   ] as const
 ).filter((entry) => readCapability(CAPABILITIES, entry.href).kind === 'available');
 
-const FULL_BLEED_PATHS = new Set(['/', '/details', '/canshou', '/free', '/scenario', '/creator', '/character-manager', '/encyclopedia', '/messages', '/settings', '/me', '/local-library']);
+const FULL_BLEED_PATHS = new Set(['/', '/details', '/canshou', '/free', '/scenario', '/sublimation', '/creator', '/character-manager', '/encyclopedia', '/messages', '/settings', '/me', '/local-library']);
 
 /** 条目页是前缀而不是字面路径：`/encyclopedia/<slug>`。 */
 const isFullBleedPath = (pathname: string) =>
@@ -422,6 +422,12 @@ const scenarioRoute = createRoute({
   component: lazyRouteComponent(() => import('./scenario-page'), 'DesktopScenario'),
 });
 
+const sublimationRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/sublimation',
+  component: lazyRouteComponent(() => import('./sublimation-page'), 'DesktopSublimation'),
+});
+
 const creatorRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/creator',
@@ -434,6 +440,7 @@ export const routeTree = rootRoute.addChildren([
   canshouRoute,
   freeRoute,
   scenarioRoute,
+  sublimationRoute,
   creatorRoute,
   characterManagerRoute,
   encyclopediaIndexRoute,
