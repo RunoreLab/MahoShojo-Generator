@@ -37,6 +37,7 @@ export interface GenerationStoredOutput<TCardKind extends string> {
 /** 持久化草稿：家族字段（`TDraft`）+ 公共版本号/输出版块。 */
 export type StoredGenerationDraft<TDraft, TCardKind extends string> = TDraft & {
   version: 1;
+  savedAt?: number;
   output?: GenerationStoredOutput<TCardKind>;
 };
 
@@ -100,6 +101,7 @@ export interface GenerationSessionState<TDraft, TCardKind extends string = strin
   pendingRestore: boolean;
   draftError: string | null;
   draftSaved: boolean;
+  draftSavedAt: number | null;
   phase: Phase;
   rawText: string;
   card: GenerationResultCardData | null;
@@ -135,6 +137,7 @@ export class DesktopGenerationSession<
   private listeners = new Set<() => void>();
   private pending: StoredGenerationDraft<TDraft, TCardKind> | null = null;
   private blocked = false;
+  private editedSinceRead = false;
   private disposed = false;
   private controller: AbortController | null = null;
   private mode: Mode = 'direct-local';
@@ -149,7 +152,7 @@ export class DesktopGenerationSession<
       requestId?: () => string;
     },
   ) {
-    this.state = { draft: clone(dependencies.initialDraft), pendingRestore: false, draftError: null, draftSaved: true, phase: 'idle', rawText: '', card: null, cardKind: family.defaultCardKind, resultRestored: false, reasoning: null, message: null, saving: false, saveStatus: 'idle', saveError: null };
+    this.state = { draft: clone(dependencies.initialDraft), pendingRestore: false, draftError: null, draftSaved: true, draftSavedAt: null, phase: 'idle', rawText: '', card: null, cardKind: family.defaultCardKind, resultRestored: false, reasoning: null, message: null, saving: false, saveStatus: 'idle', saveError: null };
     try {
       const raw = dependencies.storage.getItem(family.draftKey);
       if (raw !== null) {
@@ -161,7 +164,7 @@ export class DesktopGenerationSession<
     } catch {
       this.blocked = true;
       this.state.draftSaved = false;
-      this.state.draftError = '无法读取草稿，可能已损坏或版本不受支持。确认清除前不会覆盖原数据。';
+      this.state.draftError = '旧草稿无法读取，原数据已保留。仍可继续填写和生成；本次内容暂不自动保存，请及时保存到本地库或导出。';
     }
   }
   getSnapshot = (): GenerationSessionState<TDraft, TCardKind> => this.state;
@@ -169,14 +172,17 @@ export class DesktopGenerationSession<
   hasUnsavedResult = (): boolean => this.state.card !== null && this.state.saveStatus !== 'saved' && this.state.saveStatus !== 'already-present';
   /** Corrupt or future-version storage is preserved until the user explicitly clears it. */
   isDraftBlocked = (): boolean => this.blocked;
+  /** 受保护的旧数据不等于新修改；memory-only 工作仍须离开确认。 */
+  hasUnsavedDraft = (): boolean => !this.state.pendingRestore && !this.state.draftSaved && (!this.blocked || this.editedSinceRead);
   subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener); };
   private publish(patch: Partial<GenerationSessionState<TDraft, TCardKind>>): void {
     if (this.disposed) return;
+    if (patch.draftSaved === false) this.editedSinceRead = true;
     this.state = { ...this.state, ...patch };
     this.listeners.forEach((listener) => listener());
   }
   updateDraft(draft: TDraft): void {
-    if (this.disposed || this.blocked || this.state.pendingRestore || this.controller || this.state.saving) return;
+    if (this.disposed || this.state.pendingRestore || this.controller || this.state.saving) return;
     this.publish({ draft: clone(draft), draftSaved: false });
     this.retryDraftSave();
   }
@@ -192,8 +198,8 @@ export class DesktopGenerationSession<
    */
   private applyRestoredDraft(saved: StoredGenerationDraft<TDraft, TCardKind>, announce: boolean): void {
     if (saved.output) this.mode = saved.output.mode;
-    const { version: _version, output, ...restoredDraft } = saved;
-    this.publish({ draft: clone(restoredDraft) as TDraft, pendingRestore: false, draftSaved: true, phase: output?.phase ?? 'idle', card: output?.card ?? null, cardKind: output?.card ? output.cardKind ?? this.family.defaultCardKind : this.family.defaultCardKind, resultRestored: output?.card != null, reasoning: null, rawText: output?.rawText ?? '', message: !announce ? null : output?.phase === 'uncertain' ? '已恢复草稿；上次生成的服务器执行结果未能确认，不会自动重新生成。' : output ? '已恢复草稿；不会自动重新生成。' : null });
+    const { version: _version, savedAt, output, ...restoredDraft } = saved;
+    this.publish({ draft: clone(restoredDraft) as TDraft, pendingRestore: false, draftSaved: true, draftSavedAt: savedAt ?? null, phase: output?.phase ?? 'idle', card: output?.card ?? null, cardKind: output?.card ? output.cardKind ?? this.family.defaultCardKind : this.family.defaultCardKind, resultRestored: output?.card != null, reasoning: null, rawText: output?.rawText ?? '', message: !announce ? null : output?.phase === 'uncertain' ? '已恢复草稿；上次生成的服务器执行结果未能确认，不会自动重新生成。' : output ? '已恢复草稿；不会自动重新生成。' : null });
   }
   discardDraft(): void {
     if (this.disposed || this.controller || this.state.saving) return;
@@ -201,7 +207,8 @@ export class DesktopGenerationSession<
       this.dependencies.storage.removeItem(this.family.draftKey);
       this.pending = null;
       this.blocked = false;
-      this.publish({ draft: clone(this.dependencies.initialDraft), pendingRestore: false, draftError: null, draftSaved: true, phase: 'idle', rawText: '', card: null, cardKind: this.family.defaultCardKind, resultRestored: false, reasoning: null, message: null, saveStatus: 'idle', saveError: null });
+      this.editedSinceRead = false;
+      this.publish({ draft: clone(this.dependencies.initialDraft), pendingRestore: false, draftError: null, draftSaved: true, draftSavedAt: null, phase: 'idle', rawText: '', card: null, cardKind: this.family.defaultCardKind, resultRestored: false, reasoning: null, message: null, saveStatus: 'idle', saveError: null });
     } catch { this.publish({ draftError: '清除草稿失败，原草稿保护仍生效。', draftSaved: false }); }
   }
   retryDraftSave(): void {
@@ -214,12 +221,13 @@ export class DesktopGenerationSession<
     const storedPhase = phase === 'generating'
       ? (this.mode === 'hosted-json' ? 'uncertain' : 'cancelled')
       : phase;
-    const stored: StoredGenerationDraft<TDraft, TCardKind> = { version: 1, ...clone(draft), output: { mode: this.mode, cardKind, card, rawText, phase: storedPhase } };
+    const savedAt = Date.now();
+    const stored: StoredGenerationDraft<TDraft, TCardKind> = { version: 1, ...clone(draft), savedAt, output: { mode: this.mode, cardKind, card, rawText, phase: storedPhase } };
     try {
       const raw = JSON.stringify(stored);
       if (raw.length > MAX_DRAFT_CHARACTERS) throw new Error('草稿超过大小限制');
       this.dependencies.storage.setItem(this.family.draftKey, raw);
-      this.publish({ draftSaved: true, draftError: null });
+      this.publish({ draftSaved: true, draftSavedAt: savedAt, draftError: null });
     } catch { this.publish({ draftSaved: false, draftError: '草稿写入失败，当前内容仅保留在此页面。请重试保存草稿。' }); }
   }
   private scheduleDraftSave(): void {
@@ -233,7 +241,7 @@ export class DesktopGenerationSession<
     intent: Omit<TIntent, 'requestId'>,
     discardUnsavedResult = false,
   ): Promise<void> {
-    if (this.disposed || this.controller || this.state.saving || this.blocked || this.state.pendingRestore) return;
+    if (this.disposed || this.controller || this.state.saving || this.state.pendingRestore) return;
     if (this.hasUnsavedResult() && !discardUnsavedResult) return;
     const controller = new AbortController();
     this.controller = controller;
@@ -284,7 +292,7 @@ export class DesktopGenerationSession<
    * `direct-local`（纯本机产出，无远端参与者）。
    */
   applyLocalResult(card: GenerationResultCardData, cardKind: TCardKind, discardUnsavedResult = false): void {
-    if (this.disposed || this.controller || this.state.saving || this.blocked || this.state.pendingRestore) return;
+    if (this.disposed || this.controller || this.state.saving || this.state.pendingRestore) return;
     if (this.hasUnsavedResult() && !discardUnsavedResult) return;
     this.mode = 'direct-local';
     const normalized = clone(card);
@@ -296,7 +304,7 @@ export class DesktopGenerationSession<
     this.retryDraftSave();
   }
   clearOutput(): void {
-    if (this.disposed || this.isBusy() || this.blocked || this.state.pendingRestore) return;
+    if (this.disposed || this.isBusy() || this.state.pendingRestore) return;
     this.publish({ phase: 'idle', rawText: '', card: null, cardKind: this.family.defaultCardKind, resultRestored: false, reasoning: null, message: null, saveStatus: 'idle', saveError: null, draftSaved: false });
     this.retryDraftSave();
   }
@@ -368,6 +376,7 @@ export class DesktopGenerationSession<
     if (!object(value) || value.version !== 1) throw new Error('草稿版本不受支持或内容损坏');
     const fields = this.family.parseDraftFields(value);
     const draft: StoredGenerationDraft<TDraft, TCardKind> = { ...fields, version: 1 };
+    if (typeof value.savedAt === 'number' && Number.isFinite(value.savedAt) && value.savedAt > 0) draft.savedAt = value.savedAt;
     if (value.output !== undefined) {
       const output = value.output;
       if (!object(output) || !EXECUTION_MODES.includes(output.mode as Mode) || typeof output.rawText !== 'string' || !STORED_PHASES.includes(String(output.phase))) throw new Error('草稿输出损坏');

@@ -148,6 +148,62 @@ describe('Details draft protection and restoration', () => {
     session.updateDraft(draft);
     expect(storage.setItem).toHaveBeenCalledTimes(1);
   });
+  it('keeps corrupt storage intact while allowing new memory-only work and guarding departure', async () => {
+    const raw = 'original broken draft';
+    const { session, storage, repository, raw: read } = harness(raw);
+    expect(session.isDraftBlocked()).toBe(true);
+    expect(session.hasUnsavedDraft()).toBe(false);
+    session.updateDraft({ ...draft, language: 'English' });
+    expect(session.getSnapshot().draft.language).toBe('English');
+    expect(session.hasUnsavedDraft()).toBe(true);
+    await session.generate(options, input, intent);
+    expect(session.getSnapshot().phase).toBe('completed');
+    expect(session.getSnapshot().draftSaved).toBe(false);
+    await expect(session.saveResult()).resolves.toBe(true);
+    expect(repository.putIfAbsent).toHaveBeenCalledTimes(1);
+    session.retryDraftSave(); session.dispose();
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(storage.removeItem).not.toHaveBeenCalled();
+    expect(read()).toBe(raw);
+  });
+  it('does not make memory-only generation reentrant or bypass unsaved-result confirmation', async () => {
+    let finish!: (result: DetailsGenerationOutcome) => void;
+    const execute = vi.fn<typeof executeDetailsGeneration>(() => new Promise((resolve) => { finish = resolve; }));
+    const { session, storage } = harness('bad original', execute);
+    const first = session.generate(options, input, intent);
+    await session.generate(options, input, intent);
+    expect(execute).toHaveBeenCalledTimes(1);
+    finish(completed); await first;
+    await session.generate(options, input, intent);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(session.hasUnsavedDraft()).toBe(true);
+    expect(storage.setItem).not.toHaveBeenCalled();
+  });
+  it('allows local output and clearing the current result without deleting the protected original', () => {
+    const { session, storage, raw } = harness('protected invalid value');
+    session.applyLocalResult(card, 'magical-girl');
+    expect(session.getSnapshot().phase).toBe('completed');
+    session.clearOutput();
+    expect(session.getSnapshot().card).toBeNull();
+    expect(session.hasUnsavedDraft()).toBe(true);
+    expect(raw()).toBe('protected invalid value');
+    expect(storage.setItem).not.toHaveBeenCalled();
+    expect(storage.removeItem).not.toHaveBeenCalled();
+  });
+  it('records real successful save time and restores it without inventing legacy timestamps', () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-09T07:00:00Z'));
+    const { session, raw } = harness();
+    expect(session.getSnapshot().draftSavedAt).toBeNull();
+    session.updateDraft(draft);
+    expect(session.getSnapshot().draftSavedAt).toBe(Date.now());
+    const restored = harness(raw()).session;
+    restored.restoreDraft();
+    expect(restored.getSnapshot().draftSavedAt).toBe(Date.now());
+    expect(restored.getSnapshot().draft).not.toHaveProperty('savedAt');
+    const legacy = harness(JSON.stringify({ version: 1, ...draft })).session;
+    legacy.restoreDraft();
+    expect(legacy.getSnapshot().draftSavedAt).toBeNull();
+  });
   it('read and remove failures protect existing storage', () => {
     const storage = { getItem: () => { throw new Error('denied'); }, setItem: vi.fn(), removeItem: () => { throw new Error('denied'); } };
     const { repository } = harness();
