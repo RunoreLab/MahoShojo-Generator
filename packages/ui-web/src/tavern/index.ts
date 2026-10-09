@@ -5,3 +5,6 @@ export * from './file';
 export * from './local-projection';
 export * from './local-sources';
 export * from './source-selection';
+export * from './export-fields';
+export * from './default-base';
+export * from './export-file';

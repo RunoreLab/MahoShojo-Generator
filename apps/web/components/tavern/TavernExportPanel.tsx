@@ -1,4 +1,28 @@
-import { useEffect, useMemo, useReducer, useState } from 'react';
+import {
+  TavernExportFields,
+  TavernExportDialogueFields,
+  TavernExportCreatorFields,
+  TavernExportAdvancedFields,
+  TavernExportChunkOptions,
+  useTavernSourceSelection,
+  readTavernSourceJson,
+  readTavernBasePng,
+} from '@mahoshojo/ui-web/tavern';
+import { SafeJsonValueSchema } from '@mahoshojo/contracts/json-value';
+import {
+  buildDefaultFieldsFromDataCard,
+  buildCreatorField,
+  buildTavernExportCard,
+  initialFields,
+  parseTavernExportTags,
+  parsePngChunkRanges,
+  MAX_TAVERN_TEXT_BYTES,
+  MAX_TAVERN_FILE_BYTES,
+  type ExportFields,
+  type ExportMeta,
+  type ExportMetaRating,
+} from '@mahoshojo/domain/tavern-card';
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import BattleDataModal from '@/components/BattleDataModal';
@@ -18,17 +42,12 @@ import { inferTemplate, type InferableTemplate } from '@/lib/data-card-converter
 import { mapDataCardRuntimeSourceInfo, mapPublicDataCardRowToBattleSelectionPayload } from '@/lib/data-card-read-mappers';
 import { computeTechIndex } from '@/lib/metrics/techIndex';
 import {
-  buildArenaDefaultScenario,
-  buildArenaWorldbook,
   buildTavernScenarioFragment,
-  createTavernV3Card,
   getDefaultTavernBasePngBytes,
-  recommendTavernExportFields,
-  type TavernExportMeta,
   writeTavernCardToPngBytes,
   type TavernScenarioFragment,
 } from '@/lib/tavern-card';
-import { useAuth, type User } from '@/lib/useAuth';
+import { useAuth } from '@/lib/useAuth';
 
 type ExportStep = 'idle' | 'ready' | 'generating' | 'done' | 'error';
 
@@ -80,51 +99,6 @@ type ApiMetaResponse =
     }
   | { success: false; error?: string };
 
-type ExportMetaRating = {
-  rating: number;
-  games: number;
-  wins: number;
-  losses: number;
-  draws: number;
-  tier: string;
-  lastDelta: number | null;
-  lastAppliedAt: string | null;
-  publicRank: number | null;
-  publicTotal: number | null;
-  winRate: number | null;
-};
-
-type ExportMeta = TavernExportMeta & {
-  dataCardId?: string;
-  dataCardName?: string;
-  dataCardDescription?: string;
-  author?: string;
-  isPublic?: boolean;
-  createdAt?: string;
-  updatedAt?: string;
-  likeCount?: number;
-  favoriteCount?: number;
-  usageCount?: number;
-  techScore?: number | null;
-  ratings?: { strict: ExportMetaRating | null; free: ExportMetaRating | null };
-};
-
-interface ExportFields {
-  name: string;
-  description: string;
-  personality: string;
-  scenario: string;
-  firstMes: string;
-  mesExample: string;
-  tags: string;
-  creator: string;
-  creatorNotes: string;
-  systemPrompt: string;
-  postHistoryInstructions: string;
-  talkativeness: number;
-  fav: boolean;
-}
-
 interface ExportState {
   step: ExportStep;
   error: string | null;
@@ -136,6 +110,7 @@ interface ExportState {
   overwriteExisting: boolean;
   includeCcv3: boolean;
   includeChara: boolean;
+  includeSourceSnapshot: boolean;
   autoArenaScenario: boolean;
   includeArenaWorldbook: boolean;
   includeScenarioInScenario: boolean;
@@ -151,6 +126,7 @@ type ExportAction =
   | { type: 'setError'; message: string }
   | { type: 'setInlineError'; message: string | null }
   | { type: 'setDataCard'; data: unknown; template: InferableTemplate; fields: ExportFields; meta?: ExportMeta | null }
+  | { type: 'setMetadata'; meta: ExportMeta; fields: Partial<ExportFields> }
   | { type: 'setBasePng'; bytes: Uint8Array; name: string }
   | { type: 'setField'; key: keyof ExportFields; value: string | number | boolean }
   | {
@@ -159,6 +135,7 @@ type ExportAction =
         | 'overwriteExisting'
         | 'includeCcv3'
         | 'includeChara'
+        | 'includeSourceSnapshot'
         | 'autoArenaScenario'
         | 'includeArenaWorldbook'
         | 'includeScenarioInScenario'
@@ -172,27 +149,10 @@ type ExportAction =
   | { type: 'setAiFilling'; value: boolean }
   | { type: 'setAiOverwriteFields'; value: boolean }
   | { type: 'generating' }
-  | { type: 'done' };
+  | { type: 'done' }
+  | { type: 'generationFailed'; message: string };
 
-const DEFAULT_CREATOR_NOTES = '来源：MahoShojo-Generator / 魔法少女竞技场 A.R.E.N.A.';
-const DEFAULT_TAVERN_CREATOR = 'github.com/RunoreLab/MahoShojo-Generator';
 const DEFAULT_TAVERN_BASE_NAME = 'mahoshojo-logo.png';
-
-const initialFields: ExportFields = {
-  name: '',
-  description: '',
-  personality: '',
-  scenario: '',
-  firstMes: '',
-  mesExample: '',
-  tags: '',
-  creator: DEFAULT_TAVERN_CREATOR,
-  creatorNotes: DEFAULT_CREATOR_NOTES,
-  systemPrompt: '',
-  postHistoryInstructions: '',
-  talkativeness: 0.5,
-  fav: false,
-};
 
 const initialState: ExportState = {
   step: 'idle',
@@ -205,6 +165,7 @@ const initialState: ExportState = {
   overwriteExisting: true,
   includeCcv3: true,
   includeChara: true,
+  includeSourceSnapshot: true,
   autoArenaScenario: true,
   includeArenaWorldbook: true,
   includeScenarioInScenario: true,
@@ -233,11 +194,14 @@ function reducer(state: ExportState, action: ExportAction): ExportState {
         template: action.template,
         fields: action.fields,
       };
+    case 'setMetadata':
+      return { ...state, exportMeta: action.meta, fields: { ...state.fields, ...action.fields } };
     case 'setBasePng':
       return { ...state, basePngBytes: action.bytes, basePngName: action.name };
     case 'setField':
       return { ...state, fields: { ...state.fields, [action.key]: action.value } as ExportFields };
     case 'setOption':
+      if (!action.value && ((action.key === 'includeCcv3' && !state.includeChara) || (action.key === 'includeChara' && !state.includeCcv3))) return state;
       return { ...state, [action.key]: action.value } as ExportState;
     case 'addScenario':
       return { ...state, scenarios: [...state.scenarios, action.scenario] };
@@ -260,6 +224,8 @@ function reducer(state: ExportState, action: ExportAction): ExportState {
       return { ...state, aiOverwriteFields: action.value };
     case 'generating':
       return { ...state, step: 'generating', error: null };
+    case 'generationFailed':
+      return { ...state, step: 'ready', error: action.message };
     case 'done':
       return { ...state, step: 'done' };
     default:
@@ -303,186 +269,6 @@ const readTavernMeta = (card: unknown): Record<string, unknown> | null => {
   if (!isRecord(tavern)) return null;
   const meta = tavern['meta'];
   return isRecord(meta) ? meta : null;
-};
-
-const DEFAULT_CLOUD_CARD_DESCRIPTIONS = new Set(['角色数据卡', '情景数据卡', '叙事历史数据卡']);
-
-const appendCreatorNotes = (base: string, block: string): string => {
-  const left = base.trim();
-  const right = block.trim();
-  if (!right) return left;
-  if (left.includes(right)) return left;
-  if (!left) return right;
-  return `${left}\n\n${right}`;
-};
-
-const buildCreatorNotesWithCloudDescription = (dataCard: unknown, baseCreatorNotes: string): string => {
-  if (!isRecord(dataCard)) return baseCreatorNotes;
-
-  const cloudId = readCloudSourceCardId(dataCard);
-  if (!cloudId) return baseCreatorNotes;
-
-  const cloudDescription = safeString(dataCard['_cardDescription']).trim();
-  if (!cloudDescription) return baseCreatorNotes;
-  if (DEFAULT_CLOUD_CARD_DESCRIPTIONS.has(cloudDescription)) return baseCreatorNotes;
-
-  const capped = cloudDescription.replace(/\r\n/g, '\n').slice(0, 800);
-  const block = `【档案馆简介】\n${capped}${cloudDescription.length > 800 ? '\n...[已截断]' : ''}`;
-  return appendCreatorNotes(baseCreatorNotes, block);
-};
-
-const buildDefaultFieldsFromDataCard = (
-  template: InferableTemplate,
-  card: unknown,
-  exportMeta?: ExportMeta | null,
-  creator?: string
-): ExportFields => {
-  const meta = readTavernMeta(card);
-  const metaTags = meta ? safeStringArray(meta['tags']) : [];
-  const recommended = recommendTavernExportFields(template, card, metaTags, exportMeta ?? undefined);
-  const recommendedTags = recommended.tags.join(', ');
-
-  if (!isRecord(card)) {
-    return { ...initialFields };
-  }
-
-  const fromMeta = (key: string): string => (meta ? safeString(meta[key]) : '');
-  const fromMetaFirstMes = fromMeta('firstMes') || fromMeta('first_mes');
-  const fromMetaMesExample = fromMeta('mesExample') || fromMeta('mes_example');
-  const baseCreatorNotes = fromMeta('creatorNotes') || fromMeta('creator_notes') || DEFAULT_CREATOR_NOTES;
-  const creatorNotes = buildCreatorNotesWithCloudDescription(card, baseCreatorNotes);
-  const creatorField = creator?.trim() || safeString(meta?.['creator']) || DEFAULT_TAVERN_CREATOR;
-
-  if (template === 'magical-girl') {
-    const codename = safeString(card['codename']) || safeString(card['name']) || '未命名角色';
-    const appearance = isRecord(card['appearance']) ? card['appearance'] : null;
-    const analysis = isRecord(card['analysis']) ? card['analysis'] : null;
-    const magicConstruct = isRecord(card['magicConstruct']) ? card['magicConstruct'] : null;
-    const wonderlandRule = isRecord(card['wonderlandRule']) ? card['wonderlandRule'] : null;
-    const blooming = isRecord(card['blooming']) ? card['blooming'] : null;
-
-    const descParts: string[] = [];
-    const overallLook = appearance ? safeString(appearance['overallLook']) : '';
-    const outfit = appearance ? safeString(appearance['outfit']) : '';
-    const accessories = appearance ? safeString(appearance['accessories']) : '';
-    const colorScheme = appearance ? safeString(appearance['colorScheme']) : '';
-    if (overallLook || outfit || accessories || colorScheme) {
-      descParts.push(
-        ['【外观】', overallLook, outfit && `服装：${outfit}`, accessories && `饰品：${accessories}`, colorScheme && `配色：${colorScheme}`]
-          .filter(Boolean)
-          .join('\n')
-      );
-    }
-    if (magicConstruct) {
-      const mcName = safeString(magicConstruct['name']);
-      const mcForm = safeString(magicConstruct['form']);
-      const mcDesc = safeString(magicConstruct['description']);
-      const mcAbilities = Array.isArray(magicConstruct['basicAbilities']) ? safeStringArray(magicConstruct['basicAbilities']) : [];
-      if (mcName || mcForm || mcDesc || mcAbilities.length > 0) {
-        descParts.push(
-          ['【魔装】', mcName && `名称：${mcName}`, mcForm && `形态：${mcForm}`, mcAbilities.length > 0 ? `能力：${mcAbilities.join('、')}` : '', mcDesc]
-            .filter(Boolean)
-            .join('\n')
-        );
-      }
-    }
-    if (wonderlandRule) {
-      const wlName = safeString(wonderlandRule['name']);
-      const wlDesc = safeString(wonderlandRule['description']);
-      const wlActivation = safeString(wonderlandRule['activation']);
-      const wlTendency = safeString(wonderlandRule['tendency']);
-      if (wlName || wlDesc || wlActivation || wlTendency) {
-        descParts.push(
-          ['【奇境规则】', wlName && `名称：${wlName}`, wlTendency && `倾向：${wlTendency}`, wlActivation && `触发：${wlActivation}`, wlDesc]
-            .filter(Boolean)
-            .join('\n')
-        );
-      }
-    }
-    if (blooming) {
-      const blName = safeString(blooming['name']);
-      const blPower = safeString(blooming['powerLevel']);
-      const blForm = safeString(blooming['evolvedForm']);
-      const blOutfit = safeString(blooming['evolvedOutfit']);
-      const blAbilities = Array.isArray(blooming['evolvedAbilities']) ? safeStringArray(blooming['evolvedAbilities']) : [];
-      if (blName || blPower || blForm || blOutfit || blAbilities.length > 0) {
-        descParts.push(
-          [
-            '【繁开】',
-            blName && `名称：${blName}`,
-            blPower && `强度：${blPower}`,
-            blForm && `形态：${blForm}`,
-            blOutfit && `装束：${blOutfit}`,
-            blAbilities.length > 0 ? `能力：${blAbilities.join('、')}` : '',
-          ]
-            .filter(Boolean)
-            .join('\n')
-        );
-      }
-    }
-
-    const personality = safeString(analysis?.['personalityAnalysis']) || fromMeta('personality');
-
-    return {
-      ...initialFields,
-      name: fromMeta('name') || codename,
-      description: fromMeta('description') || descParts.filter(Boolean).join('\n\n'),
-      personality,
-      scenario: fromMeta('scenario'),
-      firstMes: fromMetaFirstMes || recommended.firstMes || '',
-      mesExample: fromMetaMesExample || recommended.mesExample || '',
-      tags: recommendedTags,
-      creator: creatorField,
-      creatorNotes,
-    };
-  }
-
-  if (template === 'canshou') {
-    const name = safeString(card['name']) || '未命名残兽';
-    const descParts: string[] = [];
-    const appearance = safeString(card['appearance']);
-    const skin = safeString(card['materialAndSkin']);
-    const appendages = safeString(card['featuresAndAppendages']);
-    const evolution = safeString(card['evolutionStage']);
-    const attack = safeString(card['attackMethod']);
-    const ability = safeString(card['specialAbility']);
-    if (appearance) descParts.push(`【外观】\n${appearance}`);
-    if (skin) descParts.push(`【材质与皮肤】\n${skin}`);
-    if (appendages) descParts.push(`【特征与附肢】\n${appendages}`);
-    if (evolution) descParts.push(`【进化阶段】\n${evolution}`);
-    if (attack) descParts.push(`【攻击方式】\n${attack}`);
-    if (ability) descParts.push(`【特殊能力】\n${ability}`);
-
-    const personality = safeString(card['coreEmotion']) || fromMeta('personality');
-
-    return {
-      ...initialFields,
-      name: fromMeta('name') || name,
-      description: fromMeta('description') || descParts.filter(Boolean).join('\n\n'),
-      personality,
-      scenario: fromMeta('scenario'),
-      firstMes: fromMetaFirstMes,
-      mesExample: fromMetaMesExample,
-      tags: recommendedTags,
-      creator: creatorField,
-      creatorNotes,
-    };
-  }
-
-  const name = safeString(card['name']) || safeString(card['codename']) || fromMeta('name') || '未命名角色';
-  const content = safeString(card['content']) || safeString(card['description']) || '';
-  return {
-    ...initialFields,
-    name,
-    description: fromMeta('description') || content,
-    personality: fromMeta('personality'),
-    scenario: fromMeta('scenario'),
-    firstMes: fromMetaFirstMes,
-    mesExample: fromMetaMesExample,
-    tags: recommendedTags,
-    creator: creatorField,
-    creatorNotes,
-  };
 };
 
 const fetchDataCardMeta = async (dataCardId: string): Promise<Extract<ApiMetaResponse, { success: true }> | null> => {
@@ -609,68 +395,28 @@ const buildExportMeta = async (dataCard: unknown): Promise<ExportMeta> => {
   return meta;
 };
 
-const buildCreatorField = (exportMeta: ExportMeta | null, user: User | null): string => {
-  const parts: string[] = [DEFAULT_TAVERN_CREATOR];
-  if (user?.username) parts.push(user.username);
-  const author = exportMeta?.author?.trim() ?? '';
-  if (author && author !== '未知' && author.toLowerCase() !== 'unknown') {
-    parts.push(author);
+const validateSourceData = (value: unknown): Record<string, unknown> => {
+  if (!SafeJsonValueSchema.safeParse(value).success || !isRecord(value)) {
+    throw new Error('数据卡必须为安全有效的 JSON 对象（不支持危险键、过深或过多节点）。');
   }
-  return uniqueStrings(parts).join(' / ');
+  if (new TextEncoder().encode(JSON.stringify(value)).length > MAX_TAVERN_TEXT_BYTES) {
+    throw new Error('数据卡 JSON 超过 4 MiB 上限。');
+  }
+  return value;
 };
 
-const buildSourceDataSnapshot = (dataCard: unknown, maxChars: number): { json: string; truncated: boolean } | null => {
-  try {
-    const json = JSON.stringify(dataCard);
-    if (!json) return null;
-    if (json.length <= maxChars) return { json, truncated: false };
-    return { json: `${json.slice(0, maxChars)}\n...[已截断]`, truncated: true };
-  } catch {
-    return null;
-  }
+const validateBasePng = (bytes: Uint8Array): Uint8Array => {
+  if (bytes.byteLength > MAX_TAVERN_FILE_BYTES) throw new Error('底图 PNG 超过 32 MiB 上限。');
+  parsePngChunkRanges(bytes);
+  return bytes;
 };
 
-const buildExportExtensions = (dataCard: unknown, exportMeta: ExportMeta | null, user: User | null) => {
-  const exportedAt = new Date().toISOString();
-  const snapshot = buildSourceDataSnapshot(dataCard, 24_000);
-  const source = exportMeta
-    ? {
-        kind: exportMeta.source,
-        dataCardId: exportMeta.dataCardId,
-        name: exportMeta.dataCardName,
-        description: exportMeta.dataCardDescription,
-        author: exportMeta.author,
-        isPublic: exportMeta.isPublic,
-        createdAt: exportMeta.createdAt,
-        updatedAt: exportMeta.updatedAt,
-        stats: {
-          likeCount: exportMeta.likeCount,
-          favoriteCount: exportMeta.favoriteCount,
-          usageCount: exportMeta.usageCount,
-        },
-        tags: exportMeta.tags ? uniqueStrings(exportMeta.tags) : undefined,
-        metrics: {
-          techScore: exportMeta.techScore ?? null,
-          techLevel: exportMeta.techLevel ?? null,
-          isNative: typeof exportMeta.isNative === 'boolean' ? exportMeta.isNative : null,
-        },
-        ratings: exportMeta.ratings ?? undefined,
-        rankTier: exportMeta.rankTier ?? undefined,
-      }
-    : undefined;
-
-  const exporter = user ? { id: user.id, username: user.username } : undefined;
-
-  return {
-    ms_export: {
-      version: 1,
-      exportedAt,
-      exporter,
-      source,
-      sourceDataJson: snapshot?.json,
-      sourceDataTruncated: snapshot?.truncated ? true : undefined,
-    },
-  };
+// The Web library adapter adds optional runtime metadata as undefined. Omit only
+// those known absent fields; arbitrary source keys still pass strict SafeJson checks.
+const normalizeCloudSource = (payload: unknown): unknown => {
+  if (!isRecord(payload)) return payload;
+  const optionalMetadata = new Set(['_updatedAt', '_createdAt', '_likeCount', '_favoriteCount', '_usageCount']);
+  return Object.fromEntries(Object.entries(payload).filter(([key, value]) => value !== undefined || !optionalMetadata.has(key)));
 };
 
 const createId = (prefix: string): string => {
@@ -682,7 +428,7 @@ const createId = (prefix: string): string => {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 };
 
-export function TavernExportPanel() {
+export function TavernExportPanel({ onBusyChange }: { onBusyChange?: (busy: boolean) => void } = {}) {
   const router = useAppRouterAdapter();
   const [state, dispatch] = useReducer(reducer, initialState);
   const { isAuthenticated, user } = useAuth();
@@ -697,31 +443,97 @@ export function TavernExportPanel() {
   const tavernAiCooldownKey = isUserCustomKey ? 'tavernAiFillCooldown:custom' : 'tavernAiFillCooldown:system';
   const { isCooldown, startCooldown, remainingTime } = useCooldown(tavernAiCooldownKey, tavernAiCooldownMs);
 
-  const onDataCardSelected = async (file: File | null) => {
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const json = JSON.parse(text) as unknown;
-      const template = inferTemplate(json);
-      const exportMeta = await buildExportMeta(json);
-      const creatorField = buildCreatorField(exportMeta, user);
-      const fields = buildDefaultFieldsFromDataCard(template, json, exportMeta, creatorField);
-      dispatch({ type: 'setDataCard', data: json, template, fields, meta: exportMeta });
-    } catch (error) {
-      dispatch({ type: 'setError', message: error instanceof Error ? error.message : '解析数据卡失败' });
+  const busy = state.step === 'generating' || state.aiFilling || isApplyingTachie;
+  useEffect(() => { onBusyChange?.(busy); }, [busy, onBusyChange]);
+  useEffect(() => () => { onBusyChange?.(false); }, [onBusyChange]);
+
+  const sourceSelection = useTavernSourceSelection();
+  const baseSelection = useTavernSourceSelection();
+  const scenarioSelection = useTavernSourceSelection();
+  const sourceToken = useRef(0);
+  const pendingSourceRead = useRef(false);
+  const fieldRevision = useRef(0);
+  const fieldVersions = useRef<Partial<Record<keyof ExportFields, number>>>({});
+  const aiRequest = useRef<{ id: number; controller: AbortController | null }>({ id: 0, controller: null });
+  const matchingRequest = useRef(0);
+  const matchingBusy = useRef(false);
+  const generationBusy = useRef(false);
+
+  useEffect(() => () => { aiRequest.current.controller?.abort(); aiRequest.current.id += 1; matchingRequest.current += 1; }, []);
+
+  const cancelAiFill = () => {
+    aiRequest.current.controller?.abort();
+    aiRequest.current = { id: aiRequest.current.id + 1, controller: null };
+    dispatch({ type: 'setAiFilling', value: false });
+  };
+
+  const onFieldChange = (key: keyof ExportFields, value: string | number | boolean) => {
+    fieldRevision.current += 1;
+    fieldVersions.current[key] = (fieldVersions.current[key] ?? 0) + 1;
+    cancelAiFill();
+    dispatch({ type: 'setField', key, value });
+  };
+
+  const beginSourceSelection = () => {
+    cancelAiFill();
+    const token = sourceSelection.begin();
+    sourceToken.current = token;
+    pendingSourceRead.current = true;
+    return token;
+  };
+
+  const keepCurrentSource = () => {
+    // An action on the visible card supersedes a still-reading file/random result.
+    // Do not invalidate metadata already enriching this same visible source.
+    if (pendingSourceRead.current) {
+      sourceToken.current = sourceSelection.begin();
+      pendingSourceRead.current = false;
     }
   };
 
-  const onCloudCardPicked = async (payload: any) => {
+  const applySource = async (payload: unknown, token: number) => {
+    if (!sourceSelection.isCurrent(token)) return;
+    const data = validateSourceData(payload);
+    pendingSourceRead.current = false;
+    const template = inferTemplate(data);
+    const fields = buildDefaultFieldsFromDataCard(template, data, null, buildCreatorField(null, user));
+    const versions = { ...fieldVersions.current };
+    // Show the new source immediately. Later metadata may enrich only untouched fields.
+    dispatch({ type: 'setDataCard', data, template, fields });
+    const meta = await buildExportMeta(data);
+    if (!sourceSelection.isCurrent(token)) return;
+    const enriched = buildDefaultFieldsFromDataCard(template, data, meta, buildCreatorField(meta, user));
+    const untouchedFields = Object.fromEntries(Object.entries(enriched).filter(([key]) => {
+      const field = key as keyof ExportFields;
+      return (fieldVersions.current[field] ?? 0) === (versions[field] ?? 0);
+    })) as Partial<ExportFields>;
+    dispatch({ type: 'setMetadata', meta, fields: untouchedFields });
+  };
+
+  const onDataCardSelected = async (file: File | null) => {
+    if (!file) return;
+    const token = beginSourceSelection();
+    const revision = fieldRevision.current;
     try {
-      const template = inferTemplate(payload);
-      const exportMeta = await buildExportMeta(payload);
-      const creatorField = buildCreatorField(exportMeta, user);
-      const fields = buildDefaultFieldsFromDataCard(template, payload, exportMeta, creatorField);
-      dispatch({ type: 'setDataCard', data: payload, template, fields, meta: exportMeta });
-      setShowCharacterModal(false);
+      const json = await readTavernSourceJson(file);
+      if (!sourceSelection.isCurrent(token) || revision !== fieldRevision.current) return;
+      await applySource(json, token);
     } catch (error) {
-      dispatch({ type: 'setInlineError', message: error instanceof Error ? `解析档案馆数据卡失败：${error.message}` : '解析档案馆数据卡失败' });
+      if (sourceSelection.isCurrent(token) && revision === fieldRevision.current) {
+        dispatch({ type: 'setInlineError', message: error instanceof Error ? error.message : '解析数据卡失败' });
+      }
+    } finally {
+      if (sourceSelection.isCurrent(token)) pendingSourceRead.current = false;
+    }
+  };
+
+  const onCloudCardPicked = async (payload: unknown) => {
+    const token = beginSourceSelection();
+    try {
+      setShowCharacterModal(false);
+      await applySource(normalizeCloudSource(payload), token);
+    } catch (error) {
+      if (sourceSelection.isCurrent(token)) dispatch({ type: 'setInlineError', message: error instanceof Error ? `解析档案馆数据卡失败：${error.message}` : '解析档案馆数据卡失败' });
     }
   };
 
@@ -744,7 +556,7 @@ export function TavernExportPanel() {
         return;
       }
 
-      const fragment = buildTavernScenarioFragment(payload, { maxChars: 24_000 });
+      const fragment = buildTavernScenarioFragment(validateSourceData(normalizeCloudSource(payload)), { maxChars: 0 });
       if (!fragment) throw new Error('该数据卡无法识别为情景卡（支持：通用情景/情景问卷）');
 
       const cardName = sourceInfo.sourceDataCardName || fragment.title;
@@ -774,7 +586,11 @@ export function TavernExportPanel() {
   }, [state.scenarios]);
 
   const onRandomMatchCharacter = async () => {
-    if (isMatching !== null) return;
+    if (matchingBusy.current) return;
+    matchingBusy.current = true;
+    const request = ++matchingRequest.current;
+    const token = beginSourceSelection();
+    const revision = fieldRevision.current;
     setIsMatching('character');
     dispatch({ type: 'setInlineError', message: null });
 
@@ -785,19 +601,21 @@ export function TavernExportPanel() {
         throw new Error(result?.error || '无法获取随机数据');
       }
 
-      const card = result.card;
-      const payload = mapPublicDataCardRowToBattleSelectionPayload(card);
-
-      await onCloudCardPicked(payload);
+      if (!sourceSelection.isCurrent(token) || revision !== fieldRevision.current) return;
+      const payload = mapPublicDataCardRowToBattleSelectionPayload(result.card);
+      await applySource(normalizeCloudSource(payload), token);
     } catch (error) {
-      dispatch({ type: 'setInlineError', message: error instanceof Error ? `随机匹配失败：${error.message}` : '随机匹配失败' });
+      if (sourceSelection.isCurrent(token) && revision === fieldRevision.current) dispatch({ type: 'setInlineError', message: error instanceof Error ? `随机匹配失败：${error.message}` : '随机匹配失败' });
     } finally {
-      setIsMatching(null);
+      if (request === matchingRequest.current) { matchingBusy.current = false; setIsMatching(null); }
     }
   };
 
   const onRandomMatchScenario = async () => {
-    if (isMatching !== null) return;
+    if (matchingBusy.current) return;
+    matchingBusy.current = true;
+    const request = ++matchingRequest.current;
+    const token = scenarioSelection.begin();
     setIsMatching('scenario');
     dispatch({ type: 'setInlineError', message: null });
 
@@ -808,44 +626,43 @@ export function TavernExportPanel() {
         throw new Error(result?.error || '无法获取随机数据');
       }
 
+      if (!scenarioSelection.isCurrent(token)) return;
       const card = result.card;
       const payload = mapPublicDataCardRowToBattleSelectionPayload(card);
 
       onToggleScenarioPicked(payload, true);
     } catch (error) {
-      dispatch({ type: 'setInlineError', message: error instanceof Error ? `随机匹配失败：${error.message}` : '随机匹配失败' });
+      if (scenarioSelection.isCurrent(token)) dispatch({ type: 'setInlineError', message: error instanceof Error ? `随机匹配失败：${error.message}` : '随机匹配失败' });
     } finally {
-      setIsMatching(null);
+      if (request === matchingRequest.current) { matchingBusy.current = false; setIsMatching(null); }
     }
   };
 
   const onBasePngSelected = async (file: File | null) => {
     if (!file) return;
+    const token = baseSelection.begin();
+    setIsApplyingTachie(false);
     try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      dispatch({ type: 'setBasePng', bytes, name: file.name || 'base.png' });
+      const bytes = await readTavernBasePng(file);
+      if (baseSelection.isCurrent(token)) dispatch({ type: 'setBasePng', bytes, name: file.name || 'base.png' });
     } catch (error) {
-      dispatch({ type: 'setError', message: error instanceof Error ? error.message : '读取底图失败' });
+      if (baseSelection.isCurrent(token)) dispatch({ type: 'setInlineError', message: error instanceof Error ? error.message : '读取底图失败' });
     }
   };
 
   const applyDefaultBasePng = async () => {
+    const token = baseSelection.begin();
+    setIsApplyingTachie(false);
     dispatch({ type: 'setInlineError', message: null });
     try {
-      const bytes = await getDefaultTavernBasePngBytes();
-      dispatch({ type: 'setBasePng', bytes, name: DEFAULT_TAVERN_BASE_NAME });
+      const bytes = validateBasePng(await getDefaultTavernBasePngBytes());
+      if (baseSelection.isCurrent(token)) dispatch({ type: 'setBasePng', bytes, name: DEFAULT_TAVERN_BASE_NAME });
     } catch (error) {
-      dispatch({ type: 'setInlineError', message: error instanceof Error ? error.message : '默认底图加载失败' });
+      if (baseSelection.isCurrent(token)) dispatch({ type: 'setInlineError', message: error instanceof Error ? error.message : '默认底图加载失败' });
     }
   };
 
-  const tagsArray = useMemo(() => {
-    const raw = state.fields.tags
-      .split(/[,\n]/g)
-      .map((item) => item.trim())
-      .filter(Boolean);
-    return uniqueStrings(raw).slice(0, 50);
-  }, [state.fields.tags]);
+  const tagsArray = useMemo(() => parseTavernExportTags(state.fields.tags), [state.fields.tags]);
 
   const tachiePrompt = useMemo(() => {
     if (!state.dataCard) return '';
@@ -887,8 +704,9 @@ export function TavernExportPanel() {
   }, [tachiePrompt]);
 
   const blobToPngBytes = async (blob: Blob): Promise<Uint8Array> => {
+    if (blob.size > MAX_TAVERN_FILE_BYTES) throw new Error('立绘文件超过 32 MiB 上限。');
     if (blob.type === 'image/png') {
-      return new Uint8Array(await blob.arrayBuffer());
+      return validateBasePng(new Uint8Array(await blob.arrayBuffer()));
     }
 
     const objectUrl = URL.createObjectURL(blob);
@@ -917,14 +735,18 @@ export function TavernExportPanel() {
         canvas.toBlob((next) => (next ? resolve(next) : reject(new Error('立绘转 PNG 失败'))), 'image/png');
       });
 
-      return new Uint8Array(await pngBlob.arrayBuffer());
+      if (pngBlob.size > MAX_TAVERN_FILE_BYTES) throw new Error('底图 PNG 超过 32 MiB 上限。');
+      return validateBasePng(new Uint8Array(await pngBlob.arrayBuffer()));
     } finally {
       URL.revokeObjectURL(objectUrl);
     }
   };
 
   const onUseTachieAsBase = async () => {
-    if (!tachieImageUrl) return;
+    if (!tachieImageUrl || isApplyingTachie) return;
+    const token = baseSelection.begin();
+    const source = sourceToken.current;
+    const isCurrent = () => baseSelection.isCurrent(token) && sourceSelection.isCurrent(source);
     setIsApplyingTachie(true);
     dispatch({ type: 'setInlineError', message: null });
     try {
@@ -934,20 +756,27 @@ export function TavernExportPanel() {
       }
       const blob = await response.blob();
       const bytes = await blobToPngBytes(blob);
-      dispatch({ type: 'setBasePng', bytes, name: buildSafeFileName(`${state.fields.name || '角色'}_立绘`, 'png', 'tachie') });
+      if (isCurrent()) dispatch({ type: 'setBasePng', bytes, name: buildSafeFileName(`${state.fields.name || '角色'}_立绘`, 'png', 'tachie') });
     } catch (error) {
-      dispatch({ type: 'setInlineError', message: error instanceof Error ? error.message : '设置底图失败' });
+      if (isCurrent()) dispatch({ type: 'setInlineError', message: error instanceof Error ? error.message : '设置底图失败' });
     } finally {
-      setIsApplyingTachie(false);
+      if (baseSelection.isCurrent(token)) setIsApplyingTachie(false);
     }
   };
 
   const onAiFill = async () => {
+    if (aiRequest.current.controller) return;
     if (isCooldown) {
       dispatch({ type: 'setInlineError', message: `操作过于频繁，请等待 ${remainingTime} 秒后再试。` });
       return;
     }
 
+    keepCurrentSource();
+    const controller = new AbortController();
+    const requestId = aiRequest.current.id + 1;
+    aiRequest.current = { id: requestId, controller };
+    const token = sourceToken.current;
+    const isCurrent = () => aiRequest.current.id === requestId && sourceSelection.isCurrent(token);
     dispatch({ type: 'setAiFilling', value: true });
     dispatch({ type: 'setInlineError', message: null });
 
@@ -978,14 +807,18 @@ export function TavernExportPanel() {
       };
 
       const activityHeaders = await authStorage.getActivityHeaders();
+      if (!isCurrent()) return;
       const response = await fetch('/api/tavern/ai-fill', {
+        signal: controller.signal,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...activityHeaders },
         body: JSON.stringify(requestBody),
       });
 
+      if (!isCurrent()) return;
       if (!response.ok) {
         const { payload } = await readJsonOrTextFromResponse(response);
+        if (!isCurrent()) return;
         const errorJson = payload && typeof payload === 'object' ? (payload as any) : null;
         const redirectReason = errorJson?.reason || errorJson?.message || errorJson?.error || resolveApiErrorMessage({ payload, fallback: '' });
         if (errorJson?.shouldRedirect || errorJson?.redirect === '/arrested') {
@@ -1000,97 +833,96 @@ export function TavernExportPanel() {
       }
 
       const json = (await response.json()) as any;
+      if (!isCurrent()) return;
       const nextScenario = typeof json?.scenario === 'string' ? json.scenario : '';
       const nextFirstMes = typeof json?.first_mes === 'string' ? json.first_mes : '';
       const nextMesExample = typeof json?.mes_example === 'string' ? json.mes_example : '';
 
       const shouldOverwrite = state.aiOverwriteFields;
       if (shouldOverwrite || !state.fields.scenario.trim()) {
+        fieldVersions.current.scenario = (fieldVersions.current.scenario ?? 0) + 1;
         dispatch({ type: 'setField', key: 'scenario', value: nextScenario });
       }
       if (shouldOverwrite || !state.fields.firstMes.trim()) {
+        fieldVersions.current.firstMes = (fieldVersions.current.firstMes ?? 0) + 1;
         dispatch({ type: 'setField', key: 'firstMes', value: nextFirstMes });
       }
       if (shouldOverwrite || !state.fields.mesExample.trim()) {
+        fieldVersions.current.mesExample = (fieldVersions.current.mesExample ?? 0) + 1;
         dispatch({ type: 'setField', key: 'mesExample', value: nextMesExample });
       }
 
       startCooldown(tavernAiCooldownMs);
     } catch (error) {
-      dispatch({ type: 'setInlineError', message: error instanceof Error ? error.message : 'AI 补全失败' });
+      if (isCurrent()) dispatch({ type: 'setInlineError', message: error instanceof Error ? error.message : 'AI 补全失败' });
     } finally {
-      dispatch({ type: 'setAiFilling', value: false });
+      if (isCurrent()) { aiRequest.current.controller = null; dispatch({ type: 'setAiFilling', value: false }); }
     }
   };
 
+  const exportInput = useMemo(() => ({
+    fields: state.fields,
+    dataCard: state.dataCard,
+    options: {
+      autoArenaScenario: state.autoArenaScenario,
+      includeArenaWorldbook: state.includeArenaWorldbook,
+      includeScenarioInScenario: state.includeScenarioInScenario,
+      includeScenarioInWorldbook: state.includeScenarioInWorldbook,
+      includeSourceSnapshot: state.includeSourceSnapshot,
+    },
+    scenarioFragments: state.scenarios,
+    exportMeta: state.exportMeta,
+    exporter: user,
+  }), [state.dataCard, state.fields, state.autoArenaScenario, state.includeArenaWorldbook, state.includeScenarioInScenario, state.includeScenarioInWorldbook, state.includeSourceSnapshot, state.scenarios, state.exportMeta, user]);
+
+  const exportPreview = useMemo(() => {
+    if (!exportInput.dataCard) return null;
+    try {
+      return { result: buildTavernExportCard({ ...exportInput, exportedAt: new Date().toISOString() }), error: null };
+    } catch (error) {
+      return { result: null, error: error instanceof Error ? error.message : '导出内容无效' };
+    }
+  }, [exportInput]);
+
   const onGenerate = async () => {
+    if (generationBusy.current) return;
+    generationBusy.current = true;
+    keepCurrentSource();
+    baseSelection.begin();
+    setIsApplyingTachie(false);
+    const token = sourceToken.current;
+    cancelAiFill();
     dispatch({ type: 'generating' });
     try {
-      const baseBytes = state.basePngBytes ?? (await getDefaultTavernBasePngBytes());
-
-      const baseScenario = state.fields.scenario.trim();
-      const scenarioParts: string[] = [];
-      if (baseScenario) {
-        scenarioParts.push(baseScenario);
-      } else if (state.autoArenaScenario) {
-        scenarioParts.push(buildArenaDefaultScenario());
-      }
-      if (state.includeScenarioInScenario && state.scenarios.length > 0) {
-        for (const fragment of state.scenarios) {
-          scenarioParts.push(fragment.content);
-        }
-      }
-      const finalScenario = scenarioParts.filter(Boolean).join('\n\n---\n\n').trim();
-
-      const shouldWriteBook = state.includeArenaWorldbook || (state.includeScenarioInWorldbook && state.scenarios.length > 0);
-      const characterBook = shouldWriteBook
-        ? buildArenaWorldbook({
-            includeCore: state.includeArenaWorldbook,
-            scenarioFragments: state.includeScenarioInWorldbook ? state.scenarios : [],
-          })
-        : undefined;
-
-      const exportExtensions = buildExportExtensions(state.dataCard, state.exportMeta, user);
-      const card = createTavernV3Card({
-        name: state.fields.name.trim() || '未命名角色',
-        description: state.fields.description,
-        personality: state.fields.personality,
-        scenario: finalScenario,
-        first_mes: state.fields.firstMes,
-        mes_example: state.fields.mesExample,
-        creator_notes: state.fields.creatorNotes,
-        system_prompt: state.fields.systemPrompt,
-        post_history_instructions: state.fields.postHistoryInstructions,
-        tags: tagsArray,
-        creator: state.fields.creator,
-        extensions: {
-          talkativeness: Number(state.fields.talkativeness) || 0.5,
-          fav: Boolean(state.fields.fav),
-          ...exportExtensions,
-        },
-        character_book: characterBook,
-      });
-
+      if (!exportPreview?.result) throw new Error(exportPreview?.error || '请先选择数据卡');
+      if (!state.includeCcv3 && !state.includeChara) throw new Error('至少保留一种酒馆数据块。');
+      const baseBytes = validateBasePng(state.basePngBytes ?? (await getDefaultTavernBasePngBytes()));
+      if (!sourceSelection.isCurrent(token)) return;
+      // The preview and download use the exact same bounded shared projection.
+      const { card } = buildTavernExportCard({ ...exportInput, exportedAt: new Date().toISOString() });
       const outBytes = writeTavernCardToPngBytes(baseBytes, card, {
         overwriteExisting: state.overwriteExisting,
         includeCcv3Chunk: state.includeCcv3,
         includeCharaChunk: state.includeChara,
       });
-
-      const toArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
-        const copy = new Uint8Array(bytes.byteLength);
-        copy.set(bytes);
-        return copy.buffer;
-      };
-      const blob = new Blob([toArrayBuffer(outBytes)], { type: 'image/png' });
-      downloadBlob(blob, buildSafeFileName(state.fields.name || 'tavern-card', 'png', 'tavern-card'));
+      const copy = new Uint8Array(outBytes.byteLength);
+      copy.set(outBytes);
+      downloadBlob(new Blob([copy.buffer], { type: 'image/png' }), buildSafeFileName(state.fields.name || 'tavern-card', 'png', 'tavern-card'));
       dispatch({ type: 'done' });
     } catch (error) {
-      dispatch({ type: 'setInlineError', message: error instanceof Error ? error.message : '导出失败' });
-      dispatch({ type: 'setAiFilling', value: false });
+      if (sourceSelection.isCurrent(token)) dispatch({ type: 'generationFailed', message: error instanceof Error ? error.message : '导出失败' });
+    } finally {
+      generationBusy.current = false;
     }
   };
 
+  const onDownloadSource = () => {
+    if (!state.dataCard) return;
+    const json = JSON.stringify(state.dataCard);
+    downloadBlob(new Blob([json], { type: 'application/json;charset=utf-8' }), buildSafeFileName(`${state.fields.name || 'data-card'}_源数据`, 'json', 'source-card'));
+  };
+
+  const renderedSourceToken = sourceToken.current;
   const ready = state.step === 'ready' || state.step === 'generating' || state.step === 'done';
 
   return (
@@ -1111,7 +943,7 @@ export function TavernExportPanel() {
           accept="application/json,.json"
           className="cursor-pointer input-field file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-pink-50 file:text-pink-700 hover:file:bg-pink-100 disabled:opacity-50 disabled:cursor-not-allowed"
           disabled={state.step === 'generating'}
-          onChange={(event) => onDataCardSelected(event.target.files?.[0] ?? null)}
+          onChange={(event) => { const file = event.target.files?.[0] ?? null; event.target.value = ''; void onDataCardSelected(file); }}
         />
         <div className="mt-2 flex flex-col gap-2 md:flex-row md:items-center">
           <button
@@ -1148,62 +980,7 @@ export function TavernExportPanel() {
 
           <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
             <div className="space-y-4">
-              <div className="rounded-xl border border-pink-200 bg-white/70 p-4">
-                <div className="grid gap-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-pink-700">name</label>
-                    <input
-                      className="mt-2 w-full rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-                      value={state.fields.name}
-                      onChange={(e) => dispatch({ type: 'setField', key: 'name', value: e.target.value })}
-                      disabled={state.step === 'generating'}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-semibold text-pink-700">tags（逗号或换行分隔）</label>
-                    <input
-                      className="mt-2 w-full rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-                      value={state.fields.tags}
-                      onChange={(e) => dispatch({ type: 'setField', key: 'tags', value: e.target.value })}
-                      disabled={state.step === 'generating'}
-                    />
-                  </div>
-                </div>
-
-                <div className="mt-4">
-                  <label className="block text-sm font-semibold text-pink-700">description</label>
-                  <textarea
-                    className="mt-2 w-full resize-y rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-                    value={state.fields.description}
-                    onChange={(e) => dispatch({ type: 'setField', key: 'description', value: e.target.value })}
-                    disabled={state.step === 'generating'}
-                    rows={6}
-                  />
-                </div>
-
-                <div className="mt-4">
-                  <label className="block text-sm font-semibold text-pink-700">personality</label>
-                  <textarea
-                    className="mt-2 w-full resize-y rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-                    value={state.fields.personality}
-                    onChange={(e) => dispatch({ type: 'setField', key: 'personality', value: e.target.value })}
-                    disabled={state.step === 'generating'}
-                    rows={4}
-                  />
-                </div>
-
-                <div className="mt-4">
-                  <label className="block text-sm font-semibold text-pink-700">scenario</label>
-                  <textarea
-                    className="mt-2 w-full resize-y rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-                    value={state.fields.scenario}
-                    onChange={(e) => dispatch({ type: 'setField', key: 'scenario', value: e.target.value })}
-                    disabled={state.step === 'generating'}
-                    rows={3}
-                  />
-
-                  <div className="mt-3 rounded-xl border border-pink-100 bg-white/60 p-3">
+              <TavernExportFields fields={state.fields} disabled={state.step === 'generating'} onFieldChange={onFieldChange} scenarioTools={(<div className="mt-3 rounded-xl border border-pink-100 bg-white/60 p-3">
                     <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                       <div>
                         <div className="text-sm font-semibold text-pink-700">A.R.E.N.A. 世界书 / 情景拼接</div>
@@ -1302,13 +1079,15 @@ export function TavernExportPanel() {
                           disabled={state.step === 'generating'}
                           onChange={async (event) => {
                             const files = event.target.files ? Array.from(event.target.files) : [];
+                            event.target.value = '';
                             if (files.length === 0) return;
+                            const token = scenarioSelection.begin();
                             const errors: string[] = [];
                             for (const file of files) {
                               try {
-                                const text = await file.text();
-                                const json = JSON.parse(text) as unknown;
-                                const fragment = buildTavernScenarioFragment(json, { maxChars: 24_000 });
+                                const json = await readTavernSourceJson(file);
+                                if (!scenarioSelection.isCurrent(token)) return;
+                                const fragment = buildTavernScenarioFragment(json, { maxChars: 0 });
                                 if (!fragment) {
                                   throw new Error('无法识别为情景卡（支持：通用情景/情景问卷）');
                                 }
@@ -1326,13 +1105,13 @@ export function TavernExportPanel() {
                                 errors.push(`${file.name}: ${message}`);
                               }
                             }
+                            if (!scenarioSelection.isCurrent(token)) return;
                             if (errors.length > 0) {
                               dispatch({
                                 type: 'setInlineError',
                                 message: `${errors.length}/${files.length} 个情景导入失败：${errors.join('；')}`,
                               });
                             }
-                            event.target.value = '';
                           }}
                         />
                       </label>
@@ -1341,7 +1120,7 @@ export function TavernExportPanel() {
                         <button
                           type="button"
                           className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                          onClick={() => dispatch({ type: 'clearScenarios' })}
+                          onClick={() => { scenarioSelection.begin(); dispatch({ type: 'clearScenarios' }); }}
                           disabled={state.step === 'generating'}
                         >
                           清空附加情景（{state.scenarios.length}）
@@ -1407,113 +1186,13 @@ export function TavernExportPanel() {
                         未添加附加情景：你可以从在线情景库选择情景卡，或上传任意情景 JSON（通用情景/情景问卷）。
                       </div>
                     )}
-                  </div>
-                </div>
-              </div>
+                  </div>)} />
 
-              <div className="grid gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-pink-700">first_mes</label>
-                  <textarea
-                    className="mt-2 w-full resize-y rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-                    value={state.fields.firstMes}
-                    onChange={(e) => dispatch({ type: 'setField', key: 'firstMes', value: e.target.value })}
-                    disabled={state.step === 'generating'}
-                    rows={4}
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-pink-700">mes_example</label>
-                  <textarea
-                    className="mt-2 w-full resize-y rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-                    value={state.fields.mesExample}
-                    onChange={(e) => dispatch({ type: 'setField', key: 'mesExample', value: e.target.value })}
-                    disabled={state.step === 'generating'}
-                    rows={4}
-                  />
-                </div>
-              </div>
+              <TavernExportDialogueFields fields={state.fields} disabled={state.step === 'generating'} onFieldChange={onFieldChange} />
 
-              <div className="grid gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-pink-700">creator</label>
-                  <input
-                    className="mt-2 w-full rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-                    value={state.fields.creator}
-                    onChange={(e) => dispatch({ type: 'setField', key: 'creator', value: e.target.value })}
-                    disabled={state.step === 'generating'}
-                  />
-                  <div className="mt-1 text-xs text-gray-600">建议保留自动拼接的来源信息，可按需调整。</div>
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-pink-700">creator_notes</label>
-                  <textarea
-                    className="mt-2 w-full resize-y rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-                    value={state.fields.creatorNotes}
-                    onChange={(e) => dispatch({ type: 'setField', key: 'creatorNotes', value: e.target.value })}
-                    disabled={state.step === 'generating'}
-                    rows={3}
-                  />
-                </div>
-                <div className="grid gap-3">
-                  <div>
-                    <label className="block text-sm font-semibold text-pink-700">talkativeness（0~1）</label>
-                    <input
-                      type="number"
-                      step="0.05"
-                      min="0"
-                      max="1"
-                      className="mt-2 w-full rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-                      value={String(state.fields.talkativeness)}
-                      onChange={(e) => dispatch({ type: 'setField', key: 'talkativeness', value: Number(e.target.value) })}
-                      disabled={state.step === 'generating'}
-                    />
-                    <div className="mt-1 text-xs text-gray-600">
-                      SillyTavern 常用的“话多程度”参数。参考值：0.3（更简洁）/ 0.5（中性，默认）/ 0.8（更健谈）。不确定就保持 0.5。
-                    </div>
-                  </div>
-                  <label className="flex items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
-                    <input
-                      type="checkbox"
-                      checked={state.fields.fav}
-                      onChange={(e) => dispatch({ type: 'setField', key: 'fav', value: e.target.checked })}
-                      disabled={state.step === 'generating'}
-                      className="mt-1"
-                    />
-                    <div className="min-w-0">
-                      <div className="text-sm text-gray-900">fav（收藏标记）</div>
-                      <div className="mt-1 text-xs text-gray-600">通常仅影响 SillyTavern 侧的排序/显示，不影响角色设定；默认不勾选。</div>
-                    </div>
-                  </label>
-                </div>
-              </div>
+              <TavernExportCreatorFields fields={state.fields} disabled={state.step === 'generating'} onFieldChange={onFieldChange} />
 
-              <details className="rounded-xl border border-pink-100 bg-white/60 p-3">
-                <summary className="cursor-pointer text-sm font-semibold text-pink-700">高级字段（谨慎写入）</summary>
-                <div className="mt-3">
-                  <label className="block text-sm font-semibold text-pink-700">system_prompt</label>
-                  <textarea
-                    className="mt-2 w-full resize-y rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-                    value={state.fields.systemPrompt}
-                    onChange={(e) => dispatch({ type: 'setField', key: 'systemPrompt', value: e.target.value })}
-                    disabled={state.step === 'generating'}
-                    rows={3}
-                  />
-                </div>
-                <div className="mt-3">
-                  <label className="block text-sm font-semibold text-pink-700">post_history_instructions</label>
-                  <textarea
-                    className="mt-2 w-full resize-y rounded-xl border border-pink-100 bg-white/80 p-3 text-sm text-gray-900"
-                    value={state.fields.postHistoryInstructions}
-                    onChange={(e) => dispatch({ type: 'setField', key: 'postHistoryInstructions', value: e.target.value })}
-                    disabled={state.step === 'generating'}
-                    rows={3}
-                  />
-                </div>
-                <div className="mt-2 text-xs text-gray-600">
-                  注意：这些字段很容易携带隐私信息或提示注入内容。默认推荐保持为空。
-                </div>
-              </details>
+              <TavernExportAdvancedFields fields={state.fields} disabled={state.step === 'generating'} onFieldChange={onFieldChange} />
             </div>
 
             <div className="space-y-4">
@@ -1570,7 +1249,7 @@ export function TavernExportPanel() {
                   accept="image/png"
                   className="cursor-pointer input-field file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-pink-50 file:text-pink-700 hover:file:bg-pink-100 disabled:opacity-50 disabled:cursor-not-allowed"
                   disabled={state.step === 'generating'}
-                  onChange={(event) => onBasePngSelected(event.target.files?.[0] ?? null)}
+                  onChange={(event) => { const file = event.target.files?.[0] ?? null; event.target.value = ''; void onBasePngSelected(file); }}
                 />
                 <div className="mt-2 flex items-center gap-2 text-xs text-gray-600">
                   <button
@@ -1593,7 +1272,7 @@ export function TavernExportPanel() {
                     <TachieGenerator
                       key={`tavern-export-tachie-${tachiePromptKey}`}
                       prompt={tachiePrompt}
-                      onImageUrlChange={setTachieImageUrl}
+                      onImageUrlChange={(url) => { if (sourceSelection.isCurrent(renderedSourceToken)) setTachieImageUrl(url); }}
                     />
                   </div>
                   <div className="mt-3 flex flex-col gap-2 md:flex-row md:items-center">
@@ -1612,47 +1291,26 @@ export function TavernExportPanel() {
                 </div>
               ) : null}
 
-              <div className="rounded-xl border border-pink-200 bg-white/70 p-4">
-                <div className="grid gap-3 md:grid-cols-2">
-                  <label className="flex items-start gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
-                    <input
-                      type="checkbox"
-                      className="mt-1"
-                      checked={state.overwriteExisting}
-                      onChange={(e) => dispatch({ type: 'setOption', key: 'overwriteExisting', value: e.target.checked })}
-                      disabled={state.step === 'generating'}
-                    />
-                    <div className="min-w-0">
-                      <div className="text-sm text-gray-900">覆盖已有酒馆块（推荐）</div>
-                      <div className="mt-1 text-xs text-gray-600">避免重复块导致导入结果不确定。</div>
-                    </div>
-                  </label>
+              <TavernExportChunkOptions options={state} disabled={state.step === 'generating'} onOptionChange={(key, value) => dispatch({ type: 'setOption', key, value })} />
 
-                  <div className="grid gap-2">
-                    <label className="flex items-center gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
-                      <input
-                        type="checkbox"
-                        checked={state.includeCcv3}
-                        onChange={(e) => dispatch({ type: 'setOption', key: 'includeCcv3', value: e.target.checked })}
-                        disabled={state.step === 'generating'}
-                      />
-                      <span className="text-sm text-gray-900">写入 ccv3</span>
-                    </label>
-                    <label className="flex items-center gap-2 rounded-xl border border-pink-100 bg-white/70 p-3">
-                      <input
-                        type="checkbox"
-                        checked={state.includeChara}
-                        onChange={(e) => dispatch({ type: 'setOption', key: 'includeChara', value: e.target.checked })}
-                        disabled={state.step === 'generating'}
-                      />
-                      <span className="text-sm text-gray-900">写入 chara（旧版兼容）</span>
-                    </label>
-                  </div>
-                </div>
+              <div className="rounded-xl border border-pink-200 bg-white/70 p-4">
+                <label className="flex items-start gap-2 text-sm text-gray-700">
+                  <input type="checkbox" checked={state.includeSourceSnapshot} disabled={state.step === 'generating'} onChange={(event) => dispatch({ type: 'setOption', key: 'includeSourceSnapshot', value: event.target.checked })} />
+                  附带来源诊断快照（可选，最多 24000 字符，不是完整备份）
+                </label>
+                <button type="button" className="mt-3 rounded-lg border border-pink-200 px-3 py-2 text-sm text-pink-700" onClick={onDownloadSource}>
+                  下载完整源 JSON（保留未映射字段）
+                </button>
+                {exportPreview?.result?.warnings.length ? (
+                  <ul className="mt-3 space-y-1 text-xs text-amber-800" aria-label="导出提示">
+                    {exportPreview.result.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+                  </ul>
+                ) : null}
+                {exportPreview?.error ? <div role="alert" className="mt-3 text-sm text-red-700">{exportPreview.error} 请调整字段；角色正文不会被自动截断。</div> : null}
               </div>
 
               <div className="rounded-xl border border-pink-200 bg-white/70 p-4">
-                <button type="button" className="generate-button mb-0 w-full" disabled={state.step === 'generating'} onClick={onGenerate}>
+                <button type="button" className="generate-button mb-0 w-full" disabled={state.step === 'generating' || !exportPreview?.result} onClick={onGenerate}>
                   生成并下载酒馆卡 PNG
                 </button>
 
