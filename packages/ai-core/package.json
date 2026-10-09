@@ -79,7 +79,8 @@
       "types": "./src/sublimation-generation.ts",
       "import": "./src/sublimation-generation.ts",
       "default": "./src/sublimation-generation.ts"
-    }
+    },
+    "./arena-generation": "./src/arena-generation/index.ts"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",
