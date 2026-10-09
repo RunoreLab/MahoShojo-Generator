@@ -1,8 +1,14 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 
 /** Technical view only: never parse, sanitize, truncate or substitute the source card. */
 export function ScenarioJsonDetails({ data, open = false }: { data: unknown; open?: boolean }) {
-  return <details open={open} className="mt-4 rounded-lg border border-(--app-border)">
+  const [userExpanded, setUserExpanded] = useState<boolean | null>(null);
+  const expanded = userExpanded ?? open;
+  return <details open={expanded} onToggle={(event) => {
+    // 默认 fallback 变化也会触发 toggle；只记录与当前渲染值不同的用户操作。
+    // 用户一旦选择展开/折叠，后续数据变化只更新正文，不覆盖其临时视图状态。
+    if (event.currentTarget.open !== expanded) setUserExpanded(event.currentTarget.open);
+  }} className="mt-4 rounded-lg border border-(--app-border)">
     <summary className="cursor-pointer rounded-lg px-4 py-3 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--app-accent)">完整 JSON（技术视图）</summary>
     <pre className="overflow-x-auto whitespace-pre-wrap break-words border-t border-(--app-border) bg-(--app-surface-strong) p-4 font-mono text-xs">{JSON.stringify(data, null, 2)}</pre>
   </details>;

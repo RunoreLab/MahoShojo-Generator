@@ -48,3 +48,50 @@ it('renders text safely, and a later card refreshes both preview and full source
   expect(container.querySelector('details')?.open).toBe(true);
   expect(container.querySelector('pre')?.textContent).toBe(JSON.stringify(next, null, 2));
 });
+
+const settleToggle = () => act(async () => {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+});
+const userToggle = async (open: boolean) => {
+  await act(async () => {
+    const details = container.querySelector('details')!;
+    details.open = open;
+    details.dispatchEvent(new Event('toggle'));
+  });
+  await settleToggle();
+};
+
+it('preserves the user-opened technical view when an unreadable result gains familiar fields', async () => {
+  render({ title: '旧结果', elements: {}, extension: '未识别内容' });
+  await settleToggle();
+  await userToggle(false);
+  await userToggle(true);
+  const next = { title: '新结果', description: '新增简介', elements: {}, extension: ['保留全部', 42] };
+  render(next);
+  await settleToggle();
+  expect(container.querySelector('details')!.open).toBe(true);
+  expect(container.querySelector('pre')!.textContent).toBe(JSON.stringify(next, null, 2));
+});
+
+it('keeps a manually closed technical view closed across readable and unreadable replacements', async () => {
+  render({ title: '无可读字段', elements: {} });
+  await settleToggle();
+  await userToggle(false);
+  render({ description: '可读内容' });
+  await settleToggle();
+  render({ title: '又一个无可读字段的结果', elements: {} });
+  await settleToggle();
+  expect(container.querySelector('details')!.open).toBe(false);
+});
+
+it('updates the default fallback expansion until the user changes the view', async () => {
+  render({ description: '可读内容' });
+  await settleToggle();
+  expect(container.querySelector('details')!.open).toBe(false);
+  render({ title: '没有可读字段', elements: {} });
+  await settleToggle();
+  expect(container.querySelector('details')!.open).toBe(true);
+  render({ description: '恢复可读内容' });
+  await settleToggle();
+  expect(container.querySelector('details')!.open).toBe(false);
+});
