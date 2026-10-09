@@ -419,6 +419,74 @@ struct UpstreamError {
     code: Option<String>,
 }
 
+/// 正常完整帧与 EOF 尾帧必须共用折叠逻辑，避免尾部漏掉错误、usage 或推理。
+struct UpstreamStreamState {
+    text: String,
+    reasoning: String,
+    pending_text: String,
+    pending_reasoning: String,
+    usage: Option<AiExecutionUsage>,
+    finish_reason: AiExecutionFinishReason,
+}
+
+impl UpstreamStreamState {
+    fn consume_frame(
+        &mut self,
+        frame: SseFrame,
+        request: &AiExecutionRequest,
+        sequence: &mut u32,
+        on_event: &dyn EventSink,
+    ) -> Result<(), DirectAiError> {
+        let SseFrame::Data(payload) = frame;
+        let chunk: UpstreamChunk = serde_json::from_str(&payload).map_err(|error| {
+            DirectAiError::new(
+                DirectAiErrorCode::StreamProtocol,
+                format!("upstream sent an unreadable event: {error}"),
+            )
+        })?;
+        if let Some(error) = chunk.error {
+            return Err(DirectAiError {
+                code: DirectAiErrorCode::UpstreamRejected,
+                message: error
+                    .message
+                    .unwrap_or_else(|| "upstream reported an error".to_string()),
+                contract_code: Some(map_error_code(
+                    error.r#type.as_deref().or(error.code.as_deref()),
+                )),
+            });
+        }
+        if let Some(reported_usage) = chunk.usage {
+            let usage = reported_usage.into_contract();
+            emit_event(
+                on_event,
+                AiStreamEvent::Usage {
+                    request_id: request.request_id.clone(),
+                    contract_version: request.contract_version,
+                    mode: request.mode,
+                    sequence: *sequence,
+                    usage: usage.clone(),
+                },
+            )?;
+            *sequence += 1;
+            self.usage = Some(usage);
+        }
+        for choice in chunk.choices {
+            if let Some(delta) = choice.delta.reasoning_content.or(choice.delta.reasoning) {
+                self.reasoning.push_str(&delta);
+                self.pending_reasoning.push_str(&delta);
+            }
+            if let Some(delta) = choice.delta.content {
+                self.text.push_str(&delta);
+                self.pending_text.push_str(&delta);
+            }
+            if choice.finish_reason.is_some() {
+                self.finish_reason = map_finish_reason(choice.finish_reason.as_deref());
+            }
+        }
+        Ok(())
+    }
+}
+
 fn map_finish_reason(value: Option<&str>) -> AiExecutionFinishReason {
     match value {
         Some("stop") => AiExecutionFinishReason::Stop,
@@ -755,12 +823,14 @@ pub async fn run_stream(
 
     let mut parser = SseFrameParser::new();
     let mut decoder = Utf8StreamDecoder::default();
-    let mut text = String::new();
-    let mut reasoning = String::new();
-    let mut usage: Option<AiExecutionUsage> = None;
-    let mut finish_reason = AiExecutionFinishReason::Other;
-    let mut pending_text = String::new();
-    let mut pending_reasoning = String::new();
+    let mut state = UpstreamStreamState {
+        text: String::new(),
+        reasoning: String::new(),
+        pending_text: String::new(),
+        pending_reasoning: String::new(),
+        usage: None,
+        finish_reason: AiExecutionFinishReason::Other,
+    };
     let mut saw_done = false;
     // 定时器必须独立于 chunk 到达：否则上游一旦停顿（例如本地模型首 token 很慢），
     // 已经缓冲的正文会一直留在缓冲区里，用户看不到任何输出。
@@ -815,7 +885,7 @@ pub async fn run_stream(
                 break;
             }
             _ = flush_tick.tick() => {
-                if let Err(error) = flush(&mut pending_text, &mut pending_reasoning, &mut sequence) {
+                if let Err(error) = flush(&mut state.pending_text, &mut state.pending_reasoning, &mut sequence) {
                     failure = Some(error);
                     break;
                 }
@@ -856,88 +926,36 @@ pub async fn run_stream(
         };
 
         for frame in parsed {
-            saw_done = parser.is_done();
-            match frame {
-                SseFrame::Data(payload) => {
-                    let chunk: UpstreamChunk = match serde_json::from_str(&payload) {
-                        Ok(chunk) => chunk,
-                        Err(error) => {
-                            failure = Some(DirectAiError::new(
-                                DirectAiErrorCode::StreamProtocol,
-                                format!("upstream sent an unreadable event: {error}"),
-                            ));
-                            break;
-                        }
-                    };
-
-                    if let Some(error) = chunk.error {
-                        // 上游自述的错误类型映射成稳定契约码，便于客户端按 code 分支处理，
-                        // 而不是把供应商私有字符串透传给用户。
-                        failure = Some(DirectAiError {
-                            code: DirectAiErrorCode::UpstreamRejected,
-                            message: error
-                                .message
-                                .unwrap_or_else(|| "upstream reported an error".to_string()),
-                            contract_code: Some(map_error_code(
-                                error.r#type.as_deref().or(error.code.as_deref()),
-                            )),
-                        });
-                        break;
-                    }
-
-                    if let Some(reported_usage) = chunk.usage {
-                        let contract_usage = reported_usage.into_contract();
-                        emit_event(
-                            on_event,
-                            AiStreamEvent::Usage {
-                                request_id: request_id.clone(),
-                                contract_version,
-                                mode,
-                                sequence,
-                                usage: contract_usage.clone(),
-                            },
-                        )?;
-                        sequence += 1;
-                        usage = Some(contract_usage);
-                    }
-
-                    for choice in chunk.choices {
-                        if let Some(delta) =
-                            choice.delta.reasoning_content.or(choice.delta.reasoning)
-                        {
-                            reasoning.push_str(&delta);
-                            pending_reasoning.push_str(&delta);
-                        }
-                        if let Some(delta) = choice.delta.content {
-                            if !delta.is_empty() {
-                                text.push_str(&delta);
-                                pending_text.push_str(&delta);
-                            }
-                        }
-                        if choice.finish_reason.is_some() {
-                            finish_reason = map_finish_reason(choice.finish_reason.as_deref());
-                        }
-                    }
-                }
+            if let Err(error) = state.consume_frame(frame, request, &mut sequence, on_event) {
+                failure = Some(error);
+                break;
             }
         }
+        saw_done = parser.is_done();
 
         if failure.is_some() {
             break;
         }
 
         // 达到阈值就立即冲刷，不等下一个 tick：长正文下阈值触发比定时更关键。
-        let due = pending_text.chars().count() >= DELTA_FLUSH_CHARS
-            || pending_reasoning.chars().count() >= DELTA_FLUSH_CHARS;
+        let due = state.pending_text.chars().count() >= DELTA_FLUSH_CHARS
+            || state.pending_reasoning.chars().count() >= DELTA_FLUSH_CHARS;
         if due {
-            if let Err(error) = flush(&mut pending_text, &mut pending_reasoning, &mut sequence) {
+            if let Err(error) = flush(
+                &mut state.pending_text,
+                &mut state.pending_reasoning,
+                &mut sequence,
+            ) {
                 failure = Some(error);
                 break;
             }
         }
+        if saw_done {
+            break;
+        }
     }
 
-    if failure.is_none() {
+    if failure.is_none() && !saw_done {
         failure = decoder.finish().err();
     }
 
@@ -955,23 +973,50 @@ pub async fn run_stream(
             Vec::new()
         }
     };
-    for frame in tail {
-        saw_done = saw_done || parser.is_done();
-        let SseFrame::Data(payload) = frame;
-        if let Ok(chunk) = serde_json::from_str::<UpstreamChunk>(&payload) {
-            for choice in chunk.choices {
-                if let Some(delta) = choice.delta.content {
-                    text.push_str(&delta);
-                    pending_text.push_str(&delta);
-                }
+    if failure.is_none() {
+        for frame in tail {
+            if let Err(error) = state.consume_frame(frame, request, &mut sequence, on_event) {
+                failure = Some(error);
+                break;
             }
         }
     }
     saw_done = saw_done || parser.is_done();
     drop(stream);
 
+    if failure.is_none() && saw_done && state.text.trim().is_empty() {
+        let (code, message) = match state.finish_reason {
+            AiExecutionFinishReason::ContentFilter => (
+                "content-filtered",
+                "upstream content filter ended the stream before text output",
+            ),
+            AiExecutionFinishReason::ToolCalls => (
+                "invalid-response",
+                "upstream requested unsupported tool calls without text output",
+            ),
+            AiExecutionFinishReason::Length => (
+                "output-too-large",
+                "upstream reached its token limit before text output",
+            ),
+            _ => (
+                "invalid-response",
+                "upstream stream completed without nonblank output",
+            ),
+        };
+        failure = Some(DirectAiError {
+            code: DirectAiErrorCode::StreamProtocol,
+            message: message.to_string(),
+            contract_code: Some(code.to_string()),
+        });
+    }
+
     if let Some(error) = failure {
-        flush(&mut pending_text, &mut pending_reasoning, &mut sequence).ok();
+        flush(
+            &mut state.pending_text,
+            &mut state.pending_reasoning,
+            &mut sequence,
+        )
+        .ok();
         let result = match error.code {
             DirectAiErrorCode::Cancelled => {
                 AiExecutionResult::Cancelled(AiExecutionCancelledResult {
@@ -1005,7 +1050,11 @@ pub async fn run_stream(
         );
     }
 
-    flush(&mut pending_text, &mut pending_reasoning, &mut sequence)?;
+    flush(
+        &mut state.pending_text,
+        &mut state.pending_reasoning,
+        &mut sequence,
+    )?;
     if !saw_done {
         // 上游没有 `[DONE]` 就断流：按"缺少终态"处理，而不是把半截正文当成功。
         let failed = AiExecutionResult::Failed(AiExecutionFailedResult {
@@ -1034,12 +1083,12 @@ pub async fn run_stream(
         contract_version,
         mode,
         output: AiExecutionOutput {
-            text: Some(text.clone()).filter(|value| !value.is_empty()),
-            reasoning: Some(reasoning.clone()).filter(|value| !value.is_empty()),
+            text: Some(state.text.clone()).filter(|value| !value.is_empty()),
+            reasoning: Some(state.reasoning.clone()).filter(|value| !value.is_empty()),
         },
-        finish_reason,
+        finish_reason: state.finish_reason,
         resolved_model_id: Some(resolved_model_id.to_string()),
-        usage: usage.clone(),
+        usage: state.usage.clone(),
     });
     emit_terminal(
         on_event,

@@ -40,6 +40,8 @@ enum Scenario {
     Complete,
     /// 发一段正文后永久挂起，用于验证取消。
     Hang,
+    /// 发正文与 `[DONE]` 后保持 socket 打开，终态不能依赖 HTTP EOF。
+    DoneHang,
     /// 发一段正文后直接断开且不发 `[DONE]`。
     Truncated,
     /// 接受请求后延迟 response headers，用于验证 headers 未到时可以取消 send。
@@ -150,6 +152,15 @@ async fn serve_one(
                 r#"{"choices":[{"delta":{"content":"开头"},"index":0}]}"#,
             )
             .await;
+            observe_disconnect(stream, request_line, saw_authorization).await
+        }
+        Scenario::DoneHang => {
+            let _ = write_sse_frame(
+                &mut stream,
+                r#"{"choices":[{"delta":{"content":"完成"},"finish_reason":"stop","index":0}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}"#,
+            )
+            .await;
+            let _ = write_sse_raw(&mut stream, "data: [DONE]\n\n").await;
             observe_disconnect(stream, request_line, saw_authorization).await
         }
         Scenario::DelayHeaders => unreachable!("handled before writing response headers"),
@@ -401,6 +412,46 @@ fn assert_well_formed(events: &[AiStreamEvent], request_id: &str) {
 }
 
 #[tokio::test]
+async fn done_marker_completes_and_disconnects_without_waiting_for_http_eof() {
+    let server = spawn_sse_server(Scenario::DoneHang).await;
+    let store = LocalStore::open_in_memory().unwrap();
+    store
+        .put(
+            "done-open",
+            &stored_profile("done-open", &server.base_url, false),
+            "t",
+        )
+        .unwrap();
+    let sink = CollectingSink::default();
+    let registry = RequestRegistry::default();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_millis(500),
+        stream_direct_ai(
+            "done-open",
+            request("req-done-open"),
+            &store,
+            &TestSecretStore::default(),
+            &registry,
+            &sink,
+        ),
+    )
+    .await;
+    assert!(
+        result.is_ok(),
+        "[DONE] must terminate an otherwise open HTTP body"
+    );
+    result.unwrap().unwrap();
+    let events = sink.snapshot();
+    assert_well_formed(&events, "req-done-open");
+    assert!(
+        matches!(terminals(&events)[0], AiExecutionResult::Completed(result)
+        if result.output.text.as_deref() == Some("完成") && result.usage.as_ref().and_then(|usage| usage.total_tokens) == Some(5))
+    );
+    assert!(server.observation.await.unwrap().client_disconnected);
+    assert_eq!(registry.len(), 0);
+}
+
+#[tokio::test]
 async fn unicode_http_byte_chunks_preserve_text_and_reject_malformed_or_incomplete_utf8() {
     let text = "魔法少女・かなé🪄";
     let good = format!(
@@ -408,10 +459,16 @@ async fn unicode_http_byte_chunks_preserve_text_and_reject_malformed_or_incomple
     )
     .into_bytes();
     let invalid = vec![0xff];
-    // 即使已经收到 DONE，也不能把包含不完整 UTF-8 的传输静默当作成功。
-    let mut incomplete = good.clone();
-    incomplete.extend_from_slice(&[0xf0, 0x9f]);
-    for (wire, expected_text) in [(good, Some(text)), (invalid, None), (incomplete, None)] {
+    // DONE 是应用协议终态：此前不完整 UTF-8 必须失败；此后字节不再消费。
+    let mut after_done = good.clone();
+    after_done.extend_from_slice(&[0xf0, 0x9f]);
+    let incomplete = vec![0xf0, 0x9f];
+    for (wire, expected_text) in [
+        (good, Some(text)),
+        (invalid, None),
+        (incomplete, None),
+        (after_done, Some(text)),
+    ] {
         let server = spawn_sse_server(Scenario::ByteChunks(wire)).await;
         let store = LocalStore::open_in_memory().expect("in-memory store");
         store
@@ -1088,3 +1145,180 @@ async fn same_origin_redirects_preserve_headers_and_respect_the_configured_limit
     }
 }
 
+#[tokio::test]
+async fn eof_tail_preserves_reasoning_usage_and_classifies_protocol_errors() {
+    for (suffix, expected_code, has_usage) in [
+        (
+            r#"data: {"error":{"type":"rate_limit_error","message":"try later"}}"#,
+            "rate-limited",
+            false,
+        ),
+        ("data: {\"choices\":", "invalid-response", false),
+        (
+            r#"data: {"choices":[{"delta":{"reasoning_content":"tail thought","content":"tail text"},"finish_reason":"length"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}"#,
+            "internal-error",
+            true,
+        ),
+    ] {
+        let server = spawn_sse_server(Scenario::ByteChunks(suffix.as_bytes().to_vec())).await;
+        let store = LocalStore::open_in_memory().unwrap();
+        store
+            .put(
+                "tail",
+                &stored_profile("tail", &server.base_url, false),
+                "t",
+            )
+            .unwrap();
+        let sink = CollectingSink::default();
+        stream_direct_ai(
+            "tail",
+            request("req-tail"),
+            &store,
+            &TestSecretStore::default(),
+            &RequestRegistry::default(),
+            &sink,
+        )
+        .await
+        .unwrap();
+        let events = sink.snapshot();
+        assert_well_formed(&events, "req-tail");
+        assert!(
+            matches!(terminals(&events)[0], AiExecutionResult::Failed(result) if result.error.code == expected_code),
+            "{events:?}"
+        );
+        if has_usage {
+            assert!(events.iter().any(|event| matches!(event, AiStreamEvent::ReasoningDelta { delta, .. } if delta == "tail thought")));
+            assert!(events.iter().any(|event| matches!(event, AiStreamEvent::TextDelta { delta, .. } if delta == "tail text")));
+            assert!(events.iter().any(|event| matches!(event, AiStreamEvent::Usage { usage, .. } if usage.total_tokens == Some(5))));
+        }
+    }
+}
+
+#[tokio::test]
+async fn done_without_nonblank_output_preserves_the_reason_in_a_valid_failure() {
+    for (finish_reason, expected_code, expected_message) in [
+        (None, "invalid-response", "without nonblank output"),
+        (Some("stop"), "invalid-response", "without nonblank output"),
+        (Some("content_filter"), "content-filtered", "content filter"),
+        (
+            Some("tool_calls"),
+            "invalid-response",
+            "unsupported tool calls",
+        ),
+        (Some("length"), "output-too-large", "token limit"),
+    ] {
+        let chunk = serde_json::json!({
+            "choices": [{"delta": {"reasoning_content": "thought", "content": "  "}, "finish_reason": finish_reason}]
+        });
+        let wire = format!("data: {chunk}\n\ndata: [DONE]\n\n");
+        let server = spawn_sse_server(Scenario::ByteChunks(wire.as_bytes().to_vec())).await;
+        let store = LocalStore::open_in_memory().unwrap();
+        store
+            .put(
+                "empty",
+                &stored_profile("empty", &server.base_url, false),
+                "t",
+            )
+            .unwrap();
+        let sink = CollectingSink::default();
+        stream_direct_ai(
+            "empty",
+            request("req-empty"),
+            &store,
+            &TestSecretStore::default(),
+            &RequestRegistry::default(),
+            &sink,
+        )
+        .await
+        .unwrap();
+        let events = sink.snapshot();
+        assert_well_formed(&events, "req-empty");
+        assert!(
+            matches!(terminals(&events)[0], AiExecutionResult::Failed(result)
+            if result.error.code == expected_code && result.error.message.as_deref().is_some_and(|message| message.contains(expected_message))),
+            "{events:?}"
+        );
+        if let Ok(directory) = std::env::var("MAHO_NATIVE_EVENT_FIXTURE_DIR") {
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::write(
+                std::path::Path::new(&directory)
+                    .join(format!("empty-{}.json", finish_reason.unwrap_or("other"))),
+                serde_json::to_vec_pretty(&events).unwrap(),
+            )
+            .unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn text_output_keeps_each_upstream_finish_reason() {
+    for (wire_reason, canonical_reason) in [
+        ("stop", "stop"),
+        ("length", "length"),
+        ("content_filter", "content-filter"),
+        ("tool_calls", "tool-calls"),
+        ("other", "other"),
+    ] {
+        let chunk = serde_json::json!({
+            "choices": [{"delta": {"content": "partial output"}, "finish_reason": wire_reason}]
+        });
+        let wire = format!("data: {chunk}\n\ndata: [DONE]\n\n");
+        let server = spawn_sse_server(Scenario::ByteChunks(wire.as_bytes().to_vec())).await;
+        let store = LocalStore::open_in_memory().unwrap();
+        store
+            .put(
+                "reasons",
+                &stored_profile("reasons", &server.base_url, false),
+                "t",
+            )
+            .unwrap();
+        let sink = CollectingSink::default();
+        stream_direct_ai(
+            "reasons",
+            request("req-reasons"),
+            &store,
+            &TestSecretStore::default(),
+            &RequestRegistry::default(),
+            &sink,
+        )
+        .await
+        .unwrap();
+        let events = sink.snapshot();
+        assert_well_formed(&events, "req-reasons");
+        assert!(
+            matches!(terminals(&events)[0], AiExecutionResult::Completed(result)
+            if serde_json::to_value(result.finish_reason).unwrap() == canonical_reason),
+            "{events:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_bare_done_marker_is_a_single_invalid_response_terminal() {
+    let server = spawn_sse_server(Scenario::ByteChunks(b"data: [DONE]\n\n".to_vec())).await;
+    let store = LocalStore::open_in_memory().unwrap();
+    store
+        .put(
+            "bare",
+            &stored_profile("bare", &server.base_url, false),
+            "t",
+        )
+        .unwrap();
+    let sink = CollectingSink::default();
+    stream_direct_ai(
+        "bare",
+        request("req-bare"),
+        &store,
+        &TestSecretStore::default(),
+        &RequestRegistry::default(),
+        &sink,
+    )
+    .await
+    .unwrap();
+    let events = sink.snapshot();
+    assert_well_formed(&events, "req-bare");
+    assert_eq!(events.len(), 2);
+    assert!(
+        matches!(terminals(&events)[0], AiExecutionResult::Failed(result) if result.error.code == "invalid-response")
+    );
+}
