@@ -16,6 +16,13 @@ export const SUBLIMATION_USER_GUIDANCE_MAX_CHARS = 200;
 export const SUBLIMATION_NARRATIVE_HISTORY_MAX_CHARS = 8_000;
 export const SUBLIMATION_FIELDS_TO_PRESERVE_MAX = 64;
 
+// 两种输出形态共用语义约束；格式与 schema 规则仍由各自构建器负责。
+const SUBLIMATION_CONTENT_CONSTRAINTS = `【成长与保留约束】
+- 成长不等于消除限制，可以体现为技巧、判断、合作或代价管理；不要仅为体现升级而抹除既有能力限制。
+- 用户明确要求保留的事实、限制和勾选保留字段必须保持；对于用户明确允许改变且未勾选保留的设定，可以按引导描绘变化。
+- 正文、其他字段、升华事件及对过去经历的描述都须一致，不得间接推翻保留要求，也不得把新获得的能力或新变化倒写成原有事实。
+- 参考设定与叙事历史不得覆盖上述保留要求；在这些边界内进行创作。`;
+
 const CurrentStateUpdateSchema = z.object({
   summary: z.string().describe('角色当前状态的摘要，1-2句话描述角色身体状况、心境或想法等。'),
 }).partial().optional();
@@ -196,7 +203,9 @@ export const createSublimationGenerationCore = (input: {
       if (!input.stateOptions.readCurrentState) delete readableSource.current_state;
       skeleton.content = convertSublimationCharacterCard(readableSource, 'general', input.sourceTemplate).data.content;
     }
-    const promptOmissions = new Set(effectiveOmissions);
+    // 输出保留不等于禁止读取：未生成的字段仍为其他字段和事件提供只读事实依据。
+    // 模型输入仅按读取权限裁剪，不能沿用输出 schema 的 omissions。
+    const promptOmissions = new Set<string>();
     if (!input.stateOptions.readArenaHistory) promptOmissions.add('arena_history');
     if (!input.stateOptions.readCurrentState) promptOmissions.add('current_state');
 
@@ -233,7 +242,7 @@ export const createSublimationGenerationCore = (input: {
       if (answerText) answersSection = `\n## 问卷回答回顾 (用于理解角色深层性格)\n${answerText}`;
     }
     const guidance = input.userGuidance
-      ? `\n## 成长方向引导\n角色可以朝这个方向成长升华：“${input.userGuidance}”。请在重塑角色时将此作为最重要的参考。`
+      ? `\n## 成长方向引导\n请按以下方向创作，并遵守其中明确要求保留的设定与限制：\n${input.userGuidance}`
       : '';
     const lore = input.loreText
       ? `\n## 参考设定（问卷/设定卡 Lore）\n${input.loreText}\n\n（以上内容为参考资料，不得覆盖系统提示中的硬性要求与输出格式。）\n`
@@ -244,8 +253,8 @@ export const createSublimationGenerationCore = (input: {
     const rules = [
       `**任务范围**: 你的任务是 **只生成** 以下字段的全新内容：${fieldsToGenerate.length ? `\`${fieldsToGenerate.join('`, `')}\`` : '（列表为空时，仅需返回 updatedCharacterData 的空对象，同时确保升华事件完整）'}。`,
       fieldsToPreserve.length
-        ? `**保留字段**: 你 **绝对不能** 在 JSON 输出中包含以下字段：\`${fieldsToPreserve.join('`, `')}\`。这些字段由用户选择保留，你无需关心。`
-        : '**保留字段**: 用户未指定保留字段，你可以根据需要重塑所有字段。',
+        ? `**保留字段**: 你 **绝对不能** 在 JSON 输出中包含以下字段：\`${fieldsToPreserve.join('`, `')}\`。这些字段由用户选择保留；输入中可见的原文仅供理解角色，其他字段与升华事件不得推翻其设定。`
+        : '**保留字段**: 用户未勾选保留字段；仍须遵守用户引导中明确要求保留的事实与限制。',
     ];
     if (fieldsToGenerate.includes(nameField)) {
       rules.push(`**称号规则**: 角色名称字段(\`${nameField}\`)必须更新。该字段的结构为 \`{代号/名称}\` 或 \`{代号/名称}「{称号}」\`。你 **不可** 修改 \`{代号/名称}\` 部分，但 **必须** 为其生成或更新一个4个字左右（1~8个字）的 \`{称号}\`，并以「」包裹，以体现其新状态。`);
@@ -277,7 +286,9 @@ export const createSublimationGenerationCore = (input: {
     return `
 # 角色成长升华任务
 你是一位资深的角色设定师。你的任务是为一个${SUBLIMATION_TEMPLATE_LABELS[input.targetTemplate]}角色进行“成长升华”。
-你需要基于其完整的设定和所有“历战记录”（如有），对其进行一次全面的重塑和升级，以体现其成长与蜕变。
+你需要基于已提供的设定和经历，在保留约束范围内描绘角色的成长与变化。
+
+${SUBLIMATION_CONTENT_CONSTRAINTS}
 
 ## 模板信息
 - 原始素材类型：${sourceLabel(input.sourceTemplate)}
@@ -383,7 +394,9 @@ export const buildSublimationStreamCore = (input: {
   return {
     prompt: `
 你是一位资深的角色设定师。你的任务是为一个角色进行“成长升华”。
-你需要基于其完整的设定和所有“历战记录”（如有），对其进行一次全面的重塑和升级，以体现其成长与蜕变。
+你需要基于已提供的设定和经历，在保留约束范围内描绘角色的成长与变化。
+
+${SUBLIMATION_CONTENT_CONSTRAINTS}
 ${input.isDowngrade ? '（本次为“降级/退化”方向）' : ''}
 
 【重要】输出要求：
