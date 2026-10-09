@@ -3,9 +3,10 @@ import { useRouter } from 'next/navigation';
 import SaveCardModal from './CharManager/SaveCardModal';
 import DataCardsModal from './CharManager/DataCardsModal';
 import { useAuth } from '@/lib/useAuth';
-import { authStorage, dataCardApi } from '@/lib/auth';
+import { authStorage, dataCardApi, type AuthData } from '@/lib/auth';
+import { ReplaceCardModal } from '@mahoshojo/ui-web/cloud-save';
 import { quickCheck } from '@/lib/sensitive-word-filter';
-import type { OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
+import type { OnlineDataCardType, OwnedDataCardReplacementTarget } from '@mahoshojo/contracts/data-cards';
 
 interface SaveToCloudButtonProps {
   data: any;
@@ -58,6 +59,14 @@ export default function SaveToCloudButton({
   const [showDataCardsForReplace, setShowDataCardsForReplace] = useState(false);
   const [replaceEditingCard, setReplaceEditingCard] = useState<any | null>(null);
   const [replaceCurrentPage, setReplaceCurrentPage] = useState(1);
+  const [replacementTarget, setReplacementTarget] = useState<OwnedDataCardReplacementTarget | null>(null);
+  const [replacementOpen, setReplacementOpen] = useState(false);
+  const [replacementError, setReplacementError] = useState<string | null>(null);
+  const [replacementUncertain, setReplacementUncertain] = useState(false);
+  const [replacementConflict, setReplacementConflict] = useState(false);
+  const replacementUnknown = useRef(false);
+  const replacementSelection = useRef<{ data: unknown; expectedAuth: AuthData | null; context: string } | null>(null);
+
 
   const [uncertain, setUncertain] = useState(false);
   const [checkedOwnCards, setCheckedOwnCards] = useState(false);
@@ -90,6 +99,10 @@ export default function SaveToCloudButton({
     setCheckedOwnCards(false);
     setUserCapacity(undefined);
     setUserUsedSlots(undefined);
+    setShowDataCardsForReplace(false);
+    setReplacementTarget(null); setReplacementOpen(false); setReplacementError(null);
+    setReplacementUncertain(false); setReplacementConflict(false);
+    replacementUnknown.current = false; replacementSelection.current = null;
   }, [context]);
   useEffect(() => {
     mounted.current = true;
@@ -141,6 +154,7 @@ export default function SaveToCloudButton({
 
   const handleSaveClick = async () => {
     if (busy.current) return;
+    if (replacementUnknown.current) { setReplacementOpen(true); return; }
     if (!isAuthenticated) {
       alert('请先登录后再保存到云端');
       return;
@@ -175,38 +189,57 @@ export default function SaveToCloudButton({
   };
 
   const handleReplaceFromDataCards = async (card: any) => {
-    const workingData = preparedData ?? data;
-    if (!workingData) {
-      alert('没有可替换的数据。');
-      return;
-    }
-    if (!window.confirm(`确认用当前数据替换「${card.name}」吗？`)) return;
-    setSaveError(null);
+    if (busy.current || uncertainRef.current || replacementUnknown.current || !isAuthenticated || !user?.id || draftContext.current !== context || !preparedData) return;
+    const type = cardType ?? (isScenarioData(preparedData) ? 'scenario' : 'character');
+    if (card.type !== type) { alert('请选择与当前内容类型相同的数据卡'); return; }
+    busy.current = true; setIsPreparing(true);
+    const token = ++operation.current;
+    const ownerContext = context;
+    const isCurrent = () => mounted.current && token === operation.current && ownerContext === latestContext.current;
     try {
-      const finalData = { ...workingData };
-      const textToCheck = `${card.name || ''} ${card.description || ''} ${JSON.stringify(finalData)}`;
-      const sensitiveWordResult = await quickCheck(textToCheck);
-      if (sensitiveWordResult.hasSensitiveWords) {
-        navigateToArrested();
-        return;
-      }
+      const expectedAuth = await authStorage.getAuth();
+      if (!isCurrent()) return;
+      const result = await dataCardApi.readOwnedReplacementTarget(card.id, { expectedUserId: user.id, expectedAuth, isCurrent });
+      if (!isCurrent()) return;
+      if (!result.success || !result.target || result.target.type !== type) { alert(result.error || '目标卡片类型已变化，请重新选择'); return; }
+      replacementSelection.current = { data: JSON.parse(JSON.stringify(preparedData)), expectedAuth, context: ownerContext };
+      setReplacementTarget(result.target); setReplacementConflict(false); setReplacementError(null);
+      setShowDataCardsForReplace(false); setReplacementOpen(true);
+    } catch (error) { if (isCurrent()) alert(error instanceof Error ? error.message : '读取替换目标失败'); }
+    finally { if (isCurrent()) { busy.current = false; setIsPreparing(false); } }
+  };
 
-      const result = await dataCardApi.replaceCard(card.id, {
-        name: card.name,
-        description: card.description,
-        isPublic: card.is_public,
-        data: finalData,
-      });
-
+  const handleConfirmReplacement = async () => {
+    const selection = replacementSelection.current;
+    if (busy.current || uncertainRef.current || replacementUnknown.current || replacementConflict || !replacementOpen || !replacementTarget || !selection || selection.context !== context || !user?.id) return;
+    busy.current = true; setIsSaving(true); setReplacementError(null);
+    const token = ++operation.current;
+    const ownerContext = context;
+    const isCurrent = () => mounted.current && token === operation.current && ownerContext === latestContext.current;
+    const target = replacementTarget;
+    let sent = false;
+    try {
+      const checked = await quickCheck(`${target.name} ${target.description || ''} ${JSON.stringify(selection.data)}`);
+      if (!isCurrent()) return;
+      if (checked.hasSensitiveWords) { navigateToArrested(); return; }
+      sent = true;
+      const result = await dataCardApi.replaceOwnedCard(target, selection.data, { expectedUserId: user.id, expectedAuth: selection.expectedAuth, isCurrent });
+      if (!isCurrent()) return;
       if (result.success) {
         alert(result.pendingReview ? '更新已提交审核，审核通过后生效' : '已替换成功');
-        loadUserDataCards();
+        setReplacementOpen(false); setReplacementTarget(null); replacementSelection.current = null;
+        void loadUserDataCards();
       } else {
-        alert(result.error || '替换失败');
+        setReplacementError(result.error || '替换被拒绝，输入已保留');
+        setReplacementConflict(result.conflict === true);
+        if (result.uncertain) { replacementUnknown.current = true; setReplacementUncertain(true); setCheckedOwnCards(false); }
+        if (result.error === 'SENSITIVE_WORD_DETECTED') navigateToArrested();
       }
     } catch (error) {
-      alert(error instanceof Error ? error.message : '替换失败，请稍后重试');
-    }
+      if (!isCurrent()) return;
+      if (sent) { replacementUnknown.current = true; setReplacementUncertain(true); setCheckedOwnCards(false); setReplacementError('替换结果不确定，请检查我的云端卡及待审版本；不会自动重发。'); }
+      else setReplacementError(error instanceof Error ? error.message : '准备替换失败，输入已保留');
+    } finally { if (isCurrent()) { busy.current = false; setIsSaving(false); } }
   };
 
   const handleUpdateCardInfo = async (id: string, name: string, description: string, isPublic?: number) => {
@@ -245,7 +278,7 @@ export default function SaveToCloudButton({
   };
 
   const handleSave = async () => {
-    if (busy.current || uncertainRef.current || draftContext.current !== context) return;
+    if (busy.current || uncertainRef.current || replacementUnknown.current || draftContext.current !== context) return;
     if (!cardName.trim() || cardName.length > 20 || cardDescription.length > 300) {
       setSaveError(!cardName.trim() ? '请输入数据卡名称' : '名称最多 20 字符，描述最多 300 字符');
       return;
@@ -340,6 +373,9 @@ export default function SaveToCloudButton({
       </button>
       <button
         onClick={() => {
+          if (busy.current) return;
+          if (uncertainRef.current) { setShowSaveModal(true); return; }
+          if (replacementUnknown.current) { setReplacementOpen(true); return; }
           if (!isAuthenticated) {
             alert('请先登录后再替换到云端');
             return;
@@ -401,9 +437,23 @@ export default function SaveToCloudButton({
         userCapacity={userCapacity}
       />
 
+      <ReplaceCardModal isOpen={replacementOpen} target={replacementTarget ? { ...replacementTarget, reviewStatus: replacementTarget.reviewStatus ?? undefined } : null}
+        onClose={() => { if (!busy.current) setReplacementOpen(false); }} onConfirm={() => void handleConfirmReplacement()}
+        isSaving={isSaving} submitDisabled={replacementUncertain || replacementConflict} error={replacementError}
+        supplementaryContent={replacementUncertain ? <div className="space-y-2">
+          <a href="/character-manager" target="_blank" rel="noopener noreferrer" onClick={() => setCheckedOwnCards(true)}>检查我的云端卡及待审版本</a>
+          <button disabled={!checkedOwnCards || isSaving} onClick={() => {
+            if (!checkedOwnCards || busy.current || !window.confirm('已检查我的云端卡及待审版本？请重新选择目标并确认新的替换，是否继续？')) return;
+            replacementUnknown.current = false; setReplacementUncertain(false); setReplacementOpen(false); setReplacementTarget(null);
+            replacementSelection.current = null; setShowDataCardsForReplace(true); setCardsRefresh((value) => value + 1);
+          }}>我已检查，重新选择目标</button>
+        </div> : replacementConflict ? <button onClick={() => { if (!busy.current) { setReplacementOpen(false); setReplacementTarget(null); replacementSelection.current = null; setShowDataCardsForReplace(true); setCardsRefresh((value) => value + 1); } }}>重新选择替换目标</button> : undefined} />
       <DataCardsModal
         isOpen={showDataCardsForReplace}
+        busy={isSaving}
         onClose={() => {
+          if (isSaving) return;
+          operation.current++; busy.current = false; setIsPreparing(false);
           setShowDataCardsForReplace(false);
           setReplaceEditingCard(null);
         }}
