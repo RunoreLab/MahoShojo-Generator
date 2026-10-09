@@ -38,6 +38,8 @@ import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 import {
   ScenarioPageLayout,
   ScenarioResultSurface,
+  ScenarioResultContent,
+  ScenarioJsonDetails,
   ScenarioTitleField,
   ScenarioQuestionFields,
   ScenarioBlankFields,
@@ -586,9 +588,7 @@ export const ScenarioPage: React.FC = () => {
               )}
               <ScenarioResultSurface label="结构化情景结果">
                 <h2 className="text-2xl font-bold text-center mb-4">{resultData.title}</h2>
-                <div className="bg-gray-100 p-4 rounded-lg font-mono text-xs overflow-x-auto">
-                  <pre>{JSON.stringify(resultData, null, 2)}</pre>
-                </div>
+                <ScenarioResultContent data={resultData} />
                 <div className="flex flex-col md:flex-row justify-center gap-2 mt-6">
                   <button onClick={() => downloadJson(resultData)} className={`${generationActionClassNames.secondary} flex-1`}>
                     下载情景文件
@@ -664,9 +664,7 @@ export const ScenarioPage: React.FC = () => {
                     )}
                   </div>
 
-                  <div className="bg-gray-100 p-4 rounded-lg font-mono text-xs overflow-x-auto">
-                    <pre>{JSON.stringify(generalScenarioDraft, null, 2)}</pre>
-                  </div>
+                  <ScenarioJsonDetails data={generalScenarioDraft} />
 
                   <div className="flex flex-col md:flex-row justify-center gap-2 mt-2">
                     <button onClick={() => downloadJson(generalScenarioDraft)} className={`${generationActionClassNames.secondary} flex-1`}>

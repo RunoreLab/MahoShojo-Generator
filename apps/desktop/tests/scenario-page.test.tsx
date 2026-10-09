@@ -109,6 +109,8 @@ describe('Desktop Scenario route and session UI (native adapter mock)', () => {
     expect(resultSection.querySelectorAll('h2')).toHaveLength(1);
     expect(resultSection.querySelector('h2')?.textContent).toBe('雨后采访');
     expect(resultSection.querySelector('pre')?.textContent).toBe(JSON.stringify(scenarioCard, null, 2));
+    expect(resultSection.querySelector('[aria-label="情景内容预览"]')?.textContent).toContain('天台上的一次对话');
+    expect(resultSection.querySelector('details')?.open).toBe(false);
     expect([...resultSection.querySelectorAll('button')].filter((item) => item.textContent?.includes('下载'))).toHaveLength(1);
     await click('💾 下载设定文件');
     expect(mocks.download).toHaveBeenCalledExactlyOnceWith('情景_雨后采访.json', JSON.stringify(scenarioCard, null, 2));

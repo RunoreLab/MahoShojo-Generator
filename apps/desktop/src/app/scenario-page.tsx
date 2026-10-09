@@ -17,6 +17,7 @@ import { MarkdownBlock } from '@mahoshojo/ui-web/markdown';
 import {
   ScenarioPageLayout,
   ScenarioResultSurface,
+  ScenarioResultContent,
   ScenarioTitleField,
   ScenarioQuestionFields,
   ScenarioBlankFields,
@@ -323,7 +324,7 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
                   {cardKind === 'scenario' && (
                     <>
                       <h2 className="text-2xl font-bold text-center mb-4">{typeof card.title === 'string' && card.title ? card.title : '结构化情景'}</h2>
-                      <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-(--app-border-strong) bg-(--app-surface-strong) p-4 font-mono text-xs">{JSON.stringify(card, null, 2)}</pre>
+                      <ScenarioResultContent data={card} />
                     </>
                   )}
                   <button className={generationActionClassNames.primary} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => { if (guard.ready) void session.saveResult(); }}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>

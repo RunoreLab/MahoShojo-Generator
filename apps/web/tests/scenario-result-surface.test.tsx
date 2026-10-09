@@ -45,6 +45,8 @@ it('keeps structured results and the general editor in separate shared surfaces 
   const output = container.querySelector('[aria-label="结构化情景结果"]')!;
   expect(output.querySelector('h2')?.textContent).toBe(structured.title);
   expect(output.querySelector('pre')?.textContent).toBe(JSON.stringify(structured, null, 2));
+  expect(output.querySelector('details')).not.toBeNull();
+  expect(output.querySelector('summary')?.textContent).toBe('完整 JSON（技术视图）');
   expect(container.querySelectorAll('[data-testid="scenario-result-surface"]')).toHaveLength(2);
   expect(container.querySelectorAll('.card')).toHaveLength(3);
   for (const surface of [editor, output]) {
