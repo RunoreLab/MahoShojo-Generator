@@ -77,4 +77,21 @@ describe('Desktop真实角色管理云写宿主与Native模拟边界', () => {
     accountId = 8; await act(async () => { await getDesktopCloudSessionStore().refresh(); }); await act(async () => { pending.resolve({ status: 200, body: { success: true, accountFenceVersion: 1, ownerUserId: 7, target } }); });
     expect(document.querySelector('[role=dialog]')).toBeNull(); expect(requests('data-cards.replace')).toHaveLength(0); expect(container.querySelector<HTMLInputElement>('#editor-field-name')?.value).toBe('本地编辑稿');
   });
+  it('管理列表选择异类替换目标时原位显示错误，保留当前编辑且不发目标读取或写入', async () => {
+    const fallback = mock.invoke.getMockImplementation()!;
+    mock.invoke.mockImplementation((command, args) => {
+      if (command === 'cloud_card_library_request' && args.request.routeId === 'data-cards.query') {
+        const scenario = { ...row, type: 'scenario', roleType: null, name: '另一个情景' };
+        return Promise.resolve({ status: 200, body: args.request.query?.id
+          ? { success: true, card: { ...scenario, data: JSON.stringify({ templateId: '通用情景', title: '另一个情景', content: '情景正文' }) } }
+          : { success: true, cards: [scenario], total: 1, nextOffset: null } });
+      }
+      return fallback(command, args);
+    });
+    await mount(); await click('我的数据卡'); await waitFor(() => !!button('替换')); await click('替换');
+    expect(document.querySelector('[role=dialog] [role=alert]')?.textContent).toContain('请选择与当前内容类型相同的数据卡');
+    expect(requests('data-cards.replace-target.query')).toHaveLength(0); expect(requests('data-cards.replace')).toHaveLength(0);
+    expect(container.querySelector<HTMLInputElement>('#editor-field-name')?.value).toBe('本地编辑稿');
+  });
+
 });
