@@ -1,13 +1,5 @@
-// 全局常量与通用判定函数
-// 热门卡片阈值：收藏数 > 10 且使用数 > 30 时视为热门卡片，不占用槽位
-export const HOT_CARD_FAVORITE_THRESHOLD = 10;
-export const HOT_CARD_USAGE_THRESHOLD = 30;
-
-export function isHotCard(record: { favorite_count?: number; usage_count?: number }): boolean {
-  const favorites = record.favorite_count ?? 0;
-  const usage = record.usage_count ?? 0;
-  return favorites > HOT_CARD_FAVORITE_THRESHOLD && usage > HOT_CARD_USAGE_THRESHOLD;
-}
+// 热门阈值与桌面展示共享；热门卡减免一个基础槽位，并非任意大小都免费。
+export { HOT_CARD_FAVORITE_THRESHOLD, HOT_CARD_USAGE_THRESHOLD, isHotCard } from '@mahoshojo/domain/data-card-size';
 
 export function formatDateTime(value?: string | number | Date | null): string {
   if (!value) return '—';

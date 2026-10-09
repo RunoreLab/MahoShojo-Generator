@@ -3,6 +3,7 @@ import { describe, expect, test } from 'vitest';
 import {
   exceedsUtf8ByteLimit,
   getUtf8ByteLength,
+  isHotCard,
 } from '@mahoshojo/domain/data-card-size';
 
 describe('exceedsUtf8ByteLimit（D5.1-P2-r2 上移共享域层）', () => {
@@ -27,4 +28,11 @@ describe('exceedsUtf8ByteLimit（D5.1-P2-r2 上移共享域层）', () => {
       expect(exceedsUtf8ByteLimit(text, Math.max(0, actual - 1))).toBe(text.length > 0);
     }
   });
+});
+
+test('热门展示沿同一严格阈值，不把边界值提前减免', () => {
+  expect(isHotCard({})).toBe(false);
+  expect(isHotCard({ favorite_count: 10, usage_count: 31 })).toBe(false);
+  expect(isHotCard({ favorite_count: 11, usage_count: 30 })).toBe(false);
+  expect(isHotCard({ favorite_count: 11, usage_count: 31 })).toBe(true);
 });

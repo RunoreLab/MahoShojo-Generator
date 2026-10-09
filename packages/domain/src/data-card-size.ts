@@ -50,3 +50,11 @@ export const getDataCardBaseSlotCostFromBytes = (bytes: number): number => {
   const safeBytes = Number.isFinite(bytes) ? Math.max(0, Math.floor(bytes)) : 0;
   return Math.max(1, Math.ceil(safeBytes / DATA_CARD_SLOT_BYTES));
 };
+
+// Web 既有热门阈值；两端仅展示同一判定，实际槽位减免仍由服务器裁定。
+export const HOT_CARD_FAVORITE_THRESHOLD = 10;
+export const HOT_CARD_USAGE_THRESHOLD = 30;
+export function isHotCard(record: { favorite_count?: number; usage_count?: number }): boolean {
+  return (record.favorite_count ?? 0) > HOT_CARD_FAVORITE_THRESHOLD
+    && (record.usage_count ?? 0) > HOT_CARD_USAGE_THRESHOLD;
+}

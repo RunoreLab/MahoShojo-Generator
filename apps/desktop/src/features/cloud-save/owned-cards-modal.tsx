@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { isHotCard } from '@mahoshojo/domain/data-card-size';
 import { ONLINE_DATA_CARD_TYPES, type OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
 import { DataCardsModal, type DataCardsModalHost } from '@mahoshojo/ui-web/cloud-save';
 import { createDesktopCardLibraryOnlinePort, useDesktopCardLibraryHost } from '../../platform/card-library-host';
@@ -57,7 +58,7 @@ function DesktopOwnedCardsModalScope({ isOpen, onClose, expectedUserId, selected
     // 数字只作共享接口默认值；实际未读到容量时明确显示「未知」。
     defaultCapacity: 20,
     recycleLimit: 5,
-    isHotCard: (card) => (card.favorite_count ?? 0) > 10 && (card.usage_count ?? 0) > 30,
+    isHotCard,
     tilePlatform: { ...libraryHost.platform, reviewHref: '/encyclopedia/review', reportStat: online.reportCardStat },
     downloadJson: (fileName, jsonText) => {
       if (!libraryHost.platform.downloadJson) throw new Error('文件下载暂不可用，请保留编辑内容');
