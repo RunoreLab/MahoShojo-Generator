@@ -186,6 +186,11 @@
       "types": "./src/generation-actions/index.tsx",
       "import": "./src/generation-actions/index.tsx",
       "default": "./src/generation-actions/index.tsx"
+    },
+    "./narrative-history": {
+      "types": "./src/narrative-history/index.ts",
+      "import": "./src/narrative-history/index.ts",
+      "default": "./src/narrative-history/index.ts"
     }
   },
   "scripts": {
