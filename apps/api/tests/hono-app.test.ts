@@ -38,6 +38,13 @@ afterEach(() => {
 });
 
 describe('Hono server app', () => {
+  it.each(['/api/data-cards', '/api/data-cards/create-owned'])('Next-owned 卡创建路径 %s 不映射到 Hono legacy handler', async (pathname) => {
+    const app = createHonoApp(config, createRedisStub());
+    const response = await app.request(pathname, { method: 'POST', body: '{}' });
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: 'Not found', code: 'NOT_FOUND' });
+  });
+
   it('安全匹配 HTTPS 子域通配符', () => {
     const allowedOrigins = ['https://*.colanns.me'];
 

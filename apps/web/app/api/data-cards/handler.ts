@@ -17,7 +17,7 @@ import {
   updateDataCardContentByIdAndUser as updateDataCardContentByIdAndUserLegacy,
 } from '@/lib/database/data-cards';
 import { getUserDataCardCapacity } from '@/lib/database/users';
-import { requireAuthUser } from '@/lib/auth/server';
+import { requireAuthUser, type AuthenticatedUser } from '@/lib/auth/server';
 import { config as appConfig } from '@/lib/config';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import { getDrizzleDbFromRuntime, type AppDrizzleDb } from '@/lib/db/drizzle';
@@ -77,6 +77,165 @@ async function computeAndUpsertMetrics(
     });
   } catch (error) {
     console.warn('更新 data_card_metrics 失败（非阻塞）:', error);
+  }
+}
+
+// 唯一创建业务实现；调用方传入本次鉴权冻结的用户，不能在此再次鉴权。
+export async function createDataCardForUser(
+  req: Request,
+  user: Readonly<AuthenticatedUser>,
+  payload: { type?: unknown; name?: any; description?: any; data?: any; isPublic?: unknown },
+  accountFence = false,
+): Promise<Response> {
+  const userId = user.id;
+  const db = getDrizzleDbFromRuntime();
+  const makePayloadTooLargeResponse = (sizeBytes: number) =>
+    new Response(
+      JSON.stringify({
+        error: `数据卡内容过大，最大允许 ${MAX_DATA_CARD_BYTES / 1024}KB，当前大小 ${formatKilobytes(sizeBytes)}KB`
+      }),
+      {
+        status: 413, // Payload Too Large
+        headers: { 'Content-Type': 'application/json' }
+      }
+    );
+
+  // 创建新数据卡
+  try {
+    const { type, name, description, data, isPublic } = payload;
+    const isAdmin = user.is_admin === 1;
+
+    if (!type || !name || !data) {
+      return new Response(JSON.stringify({ error: '缺少必要参数' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    const typeResult = OnlineDataCardTypeSchema.safeParse(type);
+    if (!typeResult.success) {
+      return new Response(JSON.stringify({ error: '无效的数据卡类型' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+    const cardType = typeResult.data;
+    const normalizedPublic = isPublic == null
+      ? 0
+      : normalizeOnlineDataCardVisibilityCompat(isPublic);
+    if (normalizedPublic === null) {
+      return new Response(JSON.stringify({ error: '无效的数据卡可见性' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    // 检查数据卡内容大小（写入数据库前，按 UTF-8 字节数计）
+    let dataString: string;
+    let dataWithAuthorString: string;
+    try {
+      const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+        typeof value === 'object' && value !== null && !Array.isArray(value);
+      const sanitizedPayload =
+        cardType === 'questionnaire' && !isAdmin && isPlainObject(data)
+          ? { ...data, nativeAllowed: false }
+          : data;
+
+      dataString = JSON.stringify(sanitizedPayload);
+      dataWithAuthorString = JSON.stringify({ ...(JSON.parse(dataString) as any), _author: user.username, _authorId: userId });
+    } catch {
+      return new Response(JSON.stringify({ error: 'data 无法序列化为 JSON' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    const dataSize = getUtf8ByteLength(dataWithAuthorString);
+    if (dataSize > MAX_DATA_CARD_BYTES) return makePayloadTooLargeResponse(dataSize);
+
+    // 敏感词检查
+    const textToCheck = `${name} ${description || ''} ${dataWithAuthorString}`;
+    const sensitiveWordResult = await quickCheck(textToCheck);
+
+    if (sensitiveWordResult.hasSensitiveWords) {
+      return new Response(JSON.stringify({
+        error: 'SENSITIVE_WORD_DETECTED',
+        redirect: '/arrested'
+      }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    // 检查用户数据卡槽位限制：每开始使用 300KiB 占 1 槽；新卡尚不具备热门豁免。
+    const usedSlots = await getUserUsedSlots(userId);
+    const userCapacity = await getUserDataCardCapacity(userId, appConfig.DEFAULT_DATA_CARD_CAPACITY);
+    const requiredSlots = getDataCardChargedSlotsFromBytes(dataSize, false);
+    if (usedSlots + requiredSlots > userCapacity) {
+      return new Response(JSON.stringify({
+        error: `数据卡需要 ${requiredSlots} 个槽位，当前已用 ${usedSlots}/${userCapacity}，请释放足够槽位后再试`
+      }), {
+        status: 429, // Too Many Requests
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    // [v0.4.2 核心逻辑] 根据用户豁免状态决定审查状态；
+    // exemptUserPolicy==='review' 时豁免用户同样进入 pending 由自动审查裁决。
+    const exemptStillReviewed = getAutoReviewPolicy().exemptUserPolicy === 'review';
+    const reviewStatus = user.is_review_exempt === 1 && !exemptStillReviewed ? 'approved' : 'pending';
+    const result = await createDataCardWithAuthor(
+      userId,
+      user.username,
+      cardType,
+      name,
+      description || '',
+      dataWithAuthorString,
+      normalizedPublic,
+      reviewStatus // 传入新的审查状态
+    );
+
+    if (!result.success) {
+      return new Response(JSON.stringify({
+        error: result.error || '创建数据卡失败'
+      }), {
+        status: result.error?.includes('同名') ? 409 : 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    if (result.id) {
+      const tasks: Promise<unknown>[] = [computeAndUpsertMetrics(db, result.id, dataWithAuthorString)];
+      const shouldAutoReview =
+        appConfig.DATA_CARD_AUTO_REVIEW?.enabled && normalizedPublic === 1 && reviewStatus === 'pending';
+      if (shouldAutoReview) {
+        tasks.push(autoReviewLatestPendingPublicDataCardsForUser(userId));
+      }
+
+      const combined = Promise.all(tasks).then(() => undefined);
+      const executionContext = (req as any).context;
+      if (executionContext?.waitUntil) {
+        executionContext.waitUntil(combined);
+      } else {
+        await combined;
+      }
+    }
+
+    return new Response(JSON.stringify({
+      success: true,
+      id: result.id,
+      message: '数据卡创建成功',
+      ...(accountFence ? { accountFenceVersion: 1, ownerUserId: userId } : {})
+    }), {
+      status: 201,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  } catch (error) {
+    console.error('Create card error:', error);
+    return new Response(JSON.stringify({ error: '创建数据卡失败' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 }
 
@@ -143,141 +302,11 @@ async function handler(req: Request): Promise<Response> {
       }
 
     case 'POST':
-      // 创建新数据卡
+      // legacy：不提供账号围栏，但仍只鉴权一次并共用业务检查。
       try {
-        const { type, name, description, data, isPublic } = await req.json();
-        const isAdmin = user.is_admin === 1;
-
-        if (!type || !name || !data) {
-          return new Response(JSON.stringify({ error: '缺少必要参数' }), {
-            status: 400,
-            headers: { 'Content-Type': 'application/json' }
-          });
-        }
-
-        const typeResult = OnlineDataCardTypeSchema.safeParse(type);
-        if (!typeResult.success) {
-          return new Response(JSON.stringify({ error: '无效的数据卡类型' }), {
-            status: 400,
-            headers: { 'Content-Type': 'application/json' }
-          });
-        }
-        const cardType = typeResult.data;
-        const normalizedPublic = isPublic == null
-          ? 0
-          : normalizeOnlineDataCardVisibilityCompat(isPublic);
-        if (normalizedPublic === null) {
-          return new Response(JSON.stringify({ error: '无效的数据卡可见性' }), {
-            status: 400,
-            headers: { 'Content-Type': 'application/json' }
-          });
-        }
-
-        // 检查数据卡内容大小（写入数据库前，按 UTF-8 字节数计）
-        let dataString: string;
-        let dataWithAuthorString: string;
-        try {
-          const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-            typeof value === 'object' && value !== null && !Array.isArray(value);
-          const sanitizedPayload =
-            cardType === 'questionnaire' && !isAdmin && isPlainObject(data)
-              ? { ...data, nativeAllowed: false }
-              : data;
-
-          dataString = JSON.stringify(sanitizedPayload);
-          dataWithAuthorString = JSON.stringify({ ...(JSON.parse(dataString) as any), _author: user.username, _authorId: userId });
-        } catch {
-          return new Response(JSON.stringify({ error: 'data 无法序列化为 JSON' }), {
-            status: 400,
-            headers: { 'Content-Type': 'application/json' }
-          });
-        }
-
-        const dataSize = getUtf8ByteLength(dataWithAuthorString);
-        if (dataSize > MAX_DATA_CARD_BYTES) return makePayloadTooLargeResponse(dataSize);
-
-        // 敏感词检查
-        const textToCheck = `${name} ${description || ''} ${dataWithAuthorString}`;
-        const sensitiveWordResult = await quickCheck(textToCheck);
-        
-        if (sensitiveWordResult.hasSensitiveWords) {
-          return new Response(JSON.stringify({ 
-            error: 'SENSITIVE_WORD_DETECTED',
-            redirect: '/arrested'
-          }), {
-            status: 403,
-            headers: { 'Content-Type': 'application/json' }
-          });
-        }
-
-        // 检查用户数据卡槽位限制：每开始使用 300KiB 占 1 槽；新卡尚不具备热门豁免。
-        const usedSlots = await getUserUsedSlots(userId);
-        const userCapacity = await getUserDataCardCapacity(userId, appConfig.DEFAULT_DATA_CARD_CAPACITY);
-        const requiredSlots = getDataCardChargedSlotsFromBytes(dataSize, false);
-        if (usedSlots + requiredSlots > userCapacity) {
-          return new Response(JSON.stringify({
-            error: `数据卡需要 ${requiredSlots} 个槽位，当前已用 ${usedSlots}/${userCapacity}，请释放足够槽位后再试`
-          }), {
-            status: 429, // Too Many Requests
-            headers: { 'Content-Type': 'application/json' }
-          });
-        }
-
-        // [v0.4.2 核心逻辑] 根据用户豁免状态决定审查状态；
-        // exemptUserPolicy==='review' 时豁免用户同样进入 pending 由自动审查裁决。
-        const exemptStillReviewed = getAutoReviewPolicy().exemptUserPolicy === 'review';
-        const reviewStatus = user.is_review_exempt === 1 && !exemptStillReviewed ? 'approved' : 'pending';
-        const result = await createDataCardWithAuthor(
-          userId,
-          user.username,
-          cardType,
-          name,
-          description || '',
-          dataWithAuthorString,
-          normalizedPublic,
-          reviewStatus // 传入新的审查状态
-        );
-
-        if (!result.success) {
-          return new Response(JSON.stringify({ 
-            error: result.error || '创建数据卡失败' 
-          }), {
-            status: result.error?.includes('同名') ? 409 : 500,
-            headers: { 'Content-Type': 'application/json' }
-          });
-        }
-
-        if (result.id) {
-          const tasks: Promise<unknown>[] = [computeAndUpsertMetrics(db, result.id, dataWithAuthorString)];
-          const shouldAutoReview =
-            appConfig.DATA_CARD_AUTO_REVIEW?.enabled && normalizedPublic === 1 && reviewStatus === 'pending';
-          if (shouldAutoReview) {
-            tasks.push(autoReviewLatestPendingPublicDataCardsForUser(userId));
-          }
-
-          const combined = Promise.all(tasks).then(() => undefined);
-          const executionContext = (req as any).context;
-          if (executionContext?.waitUntil) {
-            executionContext.waitUntil(combined);
-          } else {
-            await combined;
-          }
-        }
-
-        return new Response(JSON.stringify({ 
-          success: true, 
-          id: result.id,
-          message: '数据卡创建成功' 
-        }), {
-          status: 201,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      } catch (error) {
-        console.error('Create card error:', error);
-        return new Response(JSON.stringify({ error: '创建数据卡失败' }), {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' }
-        });
+        return await createDataCardForUser(req, Object.freeze({ ...user }), await req.json());
+      } catch {
+        return Response.json({ error: '创建数据卡失败' }, { status: 500 });
       }
 
     case 'PUT': {
