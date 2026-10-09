@@ -22,6 +22,7 @@ fn main() {
             "delete_provider_profile",
             "validate_provider_execution_profile",
             "stream_direct_ai",
+            "stream_target_ai",
             "cancel_direct_ai",
             "save_local_card",
             "get_local_card",

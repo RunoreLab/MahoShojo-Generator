@@ -7,3 +7,4 @@ export * from './desktop-ipc';
 export * from './announcements';
 export * from './api';
 export * from './battle-report-render-snapshot';
+export * from './provider-target';

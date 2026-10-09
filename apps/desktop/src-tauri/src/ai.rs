@@ -3,8 +3,8 @@
 //! 冻结的边界（`ADR-desktop-tauri-v1` 第 5 条、`SPEC-desktop-client-v1` DESK-030..033）：
 //!
 //! - 出站请求只由 Rust 发起，renderer 不获得任何 fetch 能力；
-//! - endpoint 与 header 只能来自已保存 Profile 的窄投影，请求 DTO **不携带** endpoint、
-//!   header 字面量或 secret 明文，只带 `profileId`；
+//! - endpoint 与 header 只能来自已保存 Profile 或 native 可信预设，请求 DTO **不携带** endpoint、
+//!   header 字面量或 secret 明文，只带稳定的 Profile/preset 身份；
 //! - 重定向默认关闭（Profile 未声明时为 0），且跨 origin 绝不携带凭据；
 //! - 长流走 `Channel<AiStreamEvent>`，并保证单一终态；
 //! - 取消必须真正中止上游 HTTP body，而不只是停止向 renderer 投递。
@@ -22,6 +22,7 @@ use tauri::ipc::Channel;
 use tokio_util::sync::CancellationToken;
 
 use crate::provider_profile::DirectProviderExecutionProfile;
+use crate::provider_target::{validate_credential_purpose, CredentialPurpose};
 use crate::secret::SecretStore;
 use crate::sse::{SseFrame, SseFrameParser};
 use crate::store::LocalStore;
@@ -495,10 +496,25 @@ fn build_endpoint(profile: &DirectProviderExecutionProfile) -> Result<url::Url, 
 /// 组装出站 header。
 ///
 /// 凭据只在这里、只在 Rust 内部被解引用。返回值不进入日志、不进入事件流。
+#[cfg(test)]
 fn build_headers(
     profile: &DirectProviderExecutionProfile,
     secrets: &dyn SecretStore,
 ) -> Result<reqwest::header::HeaderMap, DirectAiError> {
+    build_headers_for_purpose(profile, secrets, &CredentialPurpose::Custom)
+}
+
+fn build_headers_for_purpose(
+    profile: &DirectProviderExecutionProfile,
+    secrets: &dyn SecretStore,
+    purpose: &CredentialPurpose,
+) -> Result<reqwest::header::HeaderMap, DirectAiError> {
+    validate_credential_purpose(profile, purpose).map_err(|_| {
+        DirectAiError::new(
+            DirectAiErrorCode::ProfileRejected,
+            "credential purpose does not match provider target",
+        )
+    })?;
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
         reqwest::header::ACCEPT,
@@ -1075,7 +1091,7 @@ fn emit_pre_stream_error_terminal(
 /// 端到端入口：读 Profile、取 secret、发请求、跑流。
 pub async fn stream_direct_ai(
     profile_id: &str,
-    request: AiExecutionRequest,
+    mut request: AiExecutionRequest,
     store: &LocalStore,
     secrets: &dyn SecretStore,
     registry: &RequestRegistry,
@@ -1112,6 +1128,85 @@ pub async fn stream_direct_ai(
         )
     })?;
 
+    // Legacy Profiles/overlay selections retain the historical 256-unit ceiling.
+    // New UI choices use the shared 200-unit schema; native never truncates old choices.
+    let model = request.model_id.as_deref().unwrap_or(&profile.model_id);
+    request.model_id = Some(
+        crate::provider_target::normalize_legacy_model_id(model).map_err(|_| {
+            DirectAiError::new(
+                DirectAiErrorCode::UnsupportedRequest,
+                "invalid custom provider model ID",
+            )
+        })?,
+    );
+    stream_resolved_direct_ai(
+        profile,
+        request,
+        secrets,
+        registry,
+        on_event,
+        CredentialPurpose::Custom,
+    )
+    .await
+}
+
+/// Additive target-based entry. Legacy Profile requests keep their existing identity and limits.
+pub async fn stream_target_ai(
+    target: crate::provider_target::ProviderTarget,
+    mut request: AiExecutionRequest,
+    store: &LocalStore,
+    secrets: &dyn SecretStore,
+    registry: &RequestRegistry,
+    on_event: &dyn EventSink,
+) -> Result<(), DirectAiError> {
+    use crate::provider_target::{resolve_direct_preset, ProviderTarget};
+    match target {
+        ProviderTarget::Custom { profile_id } => {
+            stream_direct_ai(&profile_id, request, store, secrets, registry, on_event).await
+        }
+        ProviderTarget::System {} => Err(DirectAiError::new(
+            DirectAiErrorCode::UnsupportedRequest,
+            "system target requires server execution",
+        )),
+        ProviderTarget::Preset { provider_id } => {
+            if !matches!(
+                request.mode,
+                AiExecutionMode::DirectLocal | AiExecutionMode::DirectRemote
+            ) || request.messages.is_empty()
+                || request.contract_version != 1
+            {
+                return Err(DirectAiError::new(
+                    DirectAiErrorCode::UnsupportedRequest,
+                    "unsupported AI execution request",
+                ));
+            }
+            let profile =
+                resolve_direct_preset(&provider_id, request.model_id.as_deref().unwrap_or(""))
+                    .map_err(|error| {
+                        DirectAiError::new(DirectAiErrorCode::ProfileRejected, error.message())
+                    })?;
+            request.model_id = Some(profile.model_id.clone());
+            stream_resolved_direct_ai(
+                profile,
+                request,
+                secrets,
+                registry,
+                on_event,
+                CredentialPurpose::TrustedPreset { provider_id },
+            )
+            .await
+        }
+    }
+}
+
+async fn stream_resolved_direct_ai(
+    profile: DirectProviderExecutionProfile,
+    request: AiExecutionRequest,
+    secrets: &dyn SecretStore,
+    registry: &RequestRegistry,
+    on_event: &dyn EventSink,
+    purpose: CredentialPurpose,
+) -> Result<(), DirectAiError> {
     let token = registry.register(&request.request_id)?;
     if let Err(error) = emit_event(
         on_event,
@@ -1126,7 +1221,8 @@ pub async fn stream_direct_ai(
         return Err(error);
     }
 
-    let result = stream_direct_ai_inner(&profile, &request, secrets, token, on_event).await;
+    let result =
+        stream_direct_ai_inner(&profile, &request, secrets, token, on_event, &purpose).await;
     registry.finish(&request.request_id);
     result
 }
@@ -1137,6 +1233,7 @@ async fn stream_direct_ai_inner(
     secrets: &dyn SecretStore,
     token: CancellationToken,
     on_event: &dyn EventSink,
+    purpose: &CredentialPurpose,
 ) -> Result<(), DirectAiError> {
     let client = match build_http_client(profile.max_redirects()) {
         Ok(client) => client,
@@ -1146,7 +1243,7 @@ async fn stream_direct_ai_inner(
         Ok(endpoint) => endpoint,
         Err(error) => return emit_pre_stream_error_terminal(request, error, on_event),
     };
-    let headers = match build_headers(profile, secrets) {
+    let headers = match build_headers_for_purpose(profile, secrets, purpose) {
         Ok(headers) => headers,
         Err(error) => return emit_pre_stream_error_terminal(request, error, on_event),
     };
@@ -1327,6 +1424,54 @@ mod credential_snapshot_tests {
             public_headers: None,
             transport: None,
         }
+    }
+
+    #[test]
+    fn preset_key_rotation_or_deletion_does_not_change_prepared_headers() {
+        let secrets = InterleavableSecrets::default();
+        let profile =
+            crate::provider_target::resolve_direct_preset("deepseek", "deepseek-chat").unwrap();
+        let reference = profile.api_key_ref.as_deref().unwrap();
+        secrets.set(reference, "test-old").unwrap();
+        let headers = super::build_headers_for_purpose(
+            &profile,
+            &secrets,
+            &crate::provider_target::CredentialPurpose::TrustedPreset {
+                provider_id: "deepseek".into(),
+            },
+        )
+        .unwrap();
+        secrets.set(reference, "test-new").unwrap();
+        assert_eq!(
+            headers.get(reqwest::header::AUTHORIZATION).unwrap(),
+            "Bearer test-old"
+        );
+        assert_eq!(
+            super::build_headers_for_purpose(
+                &profile,
+                &secrets,
+                &crate::provider_target::CredentialPurpose::TrustedPreset {
+                    provider_id: "deepseek".into()
+                }
+            )
+            .unwrap()
+            .get(reqwest::header::AUTHORIZATION)
+            .unwrap(),
+            "Bearer test-new"
+        );
+        secrets.delete(reference).unwrap();
+        assert_eq!(
+            headers.get(reqwest::header::AUTHORIZATION).unwrap(),
+            "Bearer test-old"
+        );
+        assert!(super::build_headers_for_purpose(
+            &profile,
+            &secrets,
+            &crate::provider_target::CredentialPurpose::TrustedPreset {
+                provider_id: "deepseek".into()
+            }
+        )
+        .is_err());
     }
 
     /// DESK-AIP-007.3 / D5.1-AIP-r1 P2：header 构造把 resolve 的明文快照进

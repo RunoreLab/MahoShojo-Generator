@@ -134,6 +134,86 @@
         "modelId": "m",
         "apiKeyRef": "provider:profile bad:api key"
       }
+    },
+    {
+      "$case": "reserved preset key",
+      "profile": {
+        "id": "profile-remote",
+        "name": "Remote BYOK",
+        "adapter": "openai-compatible",
+        "baseUrl": "https://api.example.com/v1",
+        "modelId": "gpt-4o-mini",
+        "apiKeyRef": "preset:deepseek:api-key",
+        "secretHeaderRefs": {
+          "x-tenant-token": "provider:profile-remote:x-tenant-token"
+        },
+        "publicHeaders": {
+          "x-client": "mahoshojo-desktop"
+        },
+        "transport": {
+          "maxRedirects": 2
+        }
+      }
+    },
+    {
+      "$case": "reserved preset header",
+      "profile": {
+        "id": "profile-remote",
+        "name": "Remote BYOK",
+        "adapter": "openai-compatible",
+        "baseUrl": "https://api.example.com/v1",
+        "modelId": "gpt-4o-mini",
+        "apiKeyRef": "provider:profile-remote:api-key",
+        "secretHeaderRefs": {
+          "x-custom": "PRESET:deepseek:api-key"
+        },
+        "publicHeaders": {
+          "x-client": "mahoshojo-desktop"
+        },
+        "transport": {
+          "maxRedirects": 2
+        }
+      }
+    },
+    {
+      "$case": "reserved account key",
+      "profile": {
+        "id": "profile-remote",
+        "name": "Remote BYOK",
+        "adapter": "openai-compatible",
+        "baseUrl": "https://api.example.com/v1",
+        "modelId": "gpt-4o-mini",
+        "apiKeyRef": "account-session:web-v1",
+        "secretHeaderRefs": {
+          "x-tenant-token": "provider:profile-remote:x-tenant-token"
+        },
+        "publicHeaders": {
+          "x-client": "mahoshojo-desktop"
+        },
+        "transport": {
+          "maxRedirects": 2
+        }
+      }
+    },
+    {
+      "$case": "reserved account header",
+      "profile": {
+        "id": "profile-remote",
+        "name": "Remote BYOK",
+        "adapter": "openai-compatible",
+        "baseUrl": "https://api.example.com/v1",
+        "modelId": "gpt-4o-mini",
+        "apiKeyRef": "provider:profile-remote:api-key",
+        "secretHeaderRefs": {
+          "x-custom": "ACCOUNT-SESSION:web-v1"
+        },
+        "publicHeaders": {
+          "x-client": "mahoshojo-desktop"
+        },
+        "transport": {
+          "maxRedirects": 2
+        }
+      }
     }
   ]
 }

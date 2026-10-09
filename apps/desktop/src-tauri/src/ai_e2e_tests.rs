@@ -870,3 +870,66 @@ async fn hosted_and_authoritative_modes_are_refused_by_the_direct_path() {
         assert!(format!("{error:?}").contains("UnsupportedRequest"));
     }
 }
+
+#[tokio::test]
+async fn a_preset_requires_no_profile_and_fails_closed_without_its_own_secret() {
+    let store = LocalStore::open_in_memory().unwrap();
+    let secrets = TestSecretStore::default();
+    let registry = RequestRegistry::default();
+    let sink = CollectingSink::default();
+    let mut req = request("req-preset-missing-secret");
+    req.model_id = Some("deepseek-chat".into());
+    crate::ai::stream_target_ai(
+        crate::provider_target::ProviderTarget::Preset {
+            provider_id: "deepseek".into(),
+        },
+        req,
+        &store,
+        &secrets,
+        &registry,
+        &sink,
+    )
+    .await
+    .unwrap();
+    let events = sink.snapshot();
+    assert_well_formed(&events, "req-preset-missing-secret");
+    assert!(
+        matches!(terminals(&events).first(), Some(AiExecutionResult::Failed(result))
+        if result.error.code == "authentication-failed")
+    );
+    assert!(store.get("preset:deepseek").unwrap().is_none());
+    assert!(store.get("deepseek").unwrap().is_none());
+}
+
+#[tokio::test]
+async fn target_custom_preserves_legacy_model_ids_above_new_input_limit() {
+    let server = spawn_sse_server(Scenario::Complete).await;
+    let store = LocalStore::open_in_memory().unwrap();
+    store
+        .put(
+            "legacy",
+            &stored_profile("legacy", &server.base_url, false),
+            "t",
+        )
+        .unwrap();
+    let sink = CollectingSink::default();
+    let mut req = request("req-legacy-target");
+    req.model_id = Some("a".repeat(256));
+    crate::ai::stream_target_ai(
+        crate::provider_target::ProviderTarget::Custom {
+            profile_id: "legacy".into(),
+        },
+        req,
+        &store,
+        &TestSecretStore::default(),
+        &RequestRegistry::default(),
+        &sink,
+    )
+    .await
+    .unwrap();
+    let events = sink.snapshot();
+    assert!(
+        matches!(terminals(&events).first(), Some(AiExecutionResult::Completed(result))
+        if result.resolved_model_id.as_deref() == Some("a".repeat(256).as_str()))
+    );
+}

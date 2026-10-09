@@ -1,0 +1,1461 @@
+[
+  {
+    "id": "kourichat",
+    "name": "KouriChat",
+    "baseUrl": "https://api.kourichat.com/v1",
+    "providerType": "openai",
+    "modelAliases": {},
+    "endpointKind": "provider-public",
+    "adapter": "openai-compatible",
+    "models": [
+      {
+        "id": "gemini-3.8-flash",
+        "adapter": null
+      },
+      {
+        "id": "gemini-3.6-flash",
+        "adapter": null
+      },
+      {
+        "id": "gemini-3.1-pro-preview",
+        "adapter": null
+      },
+      {
+        "id": "gemini-3.5-flash-lite",
+        "adapter": null
+      },
+      {
+        "id": "gemini-2.5-pro",
+        "adapter": null
+      },
+      {
+        "id": "gpt-5.5",
+        "adapter": null
+      },
+      {
+        "id": "gpt-5.4",
+        "adapter": null
+      },
+      {
+        "id": "gpt-5.4-mini",
+        "adapter": null
+      },
+      {
+        "id": "gpt-5.6-luna",
+        "adapter": null
+      },
+      {
+        "id": "gpt-5.6-terra",
+        "adapter": null
+      },
+      {
+        "id": "gpt-5.6-sol",
+        "adapter": null
+      },
+      {
+        "id": "gpt-6-astra",
+        "adapter": null
+      },
+      {
+        "id": "claude-opus-4-8",
+        "adapter": null
+      },
+      {
+        "id": "glm-5.3",
+        "adapter": null
+      },
+      {
+        "id": "glm-5",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-v4-flash-0731",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-v4-pro",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-v3.2",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-r1",
+        "adapter": null
+      },
+      {
+        "id": "kourichat-v3",
+        "adapter": null
+      },
+      {
+        "id": "kimi-k3",
+        "adapter": null
+      },
+      {
+        "id": "kimi-k2.6",
+        "adapter": null
+      }
+    ]
+  },
+  {
+    "id": "chatbox",
+    "name": "Chatbox AI",
+    "baseUrl": "https://ai.chatboxai.app/v1",
+    "providerType": "openai",
+    "modelAliases": {},
+    "endpointKind": "provider-public",
+    "adapter": "openai-compatible",
+    "models": [
+      {
+        "id": "gpt-5.5",
+        "adapter": null
+      },
+      {
+        "id": "gpt-5.6-sol",
+        "adapter": null
+      },
+      {
+        "id": "gpt-5.6-luna",
+        "adapter": null
+      },
+      {
+        "id": "claude-opus-5",
+        "adapter": null
+      },
+      {
+        "id": "claude-fable-5",
+        "adapter": null
+      },
+      {
+        "id": "gemini-3.1-pro-preview",
+        "adapter": null
+      },
+      {
+        "id": "gemini-3-pro",
+        "adapter": null
+      },
+      {
+        "id": "gemini-3-flash",
+        "adapter": null
+      },
+      {
+        "id": "gemini-3.5-flash-lite",
+        "adapter": null
+      },
+      {
+        "id": "gemini-2.5-flash",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-v4-flash",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-v4-pro",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-v3.2",
+        "adapter": null
+      },
+      {
+        "id": "kimi-k2.6",
+        "adapter": null
+      }
+    ]
+  },
+  {
+    "id": "tokendance",
+    "name": "词元跳动 TokenDance",
+    "baseUrl": "https://tokendance.space/gateway/v1",
+    "providerType": "openai",
+    "modelAliases": {},
+    "endpointKind": "provider-public",
+    "adapter": "openai-compatible",
+    "models": [
+      {
+        "id": "minimax-m3",
+        "adapter": null
+      },
+      {
+        "id": "minimax-m2.7",
+        "adapter": null
+      },
+      {
+        "id": "minimax-m2.5",
+        "adapter": null
+      },
+      {
+        "id": "glm-5.3-flash",
+        "adapter": null
+      },
+      {
+        "id": "glm-5.3",
+        "adapter": null
+      },
+      {
+        "id": "glm-5",
+        "adapter": null
+      },
+      {
+        "id": "glm-4.7",
+        "adapter": null
+      },
+      {
+        "id": "glm-4.5-air",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-v4-flash-0731",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-v4-pro",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-v3.2",
+        "adapter": null
+      },
+      {
+        "id": "kimi-k3",
+        "adapter": null
+      },
+      {
+        "id": "kimi-k2.7-code",
+        "adapter": null
+      },
+      {
+        "id": "kimi-k2.6",
+        "adapter": null
+      },
+      {
+        "id": "kimi-k2.5",
+        "adapter": null
+      },
+      {
+        "id": "seed-2.1-pro",
+        "adapter": null
+      },
+      {
+        "id": "seed-2.1-turbo",
+        "adapter": null
+      },
+      {
+        "id": "seed-evolving",
+        "adapter": null
+      },
+      {
+        "id": "seed-2.0-pro",
+        "adapter": null
+      },
+      {
+        "id": "seed-2.0-lite",
+        "adapter": null
+      },
+      {
+        "id": "seed-2.0-mini",
+        "adapter": null
+      },
+      {
+        "id": "qwen3.8-max",
+        "adapter": null
+      },
+      {
+        "id": "qwen3.7-max",
+        "adapter": null
+      },
+      {
+        "id": "qwen3.7-plus",
+        "adapter": null
+      },
+      {
+        "id": "qwen3.6-plus",
+        "adapter": null
+      },
+      {
+        "id": "qwen3.5-plus",
+        "adapter": null
+      },
+      {
+        "id": "qwen3.5-flash",
+        "adapter": null
+      },
+      {
+        "id": "qwen3-max",
+        "adapter": null
+      },
+      {
+        "id": "qwen3-vl-plus",
+        "adapter": null
+      },
+      {
+        "id": "qwen3.5-35b-a3b",
+        "adapter": null
+      },
+      {
+        "id": "qwen3.6-max-preview",
+        "adapter": null
+      },
+      {
+        "id": "step-3.7-flash",
+        "adapter": null
+      },
+      {
+        "id": "step-3.5-flash",
+        "adapter": null
+      },
+      {
+        "id": "hy3",
+        "adapter": null
+      },
+      {
+        "id": "longcat-2.0",
+        "adapter": null
+      },
+      {
+        "id": "ling-3.0-flash",
+        "adapter": null
+      },
+      {
+        "id": "mimo-v2.5-pro",
+        "adapter": null
+      },
+      {
+        "id": "mimo-v2.5",
+        "adapter": null
+      }
+    ]
+  },
+  {
+    "id": "xiaomi-mimo",
+    "name": "小米 MiMo",
+    "baseUrl": "https://api.xiaomimimo.com/v1",
+    "providerType": "openai",
+    "modelAliases": {},
+    "endpointKind": "provider-public",
+    "adapter": "openai-compatible",
+    "models": [
+      {
+        "id": "mimo-v2.5-pro",
+        "adapter": null
+      },
+      {
+        "id": "mimo-v2.5",
+        "adapter": null
+      }
+    ]
+  },
+  {
+    "id": "agnes-ai",
+    "name": "Agnes AI",
+    "baseUrl": "https://apihub.agnes-ai.com/v1",
+    "providerType": "openai",
+    "modelAliases": {},
+    "endpointKind": "provider-public",
+    "adapter": "openai-compatible",
+    "models": [
+      {
+        "id": "agnes-3.0-flash",
+        "adapter": null
+      },
+      {
+        "id": "agnes-2.5-flash",
+        "adapter": null
+      },
+      {
+        "id": "agnes-2.0-flash",
+        "adapter": null
+      },
+      {
+        "id": "agnes-1.5-flash",
+        "adapter": null
+      }
+    ]
+  },
+  {
+    "id": "qiniu-ai",
+    "name": "七牛云 AI 大模型推理",
+    "baseUrl": "https://api.qnaigc.com/v1",
+    "providerType": "openai",
+    "modelAliases": {},
+    "endpointKind": "provider-public",
+    "adapter": "openai-compatible",
+    "models": [
+      {
+        "id": "deepseek/deepseek-v4-flash-20260731",
+        "adapter": null
+      },
+      {
+        "id": "deepseek/deepseek-v4-pro",
+        "adapter": null
+      },
+      {
+        "id": "moonshotai/kimi-k3",
+        "adapter": null
+      },
+      {
+        "id": "moonshotai/kimi-k2.6",
+        "adapter": null
+      },
+      {
+        "id": "moonshotai/kimi-k2.5",
+        "adapter": null
+      },
+      {
+        "id": "z-ai/glm-5.3-flash",
+        "adapter": null
+      },
+      {
+        "id": "z-ai/glm-5.3",
+        "adapter": null
+      },
+      {
+        "id": "z-ai/glm-5.1",
+        "adapter": null
+      },
+      {
+        "id": "z-ai/glm-5",
+        "adapter": null
+      },
+      {
+        "id": "z-ai/glm-4.5-air-free",
+        "adapter": null
+      },
+      {
+        "id": "qwen/qwen3.6-plus",
+        "adapter": null
+      },
+      {
+        "id": "qwen/qwen3.5-35b-a3b",
+        "adapter": null
+      },
+      {
+        "id": "qwen/qwen3.7-max",
+        "adapter": null
+      },
+      {
+        "id": "MiniMax/MiniMax-M3",
+        "adapter": null
+      },
+      {
+        "id": "minimax/minimax-m2.7",
+        "adapter": null
+      },
+      {
+        "id": "doubao-seed-1.6-thinking",
+        "adapter": null
+      },
+      {
+        "id": "doubao-seed-1.6-flash",
+        "adapter": null
+      },
+      {
+        "id": "qwen3-235b-a22b-instruct-2507",
+        "adapter": null
+      }
+    ]
+  },
+  {
+    "id": "yiye",
+    "name": "一叶知秋 API",
+    "baseUrl": "https://88996.cloud/v1",
+    "providerType": "openai",
+    "modelAliases": {},
+    "endpointKind": "provider-public",
+    "adapter": "openai-compatible",
+    "models": [
+      {
+        "id": "gemini-3.8-flash",
+        "adapter": null
+      },
+      {
+        "id": "gemini-3.6-flash",
+        "adapter": null
+      },
+      {
+        "id": "gemini-3.1-pro-preview",
+        "adapter": null
+      },
+      {
+        "id": "gemini-3.5-flash-lite",
+        "adapter": null
+      },
+      {
+        "id": "gemini-2.5-pro",
+        "adapter": null
+      },
+      {
+        "id": "gemini-2.5-flash",
+        "adapter": null
+      },
+      {
+        "id": "gemini-2.5-flash-lite-preview-09-2025",
+        "adapter": null
+      },
+      {
+        "id": "gpt-5.5",
+        "adapter": null
+      },
+      {
+        "id": "gpt-5.6-luna",
+        "adapter": null
+      },
+      {
+        "id": "gpt-5.6-terra",
+        "adapter": null
+      },
+      {
+        "id": "gpt-5.6-sol",
+        "adapter": null
+      },
+      {
+        "id": "gpt-6-astra",
+        "adapter": null
+      },
+      {
+        "id": "claude-opus-5",
+        "adapter": null
+      },
+      {
+        "id": "claude-sonnet-4.6",
+        "adapter": null
+      },
+      {
+        "id": "grok-4.5",
+        "adapter": null
+      },
+      {
+        "id": "glm-5.3-flash",
+        "adapter": null
+      },
+      {
+        "id": "glm-5.2",
+        "adapter": null
+      },
+      {
+        "id": "glm-5.1",
+        "adapter": null
+      },
+      {
+        "id": "glm-5",
+        "adapter": null
+      },
+      {
+        "id": "qwen3.6-plus",
+        "adapter": null
+      },
+      {
+        "id": "qwen3.5-397b-a17b",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-v4-pro",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-v4-flash-0731",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-v3.2",
+        "adapter": null
+      },
+      {
+        "id": "kimi-k3",
+        "adapter": null
+      }
+    ]
+  },
+  {
+    "id": "token-rhythm",
+    "name": "基元律动",
+    "baseUrl": "https://tokenrhythm.studio/v1",
+    "providerType": "openai",
+    "modelAliases": {},
+    "endpointKind": "provider-public",
+    "adapter": "openai-compatible",
+    "models": [
+      {
+        "id": "deepseek-v4-flash-0731",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-v4-pro-0813",
+        "adapter": null
+      },
+      {
+        "id": "glm-5.3",
+        "adapter": null
+      },
+      {
+        "id": "glm-5.3-flash",
+        "adapter": null
+      },
+      {
+        "id": "kimi-k2.7-code",
+        "adapter": null
+      },
+      {
+        "id": "kimi-k2.6",
+        "adapter": null
+      },
+      {
+        "id": "longcat-2.0",
+        "adapter": null
+      },
+      {
+        "id": "seed-2.1-pro",
+        "adapter": null
+      },
+      {
+        "id": "mimo-v2.5-pro",
+        "adapter": null
+      },
+      {
+        "id": "minimax-m2.7",
+        "adapter": null
+      },
+      {
+        "id": "qwen3.8-max",
+        "adapter": null
+      },
+      {
+        "id": "qwen3.8-27b",
+        "adapter": null
+      },
+      {
+        "id": "qwen3.7-flash",
+        "adapter": null
+      }
+    ]
+  },
+  {
+    "id": "nova-cervus",
+    "name": "鹿鹿 API",
+    "baseUrl": "https://nova.cervus.top/v1",
+    "providerType": "openai",
+    "modelAliases": {},
+    "endpointKind": "provider-public",
+    "adapter": "openai-compatible",
+    "models": [
+      {
+        "id": "[ruru10]gemini-3.8-flash",
+        "adapter": null
+      },
+      {
+        "id": "[ruru10]gemini-3.7-flash",
+        "adapter": null
+      },
+      {
+        "id": "[ruru5]gemini-3.7-flash",
+        "adapter": null
+      },
+      {
+        "id": "[ruru2]gemini-3.6-flash-preview",
+        "adapter": null
+      },
+      {
+        "id": "[ruru12]gemini-3.5-flash",
+        "adapter": null
+      },
+      {
+        "id": "[ruru20]gemini-3.5-flash",
+        "adapter": null
+      },
+      {
+        "id": "[ruru17]gemini-3.1-pro-preview",
+        "adapter": null
+      },
+      {
+        "id": "[ruru20]gemini-3.1-pro-preview",
+        "adapter": null
+      },
+      {
+        "id": "[鹿鹿2]gemini-3-pro-preview",
+        "adapter": null
+      },
+      {
+        "id": "[ruru20]gemini-3-pro-preview",
+        "adapter": null
+      },
+      {
+        "id": "[ruru3]gemini-2.5-pro",
+        "adapter": null
+      },
+      {
+        "id": "[ruru20]gemini-2.5-pro",
+        "adapter": null
+      },
+      {
+        "id": "[ruru20]gemini-2.5-flash",
+        "adapter": null
+      },
+      {
+        "id": "[鹿鹿3]claude-sonnet-4-6-thinking",
+        "adapter": null
+      },
+      {
+        "id": "[鹿鹿2]claude-4.5-sonnet",
+        "adapter": null
+      },
+      {
+        "id": "[限时2]claude-opus-5",
+        "adapter": null
+      },
+      {
+        "id": "[鹿鹿20]claude-opus-4.8",
+        "adapter": null
+      },
+      {
+        "id": "[鹿鹿20]claude-opus-4.7",
+        "adapter": null
+      },
+      {
+        "id": "[鹿鹿3]claude-opus-4-6",
+        "adapter": null
+      },
+      {
+        "id": "[鹿鹿2]gpt-5.5",
+        "adapter": null
+      },
+      {
+        "id": "[限时2]deepseek-v4-pro-0813",
+        "adapter": null
+      },
+      {
+        "id": "[限时2]kimi-k3",
+        "adapter": null
+      },
+      {
+        "id": "[限时2]GLM-5.3",
+        "adapter": null
+      },
+      {
+        "id": "[限时2]qwen3.8-max",
+        "adapter": null
+      }
+    ]
+  },
+  {
+    "id": "modelscope",
+    "name": "魔搭 Modelscope",
+    "baseUrl": "https://api-inference.modelscope.cn/v1",
+    "providerType": "openai",
+    "modelAliases": {},
+    "endpointKind": "provider-public",
+    "adapter": "openai-compatible",
+    "models": [
+      {
+        "id": "deepseek-ai/DeepSeek-V4-Flash-0731",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-ai/DeepSeek-V4-Pro",
+        "adapter": null
+      },
+      {
+        "id": "Qwen/Qwen3.5-397B-A17B",
+        "adapter": null
+      },
+      {
+        "id": "Qwen/Qwen3.5-122B-A10B",
+        "adapter": null
+      },
+      {
+        "id": "Qwen/Qwen3.5-35B-A3B",
+        "adapter": null
+      },
+      {
+        "id": "Qwen/Qwen3.5-27B",
+        "adapter": null
+      },
+      {
+        "id": "Qwen/Qwen3-235B-A22B-Instruct-2507",
+        "adapter": null
+      },
+      {
+        "id": "Qwen/Qwen3-235B-A22B-Thinking-2507",
+        "adapter": null
+      },
+      {
+        "id": "ZhipuAI/glm-5.3-flash",
+        "adapter": null
+      },
+      {
+        "id": "ZhipuAI/GLM-5.3",
+        "adapter": null
+      },
+      {
+        "id": "ZhipuAI/GLM-5",
+        "adapter": null
+      },
+      {
+        "id": "ZhipuAI/GLM-5.1",
+        "adapter": null
+      },
+      {
+        "id": "ZhipuAI/GLM-4.7-Flash",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-ai/DeepSeek-V3.2",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-ai/DeepSeek-R1-0528",
+        "adapter": null
+      },
+      {
+        "id": "LLM-Research/Llama-4-Maverick-17B-128E-Instruct",
+        "adapter": null
+      },
+      {
+        "id": "MiniMax/MiniMax-M3",
+        "adapter": null
+      },
+      {
+        "id": "MiniMax/MiniMax-M2.7",
+        "adapter": null
+      },
+      {
+        "id": "MiniMax/MiniMax-M2.5",
+        "adapter": null
+      },
+      {
+        "id": "moonshotai/Kimi-K2.5",
+        "adapter": null
+      },
+      {
+        "id": "stepfun-ai/Step-3.7-Flash",
+        "adapter": null
+      },
+      {
+        "id": "stepfun-ai/Step-3.5-Flash",
+        "adapter": null
+      },
+      {
+        "id": "Tencent-Hunyuan/Hy3",
+        "adapter": null
+      },
+      {
+        "id": "meituan-longcat/LongCat-Flash-Lite",
+        "adapter": null
+      }
+    ]
+  },
+  {
+    "id": "google-cloudflare",
+    "name": "Google",
+    "baseUrl": "https://gateway.ai.cloudflare.com/v1/5e2c3572782d87ae449e050ac15d6c5d/mhsj-custom/google-ai-studio/v1beta",
+    "providerType": "google",
+    "modelAliases": {},
+    "endpointKind": "project-forward",
+    "adapter": null,
+    "models": [
+      {
+        "id": "gemini-3.8-flash",
+        "adapter": null
+      },
+      {
+        "id": "gemini-3.6-flash",
+        "adapter": null
+      },
+      {
+        "id": "gemini-3.1-pro-preview",
+        "adapter": null
+      },
+      {
+        "id": "gemini-3.5-flash-lite",
+        "adapter": null
+      },
+      {
+        "id": "gemini-2.5-pro",
+        "adapter": null
+      },
+      {
+        "id": "gemini-2.5-flash",
+        "adapter": null
+      },
+      {
+        "id": "gemini-2.5-flash-lite",
+        "adapter": null
+      },
+      {
+        "id": "gemma-4-31b-it",
+        "adapter": null
+      },
+      {
+        "id": "gemma-4-26b-a4b-it",
+        "adapter": null
+      },
+      {
+        "id": "gemma-3-27b-it",
+        "adapter": null
+      },
+      {
+        "id": "gemma-3-12b-it",
+        "adapter": null
+      },
+      {
+        "id": "gemma-3-4b-it",
+        "adapter": null
+      }
+    ]
+  },
+  {
+    "id": "deepseek",
+    "name": "DeepSeek",
+    "baseUrl": "https://api.deepseek.com",
+    "providerType": "deepseek",
+    "modelAliases": {
+      "deepseek-v4-flash-0731": "deepseek-v4-flash"
+    },
+    "endpointKind": "provider-public",
+    "adapter": "openai-compatible",
+    "models": [
+      {
+        "id": "deepseek-flash",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-v4-flash-0731",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-v4-pro",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-chat",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-reasoner",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-r1",
+        "adapter": null
+      }
+    ]
+  },
+  {
+    "id": "siliconflow",
+    "name": "硅基流动 SiliconFlow",
+    "baseUrl": "https://api.siliconflow.cn/v1",
+    "providerType": "openai",
+    "modelAliases": {},
+    "endpointKind": "provider-public",
+    "adapter": "openai-compatible",
+    "models": [
+      {
+        "id": "deepseek-ai/DeepSeek-V3.2",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-ai/DeepSeek-R1",
+        "adapter": null
+      },
+      {
+        "id": "Pro/zai-org/GLM-5.2",
+        "adapter": null
+      },
+      {
+        "id": "Pro/zai-org/GLM-5.1",
+        "adapter": null
+      },
+      {
+        "id": "Qwen/Qwen3.7-max",
+        "adapter": null
+      },
+      {
+        "id": "Qwen/Qwen3.7-plus",
+        "adapter": null
+      },
+      {
+        "id": "Qwen/Qwen3.6-plus",
+        "adapter": null
+      },
+      {
+        "id": "Qwen/Qwen3.5-plus",
+        "adapter": null
+      },
+      {
+        "id": "Qwen/Qwen3-32B",
+        "adapter": null
+      },
+      {
+        "id": "Qwen/Qwen3-235B-A22B-Instruct-2507",
+        "adapter": null
+      },
+      {
+        "id": "moonshotai/Kimi-K2.6",
+        "adapter": null
+      }
+    ]
+  },
+  {
+    "id": "openrouter",
+    "name": "OpenRouter",
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "providerType": "openai",
+    "modelAliases": {},
+    "endpointKind": "provider-public",
+    "adapter": "openai-compatible",
+    "models": [
+      {
+        "id": "google/gemini-3.8-flash",
+        "adapter": null
+      },
+      {
+        "id": "google/gemini-3.6-flash",
+        "adapter": null
+      },
+      {
+        "id": "google/gemini-3.1-pro-preview",
+        "adapter": null
+      },
+      {
+        "id": "google/gemini-3.5-flash-lite",
+        "adapter": null
+      },
+      {
+        "id": "google/gemini-2.5-pro",
+        "adapter": null
+      },
+      {
+        "id": "google/gemini-2.5-flash",
+        "adapter": null
+      },
+      {
+        "id": "google/gemini-2.5-flash-lite",
+        "adapter": null
+      },
+      {
+        "id": "openai/gpt-5.5",
+        "adapter": null
+      },
+      {
+        "id": "openai/gpt-5.4",
+        "adapter": null
+      },
+      {
+        "id": "openai/gpt-5.6-luna",
+        "adapter": null
+      },
+      {
+        "id": "openai/gpt-5.6-terra",
+        "adapter": null
+      },
+      {
+        "id": "openai/gpt-5.6-sol",
+        "adapter": null
+      },
+      {
+        "id": "openai/gpt-6-astra",
+        "adapter": null
+      },
+      {
+        "id": "openai/gpt-6-astra-pro",
+        "adapter": null
+      },
+      {
+        "id": "anthropic/claude-fable-5.1",
+        "adapter": null
+      },
+      {
+        "id": "anthropic/claude-opus-4.8",
+        "adapter": null
+      },
+      {
+        "id": "anthropic/claude-sonnet-4.6",
+        "adapter": null
+      },
+      {
+        "id": "x-ai/grok-4.5",
+        "adapter": null
+      },
+      {
+        "id": "deepseek/deepseek-v4-flash",
+        "adapter": null
+      },
+      {
+        "id": "deepseek/deepseek-v4-flash-0731",
+        "adapter": null
+      },
+      {
+        "id": "deepseek/deepseek-v4-pro",
+        "adapter": null
+      },
+      {
+        "id": "qwen/qwen3.8-max",
+        "adapter": null
+      },
+      {
+        "id": "qwen/qwen3.7-max",
+        "adapter": null
+      },
+      {
+        "id": "qwen/qwen3.6-plus",
+        "adapter": null
+      },
+      {
+        "id": "moonshotai/kimi-k2.7-code",
+        "adapter": null
+      },
+      {
+        "id": "moonshotai/kimi-k2.6",
+        "adapter": null
+      },
+      {
+        "id": "moonshotai/kimi-k3",
+        "adapter": null
+      },
+      {
+        "id": "minimax/minimax-m3",
+        "adapter": null
+      }
+    ]
+  },
+  {
+    "id": "poe",
+    "name": "Poe",
+    "baseUrl": "https://api.poe.com/v1",
+    "providerType": "openai",
+    "modelAliases": {},
+    "endpointKind": "provider-public",
+    "adapter": "openai-compatible",
+    "models": [
+      {
+        "id": "gemini-2.5-pro",
+        "adapter": null
+      },
+      {
+        "id": "gemini-2.5-flash",
+        "adapter": null
+      },
+      {
+        "id": "gemini-2.5-flash-lite",
+        "adapter": null
+      },
+      {
+        "id": "gemini-3.1-pro",
+        "adapter": null
+      },
+      {
+        "id": "gemini-3-pro",
+        "adapter": null
+      },
+      {
+        "id": "gemini-3-flash",
+        "adapter": null
+      },
+      {
+        "id": "gemini-3.5-flash-lite",
+        "adapter": null
+      },
+      {
+        "id": "gemini-3.8-flash",
+        "adapter": null
+      },
+      {
+        "id": "gemini-3.6-flash",
+        "adapter": null
+      },
+      {
+        "id": "GPT-5.5",
+        "adapter": null
+      },
+      {
+        "id": "GPT-6-Astra",
+        "adapter": null
+      },
+      {
+        "id": "GPT-5.6-Luna",
+        "adapter": null
+      },
+      {
+        "id": "GPT-5.6-Terra",
+        "adapter": null
+      },
+      {
+        "id": "GPT-5.6-Sol",
+        "adapter": null
+      },
+      {
+        "id": "Claude-Opus-4.8",
+        "adapter": null
+      },
+      {
+        "id": "Claude-Sonnet-4.6",
+        "adapter": null
+      },
+      {
+        "id": "Claude-Haiku-4.5",
+        "adapter": null
+      },
+      {
+        "id": "Grok-4.5",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-r1",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-v3.2",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-v4-flash",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-v4-pro",
+        "adapter": null
+      },
+      {
+        "id": "qwen-3.6-plus",
+        "adapter": null
+      },
+      {
+        "id": "qwen-3.5-plus",
+        "adapter": null
+      },
+      {
+        "id": "kimi-k3",
+        "adapter": null
+      },
+      {
+        "id": "kimi-k2.6",
+        "adapter": null
+      },
+      {
+        "id": "kimi-k2.5",
+        "adapter": null
+      }
+    ]
+  },
+  {
+    "id": "nvidia",
+    "name": "英伟达 NVIDIA",
+    "baseUrl": "https://integrate.api.nvidia.com/v1",
+    "providerType": "openai",
+    "modelAliases": {},
+    "endpointKind": "provider-public",
+    "adapter": "openai-compatible",
+    "models": [
+      {
+        "id": "google/gemma-4-31b-it",
+        "adapter": null
+      },
+      {
+        "id": "google/gemma-3-27b-it",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-ai/deepseek-v3.2",
+        "adapter": null
+      },
+      {
+        "id": "qwen/qwen3.5-397b-a17b",
+        "adapter": null
+      },
+      {
+        "id": "qwen/qwen3.5-122b-a10b",
+        "adapter": null
+      },
+      {
+        "id": "moonshotai/kimi-k3",
+        "adapter": null
+      },
+      {
+        "id": "moonshotai/kimi-k2.5",
+        "adapter": null
+      },
+      {
+        "id": "moonshotai/kimi-k2-instruct",
+        "adapter": null
+      },
+      {
+        "id": "mistralai/mistral-large-3-675b-instruct-2512",
+        "adapter": null
+      },
+      {
+        "id": "qwen/qwq-32b",
+        "adapter": null
+      },
+      {
+        "id": "z-ai/glm-5.3-flash",
+        "adapter": null
+      },
+      {
+        "id": "z-ai/glm-5.2",
+        "adapter": null
+      },
+      {
+        "id": "z-ai/glm4.7",
+        "adapter": null
+      },
+      {
+        "id": "bytedance/seed-oss-36b-instruct",
+        "adapter": null
+      },
+      {
+        "id": "mistralai/magistral-small-2506",
+        "adapter": null
+      },
+      {
+        "id": "mistralai/mistral-nemotron",
+        "adapter": null
+      },
+      {
+        "id": "microsoft/phi-4-mini-flash-reasoning",
+        "adapter": null
+      },
+      {
+        "id": "nvidia/nemotron-mini-4b-instruct",
+        "adapter": null
+      },
+      {
+        "id": "nvidia/nemotron-3-super-120b-a12b",
+        "adapter": null
+      }
+    ]
+  },
+  {
+    "id": "opencode-zen",
+    "name": "OpenCode Zen",
+    "baseUrl": "https://opencode.ai/zen/v1",
+    "providerType": "openai",
+    "modelAliases": {},
+    "endpointKind": "provider-public",
+    "adapter": null,
+    "models": [
+      {
+        "id": "deepseek-v4-flash",
+        "adapter": "openai-compatible"
+      },
+      {
+        "id": "deepseek-v4-pro",
+        "adapter": "openai-compatible"
+      },
+      {
+        "id": "glm-5.3-flash",
+        "adapter": "openai-compatible"
+      },
+      {
+        "id": "glm-5.2",
+        "adapter": "openai-compatible"
+      },
+      {
+        "id": "glm-5.1",
+        "adapter": "openai-compatible"
+      },
+      {
+        "id": "glm-5",
+        "adapter": "openai-compatible"
+      },
+      {
+        "id": "kimi-k3",
+        "adapter": "openai-compatible"
+      },
+      {
+        "id": "kimi-k2.7-code",
+        "adapter": "openai-compatible"
+      },
+      {
+        "id": "kimi-k2.6",
+        "adapter": "openai-compatible"
+      },
+      {
+        "id": "kimi-k2.5",
+        "adapter": "openai-compatible"
+      },
+      {
+        "id": "minimax-m3",
+        "adapter": "openai-compatible"
+      },
+      {
+        "id": "minimax-m2.7",
+        "adapter": "openai-compatible"
+      },
+      {
+        "id": "big-pickle",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-v4-flash-free",
+        "adapter": "openai-compatible"
+      }
+    ]
+  },
+  {
+    "id": "opencode-go",
+    "name": "OpenCode Go",
+    "baseUrl": "https://opencode.ai/zen/go/v1",
+    "providerType": "openai",
+    "modelAliases": {},
+    "endpointKind": "provider-public",
+    "adapter": null,
+    "models": [
+      {
+        "id": "deepseek-v4-flash",
+        "adapter": "openai-compatible"
+      },
+      {
+        "id": "deepseek-v4-pro",
+        "adapter": "openai-compatible"
+      },
+      {
+        "id": "glm-5.3-flash",
+        "adapter": "openai-compatible"
+      },
+      {
+        "id": "glm-5.3",
+        "adapter": "openai-compatible"
+      },
+      {
+        "id": "kimi-k3",
+        "adapter": "openai-compatible"
+      },
+      {
+        "id": "kimi-k2.7-code",
+        "adapter": "openai-compatible"
+      },
+      {
+        "id": "kimi-k2.6",
+        "adapter": "openai-compatible"
+      },
+      {
+        "id": "mimo-v2.5-pro",
+        "adapter": "openai-compatible"
+      },
+      {
+        "id": "mimo-v2.5",
+        "adapter": "openai-compatible"
+      },
+      {
+        "id": "hy3",
+        "adapter": "openai-compatible"
+      }
+    ]
+  },
+  {
+    "id": "mystery",
+    "name": "魔法国度",
+    "baseUrl": "https://fmxalteyoxwi.jp-members-1.clawcloudrun.com/proxy/gemini-suda/v1beta",
+    "providerType": "google",
+    "modelAliases": {},
+    "endpointKind": "project-forward",
+    "adapter": null,
+    "models": [
+      {
+        "id": "gemini-2.5-flash",
+        "adapter": null
+      }
+    ]
+  }
+]

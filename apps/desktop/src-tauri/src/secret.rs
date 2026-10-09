@@ -59,7 +59,7 @@ impl SecretStoreError {
         Self::failure()
     }
 
-    fn invalid_ref() -> Self {
+    pub(crate) fn invalid_ref() -> Self {
         Self {
             code: SecretStoreErrorCode::InvalidSecretRef,
             message: "secret reference must be 1..=256 ASCII characters from [A-Za-z0-9._:-]"

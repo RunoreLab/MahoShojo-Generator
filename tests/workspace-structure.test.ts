@@ -653,6 +653,7 @@ describe('desktop workspace app ownership', () => {
       'delete_provider_profile',
       'validate_provider_execution_profile',
       'stream_direct_ai',
+      'stream_target_ai',
       'cancel_direct_ai',
       'save_local_card',
       'get_local_card',
@@ -714,7 +715,7 @@ describe('desktop workspace app ownership', () => {
     expect(commands).not.toContain('get_provider_secret');
     expect(commands).not.toContain('read_provider_secret');
 
-    // Direct 通路的选择器只能是 profileId 与 requestId：请求 DTO 不得携带 endpoint 或 secret。
+    // Direct 通路只接受稳定 Profile/preset 身份：请求 DTO 不得携带 endpoint 或 secret。
     const streamCommand = commands.filter((command) => /direct_ai/u.test(command));
     expect(streamCommand).toEqual(['stream_direct_ai', 'cancel_direct_ai']);
     // `open_external_url` 的 `url: String` 是受控外链的业务入参（DESK-PARITY-003）：

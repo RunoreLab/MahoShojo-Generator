@@ -140,6 +140,38 @@ pub struct DirectProviderExecutionProfile {
     pub transport: Option<ProfileTransport>,
 }
 
+pub(crate) const PRESET_SECRET_PREFIX: &str = "preset:";
+pub(crate) const ACCOUNT_SESSION_SECRET_PREFIX: &str = "account-session:";
+
+pub(crate) fn has_secret_namespace(reference: &str, prefix: &str) -> bool {
+    reference
+        .get(..prefix.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+}
+
+// Preset credentials may only be sent to the endpoint resolved from native authority.
+// Apply this to reads as well as writes: old/restore/import paths cannot bypass it.
+pub(crate) fn reject_reserved_secret_refs(
+    api_key_ref: Option<&str>,
+    headers: Option<&BTreeMap<String, String>>,
+) -> Result<(), ProviderProfileError> {
+    if api_key_ref
+        .into_iter()
+        .chain(
+            headers
+                .into_iter()
+                .flat_map(|map| map.values().map(String::as_str)),
+        )
+        .any(|reference| {
+            has_secret_namespace(reference, PRESET_SECRET_PREFIX)
+                || has_secret_namespace(reference, ACCOUNT_SESSION_SECRET_PREFIX)
+        })
+    {
+        return Err(ProviderProfileError::InvalidSecretRef);
+    }
+    Ok(())
+}
+
 fn is_valid_secret_ref(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= MAX_SECRET_REF_LENGTH
@@ -206,10 +238,14 @@ impl DirectProviderExecutionProfile {
         let profile: Self =
             serde_json::from_str(document).map_err(|_| ProviderProfileError::MalformedDocument)?;
         profile.validate()?;
+        reject_reserved_secret_refs(
+            profile.api_key_ref.as_deref(),
+            profile.secret_header_refs.as_ref(),
+        )?;
         Ok(profile)
     }
 
-    fn validate(&self) -> Result<(), ProviderProfileError> {
+    pub(crate) fn validate(&self) -> Result<(), ProviderProfileError> {
         // D1 只实现 OpenAI-compatible。其余 adapter 显式失败，而不是悄悄按 OpenAI 语义
         // 发起请求 —— 那会产生难以排查的行为差异。
         if self.adapter != ProviderAdapter::OpenaiCompatible {
@@ -350,6 +386,10 @@ pub fn parse_stored_profile(
         transport: stored.transport,
     };
     profile.validate()?;
+    reject_reserved_secret_refs(
+        profile.api_key_ref.as_deref(),
+        profile.secret_header_refs.as_ref(),
+    )?;
     Ok(profile)
 }
 
@@ -372,6 +412,10 @@ impl StoredProviderProfileIdentity {
         if identity.id.trim().is_empty() {
             return Err(ProviderProfileError::MalformedDocument);
         }
+        reject_reserved_secret_refs(
+            identity.api_key_ref.as_deref(),
+            identity.secret_header_refs.as_ref(),
+        )?;
         Ok(identity)
     }
 
@@ -401,6 +445,23 @@ mod tests {
         value.to_string()
     }
 
+    #[test]
+    fn preset_secret_refs_cannot_be_saved_executed_or_deleted_by_profiles() {
+        for reference in [
+            "preset:deepseek:api-key",
+            "PRESET:deepseek:api-key",
+            "account-session:web-v1",
+            "ACCOUNT-SESSION:web-v1",
+        ] {
+            let value = serde_json::json!({
+                "id": "attacker", "name": "custom", "adapter": "openai-compatible",
+                "baseUrl": "https://example.invalid", "modelId": "model", "apiKeyRef": reference
+            })
+            .to_string();
+            assert!(parse_stored_profile(&value).is_err());
+            assert!(super::StoredProviderProfileIdentity::parse(&value).is_err());
+        }
+    }
     #[test]
     fn parses_a_stored_full_profile_into_an_executable_projection() {
         // 落盘的是完整 Profile；执行时必须能从它解析出窄投影，且校验规则完全一致。

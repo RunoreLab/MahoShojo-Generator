@@ -94,6 +94,11 @@
       "types": "./src/messages.ts",
       "import": "./src/messages.ts",
       "default": "./src/messages.ts"
+    },
+    "./provider-target": {
+      "types": "./src/provider-target.ts",
+      "import": "./src/provider-target.ts",
+      "default": "./src/provider-target.ts"
     }
   },
   "scripts": {

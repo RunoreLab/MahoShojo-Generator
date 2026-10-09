@@ -1,0 +1,22 @@
+{
+  "validTargets": [
+    {"kind":"system"},
+    {"kind":"preset","providerId":"deepseek"},
+    {"kind":"custom","profileId":"conn_existing"}
+  ],
+  "invalidTargets": [
+    {"kind":"preset","providerId":"deepseek","baseUrl":"https://example.invalid"},
+    {"kind":"preset","providerId":"deepseek","apiKeyRef":"someone-else"},
+    {"kind":"system","profileId":"conn_existing"},
+    {"kind":"custom","providerId":"deepseek"},
+    {"kind":"unknown"}
+  ],
+  "models": [
+    {"input":" model ","output":"model"},
+    {"input":"\ufeffmodel\ufeff","output":"model"},
+    {"input":"\u0085model","output":null},
+    {"input":"a\nb","output":null},
+    {"input":"m\u0085odel","output":null},
+    {"input":"  ","output":null}
+  ]
+}

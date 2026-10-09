@@ -33,6 +33,7 @@ mod maintenance_contract_tests;
 mod provider_profile;
 #[cfg(test)]
 mod provider_profile_ipc_contract_tests;
+mod provider_target;
 mod public_cache;
 mod restore;
 mod secret;
@@ -86,6 +87,8 @@ fn set_provider_secret(
     secret_ref: String,
     value: String,
 ) -> Result<(), secret::SecretStoreError> {
+    provider_target::validate_provider_secret_ref_scope(&secret_ref)
+        .map_err(|_| secret::SecretStoreError::invalid_ref())?;
     store.set(&secret_ref, &value)
 }
 
@@ -95,6 +98,8 @@ fn has_provider_secret(
     store: State<'_, SharedSecretStore>,
     secret_ref: String,
 ) -> Result<bool, secret::SecretStoreError> {
+    provider_target::validate_provider_secret_ref_scope(&secret_ref)
+        .map_err(|_| secret::SecretStoreError::invalid_ref())?;
     store.exists(&secret_ref)
 }
 
@@ -104,6 +109,8 @@ fn delete_provider_secret(
     store: State<'_, SharedSecretStore>,
     secret_ref: String,
 ) -> Result<(), secret::SecretStoreError> {
+    provider_target::validate_provider_secret_ref_scope(&secret_ref)
+        .map_err(|_| secret::SecretStoreError::invalid_ref())?;
     store.delete(&secret_ref)
 }
 
@@ -187,6 +194,27 @@ async fn stream_direct_ai(
 ) -> Result<(), ai::DirectAiError> {
     ai::stream_direct_ai(
         &profile_id,
+        request,
+        library.profiles(),
+        secrets.inner().as_ref(),
+        &registry,
+        &on_event,
+    )
+    .await
+}
+
+/// Presets are resolved from the native trusted catalog; no renderer URL or Key is accepted.
+#[tauri::command]
+async fn stream_target_ai(
+    library: State<'_, LocalLibrary>,
+    secrets: State<'_, SharedSecretStore>,
+    registry: State<'_, ai::RequestRegistry>,
+    target: provider_target::ProviderTarget,
+    request: ai::AiExecutionRequest,
+    on_event: tauri::ipc::Channel<ai::AiStreamEvent>,
+) -> Result<(), ai::DirectAiError> {
+    ai::stream_target_ai(
+        target,
         request,
         library.profiles(),
         secrets.inner().as_ref(),
@@ -1417,6 +1445,7 @@ pub fn run() {
             delete_provider_profile,
             validate_provider_execution_profile,
             stream_direct_ai,
+            stream_target_ai,
             cancel_direct_ai,
             save_local_card,
             get_local_card,

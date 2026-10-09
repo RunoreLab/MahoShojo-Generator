@@ -109,7 +109,10 @@ const addCanonicalDuplicateHeaderIssues = (
   }
 };
 
-const SecretRefValueSchema = SecretRefSchema;
+const SecretRefValueSchema = SecretRefSchema.refine(
+  (value) => !/^(?:preset|account-session):/iu.test(value),
+  'reserved credentials cannot be referenced by a custom profile',
+);
 
 const SecretHeaderRefsSchema = z
   .record(HeaderNameSchema, SecretRefValueSchema)

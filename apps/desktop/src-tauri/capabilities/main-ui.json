@@ -17,6 +17,7 @@
     "allow-delete-provider-profile",
     "allow-validate-provider-execution-profile",
     "allow-stream-direct-ai",
+    "allow-stream-target-ai",
     "allow-cancel-direct-ai",
     "allow-save-local-card",
     "allow-get-local-card",

@@ -279,14 +279,13 @@ const normalizeCustomModelId = (modelId: string): string | null => {
     return normalized;
 };
 
-const normalizeResolvedModelId = (provider: AIProviderOption, modelId: string): string => {
-    // DeepSeek 官方 V4 Flash 的 API modelId 是 deepseek-v4-flash。
-    // 目录暂时保留 -0731 以兼容既有 localStorage / UI 选择，在请求解析边界统一规范化。
-    if (provider.id === 'deepseek' && modelId.toLowerCase() === 'deepseek-v4-flash-0731') {
-        return 'deepseek-v4-flash';
-    }
-    return modelId;
+/** Case-insensitive legacy request aliases, shared with the generated native authority. */
+export const AI_PROVIDER_MODEL_ALIASES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+    deepseek: { 'deepseek-v4-flash-0731': 'deepseek-v4-flash' },
 };
+
+const normalizeResolvedModelId = (provider: AIProviderOption, modelId: string): string =>
+    AI_PROVIDER_MODEL_ALIASES[provider.id]?.[modelId.toLowerCase()] ?? modelId;
 
 export const resolveAIProviderModel = (
     provider: AIProviderOption,
