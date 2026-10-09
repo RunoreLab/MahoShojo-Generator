@@ -22,6 +22,8 @@
     "hostedGenerateScenario": "/api/generate-scenario",
     "hostedGenerateCreatorStream": "/api/creator/generate-stream",
     "hostedGenerateCreator": "/api/creator/generate",
+    "hostedGenerateSublimationStream": "/api/generate-sublimation-stream",
+    "hostedGenerateSublimation": "/api/generate-sublimation",
     "loopbackCallback": "/callback"
   },
   "limits": {
@@ -69,20 +71,24 @@
     "generate-canshou-stream",
     "generate-free-stream",
     "generate-scenario-stream",
-    "generate-creator-stream"
+    "generate-creator-stream",
+    "generate-sublimation-stream"
   ],
   "hostedJsonRouteIds": [
     "generate-magical-girl-details",
     "generate-canshou",
     "generate-free",
     "generate-scenario",
-    "generate-creator"
+    "generate-creator",
+    "generate-sublimation"
   ],
   "hostedBodyLimits": {
     "defaultMaxBytes": 262144,
     "routeMaxBytes": {
       "generate-free": 1048576,
-      "generate-free-stream": 1048576
+      "generate-free-stream": 1048576,
+      "generate-sublimation": 4194304,
+      "generate-sublimation-stream": 4194304
     }
   },
   "cardLibrary": {

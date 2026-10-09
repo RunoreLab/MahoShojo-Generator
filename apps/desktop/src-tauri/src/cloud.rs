@@ -94,6 +94,10 @@ const HOSTED_GENERATE_CREATOR_STREAM_PATH: &str = "/api/creator/generate-stream"
 const HOSTED_ROUTE_CREATOR_STREAM: &str = "generate-creator-stream";
 const HOSTED_GENERATE_CREATOR_PATH: &str = "/api/creator/generate";
 const HOSTED_ROUTE_CREATOR: &str = "generate-creator";
+const HOSTED_GENERATE_SUBLIMATION_STREAM_PATH: &str = "/api/generate-sublimation-stream";
+const HOSTED_ROUTE_SUBLIMATION_STREAM: &str = "generate-sublimation-stream";
+const HOSTED_GENERATE_SUBLIMATION_PATH: &str = "/api/generate-sublimation";
+const HOSTED_ROUTE_SUBLIMATION: &str = "generate-sublimation";
 
 /// hosted 流式生成命令开放的 routeId 集合（renderer 传入，native 校验）。
 const HOSTED_STREAM_ROUTES: &[&str] = &[
@@ -102,6 +106,7 @@ const HOSTED_STREAM_ROUTES: &[&str] = &[
     HOSTED_ROUTE_FREE_STREAM,
     HOSTED_ROUTE_SCENARIO_STREAM,
     HOSTED_ROUTE_CREATOR_STREAM,
+    HOSTED_ROUTE_SUBLIMATION_STREAM,
 ];
 /// hosted 非流式 JSON 生成命令开放的 routeId 集合。
 const HOSTED_JSON_ROUTES: &[&str] = &[
@@ -110,6 +115,7 @@ const HOSTED_JSON_ROUTES: &[&str] = &[
     HOSTED_ROUTE_FREE,
     HOSTED_ROUTE_SCENARIO,
     HOSTED_ROUTE_CREATOR,
+    HOSTED_ROUTE_SUBLIMATION,
 ];
 
 /// routeId → 固定上游路径（仅流式生成；`?format=sse` 由调用方追加）。
@@ -120,6 +126,7 @@ fn hosted_stream_path(route_id: &str) -> Option<&'static str> {
         HOSTED_ROUTE_FREE_STREAM => Some(HOSTED_GENERATE_FREE_STREAM_PATH),
         HOSTED_ROUTE_SCENARIO_STREAM => Some(HOSTED_GENERATE_SCENARIO_STREAM_PATH),
         HOSTED_ROUTE_CREATOR_STREAM => Some(HOSTED_GENERATE_CREATOR_STREAM_PATH),
+        HOSTED_ROUTE_SUBLIMATION_STREAM => Some(HOSTED_GENERATE_SUBLIMATION_STREAM_PATH),
         _ => None,
     }
 }
@@ -132,6 +139,7 @@ fn hosted_json_path(route_id: &str) -> Option<&'static str> {
         HOSTED_ROUTE_FREE => Some(HOSTED_GENERATE_FREE_PATH),
         HOSTED_ROUTE_SCENARIO => Some(HOSTED_GENERATE_SCENARIO_PATH),
         HOSTED_ROUTE_CREATOR => Some(HOSTED_GENERATE_CREATOR_PATH),
+        HOSTED_ROUTE_SUBLIMATION => Some(HOSTED_GENERATE_SUBLIMATION_PATH),
         _ => None,
     }
 }
@@ -1236,6 +1244,10 @@ pub async fn cloud_online_status(
 /// UTF-8 最坏 ~4 字节/字符估算约 800KB，外加 prompt 与 JSON 包装余量后
 /// 取整 1 MiB——仍是有界输入，不放开成无限。
 const HOSTED_BODY_FREE_MAX_BYTES: usize = 1024 * 1024;
+/// 升华扁平上行完整原卡 + 问卷 + 叙事历史；1 MiB 可流通卡本身已超过默认预算。
+/// 独立给聚合载荷 4 MiB 传输预算，并非声称服务端字段有此限制：JSON 历史
+/// 不截断，stream 的 8,000 字符截断也发生在解析后。超限拒绝，不删改业务载荷。
+const HOSTED_BODY_SUBLIMATION_MAX_BYTES: usize = 4 * 1024 * 1024;
 /// 其余生成路由沿用 256 KiB：问卷/情景回答体量远小于附件场景，
 /// 不随 free 的配额自动放宽（G2-r1 分路由预算）。
 const HOSTED_BODY_DEFAULT_MAX_BYTES: usize = 256 * 1024;
@@ -1245,6 +1257,9 @@ const HOSTED_BODY_DEFAULT_MAX_BYTES: usize = 256 * 1024;
 fn hosted_body_max_bytes(route_id: &str) -> usize {
     match route_id {
         HOSTED_ROUTE_FREE | HOSTED_ROUTE_FREE_STREAM => HOSTED_BODY_FREE_MAX_BYTES,
+        HOSTED_ROUTE_SUBLIMATION | HOSTED_ROUTE_SUBLIMATION_STREAM => {
+            HOSTED_BODY_SUBLIMATION_MAX_BYTES
+        }
         _ => HOSTED_BODY_DEFAULT_MAX_BYTES,
     }
 }
@@ -1482,7 +1497,10 @@ fn build_hosted_request_body(
         .map_err(|_| invalid_request("生成请求 body 无法序列化"))?
         .len();
     if size > hosted_body_max_bytes(&request.route_id) {
-        return Err(invalid_request("生成请求 body 超出大小上限"));
+        return Err(hosted_body_budget_error(
+            &request.route_id,
+            "生成请求 body 超出大小上限",
+        ));
     }
     let mut result = request.body.clone();
     // 系统通道偏好 → `customProvider:{providerId:'system', modelId, apiKey:''}`。
@@ -1535,12 +1553,26 @@ fn build_hosted_request_body(
     Ok(result)
 }
 
+fn hosted_body_budget_error(route_id: &str, fallback_message: &str) -> CloudError {
+    if matches!(
+        route_id,
+        HOSTED_ROUTE_SUBLIMATION | HOSTED_ROUTE_SUBLIMATION_STREAM
+    ) {
+        invalid_request(
+            "升华请求体（含原卡、参考与供应商配置）超过 4 MiB，请减少本次引用的历史或问卷后重试",
+        )
+    } else {
+        invalid_request(fallback_message)
+    }
+}
+
 fn check_hosted_body_budget(body: &serde_json::Value, route_id: &str) -> Result<(), CloudError> {
     let final_size = serde_json::to_vec(body)
         .map_err(|_| invalid_request("生成请求 body 无法序列化"))?
         .len();
     if final_size > hosted_body_max_bytes(route_id) {
-        return Err(invalid_request(
+        return Err(hosted_body_budget_error(
+            route_id,
             "生成请求 body 注入供应商配置后超出大小上限",
         ));
     }
@@ -3369,6 +3401,14 @@ mod tests {
             fixture["paths"]["hostedGenerateCreator"].as_str(),
             Some(HOSTED_GENERATE_CREATOR_PATH)
         );
+        assert_eq!(
+            fixture["paths"]["hostedGenerateSublimationStream"].as_str(),
+            Some(HOSTED_GENERATE_SUBLIMATION_STREAM_PATH)
+        );
+        assert_eq!(
+            fixture["paths"]["hostedGenerateSublimation"].as_str(),
+            Some(HOSTED_GENERATE_SUBLIMATION_PATH)
+        );
         let event_names: Vec<&str> = fixture["hostedGenerationEventNames"]
             .as_array()
             .unwrap()
@@ -3672,7 +3712,7 @@ mod tests {
             CloudErrorCode::InvalidRequest
         );
 
-        // 分路由预算（G2-r1）：free 附件路由获 1 MiB，其余路由保持 256 KiB。
+        // 分路由预算（G2-r1）：free 附件路由获 1 MiB，不影响问卷默认预算。
         let mut free_request = hosted_request();
         free_request.route_id = HOSTED_ROUTE_FREE.to_string();
         free_request.body = serde_json::json!({"pad": "x".repeat(300 * 1024)});
@@ -4027,7 +4067,7 @@ mod tests {
     }
 
     #[test]
-    fn hosted_byok_five_families_use_fixed_routes_and_native_secret() {
+    fn hosted_byok_all_families_use_fixed_routes_and_native_secret() {
         rt().block_on(async {
             let server = spawn_mock_server();
             let state = CloudState::with_origin(&server.origin);
@@ -4361,6 +4401,241 @@ mod tests {
                 ]
             );
             assert_eq!(events.last().unwrap().data["ok"], true);
+        });
+    }
+
+    /// 升华是扁平原卡请求；独立核对真实路径、SSE协商和业务正文无损透传。
+    #[test]
+    fn hosted_sublimation_fixed_routes_preserve_full_body_and_response() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            store_session(
+                &secrets,
+                &StoredSession {
+                    cookie: "better-auth.session_token=sublimation-test".to_string(),
+                    session_expires_at: None,
+                    account: CloudAccountRecord {
+                        user_id: 7,
+                        username: "homura".into(),
+                        display_name: None,
+                    },
+                },
+            )
+            .unwrap();
+            let registry = crate::ai::RequestRegistry::default();
+            // 完整卡可以超过默认256KiB；native不应用stream服务器的8000字符截断。
+            let original = serde_json::json!({
+                "name": "保留角色", "content": "角".repeat(100_000),
+                "narrativeHistory": "完整引用".repeat(3_000),
+                "arena_history": {"entries": [{"id": 1, "text": "原历战"}]},
+                "current_state": {"status": "原状态"},
+                "readArenaHistory": true, "writeArenaHistory": false,
+                "readCurrentState": false, "writeCurrentState": true,
+                "arenaHistoryRetentionStrategy": "keep-all",
+                "fieldsToPreserve": ["name"], "questionnaires": []
+            });
+            for (route_id, expected_target, is_stream) in [
+                (
+                    HOSTED_ROUTE_SUBLIMATION_STREAM,
+                    "/api/generate-sublimation-stream?format=sse",
+                    true,
+                ),
+                (HOSTED_ROUTE_SUBLIMATION, "/api/generate-sublimation", false),
+            ] {
+                let mut request = hosted_request();
+                request.route_id = route_id.into();
+                request.body = original.clone();
+                if is_stream {
+                    let sink = VecSink::new();
+                    stream_hosted_ai(&state, &secrets, &registry, request, &sink)
+                        .await
+                        .unwrap();
+                    let events = sink.events.lock().unwrap();
+                    assert_eq!(
+                        events
+                            .iter()
+                            .map(|event| event.event.as_str())
+                            .collect::<Vec<_>>(),
+                        [
+                            "reasoning",
+                            "reasoning_done",
+                            "markdown",
+                            "telemetry",
+                            "done"
+                        ]
+                    );
+                    assert_eq!(events[2].data["chunk"], "一段正文");
+                } else {
+                    let response = hosted_ai_request(&state, &secrets, &registry, request)
+                        .await
+                        .unwrap();
+                    assert_eq!(response.status, 200);
+                    assert_eq!(response.body["data"]["signature"], "sig.v1");
+                    assert_eq!(response.body["aiMeta"]["aiModel"], "glm-5.3-flash");
+                }
+                assert_eq!(
+                    server.last_generate_body.lock().unwrap().as_ref(),
+                    Some(&original)
+                );
+                let headers = server
+                    .last_generate_headers
+                    .lock()
+                    .unwrap()
+                    .clone()
+                    .unwrap();
+                assert_eq!(
+                    headers.lines().next().unwrap(),
+                    format!("POST {expected_target} HTTP/1.1")
+                );
+                assert!(headers
+                    .to_ascii_lowercase()
+                    .contains("cookie: better-auth.session_token=sublimation-test"));
+                assert!(headers.to_ascii_lowercase().contains(if is_stream {
+                    "accept: text/event-stream"
+                } else {
+                    "x-mahoshojo-ai-meta: 1"
+                }));
+                assert_eq!(registry.len(), 0);
+            }
+        });
+    }
+
+    #[test]
+    fn hosted_sublimation_rejects_crossed_routes_and_renderer_injection_before_dispatch() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            let registry = crate::ai::RequestRegistry::default();
+            for is_stream in [true, false] {
+                for body in [
+                    serde_json::json!(null),
+                    serde_json::json!([]),
+                    serde_json::json!({"name": "卡", "customProvider": {"apiKey": "renderer-key"}}),
+                ] {
+                    let mut request = hosted_request();
+                    request.route_id = if is_stream {
+                        HOSTED_ROUTE_SUBLIMATION_STREAM
+                    } else {
+                        HOSTED_ROUTE_SUBLIMATION
+                    }
+                    .into();
+                    request.body = body;
+                    let error = if is_stream {
+                        stream_hosted_ai(&state, &secrets, &registry, request, &VecSink::new())
+                            .await
+                            .unwrap_err()
+                    } else {
+                        hosted_ai_request(&state, &secrets, &registry, request)
+                            .await
+                            .unwrap_err()
+                    };
+                    assert_eq!(error.code, CloudErrorCode::InvalidRequest);
+                }
+                for invalid_route in [
+                    if is_stream {
+                        HOSTED_ROUTE_SUBLIMATION
+                    } else {
+                        HOSTED_ROUTE_SUBLIMATION_STREAM
+                    },
+                    "/api/generate-sublimation",
+                    "generate-sublimation-stream?format=sse",
+                ] {
+                    let mut request = hosted_request();
+                    request.route_id = invalid_route.into();
+                    let error = if is_stream {
+                        stream_hosted_ai(&state, &secrets, &registry, request, &VecSink::new())
+                            .await
+                            .unwrap_err()
+                    } else {
+                        hosted_ai_request(&state, &secrets, &registry, request)
+                            .await
+                            .unwrap_err()
+                    };
+                    assert_eq!(error.code, CloudErrorCode::InvalidRequest);
+                }
+            }
+            assert!(server.last_generate_body.lock().unwrap().is_none());
+            assert_eq!(registry.len(), 0);
+        });
+    }
+
+    #[test]
+    fn hosted_sublimation_utf8_budget_is_exact_and_rechecked_after_native_injection() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            let registry = crate::ai::RequestRegistry::default();
+            secrets
+                .set(
+                    &crate::provider_target::preset_secret_ref("deepseek").unwrap(),
+                    "test-native-secret",
+                )
+                .unwrap();
+            for route_id in [HOSTED_ROUTE_SUBLIMATION, HOSTED_ROUTE_SUBLIMATION_STREAM] {
+                let mut request = hosted_request();
+                request.route_id = route_id.into();
+                let empty = serde_json::json!({"name": "完整卡", "narrativeHistory": ""});
+                let text_bytes =
+                    HOSTED_BODY_SUBLIMATION_MAX_BYTES - serde_json::to_vec(&empty).unwrap().len();
+                let history = "角🌟".repeat(text_bytes / 7) + &"x".repeat(text_bytes % 7);
+                request.body = serde_json::json!({"name": "完整卡", "narrativeHistory": history});
+                assert_eq!(
+                    serde_json::to_vec(&request.body).unwrap().len(),
+                    HOSTED_BODY_SUBLIMATION_MAX_BYTES
+                );
+                assert_eq!(build_hosted_request_body(&request).unwrap(), request.body);
+                request.body["narrativeHistory"] = serde_json::json!(
+                    request.body["narrativeHistory"]
+                        .as_str()
+                        .unwrap()
+                        .to_string()
+                        + "x"
+                );
+                let error = build_hosted_request_body(&request).unwrap_err();
+                assert_eq!(error.code, CloudErrorCode::InvalidRequest);
+                assert!(error.message.contains("4 MiB"));
+                let mut restored = request.body["narrativeHistory"]
+                    .as_str()
+                    .unwrap()
+                    .to_string();
+                restored.pop();
+                request.body["narrativeHistory"] = serde_json::json!(restored);
+                request.system_config = Some(CloudHostedSystemConfig {
+                    model_id: Some("glm-5.3-flash".into()),
+                    generation_overrides: None,
+                });
+                assert_eq!(
+                    build_hosted_request_body(&request).unwrap_err().code,
+                    CloudErrorCode::InvalidRequest
+                );
+                request.system_config = None;
+                request.preset_config = Some(CloudHostedPresetConfig {
+                    provider_id: "deepseek".into(),
+                    model_id: "custom-model".into(),
+                    generation_overrides: None,
+                });
+                let error = prepare_hosted_dispatch(
+                    &state,
+                    &secrets,
+                    &request,
+                    if route_id == HOSTED_ROUTE_SUBLIMATION {
+                        HOSTED_JSON_ROUTES
+                    } else {
+                        HOSTED_STREAM_ROUTES
+                    },
+                )
+                .await
+                .unwrap_err();
+                assert_eq!(error.code, CloudErrorCode::InvalidRequest);
+                assert!(error.message.contains("4 MiB"));
+                assert!(!error.message.contains("test-native-secret"));
+            }
+            assert!(server.last_generate_body.lock().unwrap().is_none());
+            assert_eq!(registry.len(), 0);
         });
     }
 
@@ -4769,7 +5044,15 @@ mod tests {
                     stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
                     stream.shutdown().await.unwrap();
                 } else {
-                    stream.write_all(format!("HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: 1000\r\nConnection: close\r\n\r\n{{\"data\":").as_bytes()).await.unwrap();
+                    let (content_type, partial) = if status == 200 && route.ends_with("-stream") {
+                        (
+                            "text/event-stream",
+                            "event: markdown\ndata: {\"chunk\":\"partial\"}\n\n",
+                        )
+                    } else {
+                        ("application/json", "{\"data\":")
+                    };
+                    stream.write_all(format!("HTTP/1.1 {status} Test\r\nContent-Type: {content_type}\r\nContent-Length: 1000\r\nConnection: close\r\n\r\n{partial}").as_bytes()).await.unwrap();
                     let _ = headers_sent.send(());
                     return matches!(
                         tokio::time::timeout(Duration::from_secs(2), stream.read(&mut chunk)).await,
@@ -4785,14 +5068,27 @@ mod tests {
     #[test]
     fn audit_hosted_json_cancellation_drops_body_after_headers() {
         rt().block_on(async {
-            for status in [200, 500] {
-                let (origin, headers_seen, server) =
-                    delayed_hosted_body_server(status, HOSTED_GENERATE_DETAILS_PATH).await;
+            for (route_id, path, status) in [
+                (HOSTED_ROUTE_DETAILS, HOSTED_GENERATE_DETAILS_PATH, 200),
+                (HOSTED_ROUTE_DETAILS, HOSTED_GENERATE_DETAILS_PATH, 500),
+                (
+                    HOSTED_ROUTE_SUBLIMATION,
+                    HOSTED_GENERATE_SUBLIMATION_PATH,
+                    200,
+                ),
+                (
+                    HOSTED_ROUTE_SUBLIMATION,
+                    HOSTED_GENERATE_SUBLIMATION_PATH,
+                    500,
+                ),
+            ] {
+                let (origin, headers_seen, server) = delayed_hosted_body_server(status, path).await;
                 let state = CloudState::with_origin(&origin);
                 let secrets = MemorySecrets::new();
                 let registry = crate::ai::RequestRegistry::default();
-                let operation =
-                    hosted_ai_request(&state, &secrets, &registry, hosted_json_request());
+                let mut request = hosted_json_request();
+                request.route_id = route_id.into();
+                let operation = hosted_ai_request(&state, &secrets, &registry, request);
                 tokio::pin!(operation);
                 tokio::select! {
                     result = &mut operation => panic!("body should remain pending: {result:?}"),
@@ -4823,42 +5119,68 @@ mod tests {
     }
 
     #[test]
-    fn audit_hosted_stream_cancellation_drops_slow_error_body_after_headers() {
+    fn audit_hosted_stream_cancellation_drops_slow_success_and_error_bodies() {
         rt().block_on(async {
-            let (origin, headers_seen, server) =
-                delayed_hosted_body_server(500, HOSTED_GENERATE_DETAILS_STREAM_PATH).await;
-            let state = CloudState::with_origin(&origin);
-            let secrets = MemorySecrets::new();
-            let registry = crate::ai::RequestRegistry::default();
-            let sink = VecSink::new();
-            let operation = stream_hosted_ai(&state, &secrets, &registry, hosted_request(), &sink);
-            tokio::pin!(operation);
-            tokio::select! {
-                result = &mut operation => panic!("body should remain pending: {result:?}"),
-                _ = headers_seen => {},
+            for (route_id, path, status) in [
+                (
+                    HOSTED_ROUTE_DETAILS_STREAM,
+                    HOSTED_GENERATE_DETAILS_STREAM_PATH,
+                    500,
+                ),
+                (
+                    HOSTED_ROUTE_SUBLIMATION_STREAM,
+                    HOSTED_GENERATE_SUBLIMATION_STREAM_PATH,
+                    200,
+                ),
+                (
+                    HOSTED_ROUTE_SUBLIMATION_STREAM,
+                    HOSTED_GENERATE_SUBLIMATION_STREAM_PATH,
+                    500,
+                ),
+            ] {
+                let (origin, headers_seen, server) = delayed_hosted_body_server(status, path).await;
+                let state = CloudState::with_origin(&origin);
+                let secrets = MemorySecrets::new();
+                let registry = crate::ai::RequestRegistry::default();
+                let sink = VecSink::new();
+                let mut request = hosted_request();
+                request.route_id = route_id.into();
+                let operation = stream_hosted_ai(&state, &secrets, &registry, request, &sink);
+                tokio::pin!(operation);
+                tokio::select! {
+                    result = &mut operation => panic!("body should remain pending: {result:?}"),
+                    _ = headers_seen => {},
+                }
+                tokio::select! {
+                    result = &mut operation => panic!("body should remain pending: {result:?}"),
+                    _ = tokio::time::sleep(Duration::from_millis(30)) => {},
+                }
+                assert!(registry.cancel("req-1"));
+                let cancelled =
+                    tokio::time::timeout(Duration::from_millis(500), &mut operation).await;
+                assert!(
+                    cancelled.is_ok(),
+                    "cancel must interrupt the diagnostic body reader"
+                );
+                assert!(cancelled.unwrap().is_ok());
+                {
+                    let events = sink.events.lock().unwrap();
+                    assert_eq!(
+                        events
+                            .iter()
+                            .filter(|event| is_hosted_terminal_event(event))
+                            .count(),
+                        1
+                    );
+                    assert_eq!(events.last().unwrap().event, "error");
+                    assert_eq!(events.last().unwrap().data["code"], "cancelled");
+                }
+                assert_eq!(registry.len(), 0);
+                assert!(
+                    server.await.unwrap(),
+                    "cancel must close the upstream socket"
+                );
             }
-            tokio::select! {
-                result = &mut operation => panic!("body should remain pending: {result:?}"),
-                _ = tokio::time::sleep(Duration::from_millis(30)) => {},
-            }
-            assert!(registry.cancel("req-1"));
-            let cancelled = tokio::time::timeout(Duration::from_millis(500), &mut operation).await;
-            assert!(
-                cancelled.is_ok(),
-                "cancel must interrupt the diagnostic body reader"
-            );
-            assert!(cancelled.unwrap().is_ok());
-            {
-                let events = sink.events.lock().unwrap();
-                assert_eq!(events.len(), 1);
-                assert_eq!(events[0].event, "error");
-                assert_eq!(events[0].data["code"], "cancelled");
-            }
-            assert_eq!(registry.len(), 0);
-            assert!(
-                server.await.unwrap(),
-                "cancel must close the upstream socket"
-            );
         });
     }
 

@@ -132,9 +132,11 @@ describe('desktop-cloud 协议常量与 fixture 同步', () => {
         `routeId ${routeId} 的预算应与 fixture 一致`,
       ).toBe(expected);
     }
-    // free 附件路由获得 1 MiB 配额；其余生成路由保持默认 256 KiB。
+    // free 为附件保留 1 MiB，升华为原卡+参考保留 4 MiB；其余路由仍为 256 KiB。
     expect(hostedGenerationBodyMaxBytes('generate-free')).toBe(1024 * 1024);
     expect(hostedGenerationBodyMaxBytes('generate-free-stream')).toBe(1024 * 1024);
+    expect(hostedGenerationBodyMaxBytes('generate-sublimation')).toBe(4 * 1024 * 1024);
+    expect(hostedGenerationBodyMaxBytes('generate-sublimation-stream')).toBe(4 * 1024 * 1024);
     expect(hostedGenerationBodyMaxBytes('generate-scenario')).toBe(256 * 1024);
     expect(hostedGenerationBodyMaxBytes('generate-canshou-stream')).toBe(256 * 1024);
   });
@@ -361,6 +363,43 @@ describe('renderer IPC 投影', () => {
       routeId: 'some-other-route',
       body: {},
     }).success).toBe(false);
+  });
+
+  it('升华两命令保留独立路由白名单及严格的非秘密 IPC 输入', () => {
+    const body = {
+      name: '完整角色卡',
+      content: '已有角色正文',
+      arena_history: { entries: [{ id: 1, text: '保留历战' }] },
+      narrativeHistory: '参考历史'.repeat(3_000),
+      fieldsToPreserve: ['name'],
+      questionnaires: [],
+    };
+    for (const [schema, routeId, otherRoute] of [
+      [DesktopHostedGenerateRequestSchema, 'generate-sublimation-stream', 'generate-sublimation'],
+      [DesktopHostedJsonRequestSchema, 'generate-sublimation', 'generate-sublimation-stream'],
+    ] as const) {
+      const request = { requestId: 'sublimation', routeId, body };
+      expect(schema.parse(request).body).toEqual(body);
+      expect(schema.safeParse({ ...request, routeId: otherRoute }).success).toBe(false);
+      for (const route of [`/api/${routeId}`, `${routeId}?format=sse`, '../generate-sublimation']) {
+        expect(schema.safeParse({ ...request, routeId: route }).success).toBe(false);
+      }
+      for (const extra of [
+        { apiKey: 'renderer-key' },
+        { secretRef: 'provider-key:renderer' },
+        { url: 'https://example.com' },
+        { path: '/api/admin' },
+        { headers: { cookie: 'renderer-session' } },
+        { method: 'GET' },
+      ]) {
+        expect(schema.safeParse({ ...request, ...extra }).success).toBe(false);
+      }
+      const presetConfig = { providerId: 'deepseek', modelId: 'custom-model' };
+      expect(schema.safeParse({ ...request, presetConfig }).success).toBe(true);
+      expect(schema.safeParse({ ...request, presetConfig: { ...presetConfig, apiKey: 'key' } }).success).toBe(false);
+      expect(schema.safeParse({ ...request, presetConfig: { ...presetConfig, baseUrl: 'https://example.com' } }).success).toBe(false);
+      expect(schema.safeParse({ ...request, presetConfig, systemConfig: {} }).success).toBe(false);
+    }
   });
 
   it('hosted systemConfig：「使用系统默认配置」通道的非秘密偏好（D5.1-AIP-r1）', () => {

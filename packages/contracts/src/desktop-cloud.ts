@@ -319,13 +319,14 @@ export const HostedGenerationEventSchema = z.object({
 }).strict();
 export type HostedGenerationEvent = z.infer<typeof HostedGenerationEventSchema>;
 
-/** hosted 适配层允许选择的路由标识白名单（D5.0c 起，D5.1-G1 增残兽，D5.1-G2 增自由/情景，D5.1-G3 增创作工房）。 */
+/** hosted 适配层允许选择的路由标识白名单（D5.0c 起，D5.1-G1 增残兽，D5.1-G2 增自由/情景，D5.1-G3 增创作工房，D5.1-G4 增升华）。 */
 export const HostedGenerationRouteIdSchema = z.enum([
   'generate-magical-girl-details-stream',
   'generate-canshou-stream',
   'generate-free-stream',
   'generate-scenario-stream',
   'generate-creator-stream',
+  'generate-sublimation-stream',
 ]);
 export type HostedGenerationRouteId = z.infer<typeof HostedGenerationRouteIdSchema>;
 
@@ -420,6 +421,7 @@ export const HostedJsonGenerationRouteIdSchema = z.enum([
   'generate-free',
   'generate-scenario',
   'generate-creator',
+  'generate-sublimation',
 ]);
 export type HostedJsonGenerationRouteId = z.infer<typeof HostedJsonGenerationRouteIdSchema>;
 
@@ -462,11 +464,17 @@ export const HOSTED_GENERATION_BODY_DEFAULT_MAX_BYTES = 256 * 1024;
 /**
  * 按路由放宽的请求体上限：free 两路由须容纳附件预算（wire 侧附件正文合计
  * ≤200k 字符，CJK 按 UTF-8 最坏 ~4B/字符约 800KB，加 prompt 与 JSON 包装
- * 余量取整 1 MiB）；其余生成路由不随 free 的配额自动放宽。
+ * 余量取整 1 MiB）。升华上行是完整原卡 + 问卷 + 历史，而非短问卷答案：
+ * 为 1 MiB 可流通卡与额外参考文本保留空间，独立设 4 MiB 传输上限。
+ * 此值是 Desktop 聚合载荷预算，不是服务端字段上限；JSON 历史没有字符截断，
+ * stream 的 8,000 字符截断发生在服务端解析后，不能据此把 wire 预算缩小。
+ * 超限明确拒绝，不截断原卡或历史；其余生成路由不随这两族自动放宽。
  */
 export const HOSTED_GENERATION_BODY_ROUTE_MAX_BYTES: Readonly<Record<string, number>> = {
   'generate-free': 1024 * 1024,
   'generate-free-stream': 1024 * 1024,
+  'generate-sublimation': 4 * 1024 * 1024,
+  'generate-sublimation-stream': 4 * 1024 * 1024,
 };
 
 /** routeId → 请求体字节上限；未列入放宽表的路由一律回落默认值。 */
