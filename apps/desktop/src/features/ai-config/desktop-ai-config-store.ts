@@ -89,6 +89,8 @@ export interface DesktopAiConfigState {
   /** profileId → 凭据存在性；只回答存在性，永不读回明文。 */
   secretStatus: Readonly<Record<string, DesktopSecretPresence>>;
   savingConnection: boolean;
+  /** 删除事务覆盖 Profile、旧凭据清理与列表刷新。 */
+  deletingConnection: boolean;
   presetsByProviderId: Readonly<Record<string, DesktopPresetSelection>>;
   presetSecretStatus: Readonly<Record<string, DesktopSecretPresence>>;
   credentialDraftRevision: number;
@@ -165,6 +167,7 @@ const INITIAL_STATE: DesktopAiConfigState = {
   profilesError: null,
   secretStatus: {},
   savingConnection: false,
+  deletingConnection: false,
   presetsByProviderId: {}, presetSecretStatus: {}, credentialDraftRevision: 0, generationActive: false, savingCredential: false, modelInputError: null,
 };
 
@@ -559,6 +562,7 @@ export class DesktopAiConfigStore {
     if (!this.overlayWritable) throw new Error('AI 配置尚未就绪');
     if (this.state.savingCredential) throw new Error('凭据正在保存，请稍后生成');
     if (this.saveConnectionInFlight) throw new Error('连接正在保存，请稍后生成');
+    if (this.state.deletingConnection) throw new Error('连接正在删除，请稍后生成');
     if (this.state.modelInputError) throw new Error(this.state.modelInputError);
     const target = resolveDesktopAiTarget(this.state.selection, this.state.profiles, this.state.generationOverrides, this.state.modelsByProfileId, this.state.presetsByProviderId);
     if (target.unavailableReason || !target.providerTarget) throw new Error(target.unavailableReason ?? '请选择供应商');
@@ -781,6 +785,7 @@ export class DesktopAiConfigStore {
   } | null = null;
 
   saveConnection = (draft: ProfileDraft): Promise<DesktopSaveConnectionResult> => {
+    if (this.state.deletingConnection) return Promise.reject(new Error('连接正在删除，请稍后保存'));
     if (this.state.generationActive || this.state.savingCredential) return Promise.reject(new Error('生成期间请勿更换连接或凭据'));
     const inFlight = this.saveConnectionInFlight;
     if (inFlight !== null) {
@@ -919,8 +924,28 @@ export class DesktopAiConfigStore {
    * - 删除当前正在使用的连接时显式清掉 `clientConnectionId`，不自动换供应商
    *   （DESK-ONLINE-002）。Profile 是索引、凭据是内容；孤儿凭据比悬空 Profile 安全。
    */
-  deleteConnection = async (profileId: string): Promise<void> => {
-    if (this.state.generationActive || this.state.savingCredential) throw new Error('生成期间请勿删除连接');
+  private deleteConnectionInFlight: { profileId: string; promise: Promise<void> } | null = null;
+
+  deleteConnection = (profileId: string): Promise<void> => {
+    const inFlight = this.deleteConnectionInFlight;
+    if (inFlight) {
+      return inFlight.profileId === profileId
+        ? inFlight.promise
+        : Promise.reject(new Error('另一个连接正在删除中，请稍后重试'));
+    }
+    if (this.state.generationActive || this.state.savingCredential) return Promise.reject(new Error('生成期间请勿删除连接'));
+    if (this.saveConnectionInFlight || this.state.savingConnection) return Promise.reject(new Error('连接正在保存，请稍后删除'));
+    const promise = this.deleteConnectionInner(profileId).finally(() => {
+      this.deleteConnectionInFlight = null;
+      this.publish({ deletingConnection: false });
+    });
+    this.deleteConnectionInFlight = { profileId, promise };
+    return promise;
+  };
+
+  private deleteConnectionInner = async (profileId: string): Promise<void> => {
+    // 先同步上锁；native 删除、旧凭据清理及刷新未全部返回前，保存/生成不得进入。
+    this.publish({ deletingConnection: true });
     const existing =
       this.state.profiles.find((item) => item.id === profileId) ??
       (await getProviderProfile(this.deps.invoke, profileId).catch(() => null));

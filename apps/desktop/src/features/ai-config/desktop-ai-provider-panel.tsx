@@ -40,7 +40,7 @@ export const DesktopAiProviderPanel = ({ controlsSlot, management = false }: Des
   const preset = target.preset;
   const profile = target.profile;
   const isSystem = identity?.kind === 'system';
-  const disabled = state.overlayState !== 'ready' || state.generationActive || state.savingCredential || state.savingConnection;
+  const disabled = state.overlayState !== 'ready' || state.generationActive || state.savingCredential || state.savingConnection || state.deletingConnection;
   const presetId = identity?.kind === 'preset' ? identity.providerId : null;
   const keyDraft = presetId ? store.getPresetKeyDraft(presetId) : '';
   const identityKey = JSON.stringify(identity);

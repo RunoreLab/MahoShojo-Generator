@@ -216,6 +216,7 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
   const [editing, setEditing] = useState<EditingState | null>(null);
   const [editorDirty, setEditorDirty] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // DESK-AIP-003.7：编辑器存在未保存修改（含易失 Key 输入）时，另选编辑
   // 对象须显式确认放弃；取消键在编辑器内已有同款确认。
@@ -257,11 +258,23 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
     setEditing(null);
   };
 
-  const blockedOverlay = state.overlayState === 'blocked' || state.generationActive || state.savingCredential;
+  const deleteConnection = async (profileId: string) => {
+    setDeleteError(null);
+    try {
+      await store.deleteConnection(profileId);
+      setEditing((current) => current?.draft.id === profileId ? null : current);
+    } catch (cause) {
+      setDeleteError(`连接删除未完成：${cause instanceof Error ? cause.message : '本地存储操作失败，请重试'}`);
+    }
+  };
+
+  const blockedOverlay = state.overlayState === 'blocked' || state.generationActive || state.savingCredential || state.deletingConnection;
 
   return (
     <section className="flex flex-col gap-4 rounded-lg border border-(--app-border) bg-(--app-surface) p-4">
-      <fieldset disabled={state.generationActive || state.savingCredential || state.savingConnection} className="contents">
+      {deleteError && <p role="alert" className="text-sm text-(--app-accent-strong)">{deleteError}</p>}
+      {state.deletingConnection && <p role="status" className="text-sm">正在删除连接及其凭据…</p>}
+      <fieldset disabled={state.generationActive || state.savingCredential || state.savingConnection || state.deletingConnection} className="contents">
       <header className="flex flex-col gap-1">
         <h2 className="battle-lite-strong-text text-sm font-medium">AI 连接</h2>
         <p className="battle-lite-muted-text text-xs">
@@ -359,7 +372,7 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
                   hasKeyRef: profile.apiKeyRef !== undefined,
                 })
               }
-              onDelete={() => void store.deleteConnection(profile.id)}
+              onDelete={() => void deleteConnection(profile.id)}
             />
           ))}
         </ul>
