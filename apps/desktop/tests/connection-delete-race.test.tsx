@@ -40,7 +40,7 @@ it('a pending deletion prevents editing and saving a stale credential reference'
   await click('删除'); await click('确认删除（连同已存凭据）');
   // Native Profile deletion has returned, but the OS credential cleanup is pending.
   // The old renderer row is still shown until refresh; baseline lets it be edited.
-  await click('编辑');
+  if (button('编辑')) await click('编辑');
   if (button('保存连接')) await click('保存连接');
   const overlappingSave = mocks.invoke.mock.calls.some(([command]) => command === 'validate_provider_execution_profile');
   await act(async () => deletion.resolve()); await settle();
@@ -118,4 +118,58 @@ it('closes the deleted connection editor after success instead of leaving a stal
   await act(async () => deletion.resolve()); await settle();
   expect(button('保存连接')).toBeUndefined();
   expect(getDesktopAiConfigStore().getSnapshot().profiles).toHaveLength(0);
+});
+
+it('deleting a connection removes its editable cache even when refresh fails', async () => {
+  await act(async () => root.render(<StrictMode><AiConnectionsPanel /></StrictMode>)); await settle();
+  const store = getDesktopAiConfigStore();
+  const nativeInvoke = mocks.invoke.getMockImplementation()!;
+  mocks.invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+    if (command === 'list_provider_profile_ids') throw new Error('list unavailable');
+    return nativeInvoke(command, args);
+  });
+  await click('删除'); await click('确认删除（连同已存凭据）');
+  await act(async () => deletion.resolve()); await settle();
+  expect(store.getSnapshot().deletingConnection).toBe(false);
+  expect(profiles.has('p1')).toBe(false);
+  expect(secrets.has(original.apiKeyRef!)).toBe(false);
+  if (button('编辑')) {
+    await click('编辑');
+    await click('保存连接');
+    await act(async () => validation.resolve()); await settle();
+  }
+  expect(profiles.has('p1')).toBe(false);
+});
+
+
+it('does not let a refresh started before deletion reintroduce the old profile or credential status', async () => {
+  const store = getDesktopAiConfigStore(); store.init();
+  await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
+  const oldProbe = deferred();
+  const nativeInvoke = mocks.invoke.getMockImplementation()!;
+  let probing = false;
+  let failNextList = false;
+  mocks.invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+    if (command === 'list_provider_profile_ids' && failNextList) throw new Error('list unavailable');
+    if (command === 'has_provider_secret') {
+      probing = true;
+      await oldProbe.promise;
+      return true; // A stale read from before deletion.
+    }
+    return nativeInvoke(command, args);
+  });
+  const staleRefresh = store.refreshProfiles();
+  await vi.waitFor(() => expect(probing).toBe(true));
+  const pending = store.deleteConnection('p1');
+  await vi.waitFor(() => expect(store.getSnapshot().profiles).toHaveLength(0));
+  const published: boolean[] = [];
+  const unsubscribe = store.subscribe(() => published.push(store.getSnapshot().profiles.some(profile => profile.id === 'p1')));
+  failNextList = true;
+  deletion.resolve(); oldProbe.resolve();
+  await staleRefresh; await pending; unsubscribe();
+  expect(published).not.toContain(true);
+  expect(store.getSnapshot().profiles).toHaveLength(0);
+  expect(store.getSnapshot().secretStatus).not.toHaveProperty('p1');
+  expect(store.getSnapshot().profilesState).toBe('failed');
+  expect(store.getSnapshot().deletingConnection).toBe(false);
 });

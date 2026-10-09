@@ -181,6 +181,8 @@ export class DesktopAiConfigStore {
   private generationEpoch = 0;
   private preparing = false;
   private profilesPromise: Promise<void> | null = null;
+  /** 已确认删除会推进版本，拒绝删除前启动的读取回填旧 Profile。 */
+  private profilesEpoch = 0;
 
   constructor(private readonly deps: DesktopAiConfigDeps) {}
 
@@ -276,6 +278,7 @@ export class DesktopAiConfigStore {
 
   refreshProfiles = async (): Promise<void> => {
     if (this.profilesPromise) return this.profilesPromise;
+    const epoch = this.profilesEpoch;
     this.publish({ profilesState: 'loading', profilesError: null });
     this.profilesPromise = (async () => {
       try {
@@ -301,6 +304,8 @@ export class DesktopAiConfigStore {
             }
           }),
         );
+
+        if (epoch !== this.profilesEpoch) return;
 
         // 清理指向已删除连接的孤儿 overrides。选择本身**不**被改写：
         // 悬空的 clientConnectionId 保留原 ID 由解析层给出诊断（DESK-ONLINE-002
@@ -336,6 +341,7 @@ export class DesktopAiConfigStore {
           secretStatus: Object.fromEntries(secretEntries),
         });
       } catch (cause) {
+        if (epoch !== this.profilesEpoch) return;
         const detail = cause instanceof Error ? cause.message : '';
         this.publish({
           profilesState: 'failed',
@@ -951,6 +957,13 @@ export class DesktopAiConfigStore {
       (await getProviderProfile(this.deps.invoke, profileId).catch(() => null));
 
     await deleteProviderProfile(this.deps.invoke, profileId);
+    // Native 已确认删除：立即移除可编辑缓存，不依赖后续可能失败的列表读取。
+    // 同时拦下删除前已读到旧文档、仍在等待凭据探测的 refresh。
+    const pendingRefresh = this.profilesPromise;
+    this.profilesEpoch += 1;
+    const secretStatus = { ...this.state.secretStatus };
+    delete secretStatus[profileId];
+    this.publish({ profiles: this.state.profiles.filter((profile) => profile.id !== profileId), secretStatus });
     if (existing?.apiKeyRef !== undefined) {
       await deleteProviderSecret(this.deps.invoke, existing.apiKeyRef).catch(() => undefined);
     }
@@ -961,6 +974,7 @@ export class DesktopAiConfigStore {
         selection: { ...overlay.selection, clientConnectionId: null, clientTarget: null },
       }));
     }
+    await pendingRefresh;
     await this.refreshProfiles();
   };
 }
