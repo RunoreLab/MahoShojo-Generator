@@ -60,3 +60,7 @@ D5.1-T 本地往返：`ui-web/tavern` 从 Web 原导入区抽出文件、候选�
 双端原路径共用原件导出、本地来源和保存反馈；`local-library/imported-unsigned-card`
 使用既有 `putIfAbsent` 与摘要契约保存未签名导入副本，墓碑不复活、不提升嵌套签名权威。
 Desktop `/tavern` 本片只交付 PNG/JSON 原件与通用角色规则旅程，其他模板与普通卡新建酒馆导出仍另片。
+
+D5.1-T 组队：`domain/team-merge` 与 `ui-web/team` 由 Web 原合并入口和编排页面实际消费，
+Desktop 本地旅程注入既有仓储与下载端口。`domain/team-input` 仅约束本地输入和合成预算，
+不把来源签名转换为权威；Web 在线验签/重签名、云保存与立绘仍由宿主持有。
