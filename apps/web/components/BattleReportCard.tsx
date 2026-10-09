@@ -6,8 +6,6 @@ import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown'
 import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
-// 1. [新增] 导入随机判定结果的类型定义
-import { AdjudicationResult } from '@/types/arena';
 import remarkBattleTable from '@/lib/markdown/remarkBattleTable';
 import { fixNestedListIndentation } from '@mahoshojo/ui-web/markdown';
 import {
@@ -27,60 +25,11 @@ import { createBlobUrl, downloadBlob } from '@/lib/client/blobUrl';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
 import { extractHeuristicReasoningFromMarkdown } from '@/lib/ai/reasoning-normalizer';
-import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 
 type MarkdownCodeProps = React.ComponentPropsWithoutRef<'code'> & ExtraProps & { inline?: boolean };
 
-export interface NewsReport {
-  reportFormat?: 'markdown' | 'web';
-  webHtml?: string;
-  webPackage?: import('@mahoshojo/contracts/web-package').WebPackageArtifact;
-  webReady?: boolean;
-  headline: string;
-  scenario?: string;
-  reporterInfo: {
-    name:string;
-    publication: string;
-  };
-  /** 本次生成所使用的 AI 模型（用于战报元数据展示，可能为空）。 */
-  aiModel?: string | null;
-  article: {
-    body: string;
-    analysis: string;
-  };
-  officialReport: {
-    winner: string;
-    conclusion: string;
-  };
-  /** AI 生成相关的 token 统计（用于战报页展示，可能为空）。 */
-  aiUsage?: {
-    promptTokens?: number | null;
-    reasoningTokens?: number | null;
-    textTokens?: number | null;
-    completionTokens?: number | null;
-    totalTokens?: number | null;
-    cachedTokens?: number | null;
-    [key: string]: unknown;
-  };
-  /** AI 思考内容（结构化，可能为空）。 */
-  aiReasoning?: AIReasoningEnvelope | null;
-  /**
-   * 读取叙事历史条数：仅在开启 readNarrativeHistory 时由后端写入（未开启则不返回）。
-   * 可能为 0（已开启但本地无可用条目）。
-   */
-  narrativeHistoryReadCount?: number;
-  // 可选的用户引导信息字段
-  userGuidance?: string;
-  /**
-   * 角色行动/想法引导（逐角色、可选）。
-   * - 仅当用户填写时返回/展示
-   * - 会被记录进战报生成记录与（可选）历战记录
-   */
-  characterGuidances?: Array<{ characterName: string; guidance: string }>;
-  mode?: 'classic' | 'kizuna' | 'daily' | 'scenario';
-  // 2. [新增] 为战报数据接口增加随机判定结果字段
-  adjudicationResults?: AdjudicationResult[];
-}
+import type { ArenaBattleReport as NewsReport } from '@mahoshojo/ai-core/arena-generation';
+export type { ArenaBattleReport as NewsReport } from '@mahoshojo/ai-core/arena-generation';
 
 export type BattleReportIllustrationSource = 'generated' | 'uploaded';
 

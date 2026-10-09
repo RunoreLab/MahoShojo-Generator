@@ -1,5 +1,10 @@
 'use client';
 
+import {
+  buildArenaGenerationInputSnapshot, normalizeBattleAiImpacts, extractTitleFromBattleMarkdown,
+  projectArenaBattleReport, projectArenaUpdatedRoster,
+} from '@mahoshojo/ai-core/arena-generation';
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArenaRoomHostRuntimeGenerationSchema } from '@mahoshojo/contracts/arena-room';
@@ -8,7 +13,6 @@ import {
   evaluateArenaBasicGenerationReadiness,
 } from '@mahoshojo/contracts/arena-capabilities';
 
-import type { NewsReport } from '@/components/BattleReportCard';
 import { persistArrestedBackup, type ArrestedBackupDraftItem, type ArrestedBackupTriggerSource } from '@/lib/arrested-backup';
 import { useClientRouteAdapter } from '@/lib/client-route-adapter';
 import { useProviderModeCooldown } from '@/lib/cooldown';
@@ -20,7 +24,7 @@ import {
   STREAM_ABORT_REASON_USER,
 } from '@/lib/stream/abort';
 import { useBattleStore } from '../stores/useBattleStore';
-import { BattleAiImpact, BattleApiResponse, BattleStoreState, CombatantData } from '../types';
+import { BattleApiResponse, BattleStoreState, CombatantData } from '../types';
 import { useBattleActions } from './useBattleActions';
 import { useStreamCombatantUpdater } from './useStreamCombatantUpdater';
 import { toBattleReportMarkdown } from '../utils/battleReportMarkdown';
@@ -135,47 +139,6 @@ const buildStreamInterruptedMessage = (details?: string): string => {
   return `⚠️ 战报流中断${tail}，请稍后再试。`;
 };
 
-const normalizeBattleAiImpacts = (input: unknown): BattleAiImpact[] => {
-  if (!Array.isArray(input)) return [];
-
-  const normalized = input
-    .map((raw) => {
-      if (!raw || typeof raw !== 'object') return null;
-      const record = raw as Record<string, unknown>;
-      const characterName = typeof record.characterName === 'string' ? record.characterName.trim() : '';
-      if (!characterName) return null;
-
-      const impact = typeof record.impact === 'string' ? record.impact.trim() : '';
-      const currentStateSummary =
-        typeof record.currentStateSummary === 'string' ? record.currentStateSummary.trim() : '';
-
-      return {
-        characterName: sanitizeTextByShieldWords(characterName),
-        ...(impact ? { impact: sanitizeTextByShieldWords(impact) } : {}),
-        ...(currentStateSummary ? { currentStateSummary: sanitizeTextByShieldWords(currentStateSummary) } : {}),
-      } satisfies BattleAiImpact;
-    })
-    .filter((item): item is BattleAiImpact => Boolean(item));
-
-  if (normalized.length === 0) return [];
-
-  const deduped = new Map<string, BattleAiImpact>();
-  for (const item of normalized) {
-    if (!deduped.has(item.characterName)) {
-      deduped.set(item.characterName, item);
-      continue;
-    }
-    const previous = deduped.get(item.characterName)!;
-    deduped.set(item.characterName, {
-      characterName: item.characterName,
-      impact: item.impact ?? previous.impact,
-      currentStateSummary: item.currentStateSummary ?? previous.currentStateSummary,
-    });
-  }
-
-  return Array.from(deduped.values());
-};
-
 const isServerInterruptedPayload = (payload: any, fallbackMessage: string): boolean => {
   const status = typeof payload?.status === 'string' ? payload.status.trim().toLowerCase() : '';
   if (status === 'aborted' || status === 'interrupted') return true;
@@ -183,70 +146,6 @@ const isServerInterruptedPayload = (payload: any, fallbackMessage: string): bool
   if (typeof payload?.errorCode === 'string' && payload.errorCode === 'stream_interrupted') return true;
   return isStreamInterruptedError({ message: fallbackMessage });
 };
-
-const extractTitleFromBattleMarkdown = (markdown: string): string => {
-  const lines = markdown.split(/\r?\n/).map((line) => line.trim());
-  for (const line of lines) {
-    if (!line) continue;
-    const m = line.match(/^#{1,3}\s*(.+)$/);
-    if (m?.[1]) return m[1].trim().slice(0, 120);
-    return line.slice(0, 120);
-  }
-  return '未命名战报';
-};
-
-const sanitizeReportByShieldWords = (report: NewsReport): NewsReport => ({
-  ...report,
-  headline: sanitizeTextByShieldWords(report.headline),
-  scenario: report.scenario ? sanitizeTextByShieldWords(report.scenario) : undefined,
-  aiModel: typeof report.aiModel === 'string' ? sanitizeTextByShieldWords(report.aiModel) : report.aiModel,
-  reporterInfo: {
-    ...report.reporterInfo,
-    name: sanitizeTextByShieldWords(report.reporterInfo.name),
-    publication: sanitizeTextByShieldWords(report.reporterInfo.publication),
-  },
-  article: {
-    ...report.article,
-    body: sanitizeTextByShieldWords(report.article.body),
-    analysis: sanitizeTextByShieldWords(report.article.analysis),
-  },
-  officialReport: {
-    ...report.officialReport,
-    winner: sanitizeTextByShieldWords(report.officialReport.winner),
-    conclusion: sanitizeTextByShieldWords(report.officialReport.conclusion),
-  },
-  userGuidance: report.userGuidance ? sanitizeTextByShieldWords(report.userGuidance) : undefined,
-  characterGuidances: Array.isArray((report as any).characterGuidances)
-    ? ((report as any).characterGuidances as any[])
-        .map((item) => {
-          const characterName = typeof item?.characterName === 'string' ? item.characterName.trim() : '';
-          const guidance = typeof item?.guidance === 'string' ? item.guidance.trim() : '';
-          if (!characterName || !guidance) return null;
-          return { characterName: sanitizeTextByShieldWords(characterName), guidance: sanitizeTextByShieldWords(guidance) };
-        })
-        .filter((item): item is { characterName: string; guidance: string } => Boolean(item))
-    : undefined,
-  aiReasoning: (() => {
-    const reasoning = report.aiReasoning;
-    if (!reasoning || typeof reasoning !== 'object') return reasoning;
-
-    const sanitizedParts = Array.isArray(reasoning.parts)
-      ? reasoning.parts.map((part) => ({
-          ...part,
-          text: typeof part?.text === 'string' ? sanitizeTextByShieldWords(part.text) : part?.text,
-        }))
-      : reasoning.parts;
-
-    return {
-      ...reasoning,
-      summary: typeof reasoning.summary === 'string' ? sanitizeTextByShieldWords(reasoning.summary) : reasoning.summary,
-      text: typeof reasoning.text === 'string' ? sanitizeTextByShieldWords(reasoning.text) : reasoning.text,
-      errorMessage:
-        typeof reasoning.errorMessage === 'string' ? sanitizeTextByShieldWords(reasoning.errorMessage) : reasoning.errorMessage,
-      parts: sanitizedParts,
-    };
-  })(),
-});
 
 const buildBattleBackupItems = (
   combatants: CombatantData[],
@@ -626,37 +525,19 @@ export const useBattleEngine = () => {
         }
       }
 
-      const teams: Record<number, string[]> = {};
-      const teamNamesById = new Map<number, string>(
-        useBattleStore
-          .getState()
-          .teams.map((team) => [team.id, typeof team.name === 'string' ? team.name.trim() : ''] as const)
-      );
-
-      freshCombatants.forEach((combatant) => {
-        if (!combatant.teamId) return;
-        if (!teams[combatant.teamId]) teams[combatant.teamId] = [];
-        teams[combatant.teamId].push(combatant.data.codename || combatant.data.name);
-      });
-
-      const teamNames: Record<number, string> = {};
-      Object.keys(teams).forEach((key) => {
-        const teamId = Number(key);
-        const name = teamNamesById.get(teamId);
-        if (name) teamNames[teamId] = name;
-      });
-
-      const numericLimit = settings.isArenaHistoryUnlimited ? null : Math.max(1, settings.readArenaHistoryLimit);
-      const arenaHistoryReadLimit = settings.readArenaHistory ? numericLimit ?? null : undefined;
-      const localNarrativeHistory = materializeArenaNarrativeHistoryForRequest(
-        settings,
-        useNarrativeHistoryStore.getState().entries,
-      );
-      const narrativeHistoryReadLimit = localNarrativeHistory.readLimit;
-      const narrativeHistoryForRequest = localNarrativeHistory.entries;
-
       const generationRequestId = secureRandomUUID();
       const { questionnaireSelections, questionnaires } = buildArenaQuestionnaireRequest(selectedQuestionnaires);
+      const businessInputSnapshot = roomAction.inRoom ? null : buildArenaGenerationInputSnapshot({
+        combatants: freshCombatants,
+        teams: useBattleStore.getState().teams,
+        battleMode, reportFormat, webPackageRef,
+        arenaFreeRankingEnabled, scenario, scenarioDisplayName, auxScenarios, materials,
+        selectedLanguage, settings,
+        narrativeHistoryEntries: useNarrativeHistoryStore.getState().entries,
+        adjudicationEvents, storyLength,
+        customStoryLength: normalizeCustomStoryLength(customStoryLength) || undefined,
+        questionnaireSelections, questionnaires,
+      });
       const customProviderPayload = buildCustomProviderRequestPayload(userProviderConfig);
       const generationProviderSnapshot = customProviderPayload ? {
         ...customProviderPayload,
@@ -694,48 +575,8 @@ export const useBattleEngine = () => {
       }
       const requestBody = roomAction.inRoom ? null : {
         generationRequestId,
-        reportFormat,
-        ...(reportFormat === 'web' && webPackageRef ? { webPackageRef } : {}),
+        ...businessInputSnapshot,
         ...(webPackagePromptProjection ? { webPackagePromptProjection } : {}),
-        combatants: freshCombatants.map((combatant) => ({
-          type: combatant.type,
-          data: combatant.data,
-          isNative: combatant.isValid,
-          isPreset: combatant.isPreset,
-          filename: combatant.isPreset ? combatant.filename : null,
-          teamId: typeof combatant.teamId === 'number' ? combatant.teamId : null,
-          characterGuidance: typeof (combatant as any).characterGuidance === 'string' ? (combatant as any).characterGuidance : null,
-          sourceDataCardId: combatant.sourceDataCardId,
-          sourceDataCardUpdatedAt: combatant.sourceDataCardUpdatedAt,
-        })),
-        mode: battleMode,
-        arenaFreeRankingEnabled,
-        userGuidance: settings.userGuidance,
-        scenario: shouldUseScenario ? scenario.content : undefined,
-        auxScenarios: shouldUseScenario && auxScenarios.length > 0 ? auxScenarios.map((s) => s.content) : undefined,
-        materials: materials.length > 0 ? materials : undefined,
-        scenarioTitle: shouldUseScenario ? scenarioDisplayName : undefined,
-        scenarioFileName: shouldUseScenario ? scenario.fileName : undefined,
-        scenarioSourceDataCardId: shouldUseScenario ? scenario.sourceDataCardId : undefined,
-        scenarioSourceDataCardUpdatedAt: shouldUseScenario ? scenario.sourceDataCardUpdatedAt : undefined,
-        teams: Object.keys(teams).length > 0 ? teams : undefined,
-        teamNames: Object.keys(teamNames).length > 0 ? teamNames : undefined,
-        language: selectedLanguage,
-        readArenaHistory: settings.readArenaHistory,
-        arenaHistoryReadLimit,
-        writeArenaHistory: settings.writeArenaHistory,
-        readCurrentState: settings.readCurrentState,
-        writeCurrentState: settings.writeCurrentState,
-        readNarrativeHistory: settings.readNarrativeHistory,
-        writeNarrativeHistory: settings.writeNarrativeHistory,
-        narrativeHistoryReadLimit,
-        narrativeHistory: narrativeHistoryForRequest,
-        isDowngrade: false,
-        adjudicationEvents,
-        storyLength,
-        customStoryLength: normalizeCustomStoryLength(customStoryLength) || undefined,
-        questionnaireSelections,
-        questionnaires,
         customProvider: customProviderPayload ?? undefined,
       };
 
@@ -1015,39 +856,25 @@ export const useBattleEngine = () => {
           return true;
         }
 
-        const safeScenarioDisplayName = scenarioDisplayName ? sanitizeTextByShieldWords(scenarioDisplayName) : null;
-
-        const reportWithScenario: NewsReport = {
-          ...(result.report.reportFormat === 'web' ? result.report : sanitizeReportByShieldWords(result.report)),
+        const reportWithScenario = projectArenaBattleReport({
+          report: result.report, mode: battleMode, scenarioDisplayName,
           adjudicationResults: result.adjudicationResults,
-        };
-
-        // 仅在情景模式时附加情景标题，避免其它模式复用上一场情景标题
-        if (battleMode === 'scenario' && safeScenarioDisplayName) {
-          reportWithScenario.scenario = safeScenarioDisplayName;
-        } else {
-          // 非情景模式下显式移除 scenario 字段，杜绝旧标题残留
-          delete (reportWithScenario as any).scenario;
-        }
+          sanitizeText: sanitizeTextByShieldWords,
+        });
 
         setResultReportFormat(result.report.reportFormat === 'web' ? 'web' : 'markdown');
         setResultWebPackage(result.report.webPackage ?? null);
         setResultWebReady(result.report.reportFormat === 'web' && (Boolean(result.report.webPackage) || typeof result.report.webHtml === 'string'));
         setNewsReport(reportWithScenario);
         revealGeneratedResult();
-        const normalizedImpacts = normalizeBattleAiImpacts(result.impacts);
+        const normalizedImpacts = normalizeBattleAiImpacts(result.impacts, sanitizeTextByShieldWords);
         setLatestAiImpacts(normalizedImpacts.length > 0 ? normalizedImpacts : null);
         setUpdatedCombatants(result.updatedCombatants);
         if (result.adjudicationResults) {
           setAdjudicationResults(result.adjudicationResults);
         }
 
-        const updatedRoster = freshCombatants.map((combatant) => {
-          const updated = result.updatedCombatants.find(
-            (item) => (item.codename || item.name) === (combatant.data.codename || combatant.data.name)
-          );
-          return updated ? { ...combatant, data: updated } : combatant;
-        });
+        const updatedRoster = projectArenaUpdatedRoster(freshCombatants, result.updatedCombatants);
         setCombatants(updatedRoster);
 
         if (settings.writeNarrativeHistory) {
@@ -1552,7 +1379,7 @@ export const useBattleEngine = () => {
                 }
                 if (payload?.parseOk && payload?.meta && typeof payload.meta === 'object') {
                   const meta = payload.meta as any;
-                  const impacts = normalizeBattleAiImpacts(meta.impacts);
+                  const impacts = normalizeBattleAiImpacts(meta.impacts, sanitizeTextByShieldWords);
                   metaOverrideFromSse = {
                     ...(meta.report ? { report: meta.report } : {}),
                     ...(impacts.length > 0 ? { impacts } : {}),
@@ -1855,7 +1682,7 @@ export const useBattleEngine = () => {
               if (allowStreamMeta) {
                 const extracted = await extractStreamUpdateMeta(markdownForUi);
                 if (extracted?.meta && (extracted.meta.report || (extracted.meta.impacts && extracted.meta.impacts.length > 0))) {
-                  const impacts = normalizeBattleAiImpacts(extracted.meta.impacts);
+                  const impacts = normalizeBattleAiImpacts(extracted.meta.impacts, sanitizeTextByShieldWords);
                   metaOverride = {
                     ...(extracted.meta.report ? { report: extracted.meta.report } : {}),
                     ...(impacts.length > 0 ? { impacts } : {}),
