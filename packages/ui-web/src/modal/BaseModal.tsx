@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
 import { isTopmostFocusTrapLayer, popEscapeLayer, pushEscapeLayer } from './escape-stack';
-import { acquireModalEnvironment } from './modal-environment';
+import { acquireModalEnvironment } from './modal-lifecycle';
 
 type Props = {
   isOpen: boolean;

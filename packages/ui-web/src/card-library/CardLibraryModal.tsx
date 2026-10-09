@@ -22,7 +22,7 @@ import { useLocalDataCards } from './use-local-data-cards';
 import { useLocalLibraryAutoSave } from './use-local-library-auto-save';
 import { ChevronDown, Filter, HardDrive } from 'lucide-react';
 import { BaseModal } from '../modal/BaseModal';
-import { acquireModalEnvironment } from '../modal/modal-environment';
+import { acquireModalEnvironment } from '../modal/modal-lifecycle';
 import { isTopmostFocusTrapLayer, useEscapeLayer } from '../modal/escape-stack';
 import { ModalTabs, modalTabIds, type ModalTabItem } from '../modal/ModalTabs';
 import { buttonClassName } from './Button';
