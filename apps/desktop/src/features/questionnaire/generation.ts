@@ -19,6 +19,7 @@ import {
   executeDesktopGeneration,
   GenerationTransportError,
   type DesktopDirectGenerationConfig,
+  type DesktopDirectStreamGenerationConfig,
   type DesktopExecutionMode,
   type DesktopGenerationFamily,
   type DesktopGenerationIntent,
@@ -74,6 +75,8 @@ type StructuredSchema = Parameters<typeof buildStructuredJsonInstructionFromZodS
 /** direct 通路的结构化生成配置：与 ai-core 的 `<family>GenerationConfig` 同形。 */
 export type QuestionnaireStructuredConfig = DesktopDirectGenerationConfig<QuestionnaireGenerationInput>;
 
+export type QuestionnaireStreamConfig = DesktopDirectStreamGenerationConfig<QuestionnaireGenerationInput>;
+
 /**
  * 问卷生成家族描述符（D5.1-G1）：通路编排、取消语义、错误投影与草稿
  * 契约对 `/details` 与 `/canshou` 完全一致，家族差异集中在结构化配置、
@@ -84,7 +87,7 @@ export interface QuestionnaireGenerationFamily<
   TIntent extends QuestionnaireGenerationIntent = QuestionnaireGenerationIntent,
   TStructuredKind extends string = string,
 > {
-  /** 结构化结果卡的 kind 标识（direct 与 hosted-json 通路产出）。 */
+  /** 结构化结果卡的 kind 标识（direct 非流式与 hosted-json 通路产出）。 */
   structuredCardKind: TStructuredKind;
   /** hosted 流式（SSE）与非流式（JSON）路由标识。 */
   streamRouteId: HostedGenerationRouteId;
@@ -94,6 +97,8 @@ export interface QuestionnaireGenerationFamily<
   streamCardFallbackName?(input: QuestionnaireGenerationInput): string | undefined;
   /** direct 通路的结构化生成配置（system prompt/schema/temperature/promptBuilder）。 */
   createStructuredConfig(intent: TIntent): QuestionnaireStructuredConfig;
+  /** direct Markdown 流式配置：复用 Web 的问卷、设定与语言提示词。 */
+  createDirectStreamConfig?(intent: TIntent, input: QuestionnaireGenerationInput): QuestionnaireStreamConfig;
   /** 结构化结果 → 未签名结果卡（direct 通路产出）。 */
   buildStructuredCard(data: unknown, answers: readonly QuestionnaireAnswerItem[]): QuestionnaireResultCardData;
   /** hosted JSON 响应 `data` → 结构化结果卡（schema 校验 + 透传字段）。 */
@@ -155,6 +160,9 @@ const adaptQuestionnaireFamily = <
   jsonRouteId: family.jsonRouteId,
   buildHostedBody,
   createDirectConfig: (intent) => family.createStructuredConfig(intent),
+  ...(family.createDirectStreamConfig
+    ? { createDirectStreamConfig: (intent: TIntent, input: QuestionnaireGenerationInput) => family.createDirectStreamConfig!(intent, input) }
+    : {}),
   buildStructuredCard: (data, input) => ({
     card: family.buildStructuredCard(data, input.answers),
     cardKind: family.structuredCardKind,

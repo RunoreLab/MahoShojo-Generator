@@ -11,10 +11,11 @@ import {
 /**
  * 创作工房「流式模板」的 direct 通路结构化生成配置（D5.1-G3）。
  *
- * Desktop direct（本机/远端 Provider）恒为结构化 JSON 通路，无法复刻 hosted
- * SSE 的裸 Markdown 输出；因此对 `general`/`general-scenario` 模板改用与
- * 自由生成同一组 `{name|title, content}` schema——`content` 即 Markdown 正文，
+ * Desktop direct（本机/远端 Provider）非流式兼容通路对
+ * `general`/`general-scenario` 模板使用与自由生成同一组
+ * `{name|title, content}` schema——`content` 即 Markdown 正文，
  * 产出卡形与流式卡一致（`templateId=通用角色/通用情景`）。
+ * direct 流式则直接复用 domain `buildCreatorStreamPrompt` 输出裸 Markdown。
  *
  * 业务上下文与 hosted/stream prompt 完全同源：`buildCreatorContextSections`
  * 产出【创作约束】→【参考设定】→【问卷回答】三节，规则事实经同一投影进入

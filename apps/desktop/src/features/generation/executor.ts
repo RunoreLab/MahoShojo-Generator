@@ -18,7 +18,7 @@ import {
 import { exceedsUtf8ByteLimit } from '@mahoshojo/domain/data-card-size';
 import type { JsonValue } from '@mahoshojo/contracts/json-value';
 import type { UserGenerationOverrides } from '@mahoshojo/ai-core/generation-settings';
-import { collectAiStreamResult, type AiStreamEvent } from '@mahoshojo/ai-core/stream-events';
+import { collectAiStreamResult, looksLikeTrivialEmptyOutput, type AiStreamEvent } from '@mahoshojo/ai-core/stream-events';
 
 import {
   createDesktopAiExecutionPort,
@@ -39,10 +39,12 @@ export interface DesktopGenerationIntent {
   requestId: string;
   mode: DesktopExecutionMode;
   modelId?: string;
+  /** 输出形态与执行位置正交；缺省保持既有结构化生成兼容。 */
+  generationMode?: 'stream' | 'non-stream';
   /**
    * 连接级高级生成设置（D5.0b 统一配置状态）。
    * 逐项覆盖任务默认值。direct 通路下发 temperature/maxOutputTokens（native
-   * `AiExecutionRequest` 尚无 thinking 字段，`thinking` 只持久化不下发）；
+   * 生成编排尚不下发 `thinking`，该偏好保持原兼容行为）；
    * hosted 通路经 `systemConfig.generationOverrides` 携带到服务器解析
    * （D5.1-AIP-r1），语义与 Web `customProvider.generationOverrides` 一致。
    */
@@ -103,6 +105,13 @@ export class GenerationTransportError extends Error {
 
 type StructuredSchema = Parameters<typeof buildStructuredJsonInstructionFromZodSchema>[0];
 
+/** direct Markdown 流式配置：复用 Web 提示词，不附加结构化 JSON 指令。 */
+export interface DesktopDirectStreamGenerationConfig<TInput> {
+  systemPrompt: string;
+  temperature: number;
+  promptBuilder(input: TInput): string;
+}
+
 /** direct 通路的结构化生成配置：与 ai-core 的 `<family>GenerationConfig` 同形。 */
 export interface DesktopDirectGenerationConfig<TInput> {
   systemPrompt: string;
@@ -128,7 +137,7 @@ export interface DesktopGenerationFamily<
   TCardKind extends string = string,
 > {
   /** dispatch 前的输入校验；抛出的 Error.message 如实投影为失败原因。 */
-  validateInput?(input: TInput): void;
+  validateInput?(input: TInput, intent: TIntent): void;
   /** hosted 流式（SSE）与非流式（JSON）路由标识。 */
   streamRouteId: HostedGenerationRouteId;
   jsonRouteId: HostedJsonGenerationRouteId;
@@ -136,6 +145,7 @@ export interface DesktopGenerationFamily<
   buildHostedBody(input: TInput): Record<string, JsonValue>;
   /** direct 通路的结构化生成配置（system prompt/schema/temperature/promptBuilder）。 */
   createDirectConfig(intent: TIntent, input: TInput): DesktopDirectGenerationConfig<TInput>;
+  createDirectStreamConfig?(intent: TIntent, input: TInput): DesktopDirectStreamGenerationConfig<TInput>;
   /** direct 结构化 data → 结果卡（无签名通路产出）。 */
   buildStructuredCard(data: unknown, input: TInput): GenerationCardProjection<TCardKind>;
   /** hosted SSE Markdown → 结果卡。 */
@@ -171,7 +181,12 @@ const executeDirectGeneration = async <
   onPartialText?: (text: string) => void,
 ): Promise<DesktopGenerationOutcome<TCardKind>> => {
   const snapshot = clone(input);
-  const config = family.createDirectConfig(intent, snapshot);
+  const streaming = intent.generationMode === 'stream';
+  if (streaming && !family.createDirectStreamConfig) {
+    return { status: 'failed', mode: intent.mode, rawText: '', code: 'invalid-request', message: '当前生成类型不支持客户端流式输出。' };
+  }
+  const structuredConfig = streaming ? null : family.createDirectConfig(intent, snapshot);
+  const config = structuredConfig ?? family.createDirectStreamConfig!(intent, snapshot);
   // 本函数只服务 direct 两通路；hosted 在入口处分流，这里把 mode 收窄回 contract 枚举。
   const directMode = intent.mode === 'direct-remote' ? 'direct-remote' : 'direct-local';
   const request: AiExecutionRequest = {
@@ -180,7 +195,11 @@ const executeDirectGeneration = async <
     mode: directMode,
     ...(intent.modelId === undefined ? {} : { modelId: intent.modelId }),
     messages: [
-      { role: 'system', content: `${config.systemPrompt}\n\n${buildStructuredJsonInstructionFromZodSchema(config.schema)}` },
+      ...(structuredConfig || config.systemPrompt.trim()
+        ? [{ role: 'system' as const, content: structuredConfig
+          ? `${config.systemPrompt}\n\n${buildStructuredJsonInstructionFromZodSchema(structuredConfig.schema)}`
+          : config.systemPrompt }]
+        : []),
       { role: 'user', content: config.promptBuilder(snapshot) },
     ],
     temperature: intent.overrides?.temperature ?? config.temperature,
@@ -233,9 +252,16 @@ const executeDirectGeneration = async <
   if (result.finishReason !== 'stop') {
     return { status: 'invalid-output', mode: intent.mode, result, rawText, message: '生成未正常结束，请保留原始输出后重试。' };
   }
+  if (streaming && looksLikeTrivialEmptyOutput(rawText)) {
+    return { status: 'invalid-output', mode: intent.mode, result, rawText, message: 'AI 返回空对象或空内容，未收到有效正文，请重试或切换模型。' };
+  }
   try {
-    const { data } = parseStructuredJsonWithSchema(rawText, config.schema, { taskName: config.taskName });
-    const projection = family.buildStructuredCard(data, snapshot);
+    const projection = streaming
+      ? family.buildStreamCard(rawText, snapshot)
+      : family.buildStructuredCard(
+        parseStructuredJsonWithSchema(rawText, structuredConfig!.schema, { taskName: structuredConfig!.taskName }).data,
+        snapshot,
+      );
     return {
       status: 'completed',
       mode: intent.mode,
@@ -243,6 +269,10 @@ const executeDirectGeneration = async <
       card: projection.card,
       cardKind: projection.cardKind,
       rawText,
+      reasoning: result.output.reasoning ? {
+        status: 'done', source: 'provider', text: result.output.reasoning,
+        reasoningTokens: result.usage?.reasoningTokens ?? null,
+      } : null,
     };
   } catch {
     return { status: 'invalid-output', mode: intent.mode, result, rawText, message: `输出未通过${family.cardNoun}校验，原始内容已保留。` };
@@ -575,7 +605,7 @@ export const executeDesktopGeneration = async <
   if (signal.aborted) {
     return { status: 'cancelled', mode: intent.mode, rawText: '', reason: 'aborted' };
   }
-  family.validateInput?.(input);
+  family.validateInput?.(input, intent);
   if (intent.mode === 'hosted-stream' || intent.mode === 'hosted-json') {
     const routeId = intent.mode === 'hosted-stream' ? family.streamRouteId : family.jsonRouteId;
     const body = family.buildHostedBody(input);

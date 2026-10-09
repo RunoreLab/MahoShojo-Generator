@@ -295,3 +295,10 @@ export const collectAiStreamResult = async (
 };
 
 export type { AiExecutionResult, AiExecutionUsage };
+
+/** 与 Web 原始流式生成相同的空壳判定；不修剪或改写有效正文。 */
+export const looksLikeTrivialEmptyOutput = (text: string): boolean => {
+  const trimmed = text.trim().replace(/^\uFEFF/, '');
+  return !trimmed || trimmed === 'null' || trimmed === 'undefined'
+    || /^\{\s*\}$/.test(trimmed) || /^\[\s*\]$/.test(trimmed);
+};

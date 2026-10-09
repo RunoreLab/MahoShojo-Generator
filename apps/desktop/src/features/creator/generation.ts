@@ -21,6 +21,7 @@ import { buildPersistedCreationInputs } from '@mahoshojo/domain/creator/card-met
 import { buildCreatorPromptText } from '@mahoshojo/domain/creator/prompt';
 import { buildCreatorGenerationRequestBody } from '@mahoshojo/domain/creator/request-body';
 import { buildCreatorPromptInput, validateCreatorRequest } from '@mahoshojo/domain/creator/server';
+import { buildCreatorStreamPrompt } from '@mahoshojo/domain/creator/stream-prompt';
 import { finalizeCreatorStreamCard } from '@mahoshojo/domain/creator/stream-result';
 import {
   isCreatorStreamTemplate,
@@ -34,6 +35,7 @@ import type {
 } from '@mahoshojo/domain/creator/types';
 import {
   compactQuestionnaireAnswerItems,
+  formatQuestionnaireAnswers,
   type QuestionnaireAnswerItem,
 } from '@mahoshojo/domain/questionnaire';
 import type { QuestionnaireSelection } from '@mahoshojo/domain/questionnaire-selection';
@@ -57,11 +59,12 @@ import { createStructuredCardNormalizer } from '../questionnaire/generation';
  * （构建规则 runtime 结果）、自由补充说明、多问卷答案共同构成一次创作请求。
  * - hosted 请求体走 `buildCreatorGenerationRequestBody` 共源组装（键序与 Web
  *   提交段逐键对拍；renderer 不注入 customProvider 等凭据字段——native 拒绝）；
- * - direct 通路按模板分派结构化配置：magical-girl/canshou 复用问卷家族配置
+ * - direct 非流式按模板分派结构化配置：magical-girl/canshou 复用问卷家族配置
  *   并注入 `creatorPromptText`（与 hosted `generate-creator-runtime` 同位序），
  *   general/general-scenario 走 `{name|title, content}` JSON schema（产出卡形
  *   与流式 Markdown 卡一致）；
- * - hosted-stream 产出通用卡（无 resign，DESK-ONLINE-009 延期项），
+ * - direct-stream 与 hosted-stream 共用 Markdown prompt 与通用卡构造，
+ *   产物不签名（hosted 无 resign，DESK-ONLINE-009 延期项）；
  *   hosted-json 产出结构化卡并可携带官方签名。
  */
 export type CreatorExecutionMode = DesktopExecutionMode;
@@ -220,11 +223,15 @@ const CREATOR_GENERATION_FAMILY: DesktopGenerationFamily<
   CreatorGenerationIntent,
   CreatorCardKind
 > = {
-  validateInput: (input) => {
+  validateInput: (input, intent) => {
     // 'scenario' 模板当前不接任何生成通路（hosted 两路由白名单不含、direct 无
     // 对应结构化配置）——显式拒绝，防止静默落到 magical-girl 分派分支。
     if (input.template === 'scenario') {
       throw new Error('「情景（结构化）」模板暂未接入生成通路，请选择其他创作模板。');
+    }
+    if ((intent.mode === 'hosted-stream' || (intent.mode.startsWith('direct-') && intent.generationMode === 'stream'))
+      && !isCreatorStreamTemplate(input.template)) {
+      throw new Error('流式生成仅支持通用角色卡与通用情景卡，请切换模板或使用非流式生成。');
     }
     try {
       validateCreatorRequest(buildCreatorRequestInput(input));
@@ -269,6 +276,21 @@ const CREATOR_GENERATION_FAMILY: DesktopGenerationFamily<
         language: input.language,
         loreText: input.loreText,
         creatorPromptText,
+      }),
+    };
+  },
+  createDirectStreamConfig: (_intent, input) => {
+    const template = input.template;
+    if (!isCreatorStreamTemplate(template)) throw new Error('当前创作模板不支持流式生成。');
+    return {
+      systemPrompt: '',
+      temperature: 0.75,
+      promptBuilder: (snapshot) => buildCreatorStreamPrompt({
+        template,
+        language: snapshot.language,
+        creatorPromptText: buildCreatorPromptTextFor(snapshot),
+        questionnaireAnswerText: formatQuestionnaireAnswers(snapshot.answers),
+        loreText: snapshot.loreText,
       }),
     };
   },

@@ -1,3 +1,4 @@
+import { looksLikeTrivialEmptyOutput } from '@mahoshojo/ai-core/stream-events';
 import { streamText, NoObjectGeneratedError } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
@@ -311,15 +312,6 @@ async function generateWithStreamAIUsing(
 	                const thinkingDisabledApplied =
 	                    resolvedSettings.thinkingResolution.requestedMode === 'disabled' &&
 	                    resolvedSettings.thinkingResolution.disposition === 'applied';
-
-		                const looksLikeTrivialEmptyOutput = (text: string) => {
-		                    const trimmed = text.trim().replace(/^\uFEFF/, '');
-		                    if (!trimmed) return true;
-		                    if (trimmed === 'null' || trimmed === 'undefined') return true;
-		                    if (/^\{\s*\}$/.test(trimmed)) return true;
-		                    if (/^\[\s*\]$/.test(trimmed)) return true;
-		                    return false;
-		                };
 
 		                const EMPTY_OUTPUT_ERROR_MESSAGE =
 		                    'AI 返回空对象/空内容（{} / [] / 空白），未收到有效正文，请重试或切换模型。';

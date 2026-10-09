@@ -1,6 +1,8 @@
 import {
+  buildScenarioStreamPrompt,
   createScenarioGenerationConfig,
   SCENARIO_GENERATION_SCHEMA,
+  SCENARIO_STREAM_TEMPERATURE,
 } from '@mahoshojo/ai-core/scenario-generation';
 import { buildGeneralScenarioCardFromMarkdown } from '@mahoshojo/domain/markdown-card';
 import { GENERAL_SCENARIO_TEMPLATE_ID } from '@mahoshojo/domain/data-cards';
@@ -22,7 +24,7 @@ import {
  * `@mahoshojo/ai-core/scenario-generation` 共源核；通路编排/取消/uncertain
  * 走通用执行器。
  * 卡型两种：'scenario'（结构化，hosted-json 可由服务器签名）与
- * 'general-scenario'（hosted-stream Markdown 卡，永不签名）。
+ * 'general-scenario'（direct/hosted 流式 Markdown 卡，永不签名）。
  */
 export type ScenarioExecutionMode = DesktopExecutionMode;
 
@@ -116,6 +118,11 @@ const SCENARIO_GENERATION_FAMILY: DesktopGenerationFamily<
       language: input.language,
       fieldsToKeepEmpty: input.fieldsToKeepEmpty,
     }),
+  createDirectStreamConfig: () => ({
+    systemPrompt: '',
+    temperature: SCENARIO_STREAM_TEMPERATURE,
+    promptBuilder: buildScenarioStreamPrompt,
+  }),
   buildStructuredCard: (data) => {
     // direct 通路输出是模型生成的——metadata.signature 属于伪造声明，剥除
     //（签名串只在 hosted-json 通路上可信归一化；见 normalizeHostedJsonCard）。

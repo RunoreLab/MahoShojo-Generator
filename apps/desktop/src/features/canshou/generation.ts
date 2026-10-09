@@ -1,4 +1,5 @@
 import {
+  buildCanshouStreamPrompt,
   buildUnsignedCanshouCard,
   CANSHOU_GENERATION_SCHEMA,
   createCanshouGenerationConfig,
@@ -74,6 +75,16 @@ const CANSHOU_GENERATION_FAMILY: QuestionnaireGenerationFamily<CanshouGeneration
   streamCardDefaultName: '残兽',
   // 与 Web `CanshouPage` 一致：流式卡不提供 fallbackName，只用正文标题/默认名。
   createStructuredConfig: () => createCanshouGenerationConfig(CANSHOU_LORE),
+  createDirectStreamConfig: () => ({
+    systemPrompt: '',
+    temperature: 0.8,
+    promptBuilder: (input) => buildCanshouStreamPrompt({
+      answers: input.answers,
+      questionnairesLore: input.loreText,
+      canshouLore: CANSHOU_LORE,
+      language: input.language,
+    }),
+  }),
   buildStructuredCard: (data, answers) =>
     buildUnsignedCanshouCard(data as CanshouGeneratedData, [...answers]),
   normalizeStructuredCard: normalizeCanshouResultCard,

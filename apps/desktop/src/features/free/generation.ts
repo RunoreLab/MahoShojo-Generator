@@ -1,5 +1,8 @@
 import {
+  buildFreeStreamPrompt,
   createFreeGenerationConfig,
+  FREE_GENERATION_SCHEMA_IDS,
+  isFreeStreamSchemaId,
   sanitizeFreeCard,
   validateFreeOutput,
   type FreeSchemaId,
@@ -96,13 +99,29 @@ const FREE_GENERATION_FAMILY: DesktopGenerationFamily<
   FreeGenerationIntent,
   FreeCardKind
 > = {
-  validateInput: (input) => {
+  validateInput: (input, intent) => {
     if (!input.prompt.trim()) throw new Error('请先输入提示词。');
+    if (!FREE_GENERATION_SCHEMA_IDS.includes(input.schema)) {
+      throw new Error('不支持的数据卡结构，请选择受支持的模板。');
+    }
+    if ((intent.mode === 'hosted-stream' || (intent.mode.startsWith('direct-') && intent.generationMode === 'stream'))
+      && !isFreeStreamSchemaId(input.schema)) {
+      throw new Error('流式生成仅支持通用角色卡与通用情景卡，请切换模板或使用非流式生成。');
+    }
   },
   streamRouteId: 'generate-free-stream',
   jsonRouteId: 'generate-free',
   buildHostedBody,
   createDirectConfig: (_intent, input) => createFreeGenerationConfig(input.schema),
+  createDirectStreamConfig: (_intent, input) => {
+    const schema = input.schema;
+    if (!isFreeStreamSchemaId(schema)) throw new Error('当前数据卡结构不支持流式生成。');
+    return {
+      systemPrompt: '',
+      temperature: 0.75,
+      promptBuilder: (snapshot) => buildFreeStreamPrompt({ ...snapshot, schema }),
+    };
+  },
   buildStructuredCard: (data, input) => ({
     card: normalizeFreeResultCard(input.schema, data, new Date().toISOString()),
     cardKind: input.schema,

@@ -1,4 +1,5 @@
 import {
+  buildMagicalGirlDetailsStreamPrompt,
   buildUnsignedMagicalGirlDetailsCard,
   createMagicalGirlDetailsGenerationConfig,
   MAGICAL_GIRL_DETAILS_SCHEMA,
@@ -78,6 +79,16 @@ const DETAILS_GENERATION_FAMILY: QuestionnaireGenerationFamily<DetailsGeneration
   streamCardDefaultName: '魔法少女',
   streamCardFallbackName: (input) => input.answers[0]?.answer ?? '',
   createStructuredConfig: (intent) => createMagicalGirlDetailsGenerationConfig(() => intent.flowers),
+  createDirectStreamConfig: (intent) => ({
+    systemPrompt: '',
+    temperature: 0.75,
+    promptBuilder: (input) => buildMagicalGirlDetailsStreamPrompt({
+      answers: input.answers,
+      questionnaireLore: input.loreText,
+      language: input.language,
+      flowers: intent.flowers,
+    }),
+  }),
   buildStructuredCard: (data, answers) =>
     buildUnsignedMagicalGirlDetailsCard(data as MagicalGirlDetailsGeneratedData, [...answers]),
   normalizeStructuredCard: normalizeMagicalGirlDetailsResultCard,
