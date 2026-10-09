@@ -73,6 +73,45 @@ const expectSharedOutput = (css: string, artifact: string): void => {
     });
     return declarations;
   };
+  // 字体声明一致仍不等于实际字形一致；此处只守住构建后的显式回退契约。
+  const family = (value: string | undefined) => value?.replace(/[\s'"]/g, '');
+  const sans = 'Arial,MicrosoftYaHei,PingFangSC,NotoSansCJKSC,NotoSansSC,sans-serif';
+  const mono = 'ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,LiberationMono,CourierNew,MicrosoftYaHei,PingFangSC,NotoSansCJKSC,NotoSansSC,monospace';
+  expect(family(declarationsFor(':root')['--app-font-sans']), artifact).toBe(sans);
+  expect(family(declarationsFor(':root')['--app-font-mono']), artifact).toBe(mono);
+  expect(declarationsFor('.font-mono')['font-family'], artifact).toBe('var(--app-font-mono)');
+  expect(declarationsFor('.font-sans')['font-family'], artifact).toBe('var(--app-font-sans)');
+  const layersFor = (selector: string, property: string, value: string): string[] => {
+    const layers: string[] = [];
+    stylesheet.walkRules((rule) => {
+      if (!rule.selector.split(',').map((part) => part.trim()).includes(selector)) return;
+      rule.walkDecls(property, (decl) => {
+        if (decl.value !== value) return;
+        let parent = rule.parent;
+        while (parent && parent.type !== 'root') {
+          if (parent.type === 'atrule' && parent.name === 'layer') layers.push(parent.params);
+          parent = parent.parent;
+        }
+      });
+    });
+    return layers;
+  };
+  expect(layersFor('body', 'font-family', 'var(--app-font-sans)'), artifact).toContain('base');
+  expect(layersFor('pre', 'font-family', 'var(--app-font-mono)'), artifact).toContain('base');
+  expect(layersFor('.font-mono', 'font-family', 'var(--app-font-mono)'), artifact).toContain('utilities');
+  for (const control of ['button', 'input', 'select', 'textarea']) {
+    expect(layersFor(control, 'font', 'inherit'), artifact).toContain('base');
+  }
+
+  // Minification may merge html/body or code-family selectors. Inspect individual selector members.
+  const fontRules: Record<string, string> = {};
+  stylesheet.walkRules((rule) => {
+    rule.walkDecls('font-family', (decl) => {
+      for (const selector of rule.selector.split(',').map((value) => value.trim())) fontRules[selector] = decl.value;
+    });
+  });
+  expect(fontRules.body, artifact).toBe('var(--app-font-sans)');
+  expect(fontRules.pre, artifact).toBe('var(--app-font-mono)');
   // 问卷操作区不能退回宿主文字按钮；两端真实 CSS 都须带共享布局与焦点/主题。
   expect(declarationsFor('.ui-web-questionnaire-navigation'), artifact).toMatchObject({ display: 'grid' });
   expect(declarationsFor('.ui-web-questionnaire-navigation')['grid-template-columns']?.replace(/\s/g, ''), artifact)
@@ -139,6 +178,16 @@ describe('shared theme reaches the Desktop production stylesheet', () => {
     }
 
     expectSharedOutput(css, 'Desktop 产物');
+  });
+});
+
+describe('product typography has a single owner', () => {
+  it('does not let host body or the blue theme replace shared font families', () => {
+    for (const file of [WEB_GLOBALS_CSS, path.join(WEB_ROOT, 'styles', 'blue-theme.css'), path.join(REPO_ROOT, 'apps', 'desktop', 'src', 'styles', 'globals.css')]) {
+      // gc-card is a deliberately separate decorative Web card, not a global host font.
+      const css = readFileSync(file, 'utf8').replace(/\.gc-card\s*\{[^}]*\}/g, '');
+      expect(css, file).not.toMatch(/font-family\s*:/);
+    }
   });
 });
 

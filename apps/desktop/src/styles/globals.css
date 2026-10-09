@@ -36,5 +36,4 @@ body {
   background-size: cover;
   min-height: 100vh;
   color: var(--app-text);
-  font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
 }

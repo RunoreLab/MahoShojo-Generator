@@ -38,6 +38,31 @@
  */
 @source "./**/*.{ts,tsx}";
 
+/* 同一产品的本机字体契约，不下载 Web Font。Arial 延续 Web 西文字体；显式
+ * CJK 回退避免 Edge 用户设置与 WebView2 generic 字体映射选出不同中文字体。
+ * mono 先保留拉丁代码等宽字体，CJK 无对应字形时再用无衬线回退；不承诺 CJK 等宽。
+ * --font-* 同时供 Tailwind preflight、font-sans/font-mono 与表单继承使用。 */
+:root {
+  --app-font-sans: Arial, "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Noto Sans SC", sans-serif;
+  --app-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Noto Sans SC", monospace;
+}
+
+@theme inline {
+  --font-sans: var(--app-font-sans);
+  --font-mono: var(--app-font-mono);
+}
+
+@layer base {
+  html, body {
+    font-family: var(--app-font-sans);
+  }
+
+  code, kbd, samp, pre {
+    font-family: var(--app-font-mono);
+  }
+}
+
+
 /*
  * 共享表单/选择器底座样式。
  *
