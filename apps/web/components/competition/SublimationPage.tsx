@@ -45,7 +45,7 @@ import { authStorage } from '@/lib/auth';
 import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-latch';
 import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import { formatDateTime } from '@/lib/constants';
-import { formatNarrativeHistoryEntriesForReference, mergeNarrativeHistoryText } from '@/lib/narrative-history';
+import { composeSublimationNarrativeHistoryReference } from '@/lib/narrative-history';
 import { mapDataCardSourceMeta } from '@/lib/data-card-read-mappers';
 import {
   normalizeQuestionnaireDefinition,
@@ -897,16 +897,11 @@ export const SublimationPage: React.FC = () => {
         let shouldStartCooldown = false;
 
 	        try {
-                const selectedArenaNarrativeEntryIds = new Set(
-                    Array.isArray(arenaNarrativeSelectedIds) ? arenaNarrativeSelectedIds : []
+                const finalNarrativeHistoryText = composeSublimationNarrativeHistoryReference(
+                    arenaNarrativeEntries,
+                    arenaNarrativeSelectedIds,
+                    narrativeHistory
                 );
-                const selectedArenaNarrativeEntries = Array.isArray(arenaNarrativeEntries)
-                    ? arenaNarrativeEntries.filter((entry) => entry && selectedArenaNarrativeEntryIds.has(entry.id))
-                    : [];
-                const arenaNarrativeText = formatNarrativeHistoryEntriesForReference(selectedArenaNarrativeEntries, {
-                    sourceLabel: '竞技场叙事历史',
-                });
-                const finalNarrativeHistoryText = mergeNarrativeHistoryText(arenaNarrativeText, narrativeHistory);
 
 	            const textToCheck = extractTextForCheck(characterData) + " " + userGuidance + " " + finalNarrativeHistoryText + " " + questionnaireLoreText;
 	            const redirectTarget = await getSensitiveWordRedirectTarget(textToCheck, {

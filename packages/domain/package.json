@@ -60,6 +60,11 @@
       "import": "./src/questionnaire-card.ts",
       "default": "./src/questionnaire-card.ts"
     },
+    "./narrative-history-operations": {
+      "types": "./src/narrative-history-operations.ts",
+      "import": "./src/narrative-history-operations.ts",
+      "default": "./src/narrative-history-operations.ts"
+    },
     "./narrative-history": {
       "types": "./src/narrative-history.ts",
       "import": "./src/narrative-history.ts",
