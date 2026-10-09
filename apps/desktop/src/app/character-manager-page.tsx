@@ -182,7 +182,7 @@ export function DesktopCharacterManager() {
   const hasUnsavedChanges = draft !== null && baseline !== snapshotOf(draft);
   const hasUnsavedLocalRecord = draft !== null && draft.original === null;
   // 自动保存暂停时，尚未载入编辑器的粘贴内容也只在内存里；旧保留草稿本身不阻止离开。
-  const hasUnpersistedPaste = (draftBlocked !== null || autoSaveFailed) && draft === null && pasted.trim() !== '';
+  const hasUnpersistedPaste = (draftBlocked !== null || autoSaveFailed || autoSaveTimestamp === null) && draft === null && pasted.trim() !== '';
   const needsLeaveGuard = hasUnsavedChanges || hasUnsavedLocalRecord || hasUnpersistedPaste;
   const unsavedGuardRef = useRef(false);
   unsavedGuardRef.current = needsLeaveGuard;
@@ -444,6 +444,8 @@ export function DesktopCharacterManager() {
   };
 
   const importText = (text: string) => {
+    if (!mountedRef.current || savingRef.current) return;
+    requestRef.current += 1;
     const parsed = parseImportedCard(text);
     if (!parsed.ok) {
       setNotice({ tone: 'alert', text: parsed.error });
@@ -492,6 +494,7 @@ export function DesktopCharacterManager() {
 
   const handleTemplateSelect = useCallback((target: DataCardTemplate) => {
     if (savingRef.current) return;
+    requestRef.current += 1;
     try {
       if (draft === null) {
         const data = createBlankEditableCardData(target);
@@ -549,6 +552,7 @@ export function DesktopCharacterManager() {
       return;
     }
     if (unsavedGuardRef.current && !window.confirm('载入新数据卡将放弃当前尚未保存到本地库的内容。继续？')) return;
+    requestRef.current += 1;
     const data = cloudPayloadToCardData(payload);
     open({
       original: null,
@@ -569,6 +573,7 @@ export function DesktopCharacterManager() {
   const save = async () => {
     if (draft === null || savingRef.current || !guard.ready) return;
     savingRef.current = true;
+    requestRef.current += 1;
     setSaving(true);
     setNotice(null);
     let savedId: string | null = null;
@@ -765,11 +770,18 @@ export function DesktopCharacterManager() {
             <>
               <CharacterManagerImportSection
                 onFile={(file) => {
+                  if (savingRef.current) return;
+                  const request = ++requestRef.current;
                   if (file.size > MAX_IMPORT_FILE_BYTES) {
                     setNotice({ tone: 'alert', text: '文件超过单张数据卡的大小上限（4 MiB）。' });
                     return;
                   }
-                  void file.text().then(importText, () => setNotice({ tone: 'alert', text: '读取文件失败，请重试。' }));
+                  // 文件读取同 URL 读取共享新意图序号；较晚的导入/模板/切卡/保存会作废旧读取。
+                  void file.text().then((text) => {
+                    if (mountedRef.current && request === requestRef.current && !savingRef.current) importText(text);
+                  }, () => {
+                    if (mountedRef.current && request === requestRef.current) setNotice({ tone: 'alert', text: '读取文件失败，请重试。' });
+                  });
                 }}
                 fileLabel="上传 .json 设定文件（支持角色、情景、万途通用卡）"
                 fileExtra={(
@@ -780,7 +792,7 @@ export function DesktopCharacterManager() {
                 pasteOpen={pasteOpen}
                 onPasteOpenChange={setPasteOpen}
                 pasteValue={pasted}
-                onPasteChange={setPasted}
+                onPasteChange={(value) => { requestRef.current += 1; setPasted(value); }}
                 onPasteLoad={() => importText(pasted)}
                 pasteBusy={false}
               />

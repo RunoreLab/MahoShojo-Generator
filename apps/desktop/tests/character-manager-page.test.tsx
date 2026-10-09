@@ -839,3 +839,73 @@ it('保存期间拒绝确认离开，强制卸载后的保存回调不导航回�
   await settle();
   expect(navigate).not.toHaveBeenCalled();
 });
+
+it('独审：清空失败存档后仍应保护内存中的粘贴内容', async () => {
+  window.location.hash = '#/character-manager';
+  await mount();
+  await expandPasteArea();
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
+  await type(container.querySelector<HTMLTextAreaElement>('textarea')!, '{"codename":"仅在内存"}');
+  await waitFor(() => container.textContent?.includes('页面草稿自动保存失败') === true);
+  await click(button('清空本地草稿'));
+  vi.spyOn(window, 'confirm').mockReturnValue(false);
+  const prevented = vi.fn();
+  await act(async () => { close({ preventDefault: prevented }); });
+  expect(container.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('{"codename":"仅在内存"}');
+  expect(prevented).toHaveBeenCalledOnce();
+});
+
+it('独审：较旧文件读取返回时不得覆盖用户已载入的新内容', async () => {
+  window.location.hash = '#/character-manager';
+  await mount();
+  await waitFor(() => container.querySelector('input[type="file"]') !== null);
+  let release!: (text: string) => void;
+  const file = new File(['{}'], 'old.json', { type: 'application/json' });
+  Object.defineProperty(file, 'text', { value: () => new Promise<string>(r => { release = r; }) });
+  const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+  Object.defineProperty(input, 'files', { value: [file] });
+  await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
+  await expandPasteArea();
+  await type(container.querySelector<HTMLTextAreaElement>('textarea')!, '{"codename":"用户已载入的新内容"}');
+  await click(button('从文本加载数据'));
+  expect(container.textContent).toContain('编辑角色: 用户已载入的新内容');
+  await act(async () => release('{"codename":"旧文件"}'));
+  expect(container.textContent).toContain('编辑角色: 用户已载入的新内容');
+});
+
+it.each(['success', 'failure'] as const)('较旧文件读取%s在新文件加载后不覆盖内容或诊断', async (ending) => {
+  window.location.hash = '#/character-manager';
+  await mount();
+  await waitFor(() => container.querySelector('input[type="file"]') !== null);
+  let release!: (text: string) => void;
+  let reject!: (cause: Error) => void;
+  const oldFile = new File(['{}'], 'old.json');
+  Object.defineProperty(oldFile, 'text', { value: () => new Promise<string>((resolve, fail) => { release = resolve; reject = fail; }) });
+  const newFile = new File(['{}'], 'new.json');
+  Object.defineProperty(newFile, 'text', { value: async () => '{"codename":"新文件"}' });
+  const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+  Object.defineProperty(input, 'files', { configurable: true, value: [oldFile] });
+  await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
+  Object.defineProperty(input, 'files', { configurable: true, value: [newFile] });
+  await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
+  expect(container.textContent).toContain('编辑角色: 新文件');
+  await act(async () => ending === 'success' ? release('{"codename":"旧文件"}') : reject(new Error('late read')));
+  expect(container.textContent).toContain('编辑角色: 新文件');
+  expect(container.textContent).not.toContain('读取文件失败');
+});
+
+it('尚未载入的新粘贴输入会作废旧文件读取', async () => {
+  window.location.hash = '#/character-manager';
+  await mount();
+  let release!: (text: string) => void;
+  const file = new File(['{}'], 'old.json');
+  Object.defineProperty(file, 'text', { value: () => new Promise<string>((resolve) => { release = resolve; }) });
+  const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+  Object.defineProperty(input, 'files', { value: [file] });
+  await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
+  await expandPasteArea();
+  await type(container.querySelector<HTMLTextAreaElement>('textarea')!, '{"codename":"尚未载入的新内容"}');
+  await act(async () => release('{"codename":"旧文件"}'));
+  expect(container.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('{"codename":"尚未载入的新内容"}');
+  expect(container.textContent).not.toContain('编辑角色: 旧文件');
+});
