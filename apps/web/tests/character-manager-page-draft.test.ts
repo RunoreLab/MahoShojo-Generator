@@ -2,6 +2,10 @@ import { describe, expect, test } from 'vitest';
 
 import {
   buildCharacterManagerPageDraftPayload,
+  CHARACTER_MANAGER_PAGE_DRAFT_KEY,
+  readCharacterManagerPageDraftState,
+  writeCharacterManagerPageDraft,
+  clearCharacterManagerPageDraft,
   restoreCharacterManagerPageDraft,
 } from '@/lib/character-manager-page-draft';
 
@@ -78,5 +82,21 @@ describe('character manager page draft helpers', () => {
   test('returns null for broken payloads', () => {
     expect(restoreCharacterManagerPageDraft(null)).toBeNull();
     expect(restoreCharacterManagerPageDraft('broken')).toBeNull();
+  });
+});
+
+
+describe('Web 角色管理非破坏草稿持久化', () => {
+  test.each(['{broken', JSON.stringify({ version: 20, updatedAt: Date.now(), payload: {} }), JSON.stringify({ version: 1, updatedAt: 1, payload: {} }), JSON.stringify({ version: 1, updatedAt: Date.now(), payload: { pastedJson: 'keep', characterData: 'broken', originalData: {} } })])('自动保存与空态清理都保留原字节：%s', (raw) => {
+    localStorage.setItem(CHARACTER_MANAGER_PAGE_DRAFT_KEY, raw);
+    expect(readCharacterManagerPageDraftState().kind).toBe('blocked');
+    const input = { pastedJson: '新输入', characterData: null, originalData: null, isNative: false, selectedTemplate: 'unknown' as const };
+    expect(writeCharacterManagerPageDraft(input)).toBeNull();
+    expect(writeCharacterManagerPageDraft({ ...input, pastedJson: '' })).toBeNull();
+    expect(localStorage.getItem(CHARACTER_MANAGER_PAGE_DRAFT_KEY)).toBe(raw);
+    expect(clearCharacterManagerPageDraft()).toBe(true);
+    expect(writeCharacterManagerPageDraft(input)).not.toBeNull();
+    expect(readCharacterManagerPageDraftState().kind).toBe('ready');
+    clearCharacterManagerPageDraft();
   });
 });

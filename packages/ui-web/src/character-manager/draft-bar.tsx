@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import type { PageDraftBlockedReason } from '../client/pageDraft';
 
 /** 恢复时间来自已读取的草稿，不使用随后自动保存的新时间。 */
 export const formatCharacterManagerRestoredDraftMessage = (timestamp: number): string =>
@@ -8,6 +9,7 @@ export interface CharacterManagerDraftBarProps {
   /** 最近一次自动保存的时间戳（epoch ms）；`null` 表示尚无已保存草稿。 */
   readonly savedAt: number | null;
   readonly onClear: () => void;
+  readonly blockedReason?: PageDraftBlockedReason | null;
   /** 尚无已保存草稿时的提示文案（提及存储介质，宿主各自表述）。 */
   readonly pendingText?: ReactNode;
   readonly clearLabel?: ReactNode;
@@ -21,13 +23,16 @@ export interface CharacterManagerDraftBarProps {
 export function CharacterManagerDraftBar({
   savedAt,
   onClear,
+  blockedReason,
   pendingText = '当前输入会自动保存到浏览器，刷新后仍可恢复。',
   clearLabel = '清空本地草稿',
   formatSavedAt = (timestamp) => `已自动保存于 ${new Date(timestamp).toLocaleTimeString()}`,
 }: CharacterManagerDraftBarProps) {
   return (
     <div className="mb-6 flex flex-col gap-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-900 sm:flex-row sm:items-center sm:justify-between">
-      <span>{savedAt ? formatSavedAt(savedAt) : pendingText}</span>
+      <span role={blockedReason ? 'alert' : undefined}>{blockedReason
+        ? `${blockedReason === 'read-failed' ? '本地草稿读取失败' : blockedReason === 'expired' ? '已有本地草稿已过期' : blockedReason === 'version-mismatch' ? '已有本地草稿版本暂不支持' : '已有本地草稿格式无法识别'}，${blockedReason === 'read-failed' ? '未改动原存储' : '原内容已保留'}，自动保存已暂停。仍可编辑、保存到本地库或导出；清空本地草稿成功后恢复自动保存。`
+        : savedAt ? formatSavedAt(savedAt) : pendingText}</span>
       <button
         type="button"
         onClick={onClear}

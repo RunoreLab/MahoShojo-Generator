@@ -2,7 +2,8 @@ import type { InferableDataCardTemplate } from '@mahoshojo/domain/data-cards';
 
 import {
   clearPageDraft,
-  readPageDraft,
+  readPageDraftState,
+  type PageDraftReadState,
   writePageDraft,
   type StoredPageDraft,
 } from '../client/pageDraft';
@@ -94,33 +95,35 @@ export const restoreCharacterManagerPageDraft = (input: unknown): RestoredCharac
   };
 };
 
-export const clearCharacterManagerPageDraft = () => {
+export const clearCharacterManagerPageDraft = (): boolean =>
   clearPageDraft(CHARACTER_MANAGER_PAGE_DRAFT_KEY);
-};
 
-export const readCharacterManagerPageDraft = (): StoredPageDraft<CharacterManagerPageDraftPayload> | null => {
-  const stored = readPageDraft<CharacterManagerPageDraftPayload>(CHARACTER_MANAGER_PAGE_DRAFT_KEY, {
+export const readCharacterManagerPageDraftState = (): PageDraftReadState<CharacterManagerPageDraftPayload> => {
+  const state = readPageDraftState<unknown>(CHARACTER_MANAGER_PAGE_DRAFT_KEY, {
     version: CHARACTER_MANAGER_PAGE_DRAFT_VERSION,
     ttlMs: CHARACTER_MANAGER_PAGE_DRAFT_TTL_MS,
   });
+  if (state.kind !== 'ready') return state;
+  const raw = state.stored.payload;
+  if (isPlainObject(raw) && (
+    ('pastedJson' in raw && typeof raw.pastedJson !== 'string')
+    || ((raw.characterData != null || raw.originalData != null) && !(isPlainObject(raw.characterData) && isPlainObject(raw.originalData)))
+  )) return { kind: 'blocked', reason: 'invalid' };
+  const payload = normalizeCharacterManagerDraftPayload(raw);
+  if (!payload) return { kind: 'blocked', reason: 'invalid' };
+  return { kind: 'ready', stored: { ...state.stored, payload } };
+};
 
-  if (!stored) return null;
-
-  const payload = buildCharacterManagerPageDraftPayload(stored.payload);
-  if (!payload) {
-    clearCharacterManagerPageDraft();
-    return null;
-  }
-
-  return {
-    ...stored,
-    payload,
-  };
+/** 兼容原返回形状，但不再因读取失败而删除草稿。 */
+export const readCharacterManagerPageDraft = (): StoredPageDraft<CharacterManagerPageDraftPayload> | null => {
+  const state = readCharacterManagerPageDraftState();
+  return state.kind === 'ready' ? state.stored : null;
 };
 
 export const writeCharacterManagerPageDraft = (
   input: CharacterManagerPageDraftInput,
 ): StoredPageDraft<CharacterManagerPageDraftPayload> | null => {
+  if (readCharacterManagerPageDraftState().kind === 'blocked') return null;
   const payload = buildCharacterManagerPageDraftPayload(input);
   if (!payload) {
     clearCharacterManagerPageDraft();

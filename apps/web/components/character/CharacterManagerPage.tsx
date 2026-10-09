@@ -19,6 +19,7 @@ import {
 } from '@/lib/wantu-card/character-manager';
 import Footer from '@/components/Footer';
 import { BackHomeLink } from '@mahoshojo/ui-web/shell';
+import { useUnsavedPageGuard, type PageDraftBlockedReason } from '@mahoshojo/ui-web/client';
 import { getLocalCardRepository } from '@/lib/local-library/card-repository';
 import { saveLocalDataCard } from '@/lib/local-library/save-local-data-card';
 // 【新增】导入卡片组件和颜色配置
@@ -75,7 +76,7 @@ import {
 	} from '@/lib/data-card-converter';
 import {
     clearCharacterManagerPageDraft,
-    readCharacterManagerPageDraft,
+    readCharacterManagerPageDraftState,
     writeCharacterManagerPageDraft,
 } from '@/lib/character-manager-page-draft';
 import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
@@ -336,7 +337,17 @@ export const CharacterManagerPage: React.FC = () => {
     const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
     const [selectedTemplate, setSelectedTemplate] = useState<InferableTemplate>('unknown');
     const [autoSaveTimestamp, setAutoSaveTimestamp] = useState<number | null>(null);
+    const [autoSaveFailed, setAutoSaveFailed] = useState(false);
     const [draftRestoreReady, setDraftRestoreReady] = useState(false);
+    const [draftBlocked, setDraftBlocked] = useState<PageDraftBlockedReason | null>(null);
+    const [draftStorageError, setDraftStorageError] = useState<string | null>(null);
+    const [lastLocalSavedData, setLastLocalSavedData] = useState<unknown>(null);
+    const protectedDraftDirty = (draftBlocked !== null || autoSaveFailed) && (characterData !== null
+        ? characterData !== lastLocalSavedData : pastedJson.trim() !== '');
+    const confirmProtectedDraftDiscard = useUnsavedPageGuard(
+        () => protectedDraftDirty,
+        '当前新编辑内容尚未保存到本地库，自动草稿保存已暂停。确认放弃当前内容并继续？',
+    );
     // 【新增】图片保存模态框的状态
     const [showImageModal, setShowImageModal] = useState(false);
     const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
@@ -617,6 +628,7 @@ export const CharacterManagerPage: React.FC = () => {
                 payload,
                 execution: 'edited',
             });
+            if (!result.inRecycleBin) setLastLocalSavedData(input);
             setLocalSaveNotice({
                 error: result.inRecycleBin,
                 text: result.inRecycleBin
@@ -958,7 +970,9 @@ export const CharacterManagerPage: React.FC = () => {
     const [characterPortraitAsset, setCharacterPortraitAsset] = useState<CharacterCardPortraitAsset | null>(null);
 
     useEffect(() => {
-        const restored = readCharacterManagerPageDraft();
+        const readState = readCharacterManagerPageDraftState();
+        if (readState.kind === 'blocked') setDraftBlocked(readState.reason);
+        const restored = readState.kind === 'ready' ? readState.stored : null;
         if (!restored) {
             setDraftRestoreReady(true);
             return;
@@ -982,8 +996,13 @@ export const CharacterManagerPage: React.FC = () => {
     }, []);
 
     useEffect(() => {
-        if (!draftRestoreReady) return;
-
+        if (!draftRestoreReady || draftBlocked !== null) return;
+        const readState = readCharacterManagerPageDraftState();
+        if (readState.kind === 'blocked') {
+            setDraftBlocked(readState.reason);
+            setAutoSaveTimestamp(null);
+            return;
+        }
         const stored = writeCharacterManagerPageDraft({
             pastedJson,
             characterData,
@@ -993,10 +1012,12 @@ export const CharacterManagerPage: React.FC = () => {
         });
 
         setAutoSaveTimestamp(stored?.updatedAt ?? null);
-    }, [pastedJson, characterData, originalData, isNative, selectedTemplate, draftRestoreReady]);
+        // 解除旧草稿写保护不等于新编辑已落盘；空态清理与写入失败的 null 要分开判断。
+        const hasCurrentDraft = pastedJson.trim() !== '' || (characterData !== null && originalData !== null);
+        setAutoSaveFailed(hasCurrentDraft && stored === null);
+    }, [pastedJson, characterData, originalData, isNative, selectedTemplate, draftRestoreReady, draftBlocked]);
 
-    const handleLoadOtherData = useCallback(() => {
-        clearCharacterManagerPageDraft();
+    const resetEditor = useCallback(() => {
         setCharacterData(null);
         setOriginalData(null);
         setPastedJson('');
@@ -1011,12 +1032,29 @@ export const CharacterManagerPage: React.FC = () => {
         setMessage(null);
     }, []);
 
-    const handleClearCharacterManagerDraft = useCallback(() => {
-        if (typeof window !== 'undefined' && !window.confirm('确定要清空当前页面的本地草稿吗？')) {
+    const handleLoadOtherData = useCallback(() => {
+        if (!confirmProtectedDraftDiscard()) return;
+        // 保留的旧草稿只能由明确的“清空本地草稿”删除，重新加载只关闭当前编辑器。
+        if (draftBlocked === null && !clearCharacterManagerPageDraft()) {
+            setDraftStorageError('清空本地草稿失败：原草稿仍保留，请重试。');
             return;
         }
-        handleLoadOtherData();
-    }, [handleLoadOtherData]);
+        resetEditor();
+    }, [draftBlocked, confirmProtectedDraftDiscard, resetEditor]);
+
+    const handleClearCharacterManagerDraft = useCallback(() => {
+        if (!window.confirm('确定要清空当前页面的本地草稿吗？')) return;
+        if (!clearCharacterManagerPageDraft()) {
+            setDraftStorageError('清空本地草稿失败：原草稿仍保留，请重试。');
+            return;
+        }
+        setDraftStorageError(null);
+        if (draftBlocked !== null) {
+            setDraftBlocked(null);
+            setAutoSaveTimestamp(null);
+            setMessage({ type: 'info', text: '已清空保留的本地草稿。' });
+        } else resetEditor();
+    }, [draftBlocked, resetEditor]);
 
     // [SRS 3.3.3] 动态生成立绘提示词
     useEffect(() => {
@@ -1140,6 +1178,7 @@ export const CharacterManagerPage: React.FC = () => {
 
     // 加载和处理JSON数据 (支持角色和情景文件)
     const processJsonData = async (jsonText: string) => {
+        if (characterData !== null && !confirmProtectedDraftDiscard()) return;
         setIsLoading(true);
         setMessage(null);
         setHasLostNativeness(false);
@@ -1761,8 +1800,11 @@ export const CharacterManagerPage: React.FC = () => {
 
                         <CharacterManagerDraftBar
                             savedAt={autoSaveTimestamp}
+                            blockedReason={draftBlocked}
+                            pendingText={autoSaveFailed ? <span role="alert">页面草稿自动保存失败。请及时保存到本地库或导出，继续编辑会重试自动保存。</span> : undefined}
                             onClear={handleClearCharacterManagerDraft}
                         />
+                        {draftStorageError && <p role="alert" className="mb-4 text-sm text-red-700">{draftStorageError}</p>}
 
                         {!characterData ? (
                             <CharacterManagerImportSection

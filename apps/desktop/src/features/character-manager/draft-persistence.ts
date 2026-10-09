@@ -3,7 +3,7 @@
 // 与 Web 同一 key、版本与 30 天 TTL——恢复的是「页面 scratch」而不是本地库记录
 // （本地库另有 native 持久化）。Desktop 的 payload 形状与 Web 不同（多
 // `originalId`/`title`/`cardType`），normalize 只接受本端写出的形状，陌生/损坏
-// 内容按无草稿降级并清掉。
+// 内容保留原字节并暂停自动保存，显式清空成功后才重新写入。
 //
 // 注意：编辑器里 `draft.original` 是 `LocalCardRecordV1` 全量记录——草稿只记
 // `originalId`，恢复时再经 `repository.get` 回取；记录已被删除/移回收站时降级
@@ -11,7 +11,9 @@
 
 import {
   clearPageDraft,
-  readPageDraft,
+  readPageDraftState,
+  type PageDraftReadState,
+  type PageDraftBlockedReason,
   writePageDraft,
   type StoredPageDraft,
 } from '@mahoshojo/ui-web/client';
@@ -64,19 +66,26 @@ export const normalizeDesktopDraftPayload = (raw: unknown): DesktopCharacterMana
 
 export type StoredDesktopCharacterManagerDraft = StoredPageDraft<DesktopCharacterManagerDraftState>;
 
-/** 读取仍有效的页面草稿；损坏/版本不符/过期返回 `null` 并顺手清掉。 */
-export const readDesktopCharacterManagerDraft = (): StoredDesktopCharacterManagerDraft | null => {
-  const stored = readPageDraft<unknown>(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY, {
+/** 读取与本端 payload 校验都不删除原文。 */
+export const readDesktopCharacterManagerDraftState = (): PageDraftReadState<DesktopCharacterManagerDraftState> => {
+  const state = readPageDraftState<unknown>(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY, {
     version: DESKTOP_CHARACTER_MANAGER_DRAFT_VERSION,
     ttlMs: DESKTOP_CHARACTER_MANAGER_DRAFT_TTL_MS,
   });
-  if (stored === null) return null;
-  const payload = normalizeDesktopDraftPayload(stored.payload);
-  if (payload === null) {
-    clearPageDraft(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY);
-    return null;
-  }
-  return { ...stored, payload };
+  if (state.kind !== 'ready') return state;
+  const raw = state.stored.payload;
+  if (isPlainObject(raw) && (
+    ('pastedJson' in raw && typeof raw.pastedJson !== 'string')
+    || (raw.draft != null && normalizeStoredDraft(raw.draft) === null)
+  )) return { kind: 'blocked', reason: 'invalid' };
+  const payload = normalizeDesktopDraftPayload(raw);
+  if (payload === null) return { kind: 'blocked', reason: 'invalid' };
+  return { kind: 'ready', stored: { ...state.stored, payload } };
+};
+
+export const readDesktopCharacterManagerDraft = (): StoredDesktopCharacterManagerDraft | null => {
+  const state = readDesktopCharacterManagerDraftState();
+  return state.kind === 'ready' ? state.stored : null;
 };
 
 /**
@@ -90,11 +99,14 @@ export const readDesktopCharacterManagerDraft = (): StoredDesktopCharacterManage
 export type DesktopCharacterManagerDraftWriteResult =
   | { readonly kind: 'cleared' }
   | { readonly kind: 'written'; readonly stored: StoredDesktopCharacterManagerDraft }
-  | { readonly kind: 'failed' };
+  | { readonly kind: 'failed' }
+  | { readonly kind: 'blocked'; readonly reason: PageDraftBlockedReason };
 
 export const writeDesktopCharacterManagerDraft = (
   state: DesktopCharacterManagerDraftState,
 ): DesktopCharacterManagerDraftWriteResult => {
+  const previous = readDesktopCharacterManagerDraftState();
+  if (previous.kind === 'blocked') return previous;
   const payload = normalizeDesktopDraftPayload(state);
   if (payload === null) {
     // 「空态清除」同样是写操作：removeItem 失败不能报成已清除（与 `failed` 同一口径）。

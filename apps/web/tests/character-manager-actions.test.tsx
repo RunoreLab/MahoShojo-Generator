@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CharacterManagerPage } from '@/components/character/CharacterManagerPage';
 import { getLocalCardRepository, resetLocalCardRepository } from '@/lib/local-library/card-repository';
 import { openLocalLibraryDb, resetLocalLibraryDbConnection } from '@/lib/local-library/db';
-import { writeCharacterManagerPageDraft } from '@/lib/character-manager-page-draft';
+import { CHARACTER_MANAGER_PAGE_DRAFT_KEY, readCharacterManagerPageDraftState, writeCharacterManagerPageDraft } from '@/lib/character-manager-page-draft';
 import { saveLocalDataCard } from '@/lib/local-library/save-local-data-card';
 
 const mocks = vi.hoisted(() => ({ download: vi.fn(), push: vi.fn() }));
@@ -132,6 +132,108 @@ describe('Web 角色管理共源动作与本地库接线', () => {
     await waitFor(() => container.textContent?.includes('后续修改尚未写入本地库') === true);
     expect(content.value).toBe('保存期间的新正文');
     expect((await repository.list({ limit: 100 })).items[0].data).toEqual(sample);
+  });
+
+  it.each(['{broken', JSON.stringify({ version: 77, updatedAt: Date.now(), payload: { future: true } })])('坏/未来草稿保留；新编辑可保存导出并确认放弃：%s', async (raw) => {
+    window.localStorage.setItem(CHARACTER_MANAGER_PAGE_DRAFT_KEY, raw);
+    await act(async () => { root.render(<CharacterManagerPage />); });
+    await waitFor(() => container.textContent?.includes('自动保存已暂停') === true);
+    const select = container.querySelector<HTMLSelectElement>('select')!;
+    await act(async () => { select.value = 'general'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    await waitFor(() => !!button('保存到本地库'));
+    expect(window.localStorage.getItem(CHARACTER_MANAGER_PAGE_DRAFT_KEY)).toBe(raw);
+    const unload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
+    await click('保存修改并下载');
+    expect(mocks.download).toHaveBeenCalledOnce();
+    expect(window.localStorage.getItem(CHARACTER_MANAGER_PAGE_DRAFT_KEY)).toBe(raw);
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+    await click('加载其他数据');
+    expect(button('保存到本地库')).toBeDefined();
+    await click('加载其他数据');
+    expect(button('保存到本地库')).toBeUndefined();
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(window.localStorage.getItem(CHARACTER_MANAGER_PAGE_DRAFT_KEY)).toBe(raw);
+    await act(async () => { select.value = 'general'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    await click('保存到本地库');
+    await waitFor(() => container.textContent?.includes('已保存到本地库。') === true);
+    const afterSaveUnload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(afterSaveUnload);
+    expect(afterSaveUnload.defaultPrevented).toBe(false);
+    expect(window.localStorage.getItem(CHARACTER_MANAGER_PAGE_DRAFT_KEY)).toBe(raw);
+  });
+
+  it('读取失败保留草稿，显式清空失败仍暂停，成功后保留新编辑并恢复自动保存', async () => {
+    const raw = '{keep';
+    window.localStorage.setItem(CHARACTER_MANAGER_PAGE_DRAFT_KEY, raw);
+    const originalRead = Storage.prototype.getItem;
+    const read = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+      if (key === CHARACTER_MANAGER_PAGE_DRAFT_KEY) throw new Error('denied');
+      return originalRead.call(this, key);
+    });
+    await act(async () => { root.render(<CharacterManagerPage />); });
+    await waitFor(() => container.textContent?.includes('本地草稿读取失败') === true);
+    read.mockRestore();
+    const select = container.querySelector<HTMLSelectElement>('select')!;
+    await act(async () => { select.value = 'general'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    const remove = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => { throw new Error('denied'); });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await click('清空本地草稿');
+    expect(container.textContent).toContain('清空本地草稿失败');
+    expect(button('保存修改并下载').disabled).toBe(false);
+    expect(window.localStorage.getItem(CHARACTER_MANAGER_PAGE_DRAFT_KEY)).toBe(raw);
+    expect(readCharacterManagerPageDraftState().kind).toBe('blocked');
+    remove.mockRestore();
+    await click('清空本地草稿');
+    await waitFor(() => readCharacterManagerPageDraftState().kind === 'ready');
+    expect(container.textContent).not.toContain('自动保存已暂停');
+    expect(button('保存到本地库')).toBeDefined();
+  });
+
+  it('清空坏草稿成功但新稿写入失败时仍有提示和离开保护，本地保存与自动保存恢复分别更新dirty', async () => {
+    window.localStorage.setItem(CHARACTER_MANAGER_PAGE_DRAFT_KEY, '{broken');
+    await act(async () => { root.render(<CharacterManagerPage />); });
+    await waitFor(() => container.textContent?.includes('自动保存已暂停') === true);
+    const select = container.querySelector<HTMLSelectElement>('select')!;
+    await act(async () => { select.value = 'general'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    const originalSet = Storage.prototype.setItem;
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (key === CHARACTER_MANAGER_PAGE_DRAFT_KEY) throw new Error('quota');
+      originalSet.call(this, key, value);
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await click('清空本地草稿');
+    await waitFor(() => container.textContent?.includes('页面草稿自动保存失败') === true);
+    expect(window.localStorage.getItem(CHARACTER_MANAGER_PAGE_DRAFT_KEY)).toBeNull();
+    expect(container.textContent).not.toContain('当前输入会自动保存到浏览器');
+    expect(container.textContent).not.toContain('当前编辑内容会重新自动保存');
+    const isLeaveGuarded = () => {
+      const event = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    expect(isLeaveGuarded()).toBe(true);
+    await click('保存修改并下载');
+    expect(mocks.download).toHaveBeenCalledOnce();
+    expect(isLeaveGuarded()).toBe(true);
+    await click('保存到本地库');
+    await waitFor(() => container.textContent?.includes('已保存到本地库。') === true);
+    expect(isLeaveGuarded()).toBe(false);
+    const input = container.querySelector<HTMLTextAreaElement>('#editor-field-content')!;
+    const editContent = async (value: string) => act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await editContent('本地保存后又修改');
+    expect(isLeaveGuarded()).toBe(true);
+    expect(container.textContent).toContain('页面草稿自动保存失败');
+    write.mockRestore();
+    await editContent('自动保存恢复的新正文');
+    await waitFor(() => container.textContent?.includes('已自动保存于') === true);
+    expect(container.textContent).not.toContain('页面草稿自动保存失败');
+    expect(isLeaveGuarded()).toBe(false);
+    expect(JSON.parse(window.localStorage.getItem(CHARACTER_MANAGER_PAGE_DRAFT_KEY)!).payload.characterData.content).toBe('自动保存恢复的新正文');
   });
 
   it('共源下载入口仍走 Web 补签与 Blob adapter，未改为本地库保存', async () => {

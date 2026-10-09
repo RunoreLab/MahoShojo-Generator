@@ -4,7 +4,7 @@ import { useRouter, useSearch } from '@tanstack/react-router';
 import { setDataCardFieldValue, type DataCardFieldAddon, type DataCardFieldPath } from '@mahoshojo/ui-web/card-editor';
 import { CanshouCard, GeneralCharacterCard, MagicalGirlCard, resolveMagicalGirlGradient } from '@mahoshojo/ui-web/character-card';
 import { LOCAL_CARD_TYPE_LABELS, LocalCardsPanel, useLocalCardsController, type LocalCardsHost } from '@mahoshojo/ui-web/local-cards';
-import { buildSafeFileName } from '@mahoshojo/ui-web/client';
+import { buildSafeFileName, type PageDraftBlockedReason } from '@mahoshojo/ui-web/client';
 import { BackHomeLink, ProductFooter } from '@mahoshojo/ui-web/shell';
 import type { HomeAssetSource } from '@mahoshojo/ui-web/home';
 import {
@@ -55,7 +55,7 @@ import {
 } from '../features/character-manager/editor';
 import {
   clearDesktopCharacterManagerDraft,
-  readDesktopCharacterManagerDraft,
+  readDesktopCharacterManagerDraftState,
   writeDesktopCharacterManagerDraft,
   type StoredDesktopCardDraft,
 } from '../features/character-manager/draft-persistence';
@@ -163,6 +163,7 @@ export function DesktopCharacterManager() {
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [autoSaveTimestamp, setAutoSaveTimestamp] = useState<number | null>(null);
   const [autoSaveFailed, setAutoSaveFailed] = useState(false);
+  const [draftBlocked, setDraftBlocked] = useState<PageDraftBlockedReason | null>(null);
   const [draftRestoreReady, setDraftRestoreReady] = useState(false);
   const titleId = useId();
   const typeId = useId();
@@ -173,7 +174,9 @@ export function DesktopCharacterManager() {
   // 离开保护覆盖两者——「清空本地草稿」只清 localStorage 副本，不该让未入库内容裸奔离开。
   const hasUnsavedChanges = draft !== null && baseline !== snapshotOf(draft);
   const hasUnsavedLocalRecord = draft !== null && draft.original === null;
-  const needsLeaveGuard = hasUnsavedChanges || hasUnsavedLocalRecord;
+  // 自动保存暂停时，尚未载入编辑器的粘贴内容也只在内存里；旧保留草稿本身不阻止离开。
+  const hasUnpersistedPaste = draftBlocked !== null && draft === null && pasted.trim() !== '';
+  const needsLeaveGuard = hasUnsavedChanges || hasUnsavedLocalRecord || hasUnpersistedPaste;
   const unsavedGuardRef = useRef(false);
   unsavedGuardRef.current = needsLeaveGuard;
   const savingRef = useRef(false);
@@ -284,7 +287,9 @@ export function DesktopCharacterManager() {
   // 待恢复/待裁决的草稿尚未落定前自动保存不启动，空初始态不会盖掉它。
   useEffect(() => {
     if (draftRestoreReady) return;
-    const stored = readDesktopCharacterManagerDraft();
+    const readState = readDesktopCharacterManagerDraftState();
+    if (readState.kind === 'blocked') setDraftBlocked(readState.reason);
+    const stored = readState.kind === 'ready' ? readState.stored : null;
     const storedDraft = stored?.payload.draft ?? null;
     const pastedJson = stored?.payload.pastedJson ?? '';
     if (pastedJson.trim() !== '') {
@@ -314,7 +319,7 @@ export function DesktopCharacterManager() {
   // 页面草稿自动持久化：每次编辑后落 localStorage（同 Web 的产品语义）。
   // 空态清除、失败显式报告——不能静默沿用旧时间戳伪装「已自动保存」。
   useEffect(() => {
-    if (!draftRestoreReady) return;
+    if (!draftRestoreReady || draftBlocked !== null) return;
     const result = writeDesktopCharacterManagerDraft({
       pastedJson: pasted,
       draft: draft === null ? null : {
@@ -325,7 +330,10 @@ export function DesktopCharacterManager() {
         originalData,
       },
     });
-    if (result.kind === 'written') {
+    if (result.kind === 'blocked') {
+      setDraftBlocked(result.reason);
+      setAutoSaveTimestamp(null);
+    } else if (result.kind === 'written') {
       setAutoSaveTimestamp(result.stored.updatedAt);
       setAutoSaveFailed(false);
     } else if (result.kind === 'cleared') {
@@ -335,7 +343,7 @@ export function DesktopCharacterManager() {
       setAutoSaveTimestamp(null);
       setAutoSaveFailed(true);
     }
-  }, [draft, originalData, pasted, draftRestoreReady]);
+  }, [draft, originalData, pasted, draftRestoreReady, draftBlocked]);
 
   // `?card=` 是打开记录的唯一入口；切换记录时由离开保护先确认是否放弃当前修改。
   // 启动时若挂起了与 cardParam 无关的旧草稿，本 effect 在加载落定后处置并翻转
@@ -508,6 +516,7 @@ export function DesktopCharacterManager() {
   }, [draft, open]);
 
   const handleClearDraft = useCallback(() => {
+    if (draftBlocked !== null && !window.confirm('确定清空保留的本地草稿并恢复自动保存吗？当前编辑内容不会清除。')) return;
     // 清除失败不能报成已清空（与自动保存 `written/cleared/failed` 同一诚实口径）。
     if (!clearDesktopCharacterManagerDraft()) {
       setNotice({ tone: 'alert', text: '清空浏览器内草稿失败：本地存储不可用，草稿仍保留。' });
@@ -515,8 +524,9 @@ export function DesktopCharacterManager() {
     }
     setAutoSaveTimestamp(null);
     setAutoSaveFailed(false);
+    setDraftBlocked(null);
     setNotice({ tone: 'status', text: '浏览器内的本地草稿已清空（当前编辑内容与本地库记录不受影响）。' });
-  }, []);
+  }, [draftBlocked]);
 
   // 「我的数据卡」：本地行直接以 `?card=` 打开记录（走既有加载与离开保护），
   // 云端行按内容副本载入为未保存草稿——不持有云端身份，不做写回。
@@ -718,6 +728,7 @@ export function DesktopCharacterManager() {
 
           <CharacterManagerDraftBar
             savedAt={autoSaveTimestamp}
+            blockedReason={draftBlocked}
             onClear={handleClearDraft}
             pendingText={autoSaveFailed
               ? '页面草稿自动保存暂不可用，当前修改不会被持久化。'

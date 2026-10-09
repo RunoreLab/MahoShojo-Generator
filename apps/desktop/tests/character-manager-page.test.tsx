@@ -332,6 +332,62 @@ describe('Desktop 本地角色管理（IPC mock，仍需真机重启验收）', 
     expect(container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('');
   });
 
+  it.each(['{broken', JSON.stringify({ version: 77, updatedAt: Date.now(), payload: {} })])('保留坏/未来草稿但允许新编辑、复制、本地保存及确认离开：%s', async (raw) => {
+    localStorage.setItem(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY, raw);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    window.location.hash = '#/character-manager';
+    await mount();
+    await waitFor(() => container.textContent?.includes('自动保存已暂停') === true);
+    await expandPasteArea();
+    await type(container.querySelector<HTMLTextAreaElement>('textarea')!, JSON.stringify({ codename: '新编辑', future: { keep: true } }));
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const preventPasteLeave = vi.fn();
+    close({ preventDefault: preventPasteLeave });
+    expect(preventPasteLeave).toHaveBeenCalledOnce();
+    await click(button('从文本加载数据'));
+    expect(localStorage.getItem(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY)).toBe(raw);
+    const preventDefault = vi.fn();
+    close({ preventDefault });
+    expect(preventDefault).toHaveBeenCalledOnce();
+    await click(button('复制到剪贴板'));
+    expect(JSON.parse(writeText.mock.calls[0][0])).toEqual({ codename: '新编辑', future: { keep: true } });
+    confirm.mockClear().mockReturnValueOnce(false).mockReturnValueOnce(true);
+    await click(button('加载其他数据'));
+    expect(container.textContent).toContain('编辑角色: 新编辑');
+    await click(button('加载其他数据'));
+    expect(container.textContent).not.toContain('编辑角色: 新编辑');
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(localStorage.getItem(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY)).toBe(raw);
+    await expandPasteArea();
+    await type(container.querySelector<HTMLTextAreaElement>('textarea')!, JSON.stringify({ codename: '新编辑' }));
+    await click(button('从文本加载数据'));
+    await click(button('保存到本地库'));
+    await waitFor(() => container.textContent?.includes('已保存到本地库。') === true);
+    expect(rows.size).toBe(2);
+    expect(localStorage.getItem(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY)).toBe(raw);
+  });
+
+  it('保留草稿显式清空失败不解除写保护，成功后保留当前编辑并恢复自动保存', async () => {
+    const raw = '{keep';
+    localStorage.setItem(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY, raw);
+    window.location.hash = '#/character-manager';
+    await mount();
+    await expandPasteArea();
+    await type(container.querySelector<HTMLTextAreaElement>('textarea')!, JSON.stringify({ codename: '新编辑' }));
+    await click(button('从文本加载数据'));
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const remove = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => { throw new Error('denied'); });
+    await click(button('清空本地草稿'));
+    expect(container.textContent).toContain('清空浏览器内草稿失败');
+    expect(localStorage.getItem(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY)).toBe(raw);
+    remove.mockRestore();
+    await click(button('清空本地草稿'));
+    expect(container.textContent).not.toContain('自动保存已暂停');
+    expect(container.textContent).toContain('编辑角色: 新编辑');
+    expect(JSON.parse(localStorage.getItem(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY)!).payload.draft.data.codename).toBe('新编辑');
+  });
+
   it('非法导入给出原因且不进入编辑', async () => {
     window.location.hash = '#/character-manager';
     await mount();
