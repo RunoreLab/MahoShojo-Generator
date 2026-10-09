@@ -379,6 +379,8 @@ struct UpstreamUsage {
     #[serde(default)]
     reasoning_tokens: Option<u64>,
     #[serde(default)]
+    completion_tokens_details: Option<UpstreamCompletionTokensDetails>,
+    #[serde(default)]
     total_tokens: Option<u64>,
     #[serde(default)]
     prompt_tokens_details: Option<UpstreamPromptTokensDetails>,
@@ -390,12 +392,22 @@ struct UpstreamPromptTokensDetails {
     cached_tokens: Option<u64>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize)]
+struct UpstreamCompletionTokensDetails {
+    #[serde(default)]
+    reasoning_tokens: Option<u64>,
+}
+
 impl UpstreamUsage {
     fn into_contract(self) -> AiExecutionUsage {
         AiExecutionUsage {
             input_tokens: self.prompt_tokens,
             output_tokens: self.completion_tokens,
-            reasoning_tokens: self.reasoning_tokens,
+            // 标准 nested 字段优先（包括显式 0）；缺失/null 时兼容旧顶层扩展。
+            reasoning_tokens: self
+                .completion_tokens_details
+                .and_then(|details| details.reasoning_tokens)
+                .or(self.reasoning_tokens),
             cached_input_tokens: self
                 .prompt_tokens_details
                 .and_then(|details| details.cached_tokens),

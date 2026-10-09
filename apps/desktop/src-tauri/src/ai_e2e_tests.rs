@@ -48,6 +48,8 @@ enum Scenario {
     DelayHeaders,
     /// 逐字节 HTTP chunk，用于覆盖 UTF-8 字符与传输分块边界互不对齐。
     ByteChunks(Vec<u8>),
+    /// 完整 SSE 载荷，覆盖大帧但不把每个字节扩成独立 HTTP chunk。
+    RawBytes(Vec<u8>),
 }
 
 struct TestServer {
@@ -165,6 +167,11 @@ async fn serve_one(
         }
         Scenario::DelayHeaders => unreachable!("handled before writing response headers"),
         Scenario::ByteChunks(_) => unreachable!("handled before writing response headers"),
+        Scenario::RawBytes(bytes) => {
+            let _ = stream.write_all(&bytes).await;
+            let _ = stream.shutdown().await;
+            observe_disconnect(stream, request_line, saw_authorization).await
+        }
     }
 }
 
@@ -1432,3 +1439,72 @@ async fn delta_at_the_exact_utf16_limit_is_preserved() {
     .await;
 }
 
+#[tokio::test]
+async fn reasoning_usage_prefers_standard_nested_tokens_and_falls_back_to_legacy() {
+    for (index, (usage, expected_tokens)) in [
+        (
+            serde_json::json!({"completion_tokens_details": {"reasoning_tokens": 7}}),
+            7,
+        ),
+        (serde_json::json!({"reasoning_tokens": 5}), 5),
+        (
+            serde_json::json!({"reasoning_tokens": 5, "completion_tokens_details": {"reasoning_tokens": 7}}),
+            7,
+        ),
+        (
+            serde_json::json!({"reasoning_tokens": 5, "completion_tokens_details": {"reasoning_tokens": 0}}),
+            0,
+        ),
+        (
+            serde_json::json!({"reasoning_tokens": 5, "completion_tokens_details": {}}),
+            5,
+        ),
+        (
+            serde_json::json!({"reasoning_tokens": 5, "completion_tokens_details": null}),
+            5,
+        ),
+        (
+            serde_json::json!({"reasoning_tokens": 5, "completion_tokens_details": {"reasoning_tokens": null}}),
+            5,
+        ),
+    ].into_iter().enumerate() {
+        let chunk = serde_json::json!({
+            "choices": [{"delta": {"content": "answer"}, "finish_reason": "stop"}], "usage": usage,
+        });
+        let wire = format!("data: {chunk}\n\ndata: [DONE]\n\n");
+        let server = spawn_sse_server(Scenario::RawBytes(wire.into_bytes())).await;
+        let store = LocalStore::open_in_memory().unwrap();
+        store
+            .put(
+                "usage",
+                &stored_profile("usage", &server.base_url, false),
+                "t",
+            )
+            .unwrap();
+        let sink = CollectingSink::default();
+        stream_direct_ai(
+            "usage",
+            request("req-usage"),
+            &store,
+            &TestSecretStore::default(),
+            &RequestRegistry::default(),
+            &sink,
+        )
+        .await
+        .unwrap();
+        let events = sink.snapshot();
+        if let Ok(directory) = std::env::var("MAHO_NATIVE_EVENT_FIXTURE_DIR") {
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::write(
+                std::path::Path::new(&directory).join(format!("usage-{index}.json")),
+                serde_json::to_vec_pretty(&events).unwrap(),
+            ).unwrap();
+        }
+        assert_well_formed(&events, "req-usage");
+        assert!(events.iter().any(|event| matches!(event, AiStreamEvent::Usage { usage, .. } if usage.reasoning_tokens == Some(expected_tokens))), "expected reasoningTokens={expected_tokens} for {usage}, got {events:?}");
+        assert!(
+            matches!(terminals(&events)[0], AiExecutionResult::Completed(result)
+            if result.usage.as_ref().and_then(|usage| usage.reasoning_tokens) == Some(expected_tokens))
+        );
+    }
+}
