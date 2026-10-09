@@ -1,3 +1,5 @@
+import { buildQuestionnaireGenerationRequestFields, type QuestionnaireSelection } from '@mahoshojo/domain/questionnaire-selection';
+import { parseSublimationLoreSelections, sublimationLoreSelections, sublimationLoreText, sublimationLoreMetadata } from './lore-selection';
 import {
   buildSublimationStreamCore,
   createSublimationGenerationCore,
@@ -49,6 +51,7 @@ export interface SublimationGenerationInput {
   userGuidance: string;
   narrativeHistory: string;
   loreText: string;
+  selectedQuestionnaires?: QuestionnaireSelection[];
   allowReshapeNames: boolean;
   isDowngrade?: boolean;
   readArenaHistory: boolean;
@@ -99,7 +102,7 @@ const coreConfig = (input: SublimationGenerationInput) => createSublimationGener
   language: input.language,
   userGuidance: input.userGuidance || null,
   narrativeHistory: input.narrativeHistory || null,
-  loreText: input.loreText || null,
+  loreText: sublimationLoreText(input) || null,
   fieldsToPreserve: input.fieldsToPreserve,
   allowReshapeNames: input.allowReshapeNames,
   defaultQuestions: input.defaultQuestions ?? DEFAULT_QUESTIONS,
@@ -163,6 +166,7 @@ const validateInput = (input: SublimationGenerationInput, intent: SublimationGen
   }
   if (!streaming && input.writeCurrentState) assertSublimationCurrentStateWriteSupported(input.originalData.current_state);
   if (input.writeArenaHistory) assertSublimationHistoryRetentionSupported(input.originalData.arena_history, input.arenaHistoryRetentionStrategy);
+  parseSublimationLoreSelections(input.selectedQuestionnaires);
   prepareSublimationInput(input);
 };
 
@@ -178,10 +182,7 @@ const buildHostedBody = (input: SublimationGenerationInput): Record<string, Json
   isDowngrade: input.isDowngrade ?? false,
   ...stateOptions(input),
   arenaHistoryRetentionStrategy: input.arenaHistoryRetentionStrategy,
-  ...(input.loreText ? {
-    questionnaires: [{ id: 'desktop-sublimation-lore', kind: input.targetTemplate === 'canshou' ? 'canshou' : 'magical-girl', title: '补充设定', questions: [], loreMarkdown: input.loreText, useLore: true }],
-    questionnaireSelections: [{ source: 'upload', kind: input.targetTemplate === 'canshou' ? 'canshou' : 'magical-girl', useLore: true }],
-  } : {}),
+  ...buildQuestionnaireGenerationRequestFields(sublimationLoreSelections(input)) as unknown as Record<string, JsonValue>,
 });
 
 const SUBLIMATION_FAMILY: DesktopGenerationFamily<SublimationGenerationInput, SublimationGenerationIntent, SublimationCardKind> = {
@@ -192,7 +193,7 @@ const SUBLIMATION_FAMILY: DesktopGenerationFamily<SublimationGenerationInput, Su
   createDirectConfig: (_intent, input) => coreConfig(input),
   createDirectStreamConfig: (_intent, input) => {
     const config = buildSublimationStreamCore({
-      ...input, stateOptions: stateOptions(input), sourceTemplate: input.sourceTemplate ?? inferSublimationSourceTemplate(input.originalData),
+      ...input, loreText: sublimationLoreText(input), stateOptions: stateOptions(input), sourceTemplate: input.sourceTemplate ?? inferSublimationSourceTemplate(input.originalData),
       isDowngrade: input.isDowngrade ?? false,
     });
     return { systemPrompt: '', temperature: config.temperature, promptBuilder: () => config.prompt };
@@ -217,9 +218,7 @@ const SUBLIMATION_FAMILY: DesktopGenerationFamily<SublimationGenerationInput, Su
       sublimationEvent: result.sublimationEvent,
       finalUserGuidance: input.userGuidance || null,
       hasNarrativeHistory: Boolean(input.narrativeHistory),
-      hasQuestionnaireLore: Boolean(input.loreText),
-      hasNonNativeQuestionnaireLore: Boolean(input.loreText),
-      questionnaireSelectionCount: input.loreText ? 1 : 0,
+      ...sublimationLoreMetadata(input),
       isNative: false,
     });
     stripSublimationSignature(card);
@@ -233,9 +232,7 @@ const SUBLIMATION_FAMILY: DesktopGenerationFamily<SublimationGenerationInput, Su
       retentionStrategy: input.arenaHistoryRetentionStrategy,
       finalUserGuidance: input.userGuidance,
       hasNarrativeHistory: Boolean(input.narrativeHistory),
-      hasQuestionnaireLore: Boolean(input.loreText),
-      hasNonNativeQuestionnaireLore: Boolean(input.loreText),
-      questionnaireSelectionCount: input.loreText ? 1 : 0,
+      ...sublimationLoreMetadata(input),
       isNative: false,
     });
     stripSublimationSignature(card);

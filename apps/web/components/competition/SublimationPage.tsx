@@ -28,7 +28,7 @@ import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { StreamStopButton } from '@/components/shared/StreamStopButton';
-import { SublimationArenaHistoryStrategyFieldset, SublimationPageFrame, SublimationPageHeader, SublimationTargetField, SublimationGuidanceField, SublimationNarrativeField, SublimationPreserveFields, SublimationCurrentStateFieldset, TARGET_TEMPLATE_OPTIONS, PRESERVABLE_FIELDS_CONFIG, getDefaultPreserveFields, getPersonalityPreset } from '@mahoshojo/ui-web/sublimation';
+import { SublimationArenaHistoryStrategyFieldset, SublimationPageFrame, SublimationPageHeader, SublimationTargetField, SublimationGuidanceField, SublimationNarrativeField, SublimationPreserveFields, SublimationCurrentStateFieldset, SublimationLoreSelection, TARGET_TEMPLATE_OPTIONS, PRESERVABLE_FIELDS_CONFIG, getDefaultPreserveFields, getPersonalityPreset } from '@mahoshojo/ui-web/sublimation';
 import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
 import { readSafeTextAndReasoningStreamFromResponse } from '@/lib/stream/read-safe-text-and-reasoning-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
@@ -499,7 +499,7 @@ export const SublimationPage: React.FC = () => {
         const hasNonNativeLore = selectedQuestionnaires.some((selection) =>
             selection.useLore !== false
             && Boolean(selection.questionnaire.loreMarkdown?.trim())
-            && selection.questionnaire.nativeAllowed !== true
+            && (selection.source === 'upload' || selection.questionnaire.nativeAllowed !== true)
         );
         if (hasNonNativeLore) return false;
         const trimmedGuidance = typeof userGuidance === 'string' ? userGuidance.trim() : '';
@@ -690,6 +690,7 @@ export const SublimationPage: React.FC = () => {
                 nativeAllowed: false,
             });
             if (!normalized) throw new Error('问卷文件解析失败');
+            normalized.nativeAllowed = false;
             applyQuestionnaireSelection({ source: 'upload', questionnaire: normalized });
             setError(null);
         } catch (err) {
@@ -712,6 +713,7 @@ export const SublimationPage: React.FC = () => {
                 nativeAllowed: false,
             });
             if (!normalized) throw new Error('问卷 JSON 无法识别，请检查格式');
+            normalized.nativeAllowed = false;
             applyQuestionnaireSelection({ source: 'upload', questionnaire: normalized });
             setPasteQuestionnaireError(null);
             setError(null);
@@ -949,7 +951,7 @@ export const SublimationPage: React.FC = () => {
                     hasNonNativeQuestionnaireLore: selectedQuestionnaires.some((selection) =>
                         selection.useLore !== false
                         && Boolean(selection.questionnaire.loreMarkdown?.trim())
-                        && selection.questionnaire.nativeAllowed !== true
+                        && (selection.source === 'upload' || selection.questionnaire.nativeAllowed !== true)
                     ),
                     questionnaireSelectionCount: selectedQuestionnaires.length,
                     isNative: isSourceNative === true,
@@ -1093,7 +1095,7 @@ export const SublimationPage: React.FC = () => {
         && selectedQuestionnaires.some((selection) =>
             selection.useLore !== false
             && Boolean(selection.questionnaire.loreMarkdown?.trim())
-            && selection.questionnaire.nativeAllowed !== true
+            && (selection.source === 'upload' || selection.questionnaire.nativeAllowed !== true)
         );
     const shouldWarnGuidanceNativeness =
         hasGuidance
@@ -1278,195 +1280,44 @@ export const SublimationPage: React.FC = () => {
 
                         <SublimationTargetField targetTemplate={targetTemplate} sourceTemplateLabel={sourceTemplateLabel} hasCrossTemplateSelection={hasCrossTemplateSelection} disabled={isGenerating || !characterData} onChange={handleTargetTemplateChange} />
 
-                        {/* 问卷/设定卡 Lore 注入 */}
-                        <div className="mb-6 p-4 bg-purple-50 border border-purple-200 rounded-lg text-sm text-purple-900">
-                            <button
-                                type="button"
-                                onClick={() => setShowQuestionnaireSettings((prev) => !prev)}
-                                className="flex items-center justify-between w-full text-left font-medium text-purple-800 hover:text-purple-900"
-                                disabled={isGenerating}
-                            >
-                                <span>设定（Lore）注入：选择问卷/设定卡</span>
-                                <span className="ml-2">{showQuestionnaireSettings ? '▼' : '▶'}</span>
-                            </button>
-                            {showQuestionnaireSettings && (
-                                <div className="mt-3 space-y-3">
-                                    <p className="text-xs text-purple-700">
-                                        选择问卷/设定卡，将其中的 <code>loreMarkdown</code> 作为【参考设定】注入到升华提示词中（不是题目，不需要作答）。
-                                    </p>
-                                    <div className="space-y-2">
-                                        <div className="text-[11px] font-semibold text-purple-700">已选择的设定来源</div>
-                                        {selectedQuestionnaires.length === 0 ? (
-                                            <div className="rounded-lg border border-purple-200 bg-white px-3 py-2 text-[11px] text-gray-500">
-                                                暂无设定来源
-                                            </div>
-                                        ) : (
-                                            selectedQuestionnaires.map((selection) => {
-                                                const selectionId = selection.selectionId ?? selection.questionnaire.id;
-                                                const hasLore = Boolean(selection.questionnaire.loreMarkdown?.trim());
-                                                const sourceLabel = selection.source === 'preset'
-                                                    ? '预设'
-                                                    : selection.source === 'upload'
-                                                        ? '本地上传'
-                                                        : '云端问卷';
-                                                const nativeLabel = selection.questionnaire.nativeAllowed === true ? '原生许可' : '非原生';
-                                                return (
-                                                    <div key={selectionId} className="flex items-center justify-between rounded-lg border border-purple-200 bg-white px-3 py-2">
-                                                        <div className="min-w-0">
-                                                            <div className="font-semibold text-purple-800 truncate">{selection.questionnaire.title}</div>
-                                                            <div className="text-[11px] text-gray-500">
-                                                                来源：{sourceLabel}
-                                                                {selection.dataCardAuthor ? ` · 作者：${selection.dataCardAuthor}` : ''}
-                                                                {` · ${nativeLabel}`}
-                                                                {!hasLore ? ' · 无设定' : ''}
-                                                            </div>
-                                                        </div>
-                                                        <div className="flex items-center gap-3">
-                                                            <label className={`flex items-center gap-2 text-[11px] ${hasLore ? 'text-purple-800' : 'text-gray-400'}`}>
-                                                                <input
-                                                                    type="checkbox"
-                                                                    checked={selection.useLore !== false && hasLore}
-                                                                    disabled={!hasLore || isGenerating}
-                                                                    onChange={(e) => handleToggleQuestionnaireLore(selectionId, e.target.checked)}
-                                                                />
-                                                                使用设定
-                                                            </label>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => handleOpenQuestionnaireDetails(selection)}
-                                                                disabled={isGenerating}
-                                                                className="text-xs text-purple-700 hover:underline disabled:text-gray-300"
-                                                            >
-                                                                详情
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => handleRemoveQuestionnaireSelection(selectionId)}
-                                                                disabled={isGenerating}
-                                                                className="text-xs text-rose-500 hover:underline disabled:text-gray-300"
-                                                            >
-                                                                移除
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })
-                                        )}
-                                    </div>
-
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        <select
-                                            className="input-field text-xs"
-                                            onChange={(e) => {
-                                                if (e.target.value) {
-                                                    void handleAddPresetQuestionnaire(e.target.value);
-                                                    e.currentTarget.value = '';
-                                                }
-                                            }}
-                                            defaultValue=""
-                                            disabled={isGenerating}
-                                        >
-                                            <option value="" disabled>选择预设问卷/设定卡</option>
-                                            {presetEntries.map((preset) => (
-                                                <option key={`${preset.kind}:${preset.id}`} value={preset.id}>
-                                                    {preset.kind === 'canshou' ? '残兽' : '魔法少女'} · {preset.title}
-                                                </option>
-                                            ))}
-                                        </select>
-                                        <label className={`inline-flex items-center gap-2 rounded-lg border border-purple-200 bg-white px-3 py-1 text-xs font-medium text-purple-700 hover:border-purple-300 cursor-pointer ${isGenerating ? 'opacity-50 cursor-not-allowed' : ''}`}>
-                                            上传问卷 JSON
-                                            <input
-                                                type="file"
-                                                accept="application/json"
-                                                onChange={(e) => void handleUploadQuestionnaire(e.target.files?.[0] ?? null)}
-                                                className="hidden"
-                                                disabled={isGenerating}
-                                            />
-                                        </label>
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setQuestionnairePickerError(null);
-                                                setShowQuestionnairePicker(true);
-                                            }}
-                                            className="rounded-lg border border-purple-200 bg-white px-3 py-1 text-xs text-purple-700 hover:border-purple-300 disabled:opacity-50"
-                                            disabled={isGenerating}
-                                        >
-                                            从云端问卷库选择
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                setPasteQuestionnaireError(null);
-                                                setShowPasteQuestionnaireImport((prev) => !prev);
-                                            }}
-                                            className="rounded-lg border border-purple-200 bg-purple-100 px-3 py-1 text-xs text-purple-800 hover:border-purple-300 hover:bg-purple-200 disabled:opacity-50"
-                                            disabled={isGenerating}
-                                        >
-                                            {showPasteQuestionnaireImport ? '收起粘贴导入' : '粘贴导入 JSON'}
-                                        </button>
-                                        <Link href="/questionnaire-editor" className="text-xs text-purple-700 hover:underline">
-                                            打开问卷编辑器
-                                        </Link>
-                                    </div>
-
-                                    {showPasteQuestionnaireImport && (
-                                        <div className="rounded-lg border border-purple-200 bg-white p-3 text-xs text-gray-700">
-                                            <label className="text-xs text-gray-600">粘贴问卷 JSON</label>
-                                            <textarea
-                                                value={pasteQuestionnaireText}
-                                                onChange={(e) => setPasteQuestionnaireText(e.target.value)}
-                                                placeholder="在此粘贴问卷 JSON（可包含 loreMarkdown）"
-                                                className="input-field mt-2 h-28"
-                                                rows={6}
-                                                disabled={isGenerating}
-                                            />
-                                            <div className="mt-2 flex items-center justify-between">
-                                                <button
-                                                    type="button"
-                                                    onClick={handlePasteQuestionnaireImport}
-                                                    className="rounded-lg border border-purple-200 bg-purple-50 px-3 py-1 text-xs text-purple-800 hover:border-purple-300 hover:bg-purple-100 disabled:opacity-50"
-                                                    disabled={isGenerating}
-                                                >
-                                                    解析并载入
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    onClick={() => {
-                                                        setPasteQuestionnaireText('');
-                                                        setPasteQuestionnaireError(null);
-                                                    }}
-                                                    className="text-xs text-gray-500 hover:text-gray-700 disabled:opacity-50"
-                                                    disabled={isGenerating}
-                                                >
-                                                    清空
-                                                </button>
-                                            </div>
-                                            {pasteQuestionnaireError && (
-                                                <p className="mt-2 text-rose-500">{pasteQuestionnaireError}</p>
-                                            )}
-                                        </div>
-                                    )}
-
-                                    {questionnaireLoadError && (
-                                        <p className="text-xs text-rose-500">{questionnaireLoadError}</p>
-                                    )}
-
-                                    {questionnaireLoreText.trim() && (
-                                        <TokenIndicator
-                                            text={questionnaireLoreText}
-                                            warningText="⚠️ 注入设定较长时，升华更易超时/失败。可尝试精简 lore 或减少勾选内容。"
-                                        />
-                                    )}
-
-                                    {shouldWarnLoreNativeness && (
-                                        <p className="text-xs text-yellow-700">
-                                            ⚠️ 已注入非原生许可的问卷设定，本次升华结果将标记为“衍生数据”（非原生），并移除/不生成原生签名。
-                                        </p>
-                                    )}
-                                </div>
-                            )}
-                        </div>
+                        <SublimationLoreSelection
+                            expanded={showQuestionnaireSettings}
+                            onExpandedChange={setShowQuestionnaireSettings}
+                            disabled={isGenerating}
+                            selections={selectedQuestionnaires}
+                            presets={presetEntries}
+                            onSelectPreset={handleAddPresetQuestionnaire}
+                            onUpload={handleUploadQuestionnaire}
+                            onOpenPicker={() => {
+                                setQuestionnairePickerError(null);
+                                setShowQuestionnairePicker(true);
+                            }}
+                            onToggleLore={handleToggleQuestionnaireLore}
+                            onRemove={handleRemoveQuestionnaireSelection}
+                            onDetails={handleOpenQuestionnaireDetails}
+                            pasteExpanded={showPasteQuestionnaireImport}
+                            onPasteExpandedChange={(expanded) => {
+                                setPasteQuestionnaireError(null);
+                                setShowPasteQuestionnaireImport(expanded);
+                            }}
+                            pasteText={pasteQuestionnaireText}
+                            onPasteTextChange={setPasteQuestionnaireText}
+                            onPasteImport={handlePasteQuestionnaireImport}
+                            onPasteClear={() => {
+                                setPasteQuestionnaireText('');
+                                setPasteQuestionnaireError(null);
+                            }}
+                            loadError={questionnaireLoadError}
+                            pasteError={pasteQuestionnaireError}
+                            tokenIndicator={questionnaireLoreText.trim() ? (
+                                <TokenIndicator
+                                    text={questionnaireLoreText}
+                                    warningText="⚠️ 注入设定较长时，升华更易超时/失败。可尝试精简 lore 或减少勾选内容。"
+                                />
+                            ) : null}
+                            warnNonNative={shouldWarnLoreNativeness}
+                            editorNavigation={{ onNavigate: (href) => router.push(href) }}
+                        />
 
                         <SublimationGuidanceField value={userGuidance} onChange={setUserGuidance} disabled={isGenerating}>
                             {shouldConfirmGuidanceNativeness && (

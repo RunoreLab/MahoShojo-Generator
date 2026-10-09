@@ -64,6 +64,19 @@ describe('Desktop sublimation shared executor', () => {
     expect(history.entries.at(-1)).toMatchObject({ type: 'sublimation', title: '新生' });
     expect(value).toEqual(before); expect(native.invoke).toHaveBeenCalledTimes(1);
   });
+  it('direct prompt consumes typed Lore once, excludes disabled sources and remains unsigned', async () => {
+    const selectedQuestionnaires = [
+      { source: 'preset' as const, questionnaire: { id: 'preset', kind: 'magical-girl' as const, title: '预设源', questions: [], loreMarkdown: '唯一设定证据', nativeAllowed: true } },
+      { source: 'upload' as const, questionnaire: { id: 'off', kind: 'magical-girl' as const, title: '关闭源', questions: [], loreMarkdown: '不能进入提示词' }, useLore: false },
+    ];
+    const { native, result } = runDirect(input({ selectedQuestionnaires }));
+    const outcome = await result;
+    expect(native.request!.messages[1]!.content).toContain('唯一设定证据');
+    expect(native.request!.messages[1]!.content).not.toContain('不能进入提示词');
+    expect(String(native.request!.messages[1]!.content).split('唯一设定证据')).toHaveLength(2);
+    expect(outcome.status).toBe('completed');
+    if (outcome.status === 'completed') expect(outcome.card).not.toHaveProperty('signature');
+  });
   it('preserve fields and disabled state/history writes survive local finalize', async () => {
     const outcome = await runDirect(input({ fieldsToPreserve: ['name'], writeArenaHistory: false, writeCurrentState: false })).result;
     expect(outcome.status).toBe('completed');

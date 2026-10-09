@@ -34,6 +34,7 @@ vi.mock('@/components/shared/ThemeImage', () => ({ ThemeImage: () => null }));
 vi.mock('@/components/shared/TokenIndicator', () => ({ TokenIndicator: () => null }));
 
 import { SublimationPage } from '@/components/competition/SublimationPage';
+import * as sublimationResult from '@/lib/sublimation/stream-result';
 
 let root: Root;
 let container: HTMLDivElement;
@@ -131,5 +132,54 @@ describe('成长升华结果导航（真实页面）', () => {
     localStorage.setItem('mahoshojo.result-auto-scroll', 'off');
     await click('开始升华');
     expect(scroll).not.toHaveBeenCalled();
+  });
+
+  it.each(['upload', 'paste', 'restored'] as const)('%s 来源不能借自报 nativeAllowed 获得原生许可或流式重签名', async (method) => {
+    const questionnaire = {
+      id: 'local-lore', kind: 'magical-girl', title: '本地星海设定',
+      loreMarkdown: '星海中的守护者', nativeAllowed: true, questions: [],
+    };
+    const buildResult = vi.spyOn(sublimationResult, 'buildStreamedSublimationResultCard');
+    vi.mocked(fetch).mockImplementation(async (url) => new Response(JSON.stringify(
+      url === '/languages.json' ? [] : url === '/api/verify-origin' ? { isValid: true } : { presets: [] },
+    ), { headers: { 'content-type': 'application/json' } }));
+    localStorage.setItem('mahoshojo.sublimation.preferences.v1', JSON.stringify({
+      generationMode: 'stream', targetTemplate: 'general', showQuestionnaireSettings: true,
+      questionnaireSelections: method === 'restored' ? [{ source: 'upload', questionnaire }] : [],
+    }));
+    await act(async () => root.render(<SublimationPage />));
+    const sourceInput = container.querySelector('#character-upload')!;
+    Object.defineProperty(sourceInput, 'files', { value: [{ type: 'application/json', name: 'source.json', text: async () => JSON.stringify(source) }] });
+    await act(async () => sourceInput.dispatchEvent(new Event('change', { bubbles: true })));
+
+    if (method === 'upload') {
+      const upload = [...container.querySelectorAll<HTMLInputElement>('input[type="file"]')].find((input) => input.closest('label')?.textContent?.includes('上传问卷 JSON'))!;
+      Object.defineProperty(upload, 'files', { value: [{ type: 'application/json', name: 'lore.json', text: async () => JSON.stringify(questionnaire) }] });
+      await act(async () => upload.dispatchEvent(new Event('change', { bubbles: true })));
+    } else if (method === 'paste') {
+      await click('粘贴导入 JSON');
+      const textarea = container.querySelector<HTMLTextAreaElement>('textarea[placeholder="在此粘贴问卷 JSON（可包含 loreMarkdown）"]')!;
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, JSON.stringify(questionnaire));
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await click('解析并载入');
+    }
+
+    expect(container.textContent).toContain('来源：本地上传 · 非原生');
+    expect(container.textContent).toContain('已注入非原生许可的问卷设定');
+    const saved = JSON.parse(localStorage.getItem('mahoshojo.sublimation.preferences.v1')!);
+    expect(saved.questionnaireSelections[0].questionnaire.nativeAllowed).toBe(method === 'restored');
+    mock.dispatch.mockResolvedValue(new Response('', { headers: { 'content-type': 'text/event-stream' } }));
+    await click('开始升华');
+    const sentBody = JSON.parse(mock.dispatch.mock.calls.at(-1)![1].body);
+    expect(sentBody.questionnaireSelections).toEqual([{ source: 'upload', kind: 'magical-girl' }]);
+    await act(async () => finishStream({ text: '## 星海新生\n升华正文', outputSafetyStatus: 'safe', wasAborted: false }));
+    expect(buildResult).toHaveBeenLastCalledWith(expect.objectContaining({
+      isNative: true, hasQuestionnaireLore: true, hasNonNativeQuestionnaireLore: true,
+    }));
+    expect(buildResult.mock.results.at(-1)?.value.arena_history.entries[0].metadata.non_native_data_involved).toBe(true);
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => url === '/api/resign-data')).toBe(false);
+    expect(container.textContent).toContain('衍生数据');
   });
 });

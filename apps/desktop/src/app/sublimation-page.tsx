@@ -1,3 +1,4 @@
+import { DesktopSublimationLoreSelector } from '../features/sublimation/lore-selector';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from '@tanstack/react-router';
@@ -49,6 +50,8 @@ function SublimationForm({ session, repository }: { session: SublimationSession;
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionInfo, setActionInfo] = useState<string | null>(null);
+  const loreLoadingRef = useRef(false);
+  const [loreLoading, setLoreLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const importingRef = useRef(false);
   const importEpoch = useRef(0);
@@ -62,15 +65,15 @@ function SublimationForm({ session, repository }: { session: SublimationSession;
   const [historySort, setHistorySort] = useState<NarrativeHistorySort>('created_desc');
   const [selectedHistoryIds, setSelectedHistoryIds] = useState<string[]>([]);
   const draft = state.draft;
-  const busy = state.phase === 'generating' || state.saving || aiState.generationActive || importing;
+  const busy = state.phase === 'generating' || state.saving || aiState.generationActive || importing || loreLoading;
   const blocked = state.pendingRestore;
   const updateDraft = (patch: Partial<SublimationDraft>) => session.updateDraft({ ...session.getSnapshot().draft, ...patch });
   const guard = useLeaveGuard(
-    () => importingRef.current || aiStore.isPreparingGeneration() || session.isBusy() || session.hasUnsavedDraft(),
+    () => loreLoadingRef.current || importingRef.current || aiStore.isPreparingGeneration() || session.isBusy() || session.hasUnsavedDraft(),
     '生成、导入或保存尚未完成，或当前草稿未能保存。请等待、取消生成或重试保存草稿后再离开。',
     '窗口关闭保护初始化失败，生成与保存暂不可用。请重新打开页面后重试。',
     () => {
-      if (importingRef.current || aiStore.isPreparingGeneration() || session.getSnapshot().saving) return false;
+      if (loreLoadingRef.current || importingRef.current || aiStore.isPreparingGeneration() || session.getSnapshot().saving) return false;
       if (session.getSnapshot().phase !== 'generating') return !session.hasUnsavedDraft() || window.confirm('当前新内容尚未保存到本机草稿。确认放弃这些未保存更改并离开？原有存档不会被删除。');
       if (!window.confirm('生成尚未完成。确认终止生成并离开？未能保存到本机草稿的内容将丢失，可以先复制或保存。')) return false;
       session.cancel(); return true;
@@ -133,7 +136,7 @@ function SublimationForm({ session, repository }: { session: SublimationSession;
     setLibraryOpen(false);
   };
   const generate = (discardUnsavedResult = false) => {
-    if (!guard.ready || busy || importingRef.current || blocked || !draft.originalData || preparation.error || target.unavailableReason || (target.location === 'client' && !target.providerTarget)) return;
+    if (!guard.ready || busy || loreLoadingRef.current || importingRef.current || blocked || !draft.originalData || preparation.error || target.unavailableReason || (target.location === 'client' && !target.providerTarget)) return;
     if (!discardUnsavedResult) {
       if (session.hasUnsavedResult()) { setConfirmation('unsaved'); return; }
       if (state.phase === 'uncertain') { setConfirmation('uncertain'); return; }
@@ -163,7 +166,7 @@ function SublimationForm({ session, repository }: { session: SublimationSession;
     <NarrativeHistoryPicker title="选择本地叙事历史" isOpen={historyOpen} onClose={() => setHistoryOpen(false)} entries={historySource?.entries ?? []} lastUpdatedAt={historySource?.lastUpdatedAt ?? null} readStatus={historyLoading ? 'loading' : historySource?.status ?? 'loading'} sort={historySort} onSort={setHistorySort} formatDateTime={(value) => new Date(value).toLocaleString()} sourceHint={historySource?.message ?? '只读取本地库叙事历史；确认后保存引用快照，源历史不会改动。'} initialSelectedIds={selectedHistoryIds} onConfirm={(entries) => { const ids = entries.map((entry) => entry.id); setSelectedHistoryIds(ids); updateDraft({ selectedHistoryReference: composeDesktopSublimationHistory(entries, ids, '') }); setHistoryOpen(false); }} />
   </>}>
     <div className="card">
-      <SublimationPageHeader onNavigate={(href) => navigateByProductHref(router, href)} resolveInternalHref={resolveInternalHrefForHashHistory} loreEnabled={false} />
+      <SublimationPageHeader onNavigate={(href) => navigateByProductHref(router, href)} resolveInternalHref={resolveInternalHrefForHashHistory} loreEnabled={true} />
       <div className="mb-4 flex flex-wrap items-center gap-3 text-sm">
         <span>{state.draftError ? '草稿保存不可用，当前输入仍保留' : state.draftSavedAt ? '已自动保存到本机草稿' : '填写后自动保存到本机草稿'}</span>
         <button className={actionClass} disabled={busy} onClick={() => { if (window.confirm('清除本机升华草稿及当前生成结果？已保存的本地卡和源卡不会删除。')) { session.discardDraft(); setPaste(''); setSelectedHistoryIds([]); } }}>清除草稿</button>
@@ -181,6 +184,7 @@ function SublimationForm({ session, repository }: { session: SublimationSession;
         <details className="mb-6"><summary className="text-purple-700">粘贴设定 JSON</summary><label className="sr-only" htmlFor="source-json">设定 JSON</label><textarea id="source-json" className="input-field h-32" value={paste} onChange={(event) => setPaste(event.target.value)} /><button className={actionClass} onClick={() => loadSource(paste)}>从文本加载设定</button></details>
         <button className={`${actionClass} mb-6`} onClick={() => setLibraryOpen(true)}>从本地 / 公共卡库选择</button>
         <SublimationTargetField targetTemplate={draft.targetTemplate} sourceTemplateLabel={sourceTemplateLabel} hasCrossTemplateSelection={!!draft.originalData && sourceTemplate !== draft.targetTemplate} disabled={busy || !draft.originalData} onChange={(value) => updateDraft({ targetTemplate: value, fieldsToPreserve: sourceTemplate === value ? getDefaultPreserveFields(value) : [] })} />
+        <DesktopSublimationLoreSelector selections={draft.selectedQuestionnaires ?? []} onChange={(selectedQuestionnaires) => updateDraft({ selectedQuestionnaires })} disabled={busy || blocked} onLoadingChange={(loading) => { loreLoadingRef.current = loading; setLoreLoading(loading); }} />
         {preparation.warnings.map((warning) => <p key={warning} role="status" className="text-sm text-amber-700">{warning}</p>)}
         {preparation.error && <p role="alert">{preparation.error}</p>}
         <SublimationGuidanceField value={draft.userGuidance} disabled={busy} onChange={(userGuidance) => updateDraft({ userGuidance })} />

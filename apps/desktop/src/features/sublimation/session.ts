@@ -1,3 +1,4 @@
+import { parseSublimationLoreSelections } from './lore-selection';
 import type { CardRepository } from '@mahoshojo/local-library/repository';
 import { mergeNarrativeHistoryText } from '@mahoshojo/domain/narrative-history-operations';
 import { SafeJsonValueSchema } from '@mahoshojo/contracts/json-value';
@@ -43,6 +44,7 @@ export const createInitialSublimationDraft = (): SublimationDraft => ({
   userGuidance: '',
   narrativeHistory: '',
   loreText: '',
+  selectedQuestionnaires: [],
   allowReshapeNames: false,
   isDowngrade: false,
   readArenaHistory: true,
@@ -75,15 +77,17 @@ const SUBLIMATION_SESSION_FAMILY: GenerationSessionFamily<SublimationDraft, Subl
       || (value.selectedHistoryReference !== undefined && typeof value.selectedHistoryReference !== 'string')
       || (value.sourceLabel !== undefined && typeof value.sourceLabel !== 'string')
       || (value.isDowngrade !== undefined && typeof value.isDowngrade !== 'boolean')) throw new Error('草稿版本不受支持或内容损坏');
+    const selectedQuestionnaires = parseSublimationLoreSelections(value.selectedQuestionnaires);
     const keys = Object.keys(createInitialSublimationDraft());
     const fields = Object.fromEntries(keys.filter((key) => value[key] !== undefined).map((key) => [key, clone(value[key])]));
+    fields.selectedQuestionnaires = selectedQuestionnaires;
     if (value.sourceTemplate !== undefined) fields.sourceTemplate = value.sourceTemplate;
     if (value.isAdvancedVisible === true) fields.isAdvancedVisible = true;
     return fields as unknown as SublimationDraft;
   },
   normalizeStoredCardKind: (value) => isSublimationCardKind(value) ? value : 'general',
   isResidueDraft: (draft) => draft.originalData === null && !draft.userGuidance.trim()
-    && !draft.selectedHistoryReference?.trim() && !draft.narrativeHistory.trim() && !draft.loreText.trim()
+    && !draft.selectedHistoryReference?.trim() && !draft.narrativeHistory.trim() && !draft.loreText.trim() && !draft.selectedQuestionnaires?.length
     && (draft.output === undefined || (draft.output.phase === 'idle' && draft.output.card === null && draft.output.rawText === '')),
   validateCard: validateSublimationCard,
   cardTypeOf: () => 'character',
