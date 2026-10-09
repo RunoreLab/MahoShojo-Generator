@@ -395,3 +395,26 @@ describe('hosted 目标与生成资格分离', () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 });
+
+describe('流式预览的派发快照', () => {
+  it('输出形态来自派发意图，编辑草稿和重复生成不能改变；不持久化为恢复触发器', async () => {
+    let finish!: () => void;
+    const wait = new Promise<void>(resolve => { finish = resolve; });
+    const execute = vi.fn(async () => { await wait; return { status: 'cancelled' as const, mode: 'direct-local' as const, rawText: '残稿' }; });
+    const storage = memoryStorage();
+    const session = new DesktopGenerationSession(fakeSessionFamily({ executeGeneration: execute }), { storage, repository: repository(), initialDraft: { prompt: 'initial' } });
+    expect(session.getSnapshot().activeGenerationMode).toBe(null);
+    const running = session.generate({ invoke: vi.fn(), profileId: 'p' }, { prompt: 'input' }, { mode: 'direct-local', generationMode: 'stream' });
+    expect(session.getSnapshot().activeGenerationMode).toBe('stream');
+    session.updateDraft({ prompt: 'edited' });
+    await session.generate({ invoke: vi.fn(), profileId: 'p' }, { prompt: 'second' }, { mode: 'direct-local', generationMode: 'non-stream' });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(session.getSnapshot().activeGenerationMode).toBe('stream');
+    finish(); await running;
+    expect(storage.getItem(DRAFT_KEY)).not.toContain('activeGenerationMode');
+    const restored = new DesktopGenerationSession(fakeSessionFamily(), { storage, repository: repository(), initialDraft: { prompt: '' } });
+    restored.restoreDraft();
+    expect(restored.getSnapshot()).toMatchObject({ activeGenerationMode: null, rawText: '残稿', phase: 'cancelled' });
+    session.dispose(); restored.dispose();
+  });
+});

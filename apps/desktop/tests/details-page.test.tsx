@@ -102,6 +102,107 @@ const fillCurrentAnswer = async (value: string) => {
 
 describe('Desktop Details real route and session UI (native adapter mock)', () => {
 
+  it.each(['completed', 'cancelled', 'non-stream'] as const)('renders only active stream Markdown, preserves raw output and handles %s', async (ending) => {
+    const markdown = '# 流式标题\n\n**逐步正文**\n\n[外链](https://example.com/read)\n\n![外图](https://example.com/image.png)\n\n[设置](/settings) [相对路径](settings) [同页](#title) `/encyclopedia/foo`';
+    const reasoning = '仅限思考面板的推理';
+    let finish!: (outcome: DetailsGenerationOutcome) => void;
+    let emitPartial!: (text: string) => void;
+    mocks.execute.mockImplementation((_options, _input, _intent, _signal, partial) => {
+      emitPartial = partial;
+      return new Promise((resolve) => { finish = resolve; });
+    });
+    window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify(draft()));
+    await mount();
+    await click(ending === 'non-stream' ? '非流式' : '流式');
+    await submitQuestionnaire();
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.execute.mock.calls[0]![2]).toMatchObject({ generationMode: ending === 'non-stream' ? 'non-stream' : 'stream' });
+    const fetchCount = vi.mocked(fetch).mock.calls.length;
+    await act(async () => emitPartial('# 流式标题'));
+    await act(async () => emitPartial(markdown));
+    const preview = container.querySelector('[aria-label="流式正文预览"]');
+    if (ending === 'non-stream') {
+      expect(preview).toBeNull();
+    } else {
+      expect(preview?.querySelector('h1, h2, h3')?.textContent).toBe('流式标题');
+      expect(preview?.querySelector('strong')?.textContent).toBe('逐步正文');
+      expect(preview?.textContent).not.toContain(reasoning);
+      expect(preview?.textContent).not.toContain('官方签名');
+      expect(preview?.querySelector('img, audio, video, iframe, a[href]')).toBeNull();
+    }
+    expect(vi.mocked(fetch).mock.calls.length).toBe(fetchCount);
+    const raw = [...container.querySelectorAll('details')].find((element) => element.querySelector('summary')?.textContent === '原始输出正文')!;
+    expect(raw.querySelector('pre')?.textContent).toBe(markdown);
+    expect(raw.open).toBe(ending === 'non-stream');
+    expect(container.querySelector('[aria-label="生成结果"]')).toBeNull();
+    expect(button('保存到本地卡库')).toBeUndefined();
+    expect(mocks.save).not.toHaveBeenCalled();
+    if (ending === 'completed') {
+      await act(async () => finish({
+        status: 'completed', mode: 'direct-local', cardKind: 'general',
+        card: { templateId: '通用角色', name: '流式标题', content: markdown }, rawText: markdown,
+        reasoning: { status: 'done', source: 'provider', text: reasoning },
+      }));
+      await settle();
+      expect(container.querySelector('[aria-label="流式正文预览"]')).toBeNull();
+      const result = container.querySelector('[aria-label="生成结果"]')!;
+      expect(result.textContent).toContain('逐步正文');
+      expect(result.textContent).not.toContain(reasoning);
+      await act(async () => container.querySelector<HTMLButtonElement>('.ai-reasoning-panel button')!.click());
+      expect(container.querySelector('.ai-reasoning-panel')?.textContent).toContain(reasoning);
+      expect(raw.querySelector('pre')?.textContent).not.toContain(reasoning);
+      expect(button('保存到本地卡库').matches(':disabled')).toBe(false);
+      await click('保存到本地卡库');
+      expect(mocks.save).toHaveBeenCalledTimes(1);
+      expect(mocks.save.mock.calls[0]![0]).toMatchObject({ data: { content: markdown }, provenance: { kind: 'unsigned', execution: 'direct-local' } });
+    } else {
+      await click('取消生成');
+      expect(mocks.execute.mock.calls[0]![3].aborted).toBe(true);
+      await act(async () => finish({ status: 'cancelled', mode: 'direct-local', rawText: markdown, reason: 'aborted' }));
+      await settle();
+      expect(container.querySelector('[aria-label="流式正文预览"]')).toBeNull();
+      expect(raw.open).toBe(true);
+      expect(raw.querySelector('pre')?.textContent).toBe(markdown);
+      expect(JSON.parse(window.localStorage.getItem(DETAILS_DRAFT_KEY)!).output).toMatchObject({ phase: 'cancelled', rawText: markdown });
+      await click('非流式'); await click('流式');
+      expect(container.querySelector('[aria-label="流式正文预览"]')).toBeNull();
+      expect(mocks.execute).toHaveBeenCalledTimes(1);
+      expect(mocks.save).not.toHaveBeenCalled();
+    }
+  });
+
+  it('does not reinterpret restored raw output as an active Markdown stream after selecting stream', async () => {
+    window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify({
+      ...draft(),
+      output: { mode: 'direct-local', cardKind: 'general', card: null, rawText: '# 历史正文', phase: 'cancelled' },
+    }));
+    await mount(); await click('流式');
+    expect(container.querySelector('[aria-label="流式正文预览"]')).toBeNull();
+    expect([...container.querySelectorAll('pre')].some((element) => element.textContent === '# 历史正文')).toBe(true);
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['direct-local', 'http://127.0.0.1:11434/v1', 'stream'],
+    ['direct-local', 'http://127.0.0.1:11434/v1', 'non-stream'],
+    ['direct-remote', 'https://model.example/v1', 'stream'],
+    ['direct-remote', 'https://model.example/v1', 'non-stream'],
+  ] as const)('dispatches %s (%s) with selected %s mode', async (mode, baseUrl, generationMode) => {
+    mocks.profiles.mockResolvedValue({ id: 'local', name: '测试模型', adapter: 'openai-compatible', baseUrl, modelId: 'model' });
+    window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify(draft()));
+    await mount();
+    expect(button('流式').matches(':disabled')).toBe(false);
+    await click('流式');
+    if (generationMode === 'non-stream') await click('非流式');
+    const selectedLabel = generationMode === 'stream' ? '流式' : '非流式';
+    expect(button(selectedLabel).getAttribute('aria-pressed')).toBe('true');
+    await click('服务器'); await click('客户端');
+    expect(button(selectedLabel).getAttribute('aria-pressed')).toBe('true');
+    await submitQuestionnaire();
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.execute.mock.calls[0]![2]).toMatchObject({ mode, generationMode });
+  });
+
   it.each(['route', 'native'] as const)('allows confirmed %s leave after memory-only editing and saving a result, preserving damaged storage', async (kind) => {
     window.localStorage.setItem(DETAILS_DRAFT_KEY, '{broken');
     const router = await mount(); await click('开始回答问卷');

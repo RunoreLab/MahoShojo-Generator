@@ -103,6 +103,8 @@ export interface GenerationSessionState<TDraft, TCardKind extends string = strin
   draftSaved: boolean;
   draftSavedAt: number | null;
   phase: Phase;
+  /** 只描述本次派发的输出形态，不从可编辑草稿推断，也不持久化。 */
+  activeGenerationMode: 'stream' | 'non-stream' | null;
   rawText: string;
   card: GenerationResultCardData | null;
   cardKind: TCardKind;
@@ -152,7 +154,7 @@ export class DesktopGenerationSession<
       requestId?: () => string;
     },
   ) {
-    this.state = { draft: clone(dependencies.initialDraft), pendingRestore: false, draftError: null, draftSaved: true, draftSavedAt: null, phase: 'idle', rawText: '', card: null, cardKind: family.defaultCardKind, resultRestored: false, reasoning: null, message: null, saving: false, saveStatus: 'idle', saveError: null };
+    this.state = { draft: clone(dependencies.initialDraft), pendingRestore: false, draftError: null, draftSaved: true, draftSavedAt: null, phase: 'idle', activeGenerationMode: null, rawText: '', card: null, cardKind: family.defaultCardKind, resultRestored: false, reasoning: null, message: null, saving: false, saveStatus: 'idle', saveError: null };
     try {
       const raw = dependencies.storage.getItem(family.draftKey);
       if (raw !== null) {
@@ -246,7 +248,7 @@ export class DesktopGenerationSession<
     const controller = new AbortController();
     this.controller = controller;
     this.mode = intent.mode;
-    this.publish({ phase: 'generating', card: null, cardKind: this.family.defaultCardKind, resultRestored: false, reasoning: null, rawText: '', message: null, saveStatus: 'idle', saveError: null, draftSaved: false });
+    this.publish({ phase: 'generating', activeGenerationMode: intent.mode === 'hosted-stream' || (intent.mode !== 'hosted-json' && intent.generationMode === 'stream') ? 'stream' : 'non-stream', card: null, cardKind: this.family.defaultCardKind, resultRestored: false, reasoning: null, rawText: '', message: null, saveStatus: 'idle', saveError: null, draftSaved: false });
     this.retryDraftSave();
     try {
       const execute = this.dependencies.execute ?? this.family.executeGeneration;

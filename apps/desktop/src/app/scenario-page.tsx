@@ -1,3 +1,4 @@
+import { GenerationMarkdownPreview } from './generation-markdown-preview';
 import { generationActionClassNames, generationSubmitClassName } from '@mahoshojo/ui-web/generation-actions';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
@@ -141,18 +142,12 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
   const updateDraft = (patch: Partial<ScenarioDraft>) => {
     session.updateDraft({ ...session.getSnapshot().draft, ...patch });
   };
-  // 流式情景产物是「通用情景卡」（Markdown），与结构化卡不同型；客户端
-  // direct 通路永远结构化（DESK-ONLINE-009）。D5.1-AIP-r1：不再改写草稿
-  // 里的流式偏好——`effectiveGenerationMode` 表达「实际生效」方式，
-  // 切回服务器后原偏好自动恢复。
-  const effectiveGenerationMode =
-    target.location === 'client' ? 'non-stream' : draft.generationMode;
   const mode = target.mode;
   const busy = state.phase === 'generating' || state.saving || editorSaving || aiState.generationActive;
+  const showStreamPreview = state.phase === 'generating' && state.activeGenerationMode === 'stream';
   useEffect(() => () => aiStore.cancelPreparingGeneration(), [aiStore]);
   const blockedDraft = state.pendingRestore;
-  // 「客户端｜服务器」与「流式｜非流式」两个维度共同决定执行模式（DESK-ONLINE-009）：
-  // 流式/非流式只影响 hosted 路由选择，direct 通路始终为结构化生成。
+  // hosted 路由编码生成方式；direct 通路通过独立 intent 字段表达生成方式。
   const hostedMode: ScenarioExecutionMode = draft.generationMode === 'stream' ? 'hosted-stream' : 'hosted-json';
   const executionMode: ScenarioExecutionMode | null = target.location === 'server' ? hostedMode : mode;
   // 本地 Provider 配置只门禁客户端执行：server 偏好由 hosted System Default 解析、
@@ -184,7 +179,7 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
       // hosted-json 结果不确定时再次生成 = 可能的第二次调用，必须显式确认（D5.1a-r1）。
       if (state.phase === 'uncertain') { setConfirmRegenerate('uncertain'); return; }
     }
-    if (effectiveGenerationMode === 'stream' && draft.generalScenarioDraft && !window.confirm('流式生成将替换当前通用情景卡编辑内容，确认继续？可先下载或保存当前内容。')) return;
+    if (draft.generationMode === 'stream' && draft.generalScenarioDraft && !window.confirm('流式生成将替换当前通用情景卡编辑内容，确认继续？可先下载或保存当前内容。')) return;
     try {
       setActionError(null);
       setActionInfo(null);
@@ -195,9 +190,9 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
           language: draft.selectedLanguage,
           fieldsToKeepEmpty: [...draft.fieldsToKeepEmpty],
           // titleHint 仅流式语义（本地卡兜底 + hosted 请求字段），按生效方式门控。
-          titleHint: effectiveGenerationMode === 'stream' ? draft.scenarioTitleHint : '',
+          titleHint: draft.generationMode === 'stream' ? draft.scenarioTitleHint : '',
         },
-        { mode: prepared.location === 'server' ? hostedMode : prepared.mode!, modelId: prepared.modelId ?? undefined, overrides: prepared.generationOverrides },
+        { mode: prepared.location === 'server' ? hostedMode : prepared.mode!, generationMode: draft.generationMode, modelId: prepared.modelId ?? undefined, overrides: prepared.generationOverrides },
         discardUnsavedResult,
       );
         const latest = session.getSnapshot();
@@ -287,18 +282,11 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
           language={<ScenarioLanguageField value={draft.selectedLanguage} languages={languages.length ? languages : [{ code: draft.selectedLanguage, name: draft.selectedLanguage }]} onChange={(selectedLanguage) => updateDraft({ selectedLanguage })} disabled={busy || blockedDraft} />}
           mode={<fieldset disabled={busy || blockedDraft}>
             <GenerationModeSwitcher
-                // 客户端 Direct 固定走结构化通路：展示生效的「非流式」，
-                // 服务器侧的流式偏好不改写、切回服务器后恢复（D5.1-AIP-r1）。
-                value={effectiveGenerationMode}
-                disabled={target.location === 'client'}
-                onChange={(next) => updateDraft({ generationMode: next })}
-                helper={false}
-              />
-              {target.location === 'client' && (
-                <p className="mt-1 text-sm text-(--app-text-muted)">
-                  客户端执行为结构化（非流式）直出；你的服务器生成方式偏好保留，切回服务器后恢复。
-                </p>
-              )}</fieldset>}
+              value={draft.generationMode}
+              onChange={(next) => updateDraft({ generationMode: next })}
+              helper={false}
+            />
+          </fieldset>}
           actions={<>
             <div className="flex flex-wrap gap-2">
               <button className={generationSubmitClassName} disabled={!guard.ready || busy || !hasAnyAnswer(draft.answers) || !executionMode || target.unavailableReason !== null || (target.location === 'client' && !target.providerTarget) || clientProfilesBlocked || blockedDraft} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '生成情景' : '重新生成'}</button>
@@ -373,7 +361,8 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
                 </div>
               </ScenarioResultSurface>}
             </div>
-            {state.rawText && <details open={state.phase !== 'completed'}><summary>原始输出正文</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border p-3">{state.rawText}</pre></details>}
+            <GenerationMarkdownPreview active={showStreamPreview} text={state.rawText} />
+            {state.rawText && <details open={state.phase !== 'completed' && !showStreamPreview}><summary>原始输出正文</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border p-3">{state.rawText}</pre></details>}
             <GeneralScenarioEditor
               draft={editorDraft}
               disabled={busy || blockedDraft}

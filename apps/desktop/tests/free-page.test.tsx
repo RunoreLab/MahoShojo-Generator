@@ -64,6 +64,86 @@ const mount = async () => {
 };
 
 describe('Desktop Free route and session UI (native adapter mock)', () => {
+  it.each(['completed', 'cancelled', 'non-stream'] as const)('renders only active stream Markdown, preserves raw output and handles %s', async (ending) => {
+    const markdown = '# 流式标题\n\n**逐步正文**\n\n[外链](https://example.com/read)\n\n![外图](https://example.com/image.png)\n\n[设置](/settings) [相对路径](settings) [同页](#title) `/encyclopedia/foo`';
+    const reasoning = '仅限思考面板的推理';
+    let finish!: (outcome: FreeGenerationOutcome) => void;
+    let emitPartial!: (text: string) => void;
+    mocks.execute.mockImplementation((_options, _input, _intent, _signal, partial) => {
+      emitPartial = partial;
+      return new Promise((resolve) => { finish = resolve; });
+    });
+    window.localStorage.setItem(FREE_DRAFT_KEY, JSON.stringify(storedDraft('流式测试')));
+    await mount();
+    await click(ending === 'non-stream' ? '非流式' : '流式');
+    await click('生成数据卡');
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.execute.mock.calls[0]![2]).toMatchObject({ generationMode: ending === 'non-stream' ? 'non-stream' : 'stream' });
+    const fetchCount = vi.mocked(fetch).mock.calls.length;
+    await act(async () => emitPartial('# 流式标题'));
+    await act(async () => emitPartial(markdown));
+    const preview = container.querySelector('[aria-label="流式正文预览"]');
+    if (ending === 'non-stream') {
+      expect(preview).toBeNull();
+    } else {
+      expect(preview?.querySelector('h1, h2, h3')?.textContent).toBe('流式标题');
+      expect(preview?.querySelector('strong')?.textContent).toBe('逐步正文');
+      expect(preview?.textContent).not.toContain(reasoning);
+      expect(preview?.textContent).not.toContain('官方签名');
+      expect(preview?.querySelector('img, audio, video, iframe, a[href]')).toBeNull();
+    }
+    expect(vi.mocked(fetch).mock.calls.length).toBe(fetchCount);
+    const raw = [...container.querySelectorAll('details')].find((element) => element.querySelector('summary')?.textContent === '原始输出正文')!;
+    expect(raw.querySelector('pre')?.textContent).toBe(markdown);
+    expect(raw.open).toBe(ending === 'non-stream');
+    expect(container.querySelector('[aria-label="生成结果"]')).toBeNull();
+    expect(button('保存到本地卡库')).toBeUndefined();
+    expect(mocks.save).not.toHaveBeenCalled();
+    if (ending === 'completed') {
+      await act(async () => finish({
+        status: 'completed', mode: 'direct-local', cardKind: 'general',
+        card: { templateId: '通用角色', name: '流式标题', content: markdown }, rawText: markdown,
+        reasoning: { status: 'done', source: 'provider', text: reasoning },
+      }));
+      await settle();
+      expect(container.querySelector('[aria-label="流式正文预览"]')).toBeNull();
+      const result = container.querySelector('[aria-label="生成结果"]')!;
+      expect(result.textContent).toContain('逐步正文');
+      expect(result.textContent).not.toContain(reasoning);
+      await act(async () => container.querySelector<HTMLButtonElement>('.ai-reasoning-panel button')!.click());
+      expect(container.querySelector('.ai-reasoning-panel')?.textContent).toContain(reasoning);
+      expect(raw.querySelector('pre')?.textContent).not.toContain(reasoning);
+      expect(button('保存到本地卡库').matches(':disabled')).toBe(false);
+      await click('保存到本地卡库');
+      expect(mocks.save).toHaveBeenCalledTimes(1);
+      expect(mocks.save.mock.calls[0]![0]).toMatchObject({ data: { content: markdown }, provenance: { kind: 'unsigned', execution: 'direct-local' } });
+    } else {
+      await click('取消生成');
+      expect(mocks.execute.mock.calls[0]![3].aborted).toBe(true);
+      await act(async () => finish({ status: 'cancelled', mode: 'direct-local', rawText: markdown, reason: 'aborted' }));
+      await settle();
+      expect(container.querySelector('[aria-label="流式正文预览"]')).toBeNull();
+      expect(raw.open).toBe(true);
+      expect(raw.querySelector('pre')?.textContent).toBe(markdown);
+      expect(JSON.parse(window.localStorage.getItem(FREE_DRAFT_KEY)!).output).toMatchObject({ phase: 'cancelled', rawText: markdown });
+      await click('非流式'); await click('流式');
+      expect(container.querySelector('[aria-label="流式正文预览"]')).toBeNull();
+      expect(mocks.execute).toHaveBeenCalledTimes(1);
+      expect(mocks.save).not.toHaveBeenCalled();
+    }
+  });
+
+  it('does not reinterpret restored raw output as an active Markdown stream after selecting stream', async () => {
+    window.localStorage.setItem(FREE_DRAFT_KEY, JSON.stringify({
+      ...storedDraft('流式测试'),
+      output: { mode: 'direct-local', cardKind: 'general', card: null, rawText: '# 历史正文', phase: 'cancelled' },
+    }));
+    await mount(); await click('流式');
+    expect(container.querySelector('[aria-label="流式正文预览"]')).toBeNull();
+    expect([...container.querySelectorAll('pre')].some((element) => element.textContent === '# 历史正文')).toBe(true);
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
   it('restores prompt draft automatically, generates once and saves the card', async () => {
     window.localStorage.setItem(FREE_DRAFT_KEY, JSON.stringify(storedDraft('怕水的火系少女')));
     await mount();
@@ -131,40 +211,68 @@ describe('Desktop Free route and session UI (native adapter mock)', () => {
     expect(mocks.execute).toHaveBeenCalledTimes(2);
   });
 
-  it('client execution presents non-stream as effective without touching the chosen schema (G2-r1 / AIP-r1)', async () => {
-    window.localStorage.setItem(FREE_DRAFT_KEY, JSON.stringify({
-      version: 1, schemaId: 'magical-girl', generationMode: 'stream', prompt: 'x', selectedLanguage: 'zh-CN',
-    }));
+  it.each([
+    ['direct-local', 'http://127.0.0.1:11434/v1', 'stream'],
+    ['direct-local', 'http://127.0.0.1:11434/v1', 'non-stream'],
+    ['direct-remote', 'https://model.example/v1', 'stream'],
+    ['direct-remote', 'https://model.example/v1', 'non-stream'],
+  ] as const)('dispatches %s (%s) with selected %s mode', async (mode, baseUrl, generationMode) => {
+    mocks.profiles.mockResolvedValue({ id: 'local', name: '测试模型', adapter: 'openai-compatible', baseUrl, modelId: 'model' });
+    window.localStorage.setItem(FREE_DRAFT_KEY, JSON.stringify(storedDraft('自由创作')));
     await mount();
-    // D5.1-AIP-r1：草稿的流式偏好保留、切回服务器即恢复；客户端按生效的
-    // 「非流式」呈现，Schema 列表也按生效模式展开（流式归并只对服务器通路成立）。
-    const stored = JSON.parse(window.localStorage.getItem(FREE_DRAFT_KEY)!);
-    expect(stored.generationMode).toBe('stream');
-    expect(stored.schemaId).toBe('magical-girl');
-    expect(container.textContent).toContain('客户端执行为结构化（非流式）直出');
-    const schemaSelect = [...container.querySelectorAll('select')].find((el) => el.getAttribute('aria-label') === '选择 Schema')!;
-    expect((schemaSelect as HTMLSelectElement).value).toBe('magical-girl');
-    expect(schemaSelect.querySelectorAll('option').length).toBe(5);
+    expect(button('流式').matches(':disabled')).toBe(false);
+    await click('流式');
+    if (generationMode === 'non-stream') await click('非流式');
+    expect(button(generationMode === 'stream' ? '流式' : '非流式').getAttribute('aria-pressed')).toBe('true');
+    const schemaSelect = container.querySelector<HTMLSelectElement>('select[aria-label="选择 Schema"]')!;
+    expect([...schemaSelect.options].map((option) => option.value)).toEqual(generationMode === 'stream'
+      ? ['general', 'general-scenario']
+      : ['magical-girl', 'canshou', 'general', 'scenario', 'general-scenario']);
+    await click('生成数据卡');
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.execute.mock.calls[0]![2]).toMatchObject({ mode, generationMode });
   });
 
-  it('server stream mode keeps the switch and narrows schema to streamable ids', async () => {
+  it.each(['client', 'server'] as const)('reconciles a restored stream schema using the same whitelist on %s', async (executionPreference) => {
     window.localStorage.setItem(DESKTOP_AI_CONFIG_STORAGE_KEY, JSON.stringify({
-      version: 2,
-      selection: { executionPreference: 'server', clientConnectionId: 'local' },
-      hiddenPresetIds: [],
+      version: 2, selection: { executionPreference, clientConnectionId: 'local' }, hiddenPresetIds: [],
     }));
     resetDesktopAiConfigStoreForTests();
     window.localStorage.setItem(FREE_DRAFT_KEY, JSON.stringify({
-      version: 1, schemaId: 'magical-girl', generationMode: 'stream', prompt: 'x', selectedLanguage: 'zh-CN',
+      ...storedDraft('自由创作'), schemaId: 'magical-girl', generationMode: 'stream',
     }));
     await mount();
-    // 服务器通路的流式归并照旧：结构化 Schema 回写为 general。
-    const stored = JSON.parse(window.localStorage.getItem(FREE_DRAFT_KEY)!);
-    expect(stored.generationMode).toBe('stream');
-    expect(stored.schemaId).toBe('general');
-    const schemaSelect = [...container.querySelectorAll('select')].find((el) => el.getAttribute('aria-label') === '选择 Schema')!;
-    expect((schemaSelect as HTMLSelectElement).value).toBe('general');
-    expect(schemaSelect.querySelectorAll('option').length).toBe(2);
+    expect(JSON.parse(window.localStorage.getItem(FREE_DRAFT_KEY)!)).toMatchObject({ generationMode: 'stream', schemaId: 'general' });
+    const schemaSelect = container.querySelector<HTMLSelectElement>('select[aria-label="选择 Schema"]')!;
+    expect(schemaSelect.value).toBe('general');
+    expect([...schemaSelect.options].map((option) => option.value)).toEqual(['general', 'general-scenario']);
+  });
+
+  it.each([
+    ['non-stream', 'magical-girl'],
+    ['stream', 'general-scenario'],
+  ] as const)('keeps %s and schema %s unchanged when switching execution location', async (generationMode, schemaId) => {
+    window.localStorage.setItem(FREE_DRAFT_KEY, JSON.stringify({ ...storedDraft('自由创作'), generationMode, schemaId }));
+    await mount();
+    const selectedLabel = generationMode === 'stream' ? '流式' : '非流式';
+    for (const location of ['服务器', '客户端']) {
+      await click(location);
+      expect(button(selectedLabel).getAttribute('aria-pressed')).toBe('true');
+      expect(container.querySelector<HTMLSelectElement>('select[aria-label="选择 Schema"]')!.value).toBe(schemaId);
+      expect(JSON.parse(window.localStorage.getItem(FREE_DRAFT_KEY)!)).toMatchObject({ generationMode, schemaId });
+    }
+  });
+
+  it('limits schemas on an explicit stream selection and restores all options on non-stream', async () => {
+    window.localStorage.setItem(FREE_DRAFT_KEY, JSON.stringify({ ...storedDraft('自由创作'), schemaId: 'scenario' }));
+    await mount();
+    await click('流式');
+    const schemaSelect = container.querySelector<HTMLSelectElement>('select[aria-label="选择 Schema"]')!;
+    expect(schemaSelect.value).toBe('general');
+    expect(schemaSelect.options.length).toBe(2);
+    await click('非流式');
+    expect(schemaSelect.value).toBe('general');
+    expect(schemaSelect.options.length).toBe(5);
   });
 
   it('clearing attachments while a read is in flight discards the late merge (G2-r1)', async () => {

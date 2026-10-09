@@ -1,3 +1,4 @@
+import { GenerationMarkdownPreview } from './generation-markdown-preview';
 import { generationActionClassNames, generationSubmitClassName } from '@mahoshojo/ui-web/generation-actions';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
@@ -445,13 +446,6 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
     updateDraft({ selectedRuleIds: next.selectedRuleIds, primaryRuleId: next.primaryRuleId });
   }, [template, selectedRuleIds, primaryRuleId, updateDraft]);
 
-  // direct 通路恒为结构化 JSON：执行位置切到客户端时归一为非流式（与 /free 同一效应）。
-  // 客户端 direct 通路永远结构化（DESK-ONLINE-009）。D5.1-AIP-r1：不再改写
-  // 草稿里的流式偏好——`effectiveGenerationMode` 表达「实际生效」方式，
-  // 切回服务器后原偏好自动恢复；模板不随位置归一，hosted 兼容性在提交时检查。
-  const effectiveGenerationMode: GenerationMode =
-    target.location === 'client' ? 'non-stream' : generationMode;
-
   // 单选口径：关掉多选时仅保留 1 份可作答问卷（纯设定卡可叠加）。
   useEffect(() => {
     if (allowMultiple) return;
@@ -546,6 +540,7 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
 
   const mode = target.mode;
   const busy = state.phase === 'generating' || state.saving || aiState.generationActive;
+  const showStreamPreview = state.phase === 'generating' && state.activeGenerationMode === 'stream';
   useEffect(() => () => aiStore.cancelPreparingGeneration(), [aiStore]);
   const blockedDraft = state.pendingRestore;
   const hostedMode: CreatorExecutionMode = generationMode === 'stream' ? 'hosted-stream' : 'hosted-json';
@@ -780,9 +775,9 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
     },
   );
 
-  /** hosted 提交时模板×生成模式的支持矩阵；'scenario' 模板当前不接任何通路。
+  /** hosted 与客户端流式共用模板支持矩阵；客户端非流式仍支持结构化通用卡。
    * 兼容性属于「内容问题」：不按它禁用提交键，点击后如实给出原因（Web 同口径）。 */
-  const hostedModeSupported = isCreatorTemplateSupportedInGenerationMode(generationMode, template);
+  const generationModeSupported = isCreatorTemplateSupportedInGenerationMode(generationMode, template);
   const canGenerateNow = !busy
     && !blockedDraft
     && !questionnaireLoading
@@ -813,7 +808,7 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
         setActionError('「情景（结构化）」模板暂未接入生成通路，请选择其他创作模板。');
         return;
       }
-      if (target.location === 'server' && !hostedModeSupported) {
+      if ((target.location === 'server' || generationMode === 'stream') && !generationModeSupported) {
         setActionError(generationMode === 'stream'
           ? '当前仅支持【通用角色卡（Markdown）】与【通用情景卡（Markdown）】使用流式创作。'
           : '当前非流式创作仅支持【魔法少女（结构化）】与【残兽（结构化）】模板。');
@@ -824,7 +819,7 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
       // 结果快照（与 Web `creatorResultSnapshot` 同义）：结果阶段的侧栏投影按
       // 「发起这次生成时」的模板/规则/题目数展示，而不是按当前编辑态。
       resultSnapshotRef.current = {
-        generationMode: effectiveGenerationMode,
+        generationMode,
         template,
         templateLabel,
         primaryRuleLabel,
@@ -861,7 +856,7 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
             ),
           },
         },
-        { mode: prepared.location === 'server' ? hostedMode : prepared.mode!, modelId: prepared.modelId ?? undefined, flowers: getRandomFlowers(), overrides: prepared.generationOverrides },
+        { mode: prepared.location === 'server' ? hostedMode : prepared.mode!, generationMode, modelId: prepared.modelId ?? undefined, flowers: getRandomFlowers(), overrides: prepared.generationOverrides },
         discardUnsavedResult,
       );
       }).catch((cause: unknown) => setActionError(cause instanceof Error ? cause.message : 'AI 配置准备失败'));
@@ -999,10 +994,7 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
         controlsSlot={
           <>
             <GenerationModeSwitcher
-              // 客户端 Direct 固定走结构化通路：展示生效的「非流式」，
-              // 服务器侧的流式偏好不改写、切回服务器后恢复（D5.1-AIP-r1）。
-              value={effectiveGenerationMode}
-              disabled={target.location === 'client'}
+              value={generationMode}
               helper={false}
               onChange={(next: GenerationMode) => {
                 const normalizedTemplate = normalizeCreatorTemplateForGenerationMode(next, template);
@@ -1013,11 +1005,6 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
                 });
               }}
             />
-            {target.location === 'client' && (
-              <p className="text-xs text-(--app-text-subtle)">
-                客户端执行为结构化 JSON 直出；你的服务器生成方式偏好保留，切回服务器后恢复。
-              </p>
-            )}
           </>
         }
       />
@@ -1341,7 +1328,8 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
           {state.message && <p role={state.phase === 'uncertain' ? 'alert' : 'status'}>{state.message}</p>}
           {state.reasoning && <AiReasoningPanel reasoning={state.reasoning} />}
           {mainContent}
-          {state.rawText && <details open={state.phase !== 'completed'} className="mt-4"><summary>原始输出正文</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border p-3">{state.rawText}</pre></details>}
+          <GenerationMarkdownPreview active={showStreamPreview} text={state.rawText} />
+          {state.rawText && <details open={state.phase !== 'completed' && !showStreamPreview} className="mt-4"><summary>原始输出正文</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border p-3">{state.rawText}</pre></details>}
         </>
       )}
       showFooter={showFooter}

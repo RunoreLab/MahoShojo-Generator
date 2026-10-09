@@ -1,3 +1,4 @@
+import { GenerationMarkdownPreview } from './generation-markdown-preview';
 import { generationActionClassNames } from '@mahoshojo/ui-web/generation-actions';
 import { QuestionnaireDraftPanel } from './questionnaire-draft-panel';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -330,6 +331,7 @@ function CanshouForm({ session, restored }: { session: CanshouSession; restored:
   const primaryQuestionnaire = effectiveSelections[0]?.questionnaire;
   const mode = target.mode;
   const busy = state.phase === 'generating' || state.saving || aiState.generationActive;
+  const showStreamPreview = state.phase === 'generating' && state.activeGenerationMode === 'stream';
   useEffect(() => () => aiStore.cancelPreparingGeneration(), [aiStore]);
   const blockedDraft = state.pendingRestore;
   // 问卷流程与 Web 同一套领域语义：多问卷经 `buildQuestionnaireContextItems`
@@ -447,10 +449,7 @@ function CanshouForm({ session, restored }: { session: CanshouSession; restored:
   // `nativeAllowed` 是签名资格而非可用性：非原生问卷照常生成，只是不获官方签名。
   const isNativeSignatureEligible = isQuestionnaireSelectionNativeAllowed(effectiveSelections);
   const hasOverLimitAnswer = hasOverLimitQuestionnaireAnswers(flow, answersByKey);
-  // 「客户端｜服务器」与「流式｜非流式」两个维度共同决定执行模式（DESK-ONLINE-009）。
-  // D5.1-AIP-r1：客户端 Direct 固定结构化——`effectiveGenerationMode` 表达实际
-  // 生效方式，用户的流式偏好保留、切回服务器后恢复（与 scenario/free/creator 同口径）。
-  const effectiveGenerationMode = target.location === 'client' ? 'non-stream' : generationMode;
+  // 执行位置与生成方式正交；客户端也按用户选择逐步显示 Markdown 正文。
   const hostedMode: CanshouExecutionMode = generationMode === 'stream' ? 'hosted-stream' : 'hosted-json';
   const executionMode: CanshouExecutionMode | null = target.location === 'server' ? hostedMode : mode;
   // 本地 Provider 配置只门禁客户端执行：server 偏好由 hosted System Default 解析、
@@ -497,7 +496,7 @@ function CanshouForm({ session, restored }: { session: CanshouSession; restored:
             ),
           },
         },
-        { mode: prepared.location === 'server' ? hostedMode : prepared.mode!, modelId: prepared.modelId ?? undefined, overrides: prepared.generationOverrides },
+        { mode: prepared.location === 'server' ? hostedMode : prepared.mode!, generationMode, modelId: prepared.modelId ?? undefined, overrides: prepared.generationOverrides },
         discardUnsavedResult,
       ).then(() => {
         const result = session.getSnapshot();
@@ -883,18 +882,10 @@ function CanshouForm({ session, restored }: { session: CanshouSession; restored:
                     controlsSlot={
                       <div>
                         <GenerationModeSwitcher
-                          // 客户端 Direct 固定走结构化通路：展示生效的「非流式」，
-                          // 服务器侧的流式偏好不改写、切回服务器后恢复（D5.1-AIP-r1）。
-                          value={effectiveGenerationMode}
-                          disabled={target.location === 'client'}
+                          value={generationMode}
                           onChange={setGenerationMode}
                           helper={false}
                         />
-                        {target.location === 'client' && (
-                          <p className="mt-1 text-sm text-(--app-text-muted)">
-                            客户端执行为结构化（非流式）直出；你的服务器生成方式偏好保留，切回服务器后恢复。
-                          </p>
-                        )}
                       </div>
                     }
                   />
@@ -1051,7 +1042,8 @@ function CanshouForm({ session, restored }: { session: CanshouSession; restored:
                 <div className="mt-8 text-center"><BackHomeLink href="#/" onNavigate={() => void router.navigate({ to: '/' })} /></div>
               </section>}
             </div>
-            {state.rawText && <details className="mt-4" open={state.phase !== 'completed'}><summary>原始输出正文</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border p-3">{state.rawText}</pre></details>}
+            <GenerationMarkdownPreview active={showStreamPreview} text={state.rawText} />
+            {state.rawText && <details className="mt-4" open={state.phase !== 'completed' && !showStreamPreview}><summary>原始输出正文</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border p-3">{state.rawText}</pre></details>}
           </QuestionnairePageCard>
           {/* 页脚与 Web /canshou 同一共享组件；站外链接走受控外链确认。 */}
           <ProductFooter

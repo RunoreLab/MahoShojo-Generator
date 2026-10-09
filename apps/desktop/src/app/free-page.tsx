@@ -1,3 +1,4 @@
+import { GenerationMarkdownPreview } from './generation-markdown-preview';
 import { generationActionClassNames, generationSubmitClassName } from '@mahoshojo/ui-web/generation-actions';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
@@ -152,26 +153,19 @@ function FreeForm({ session }: { session: FreeSession }) {
   const updateDraft = (patch: Partial<FreeDraft>) => {
     session.updateDraft({ ...session.getSnapshot().draft, ...patch });
   };
-  // 流式产物只经 hosted 通路（Markdown 通用卡）；客户端 direct 通路永远
-  // 结构化（DESK-ONLINE-009）。D5.1-AIP-r1：不再改写草稿里的流式偏好——
-  // `effectiveGenerationMode` 表达「实际生效」方式，切回服务器后原偏好自动恢复。
-  const effectiveGenerationMode =
-    target.location === 'client' ? 'non-stream' : draft.generationMode;
-  // 流式模式下只允许通用卡：必要时自动切换 schema（与 Web 同一效果，但作用于草稿字段）。
-  // 该归并只在服务器通路成立——客户端不走流式，
-  // 切换执行位置不得顺带改写用户已选的结构化 Schema（G2-r1 复审）。
+  // 与 Web 共用流式 Schema 白名单；归并与执行位置无关，切换位置不改写 Schema。
   useEffect(() => {
-    if (target.location !== 'server' || draft.generationMode !== 'stream') return;
+    if (draft.generationMode !== 'stream') return;
     if ((FREE_STREAM_SCHEMA_IDS as readonly string[]).includes(draft.schemaId)) return;
     session.updateDraft({ ...session.getSnapshot().draft, schemaId: 'general' });
-  }, [session, target.location, draft.generationMode, draft.schemaId]);
-  const schemaOptionsForMode = freeSchemaOptionsForMode(effectiveGenerationMode);
+  }, [session, draft.generationMode, draft.schemaId]);
+  const schemaOptionsForMode = freeSchemaOptionsForMode(draft.generationMode);
   const mode = target.mode;
   const busy = state.phase === 'generating' || state.saving || aiState.generationActive;
+  const showStreamPreview = state.phase === 'generating' && state.activeGenerationMode === 'stream';
   useEffect(() => () => aiStore.cancelPreparingGeneration(), [aiStore]);
   const blockedDraft = state.pendingRestore;
-  // 「客户端｜服务器」与「流式｜非流式」两个维度共同决定执行模式（DESK-ONLINE-009）：
-  // 流式/非流式只影响 hosted 路由选择，direct 通路始终为结构化生成。
+  // hosted 路由编码生成方式；direct 通路通过独立 intent 字段表达生成方式。
   const hostedMode: FreeExecutionMode = draft.generationMode === 'stream' ? 'hosted-stream' : 'hosted-json';
   const executionMode: FreeExecutionMode | null = target.location === 'server' ? hostedMode : mode;
   // 本地 Provider 配置只门禁客户端执行：server 偏好由 hosted System Default 解析、
@@ -198,6 +192,10 @@ function FreeForm({ session }: { session: FreeSession }) {
       // hosted-json 结果不确定时再次生成 = 可能的第二次调用，必须显式确认（D5.1a-r1）。
       if (state.phase === 'uncertain') { setConfirmRegenerate('uncertain'); return; }
     }
+    if (draft.generationMode === 'stream' && !(FREE_STREAM_SCHEMA_IDS as readonly string[]).includes(draft.schemaId)) {
+      setActionError('流式生成仅支持通用角色/通用情景卡，请先切换 Schema。');
+      return;
+    }
     try {
       setActionError(null);
       setActionInfo(null);
@@ -209,7 +207,7 @@ function FreeForm({ session }: { session: FreeSession }) {
           language: draft.selectedLanguage,
           attachments: toPromptAttachments(attachments),
         },
-        { mode: prepared.location === 'server' ? hostedMode : prepared.mode!, modelId: prepared.modelId ?? undefined, overrides: prepared.generationOverrides },
+        { mode: prepared.location === 'server' ? hostedMode : prepared.mode!, generationMode: draft.generationMode, modelId: prepared.modelId ?? undefined, overrides: prepared.generationOverrides },
         discardUnsavedResult,
       );
       }).catch((cause: unknown) => setActionError(cause instanceof Error ? cause.message : 'AI 配置准备失败'));
@@ -255,18 +253,11 @@ function FreeForm({ session }: { session: FreeSession }) {
           attachments={<FreeAttachmentPanel state={attachmentState} disabled={busy || blockedDraft} />}
           mode={<fieldset disabled={busy || blockedDraft}>
             <GenerationModeSwitcher
-                        // 客户端 Direct 固定走结构化通路：展示生效的「非流式」，
-                        // 服务器侧的流式偏好不改写、切回服务器后恢复（D5.1-AIP-r1）。
-                        value={effectiveGenerationMode}
-                        disabled={target.location === 'client'}
-                        onChange={(next) => updateDraft({ generationMode: next })}
-                        helper={false}
-                      />
-                      {target.location === 'client' && (
-                        <p className="mt-1 text-sm text-(--app-text-muted)">
-                          客户端执行为结构化（非流式）直出；你的服务器生成方式偏好保留，切回服务器后恢复。
-                        </p>
-                      )}</fieldset>}
+              value={draft.generationMode}
+              onChange={(next) => updateDraft({ generationMode: next })}
+              helper={false}
+            />
+          </fieldset>}
           language={
             <FreeLanguageField
                       disabled={busy || blockedDraft}
@@ -374,7 +365,8 @@ function FreeForm({ session }: { session: FreeSession }) {
                 </FreeResultPanel>
               </section>}
             </div>
-            {state.rawText && <details open={state.phase !== 'completed'}><summary>原始输出正文</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border p-3">{state.rawText}</pre></details>}
+            <GenerationMarkdownPreview active={showStreamPreview} text={state.rawText} />
+            {state.rawText && <details open={state.phase !== 'completed' && !showStreamPreview}><summary>原始输出正文</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border p-3">{state.rawText}</pre></details>}
         </>
       ) : null}
       footer={(
