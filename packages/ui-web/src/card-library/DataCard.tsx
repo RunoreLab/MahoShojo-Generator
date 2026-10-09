@@ -24,6 +24,8 @@ export interface CardLibraryTilePlatform {
 }
 
 interface DataCardProps {
+  /** 检查列表仅展示，不提供统计写入、下载、分享或编辑动作。 */
+  browseOnly?: boolean;
   platform: CardLibraryTilePlatform;
   id: string; // Changed from number to string for UUID
   name: string;
@@ -101,6 +103,7 @@ const roleTypeStyleMap: Record<NonNullable<DataCardProps['roleType']>, string> =
 };
 
 export default function DataCard({
+  browseOnly = false,
   id,
   name,
   description,
@@ -482,7 +485,7 @@ export default function DataCard({
         ) : null}
 
         {/* 操作按钮行 */}
-        <div className="flex flex-wrap gap-3 text-sm items-center">
+        {!browseOnly && <div className="flex flex-wrap gap-3 text-sm items-center">
           {isCachedCard ? (
             <>
               {/* 计数是抓取时的线上事实，不是当前值——只展示，不做按钮（
@@ -711,11 +714,11 @@ export default function DataCard({
           ) : null}
             </>
           )}
-        </div>
+        </div>}
       </div>
 
       {/* 操作按钮 */}
-      {isOwner && (
+      {!browseOnly && isOwner && (
         <div className="flex flex-wrap gap-2 mt-2">
           <button
             onClick={(e) => {

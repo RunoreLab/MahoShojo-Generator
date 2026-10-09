@@ -1,3 +1,5 @@
+import { invoke } from '@tauri-apps/api/core';
+import { resetDesktopCloudSessionStoreForTests } from '../src/features/account/use-desktop-cloud-session';
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -54,7 +56,7 @@ const regenerate = async () => {
 const draft = () => ({ version: 1, answers: { [`${builtinSelectionId(questionnaire.id)}::${questionnaire.questions[0].id}`]: '善良' }, language: '简体中文' });
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  vi.clearAllMocks(); window.localStorage.clear();
+  vi.clearAllMocks(); vi.mocked(invoke).mockReset(); resetDesktopCloudSessionStoreForTests(); window.localStorage.clear();
   // 新 overlay 模型下执行位置与连接选择正交且默认不自动选中；
   // 需要走通生成路径的用例统一预置"客户端执行 + 已选 local 连接"。
   window.localStorage.setItem(DESKTOP_AI_CONFIG_STORAGE_KEY, JSON.stringify({
@@ -101,6 +103,32 @@ const fillCurrentAnswer = async (value: string) => {
 };
 
 describe('Desktop Details real route and session UI (native adapter mock)', () => {
+  it('protects the actual result while explicit private cloud creation is in flight', async () => {
+    const account = { userId: 7, username: 'mock-user' }; const expires = '2099-01-01T00:00:00.000Z';
+    let finish!: (value: unknown) => void;
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
+      if (command === 'cloud_cached_account') return { account, sessionExpiresAt: expires } as never;
+      if (command === 'cloud_auth_status') return { state: 'active', account, sessionExpiresAt: expires } as never;
+      if (command === 'cloud_card_library_request') {
+        const request = (args as any).request;
+        if (request.routeId === 'user-capacity.query') return { status: 200, body: { success: true, capacity: 10, usedSlots: 0 } } as never;
+        if (request.routeId === 'data-cards.create') return await new Promise((resolve) => { finish = resolve; }) as never;
+      }
+      return undefined as never;
+    });
+    window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify(draft()));
+    const router = await mount(); await submitQuestionnaire(); await click('保存私有云端副本');
+    await act(async () => { [...document.querySelectorAll('button')].find((node) => node.textContent === '保存')!.click(); }); await settle();
+    expect(button('重新生成').disabled).toBe(true); expect(button('保存到本地卡库').disabled).toBe(true);
+    await act(async () => { void router.navigate({ to: '/' }); }); await settle(); expect(router.state.location.pathname).toBe('/details');
+    const prevented = vi.fn(); await act(async () => { close({ preventDefault: prevented }); }); expect(prevented).toHaveBeenCalled();
+    expect(mocks.execute).toHaveBeenCalledTimes(1); expect(container.textContent).toContain('百合');
+    await act(async () => finish({ status: 500, body: { error: 'after insert' } })); await settle();
+    expect(document.body.textContent).toContain('服务器可能已创建副本'); expect(button('保存到本地卡库').disabled).toBe(false);
+    expect(vi.mocked(invoke).mock.calls.filter(([cmd, args]) => cmd === 'cloud_card_library_request' && (args as any).request.routeId === 'data-cards.create')).toHaveLength(1);
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
 
   it.each(['completed', 'cancelled', 'non-stream'] as const)('renders only active stream Markdown, preserves raw output and handles %s', async (ending) => {
     const markdown = '# 流式标题\n\n**逐步正文**\n\n[外链](https://example.com/read)\n\n![外图](https://example.com/image.png)\n\n[设置](/settings) [相对路径](settings) [同页](#title) `/encyclopedia/foo`';

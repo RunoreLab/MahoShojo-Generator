@@ -1,5 +1,5 @@
 import { HOT_CARD_FAVORITE_THRESHOLD, HOT_CARD_USAGE_THRESHOLD } from '@/lib/constants';
-import { DATA_CARD_SLOT_BYTES, getUtf8ByteLength } from '@/lib/data-card-size';
+import { getUtf8ByteLength } from '@/lib/data-card-size';
 
 export type DataCardSlotUsageInput = {
   data: string;
@@ -8,10 +8,8 @@ export type DataCardSlotUsageInput = {
   pendingData?: string | null;
 };
 
-export const getDataCardBaseSlotCostFromBytes = (bytes: number): number => {
-  const safeBytes = Number.isFinite(bytes) ? Math.max(0, Math.floor(bytes)) : 0;
-  return Math.max(1, Math.ceil(safeBytes / DATA_CARD_SLOT_BYTES));
-};
+export { getDataCardBaseSlotCostFromBytes } from '@mahoshojo/domain/data-card-size';
+import { getDataCardBaseSlotCostFromBytes } from '@mahoshojo/domain/data-card-size';
 
 export const isHotDataCardForQuota = (favoriteCount?: number | null, usageCount?: number | null): boolean =>
   (favoriteCount ?? 0) > HOT_CARD_FAVORITE_THRESHOLD &&

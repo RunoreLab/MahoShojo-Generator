@@ -52,6 +52,8 @@ const TAB_ARIA_LABEL = '数据卡来源';
 
 export interface CardLibraryModalProps {
   host: CardLibraryHost;
+  /** 仅检查已有记录：不提供选择或卡片写入/使用动作。默认保持原选择器行为。 */
+  browseOnly?: boolean;
   isOpen: boolean;
   onClose: () => void;
   onSelectCard?: (card: any, context: CardLibrarySelectionContext) => void;
@@ -184,6 +186,7 @@ export function CardLibraryModal({
   externalError,
   allowDeckImport = true,
   allowCardDetails = true,
+  browseOnly = false,
 }: CardLibraryModalProps) {
   const { status: authStatus, userId, userBadges } = host.auth;
   // `unknown`（未确认登录态）一律不当成「已登出」：账号页签不出现、账号绑定
@@ -1274,6 +1277,7 @@ export function CardLibraryModal({
 
   // 处理卡片选择
   const handleSelectCard = async (card: any) => {
+    if (browseOnly) return;
     const cardId = typeof card?.id === 'string' ? card.id : '';
     if (!cardId) return;
 
@@ -2483,7 +2487,7 @@ export function CardLibraryModal({
 	                    // 仅摘要缓存行：可浏览元数据，但正文相关动作一律不可执行。
 	                    const rowBodyUnavailable = rowIsCached && cachedMeta.hasBody !== true;
 	                    const itemDisabled = rowBodyUnavailable || (selectionMode === 'multi' && !isSelected && atLimit);
-	                    const showQuickToggle = selectionMode === 'multi';
+	                    const showQuickToggle = !browseOnly && selectionMode === 'multi';
 	                    const quickToggleDisabled = rowBodyUnavailable || (isSelected ? !canToggle : itemDisabled);
 	                    const quickToggleTitle = rowBodyUnavailable
 	                      ? '只缓存了摘要，联网后才能使用这张卡'
@@ -2495,8 +2499,8 @@ export function CardLibraryModal({
 		                  return (
 		                    <div
                         key={card.id}
-                        className={`relative h-full ${itemDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-                        {...(selectionMode === 'single' ? {
+                        className={`relative h-full ${browseOnly ? '' : itemDisabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                        {...(!browseOnly && selectionMode === 'single' ? {
                           role: 'button',
                           tabIndex: itemDisabled ? -1 : 0,
                           'aria-label': `选择${card.name || typeLabel}`,
@@ -2536,6 +2540,7 @@ export function CardLibraryModal({
 	                        </button>
 	                      )}
 	                      <DataCard
+                          browseOnly={browseOnly}
 	                        platform={{
 	                          Link: host.platform.Link,
 	                          reviewHref: '/encyclopedia/review',

@@ -44,3 +44,9 @@ export function exceedsUtf8ByteLimit(text: string, maxBytes: number): boolean {
 export function formatKilobytes(bytes: number): string {
   return (bytes / 1024).toFixed(1);
 }
+
+/** 新建卡槽位估算；最终值仍由服务端注入作者元数据后计算。 */
+export const getDataCardBaseSlotCostFromBytes = (bytes: number): number => {
+  const safeBytes = Number.isFinite(bytes) ? Math.max(0, Math.floor(bytes)) : 0;
+  return Math.max(1, Math.ceil(safeBytes / DATA_CARD_SLOT_BYTES));
+};

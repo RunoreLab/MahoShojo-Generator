@@ -1,16 +1,17 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import SaveCardModal from './CharManager/SaveCardModal';
 import DataCardsModal from './CharManager/DataCardsModal';
 import { useAuth } from '@/lib/useAuth';
-import { dataCardApi } from '@/lib/auth';
+import { authStorage, dataCardApi } from '@/lib/auth';
 import { quickCheck } from '@/lib/sensitive-word-filter';
-import { config } from '@/lib/config';
 import type { OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
 
 interface SaveToCloudButtonProps {
   data: any;
   getData?: () => Promise<any>;
+  /** Dynamic-only providers can identify the result independently of callback identity. */
+  sourceKey?: string | number;
   cardType?: OnlineDataCardType;
   buttonText?: string;
   defaultName?: string;
@@ -32,6 +33,7 @@ const isScenarioData = (data: any): boolean => {
 export default function SaveToCloudButton({
   data,
   getData,
+  sourceKey,
   cardType,
   buttonText = "保存到云端",
   defaultName,
@@ -41,7 +43,7 @@ export default function SaveToCloudButton({
   style = {}
 }: SaveToCloudButtonProps) {
   const router = useRouter();
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, authSource } = useAuth();
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [cardName, setCardName] = useState('');
   const [cardDescription, setCardDescription] = useState('');
@@ -51,19 +53,59 @@ export default function SaveToCloudButton({
   const [isPreparing, setIsPreparing] = useState(false);
   const [preparedData, setPreparedData] = useState<any>(null);
   const [cardsRefresh, setCardsRefresh] = useState(0);
-  const [userCapacity, setUserCapacity] = useState(config.DEFAULT_DATA_CARD_CAPACITY);
-  const [userUsedSlots, setUserUsedSlots] = useState(0);
+  const [userCapacity, setUserCapacity] = useState<number | undefined>(undefined);
+  const [userUsedSlots, setUserUsedSlots] = useState<number | undefined>(undefined);
   const [showDataCardsForReplace, setShowDataCardsForReplace] = useState(false);
   const [replaceEditingCard, setReplaceEditingCard] = useState<any | null>(null);
   const [replaceCurrentPage, setReplaceCurrentPage] = useState(1);
 
-  const navigateToArrested = () => {
-    router.push('/arrested');
-  };
+  const [uncertain, setUncertain] = useState(false);
+  const [checkedOwnCards, setCheckedOwnCards] = useState(false);
+  const busy = useRef(false);
+  const operation = useRef(0);
+  const capacityOperation = useRef(0);
+  const mounted = useRef(true);
+  // Compare source content, not callbacks: callers often recreate getData on every render.
+  let source = '';
+  try { source = JSON.stringify([sourceKey, data, cardType, defaultName, defaultDescription, defaultIsPublic]); }
+  catch { source = 'invalid-data'; }
+  const context = `${user?.id ?? ''}:${isAuthenticated}:${authSource ?? ''}:${source}`;
+  const latestContext = useRef(context);
+  latestContext.current = context;
+  const draftContext = useRef<string | null>(null);
+  const uncertainRef = useRef(false);
+
+  useEffect(() => {
+    operation.current += 1;
+    capacityOperation.current += 1;
+    busy.current = false;
+    draftContext.current = null;
+    uncertainRef.current = false;
+    setPreparedData(null);
+    setShowSaveModal(false);
+    setIsPreparing(false);
+    setIsSaving(false);
+    setSaveError(null);
+    setUncertain(false);
+    setCheckedOwnCards(false);
+    setUserCapacity(undefined);
+    setUserUsedSlots(undefined);
+  }, [context]);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; operation.current += 1; };
+  }, []);
+
+  const navigateToArrested = () => router.push('/arrested');
 
   const loadUserDataCards = async () => {
+    const ownerContext = context;
+    const request = ++capacityOperation.current;
     setCardsRefresh((value) => value + 1);
-    const capacityInfo = await dataCardApi.getUserCapacity();
+    setUserCapacity(undefined);
+    setUserUsedSlots(undefined);
+    const capacityInfo = await dataCardApi.getUserCapacity().catch(() => null);
+    if (!mounted.current || ownerContext !== latestContext.current || request !== capacityOperation.current) return;
     if (capacityInfo) {
       setUserCapacity(capacityInfo.capacity);
       setUserUsedSlots(capacityInfo.usedSlots);
@@ -71,74 +113,65 @@ export default function SaveToCloudButton({
   };
 
   const resolveData = async (): Promise<any | null> => {
-    if (getData) {
-      setIsPreparing(true);
-      try {
-        const next = await getData();
-        if (!next) return null;
-        setPreparedData(next);
-        return next;
-      } finally {
+    if (busy.current) return null;
+    busy.current = true;
+    const token = ++operation.current;
+    const ownerContext = context;
+    setIsPreparing(true);
+    setPreparedData(null);
+    try {
+      const next = getData ? await getData() : data;
+      if (!mounted.current || token !== operation.current || ownerContext !== latestContext.current) return null;
+      if (!next) return null;
+      // Freeze the complete wire data; subsequent source mutations must not alter a draft.
+      const snapshot = JSON.parse(JSON.stringify(next));
+      setPreparedData(snapshot);
+      draftContext.current = ownerContext;
+      return snapshot;
+    } catch (error) {
+      if (!mounted.current || token !== operation.current || ownerContext !== latestContext.current) return null;
+      throw error;
+    } finally {
+      if (token === operation.current && mounted.current) {
+        busy.current = false;
         setIsPreparing(false);
       }
     }
-
-    if (!data) return null;
-    setPreparedData(data);
-    return data;
   };
 
   const handleSaveClick = async () => {
+    if (busy.current) return;
     if (!isAuthenticated) {
       alert('请先登录后再保存到云端');
       return;
     }
-    
-    // 如果没有数据，则不显示模态框
-    let hadResolveError = false;
-    const resolvedData = await resolveData().catch((error) => {
-      hadResolveError = true;
-      console.error("准备保存数据失败:", error);
-      alert(error instanceof Error ? error.message : '准备保存数据失败。');
-      return null;
-    });
-    if (!resolvedData) {
-      if (!hadResolveError) {
-        alert('没有可保存的数据。');
-      }
+    // Closing a rejected/uncertain draft must not silently reset its retry decision.
+    if (draftContext.current === context && preparedData) {
+      setShowSaveModal(true);
+      void loadUserDataCards();
       return;
     }
-
-    // 根据数据类型生成默认名称和描述
-    const inferredType = isScenarioData(resolvedData) ? 'scenario' : 'character';
-    const type = cardType ?? inferredType;
-    const inferredName =
-      type === 'history'
-        ? (resolvedData?.title || resolvedData?.name || '叙事历史')
-        : type === 'scenario'
-          ? (resolvedData?.title || resolvedData?.name || '')
-          : type === 'questionnaire'
-            ? (resolvedData?.title || resolvedData?.name || '问卷')
-            : (resolvedData?.codename || resolvedData?.name || '');
-    const inferredDescription =
-      type === 'history'
-        ? '叙事历史数据卡'
-        : type === 'scenario'
-          ? '情景数据卡'
-          : type === 'questionnaire'
-            ? '问卷数据卡'
-            : '角色数据卡';
-
-    setCardName((defaultName && defaultName.trim()) ? defaultName : inferredName);
-    setCardDescription((defaultDescription && defaultDescription.trim()) ? defaultDescription : inferredDescription);
+    const ownerContext = context;
+    const preparation = operation.current + 1;
+    let resolvedData;
+    try { resolvedData = await resolveData(); }
+    catch (error) {
+      if (ownerContext === latestContext.current && mounted.current) alert(error instanceof Error ? error.message : '准备保存数据失败。');
+      return;
+    }
+    if (!mounted.current || preparation !== operation.current || ownerContext !== latestContext.current) return;
+    if (!resolvedData) { alert('没有可保存的数据。'); return; }
+    const type = cardType ?? (isScenarioData(resolvedData) ? 'scenario' : 'character');
+    const inferredName = type === 'character'
+      ? (resolvedData?.codename || resolvedData?.name || '')
+      : (resolvedData?.title || resolvedData?.name || (type === 'history' ? '叙事历史' : type === 'questionnaire' ? '问卷' : ''));
+    const inferredDescription = type === 'history' ? '叙事历史数据卡' : type === 'scenario' ? '情景数据卡' : type === 'questionnaire' ? '问卷数据卡' : '角色数据卡';
+    setCardName(defaultName?.trim() ? defaultName : inferredName);
+    setCardDescription(defaultDescription?.trim() ? defaultDescription : inferredDescription);
     setIsPublic(defaultIsPublic);
     setSaveError(null);
-    const capacityInfo = await dataCardApi.getUserCapacity();
-    if (capacityInfo !== null) {
-      setUserCapacity(capacityInfo.capacity);
-      setUserUsedSlots(capacityInfo.usedSlots);
-    }
     setShowSaveModal(true);
+    void loadUserDataCards();
   };
 
   const handleReplaceFromDataCards = async (card: any) => {
@@ -212,66 +245,87 @@ export default function SaveToCloudButton({
   };
 
   const handleSave = async () => {
-    if (!cardName.trim()) {
-      setSaveError('请输入数据卡名称');
+    if (busy.current || uncertainRef.current || draftContext.current !== context) return;
+    if (!cardName.trim() || cardName.length > 20 || cardDescription.length > 300) {
+      setSaveError(!cardName.trim() ? '请输入数据卡名称' : '名称最多 20 字符，描述最多 300 字符');
       return;
     }
-
+    if (!isAuthenticated || !user?.id || !preparedData) {
+      setSaveError('登录状态或保存数据已改变，请重新打开保存窗口。');
+      return;
+    }
+    busy.current = true;
+    const token = ++operation.current;
+    const ownerContext = context;
+    const isCurrent = () => mounted.current && token === operation.current && ownerContext === latestContext.current;
+    const submission = {
+      userId: user.id,
+      name: cardName,
+      description: cardDescription,
+      isPublic,
+      data: JSON.parse(JSON.stringify(preparedData)),
+      type: cardType ?? (isScenarioData(preparedData) ? 'scenario' : 'character'),
+    };
     setIsSaving(true);
     setSaveError(null);
-
+    let sent = false;
     try {
-      const workingData = preparedData ?? data;
-      if (!workingData) {
-        setSaveError('没有可保存的数据。');
-        return;
-      }
-      // 修正：直接使用 props 传入的 data 对象。
-      // 该对象由后端 API 生成，已包含了正确的签名状态。
-      // 本组件不再负责任何签名相关的逻辑判断。
-      const finalData = { ...workingData };
-      
-      // 前端敏感词检查
-      const type = cardType ?? (isScenarioData(finalData) ? 'scenario' : 'character');
-      const textToCheck = `${cardName} ${cardDescription} ${JSON.stringify(finalData)}`;
+      const expectedAuth = await authStorage.getAuth();
+      if (!isCurrent()) return;
+      const textToCheck = `${submission.name} ${submission.description} ${JSON.stringify(submission.data)}`;
       const sensitiveWordResult = await quickCheck(textToCheck);
-
-      if (sensitiveWordResult.hasSensitiveWords) {
-        navigateToArrested();
+      if (!isCurrent()) return;
+      if (sensitiveWordResult.hasSensitiveWords) { navigateToArrested(); return; }
+      sent = true;
+      const result = await dataCardApi.createCard(
+        submission.type, submission.name, submission.description, submission.data, submission.isPublic,
+        { expectedUserId: submission.userId, expectedAuth, isCurrent },
+      );
+      const currentAuth = await authStorage.getAuth();
+      if (!isCurrent()) return;
+      if (JSON.stringify(currentAuth) !== JSON.stringify(expectedAuth)) {
+        setSaveError('登录状态已改变。请检查原账号的云端卡，确认本次保存结果。');
+        uncertainRef.current = true;
+        setUncertain(true);
         return;
       }
-
-      const result = await dataCardApi.createCard(
-        type,
-        cardName,
-        cardDescription,
-        finalData, // 直接使用最终数据
-        isPublic
-      );
-
-      if (result.success) {
-        alert(`数据卡保存成功！${isPublic === 1 ? '（公开）' : '（私有）'}`);
+      if (result.success && typeof result.id === 'string' && result.id.trim()) {
+        alert(`数据卡保存成功！${submission.isPublic === 1 ? '（公开）' : '（私有）'}`);
         setShowSaveModal(false);
+        setPreparedData(null);
+        draftContext.current = null;
         setCardName('');
         setCardDescription('');
         setIsPublic(0);
-        setSaveError(null);
-        loadUserDataCards();
+        void loadUserDataCards();
+      } else if (result.uncertain || result.success) {
+        uncertainRef.current = true;
+        setUncertain(true);
+        setCheckedOwnCards(false);
+        setSaveError('保存结果不确定，数据卡可能已创建。请先检查“我的云端卡”，再决定是否再次新建。');
       } else {
-        if (result.error === 'SENSITIVE_WORD_DETECTED' || (result as any).redirect === '/arrested') {
+        if (result.error === 'SENSITIVE_WORD_DETECTED' || result.redirect === '/arrested') {
           navigateToArrested();
           return;
         }
-        setSaveError(result.error || '保存失败');
+        setSaveError(result.error || '保存被拒绝，输入已保留。');
       }
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : '保存失败，请稍后重试');
+      if (!isCurrent()) return;
+      if (sent) {
+        uncertainRef.current = true;
+        setUncertain(true);
+        setCheckedOwnCards(false);
+        setSaveError('保存结果不确定，数据卡可能已创建。请先检查“我的云端卡”，再决定是否再次新建。');
+      } else {
+        setSaveError(error instanceof Error ? error.message : '准备保存失败，输入已保留。');
+      }
     } finally {
-      setIsSaving(false);
+      if (isCurrent()) { busy.current = false; setIsSaving(false); }
     }
   };
 
-  const effectiveData = preparedData ?? data;
+  const effectiveData = draftContext.current === context ? preparedData : data;
   const canOperate = Boolean(data || getData);
 
   return (
@@ -280,7 +334,7 @@ export default function SaveToCloudButton({
         onClick={() => void handleSaveClick()}
         className={className}
         style={style}
-        disabled={!canOperate || isPreparing} // 如果没有数据且无法动态准备，则禁用
+        disabled={!canOperate || isPreparing || isSaving} // 如果没有数据且无法动态准备，则禁用
       >
         {isPreparing ? '准备中...' : buttonText}
       </button>
@@ -312,14 +366,14 @@ export default function SaveToCloudButton({
         }}
         className={`${className} ml-2`}
         style={{ ...style, backgroundColor: '#f59e0b', backgroundImage: 'linear-gradient(to right, #f59e0b, #f97316)' }}
-        disabled={!canOperate || isPreparing}
+        disabled={!canOperate || isPreparing || isSaving}
       >
         替换已有
       </button>
 
       <SaveCardModal
         isOpen={showSaveModal}
-        onClose={() => setShowSaveModal(false)}
+        onClose={() => { if (!busy.current) setShowSaveModal(false); }}
         onSave={handleSave}
         data={effectiveData}
         name={cardName}
@@ -330,6 +384,19 @@ export default function SaveToCloudButton({
         onPublicChange={setIsPublic}
         error={saveError}
         isSaving={isSaving}
+        submitDisabled={uncertain}
+        supplementaryContent={uncertain ? (
+          <div className="mt-3 text-sm">
+            <a href="/character-manager" target="_blank" rel="noopener noreferrer" className="underline" onClick={() => setCheckedOwnCards(true)}>检查我的云端卡</a>
+            <button type="button" disabled={!checkedOwnCards || isSaving} className="ml-3 underline disabled:opacity-50" onClick={() => {
+              if (!checkedOwnCards || busy.current) return;
+              if (!window.confirm('已检查我的云端卡？再次新建可能产生重复数据卡，是否继续？')) return;
+              uncertainRef.current = false;
+              setUncertain(false);
+              setSaveError(null);
+            }}>已检查，允许再次新建</button>
+          </div>
+        ) : undefined}
         usedSlots={userUsedSlots}
         userCapacity={userCapacity}
       />

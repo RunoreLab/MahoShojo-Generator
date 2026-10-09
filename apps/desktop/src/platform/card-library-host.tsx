@@ -28,6 +28,7 @@ import {
 import type { LocalCardRecordV1 } from '@mahoshojo/local-library/record';
 
 import { requestCardLibraryRoute } from './card-library-bridge';
+import { CLOUD_CREATE_UNCERTAIN_MESSAGE } from './private-cloud-save';
 import { DesktopCloudError, type InvokeFn } from './cloud-bridge';
 import { queryPublicReadCache, readPublicCacheCard } from './public-cache-bridge';
 import { downloadTextFile } from './download-text-file';
@@ -309,12 +310,16 @@ export const createDesktopCardLibraryOnlinePort = (invokeFn: InvokeFn): CardLibr
           isPublic: 0,
         });
         const body = asRecord(res.body);
-        if (res.status < 200 || res.status >= 300 || body?.success === false) {
-          return { ok: false, error: bodyError(res.body) ?? `上传失败（HTTP ${res.status}）` };
+        if (res.status < 200 || res.status >= 300 || body?.success !== true || typeof body?.id !== 'string' || !body.id.trim()) {
+          return { ok: false, error: [400, 401, 403, 413, 429].includes(res.status)
+            ? bodyError(res.body) ?? `上传被拒绝（HTTP ${res.status}）`
+            : CLOUD_CREATE_UNCERTAIN_MESSAGE };
         }
         return { ok: true };
       } catch (cause) {
-        return { ok: false, error: describeCause(cause, '上传到云端失败，请重试') };
+        return { ok: false, error: cause instanceof DesktopCloudError && ['not-authenticated', 'invalid-request'].includes(cause.code)
+          ? describeCause(cause, '上传请求被拒绝')
+          : CLOUD_CREATE_UNCERTAIN_MESSAGE };
       }
     },
   };

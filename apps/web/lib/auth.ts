@@ -531,26 +531,56 @@ export const dataCardApi = {
     }
   },
 
-  // 创建数据卡
-  async createCard(type: OnlineDataCardType, name: string, description: string, data: any, isPublic: number = 0): Promise<{
-    success: boolean;
-    id?: string;
-    error?: string;
-  }> {
+  // 创建不是幂等操作：包括超时、5xx 在内均不得自动重放。
+  async createCard(
+    type: OnlineDataCardType, name: string, description: string, data: any, isPublic: number = 0,
+    guard?: { expectedUserId: number; expectedAuth: AuthData | null; isCurrent: () => boolean },
+  ): Promise<{ success: boolean; id?: string; error?: string; redirect?: string; uncertain?: boolean }> {
+    let sent = false;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
     try {
-      const response = await authStorage.fetch('/api/data-cards', {
+      const frozenHeader = guard ? readStoredAuthHeader(guard.expectedAuth) : null;
+      const request: RequestInit = {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ type, name, description, data, isPublic })
-      });
-
-      const result = await response.json();
-      return result;
+        headers: { 'Content-Type': 'application/json', ...(frozenHeader ? { Authorization: frozenHeader } : {}) },
+        credentials: 'same-origin',
+        body: JSON.stringify({ type, name, description, data, isPublic }),
+        signal: controller.signal,
+      };
+      // Guarded callers already resolved their authenticated owner. Do not bootstrap a
+      // different credential while preparing this write; cookie auth needs no bearer.
+      const init = guard ? request : await authStorage.buildAuthenticatedRequestInit(request);
+      if (guard) {
+        const currentAuth = await authStorage.getAuth();
+        if (!guard.isCurrent() || currentAuth?.userId !== guard.expectedUserId ||
+            JSON.stringify(currentAuth) !== JSON.stringify(guard.expectedAuth)) {
+          return { success: false, error: '登录状态已改变，请重新打开保存窗口。' };
+        }
+      }
+      if (controller.signal.aborted) return { success: false, error: '准备保存超时，请重新打开保存窗口。' };
+      sent = true;
+      // 故意不走带重试的 GET helper。
+      const response = await fetch('/api/data-cards', init);
+      const result = await response.json().catch(() => null);
+      if (response.ok && result?.success === true && typeof result.id === 'string' && result.id.trim()) {
+        return { success: true, id: result.id };
+      }
+      if ([400, 401, 403, 413, 429].includes(response.status)) {
+        return {
+          success: false,
+          error: typeof result?.error === 'string' ? result.error : `创建被拒绝（HTTP ${response.status}）`,
+          ...(result?.redirect === '/arrested' ? { redirect: '/arrested' } : {}),
+        };
+      }
+      return { success: false, uncertain: true, error: '保存结果不确定，数据卡可能已创建。请先检查“我的云端卡”，再决定是否再次新建。' };
     } catch (error) {
       console.error('Create card error:', error);
-      return { success: false, error: '创建失败' };
+      return sent
+        ? { success: false, uncertain: true, error: '保存结果不确定，数据卡可能已创建。请先检查“我的云端卡”，再决定是否再次新建。' }
+        : { success: false, error: '准备保存失败，尚未发送创建请求。' };
+    } finally {
+      clearTimeout(timeout);
     }
   },
 

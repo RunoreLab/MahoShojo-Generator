@@ -92,9 +92,26 @@
     }
   },
   "cardLibrary": {
+    "validRequests": [
+      { "routeId": "data-cards.create", "expectedUserId": 7, "body": { "type": "character", "name": "draft", "description": "", "data": {}, "isPublic": false } },
+      { "routeId": "user-capacity.query", "expectedUserId": 7 },
+      { "routeId": "data-cards.query" },
+      { "routeId": "user-capacity.query", "expectedUserId": 9007199254740991 }
+    ],
+    "invalidFenceRequests": [
+      { "routeId": "data-cards.create", "expectedUserId": 0 },
+      { "routeId": "data-cards.create", "expectedUserId": -1 },
+      { "routeId": "data-cards.create", "expectedUserId": 1.5 },
+      { "routeId": "data-cards.create", "expectedUserId": 9007199254740992 },
+      { "routeId": "data-cards.create", "expectedUserId": "7" },
+      { "routeId": "data-cards.create", "expectedUserId": null },
+      { "routeId": "data-cards.create", "expected_user_id": 7 },
+      { "routeId": "data-cards.create", "expectedUserId": 7, "url": "https://example.test" }
+    ],
     "routes": {
       "data-cards.query": { "method": "GET", "path": "/api/data-cards", "auth": "required" },
       "data-cards.create": { "method": "POST", "path": "/api/data-cards", "auth": "required" },
+      "user-capacity.query": { "method": "GET", "path": "/api/user-capacity", "auth": "required" },
       "favorites.query": { "method": "GET", "path": "/api/favorites", "auth": "required" },
       "favorites.add": { "method": "POST", "path": "/api/favorites", "auth": "required" },
       "favorites.remove": { "method": "DELETE", "path": "/api/favorites", "auth": "required" },

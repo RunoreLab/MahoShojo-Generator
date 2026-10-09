@@ -236,6 +236,7 @@ describe('server-safe shared entrypoints stay free of React hooks', () => {
     // `./generation-actions` 只由生成页与 SaveJsonButton 客户端操作消费；不新增 RSC 导入链。
     // `./tavern` 是交互面板与状态 hook；服务端仅允许上面的 default-base 叶子。
     // `./team` 由两端客户端组队页消费，包含交互状态，不进入服务端导入链。
+    // `./cloud-save` 是含模态生命周期的受控保存表单，仅由两端客户端宿主消费。
     expect(unlisted.sort()).toEqual([
       './ai-provider',
       './announcement',
@@ -246,6 +247,7 @@ describe('server-safe shared entrypoints stay free of React hooks', () => {
       './character-manager',
       './character-result',
       './client',
+      './cloud-save',
       './color-mode',
       './community',
       './creator',

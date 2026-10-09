@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, useEffect } from 'react';
+import { DataCardSummarySchema } from '@mahoshojo/contracts/data-cards';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { LocalCardRecordV1 } from '@mahoshojo/local-library/record';
@@ -1147,4 +1148,23 @@ test.each(['library-lower', 'library-upper'] as const)('卡库与BaseModal混用
     await act(async () => root.render(null));
     document.body.style.overflow = originalOverflow;
   }
+});
+
+
+test('browse-only own public cards never select, load body, or report usage on row click', async () => {
+  const row = DataCardSummarySchema.parse({ ...publicCard('own-public'), user_id: 7 });
+  const { host, online } = createHost([], { auth: { status: 'authenticated', userId: 7, userBadges: [] }, online: {
+    fetchSummaryPage: vi.fn(async () => ({ success: true as const, cards: [row], total: 1, nextOffset: null })),
+  } });
+  const onClose = vi.fn(); const onSelectCard = vi.fn();
+  await act(async () => root.render(<CardLibraryModal host={host} isOpen onClose={onClose} onSelectCard={onSelectCard}
+    browseOnly selectedType="character" initialTab="my" visibleTabs={['my']} allowDeckImport={false} allowCardDetails={false} />));
+  await settle(); await settle();
+  const name = [...document.querySelectorAll('h4')].find((node) => node.textContent?.includes('公开角色 own-public'))!;
+  expect(name).toBeTruthy(); await click(name);
+  expect(document.querySelector('[aria-label="选择公开角色 own-public"]')).toBeNull();
+  expect(document.querySelector('[aria-label="下载数据卡到本地"]')).toBeNull();
+  expect(document.querySelector('[title="点赞"]')).toBeNull();
+  expect(onSelectCard).not.toHaveBeenCalled(); expect(onClose).not.toHaveBeenCalled();
+  expect(online.loadFullCard).not.toHaveBeenCalled(); expect(online.reportCardStat).not.toHaveBeenCalled();
 });

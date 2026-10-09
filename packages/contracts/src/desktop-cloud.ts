@@ -527,6 +527,7 @@ export const DesktopCardLibraryRouteIdSchema = z.enum([
   // 需要账号会话（无会话时 native 直接 `not-authenticated` fail-closed）
   'data-cards.query',
   'data-cards.create',
+  'user-capacity.query',
   'favorites.query',
   'favorites.add',
   'favorites.remove',
@@ -549,6 +550,8 @@ export type DesktopCardLibraryRouteId = z.infer<typeof DesktopCardLibraryRouteId
  */
 export const DesktopCardLibraryRequestSchema = z.object({
   routeId: DesktopCardLibraryRouteIdSchema,
+  // 新建私有云副本由 caller 冻结账号；optional 保持已有调用兼容。
+  expectedUserId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
   query: z.record(z.string().max(64), z.string().max(1024)).optional(),
   body: SafeJsonValueSchema.optional(),
 }).strict();

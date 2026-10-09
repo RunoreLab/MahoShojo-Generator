@@ -2249,7 +2249,7 @@ const CLOUD_ROUTE_QUERY_VALUE_MAX: usize = 1024;
 /// 路由的凭据语义：
 /// - `Required`：无已存会话即 `not-authenticated` fail-closed（「我的」「收藏」
 ///   「卡组」「创建」「消息摘要/已读」入口）；服务端明确回 401 时按会话被拒
-///   处理（清本地凭据）；
+///   处理（旧读取清本地凭据；fenced/创建请求只报告，避免误删新会话）；
 /// - `Optional`：有会话附带、没有则匿名（公开列表/标签/统计上报/全站消息）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CloudRouteAuth {
@@ -2267,6 +2267,12 @@ struct CloudRoute {
 // 与 `packages/contracts/fixtures/desktop-cloud.json` 的 `cardLibrary.routes`
 // 同源对拍：任一侧改动未同步，fixture 测试必须失败（DESK-033 同款漂移防护）。
 const CARD_LIBRARY_ROUTES: &[CloudRoute] = &[
+    CloudRoute {
+        id: "user-capacity.query",
+        method: reqwest::Method::GET,
+        path: "/api/user-capacity",
+        auth: CloudRouteAuth::Required,
+    },
     CloudRoute {
         id: "data-cards.query",
         method: reqwest::Method::GET,
@@ -2383,10 +2389,24 @@ fn lookup_cloud_route(
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CloudRouteRequest {
     pub route_id: String,
+    /// 可选兼容旧调用；新建私有云副本必须由 caller 冻结账号后提供。
+    #[serde(default, deserialize_with = "deserialize_expected_user_id")]
+    pub expected_user_id: Option<u64>,
     #[serde(default)]
     pub query: Option<std::collections::BTreeMap<String, String>>,
     #[serde(default)]
     pub body: Option<serde_json::Value>,
+}
+
+fn deserialize_expected_user_id<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let id = u64::deserialize(deserializer)?;
+    if id == 0 || id > MAX_SAFE_USER_ID {
+        return Err(serde::de::Error::custom("invalid expectedUserId"));
+    }
+    Ok(Some(id))
 }
 
 /// 窄路由 IPC 输出：「HTTP 状态 + JSON 正文」透传；业务校验在 renderer 适配层。
@@ -2443,8 +2463,8 @@ struct CloudDispatchEnv<'a> {
 /// - `query`/`body` 只是业务参数——renderer 携带 URL/path/header/凭据字段的
 ///   尝试在 `deny_unknown_fields` 处被拒；
 /// - Required 路由在本地无会话时直接 `not-authenticated`，不产生网络请求；
-///   服务端对 Required 路由回 401 时按「会话被服务端否认」清除本地凭据
-///   （与 `cloud_auth_status` 同一语义），响应仍原样回给 renderer；
+///   服务端对 Required 路由回 401 时，fenced/创建请求只报告；其余旧调用
+///   保持清本地凭据语义，响应仍原样回给 renderer；
 /// - 任何传输失败都是 `network-error`/`server-unavailable`，绝不伪装成
 ///   业务成功。
 async fn dispatch_cloud_route(
@@ -2485,7 +2505,23 @@ async fn dispatch_cloud_route(
         }
     };
 
+    if request
+        .expected_user_id
+        .is_some_and(|id| id == 0 || id > MAX_SAFE_USER_ID)
+    {
+        return Err(invalid_request("账号标识超出允许范围"));
+    }
+    // 本次请求只使用这个凭据快照；在途账号切换不能改变发送的 cookie。
     let session = load_session(env.secrets)?;
+    if request
+        .expected_user_id
+        .is_some_and(|id| session.as_ref().map(|session| session.account.user_id) != Some(id))
+    {
+        return Err(CloudError::new(
+            CloudErrorCode::NotAuthenticated,
+            "当前账号已改变，请重新确认云端保存的所属账号",
+        ));
+    }
     if route.auth == CloudRouteAuth::Required && session.is_none() {
         return Err(CloudError::new(
             CloudErrorCode::NotAuthenticated,
@@ -2499,9 +2535,21 @@ async fn dispatch_cloud_route(
         url.query_pairs_mut().extend_pairs(query.iter());
     }
 
-    let mut builder = env
-        .state
-        .http
+    // 新建不是幂等操作；连 reqwest 默认协议级 NACK 重试也禁用。
+    let create_http = if route.id == "data-cards.create" {
+        Some(
+            cloud_client_builder()
+                .retry(reqwest::retry::never())
+                .build()
+                .map_err(|_| {
+                    CloudError::new(CloudErrorCode::InternalError, "云端保存客户端初始化失败")
+                })?,
+        )
+    } else {
+        None
+    };
+    let http = create_http.as_ref().unwrap_or(&env.state.http);
+    let mut builder = http
         .request(route.method.clone(), url)
         .header(reqwest::header::ORIGIN, &env.state.origin)
         .header(reqwest::header::ACCEPT, "application/json");
@@ -2541,9 +2589,13 @@ async fn dispatch_cloud_route(
         .map_err(|error| CloudError::network(context, &error))?;
 
     let status = response.status().as_u16();
-    // 服务端对 Required 路由明确 401 = 本地凭据已被否认：与 `cloud_auth_status`
-    // 一致地清除会话，但响应原样透传给 renderer（业务错误不是传输失败）。
-    if route.auth == CloudRouteAuth::Required && status == 401 {
+    // Fenced 请求及所有创建请求的迟到 401 只报告，不能删掉切换后的会话。
+    // 不采用非原子的 compare-then-delete；旧读取/消息请求保留兼容语义。
+    if route.auth == CloudRouteAuth::Required
+        && status == 401
+        && request.expected_user_id.is_none()
+        && route.id != "data-cards.create"
+    {
         clear_session(env.secrets)?;
     }
 
@@ -2857,6 +2909,8 @@ mod tests {
         last_card_request: Mutex<Option<(String, String, Option<serde_json::Value>)>>,
         /// `Some((status, body))` 时卡库路由返回覆盖响应（测 401/错误分支）。
         card_response_override: Mutex<Option<(u16, String)>>,
+        card_request_count: std::sync::atomic::AtomicUsize,
+        card_reply_gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
         /// 卡库路由响应附加头（K1：注入 `Cache-Control` 存储许可证据）。
         card_extra_headers: Mutex<Vec<(String, String)>>,
         /// 最近一次 `/api/me/profile` 请求的原始 head（断言 cookie 注入）。
@@ -2884,6 +2938,8 @@ mod tests {
             hosted_json_response: Mutex::new(None),
             last_card_request: Mutex::new(None),
             card_response_override: Mutex::new(None),
+            card_request_count: std::sync::atomic::AtomicUsize::new(0),
+            card_reply_gate: Mutex::new(None),
             card_extra_headers: Mutex::new(Vec::new()),
             last_me_profile_head: Mutex::new(None),
             last_me_profile_body: Mutex::new(None),
@@ -3064,6 +3120,12 @@ mod tests {
                         head.to_string(),
                         serde_json::from_slice(body).ok(),
                     ));
+                    self.card_request_count
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    if let Some(wait) = self.card_reply_gate.lock().unwrap().take() {
+                        wait.recv_timeout(Duration::from_secs(3))
+                            .expect("release card reply");
+                    }
                     let mut extra = self.card_extra_headers.lock().unwrap().clone();
                     if let Some((status, override_body)) =
                         self.card_response_override.lock().unwrap().clone()
@@ -5565,6 +5627,7 @@ mod tests {
 
     fn card_request(route_id: &str) -> CloudRouteRequest {
         CloudRouteRequest {
+            expected_user_id: None,
             route_id: route_id.to_string(),
             query: None,
             body: None,
@@ -5629,6 +5692,213 @@ mod tests {
     }
 
     #[test]
+    fn card_library_account_fence_wire_matches_contract() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../packages/contracts/fixtures/desktop-cloud.json"
+        ))
+        .unwrap();
+        for wire in fixture["cardLibrary"]["validRequests"].as_array().unwrap() {
+            let request: CloudRouteRequest = serde_json::from_value(wire.clone()).unwrap();
+            assert_eq!(
+                request.expected_user_id,
+                wire.get("expectedUserId")
+                    .and_then(serde_json::Value::as_u64)
+            );
+            assert!(lookup_cloud_route(CARD_LIBRARY_ROUTES, &request.route_id).is_some());
+        }
+        for wire in fixture["cardLibrary"]["invalidFenceRequests"]
+            .as_array()
+            .unwrap()
+        {
+            assert!(
+                serde_json::from_value::<CloudRouteRequest>(wire.clone()).is_err(),
+                "{wire}"
+            );
+        }
+    }
+
+    #[test]
+    fn card_library_fence_and_capacity_are_fixed_and_fail_closed() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            let cache = TestCache::new("fenced-capacity");
+            for route in ["data-cards.create", "user-capacity.query"] {
+                for expected in [Some(7), Some(8)] {
+                    let mut request = card_request(route);
+                    request.expected_user_id = expected;
+                    let error = cloud_card_library_request(&state, &secrets, cache.get(), request)
+                        .await
+                        .unwrap_err();
+                    assert_eq!(error.code, CloudErrorCode::NotAuthenticated);
+                }
+            }
+            store_session(&secrets, &stored_test_session()).unwrap();
+            for route in ["data-cards.create", "user-capacity.query"] {
+                let mut request = card_request(route);
+                request.expected_user_id = Some(8);
+                assert_eq!(
+                    cloud_card_library_request(&state, &secrets, cache.get(), request)
+                        .await
+                        .unwrap_err()
+                        .code,
+                    CloudErrorCode::NotAuthenticated
+                );
+            }
+            assert_eq!(
+                server
+                    .card_request_count
+                    .load(std::sync::atomic::Ordering::SeqCst),
+                0
+            );
+            let mut request = card_request("user-capacity.query");
+            request.expected_user_id = Some(7);
+            let response = cloud_card_library_request(&state, &secrets, cache.get(), request)
+                .await
+                .unwrap();
+            assert!(response.cache.is_none());
+            let (target, head, body) = server.last_card_request.lock().unwrap().clone().unwrap();
+            assert_eq!(target, "/api/user-capacity");
+            assert!(head.starts_with("GET /api/user-capacity HTTP/1.1"));
+            assert!(head.contains("better-auth.session_token=native.tok"));
+            assert!(body.is_none());
+        });
+    }
+
+    #[test]
+    fn card_library_create_errors_do_not_retry_redirect_or_clear_session() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            let cache = TestCache::new("create-no-replay");
+            store_session(&secrets, &stored_test_session()).unwrap();
+            *server.card_extra_headers.lock().unwrap() = vec![("Location".into(), "/api/data-cards".into())];
+            for (index, status) in [400, 401, 403, 413, 429, 500, 503, 307, 200].into_iter().enumerate() {
+                let body = if status == 200 { "unparseable" } else { r#"{"success":false,"error":"rejected"}"# };
+                *server.card_response_override.lock().unwrap() = Some((status, body.into()));
+                let mut request = card_request("data-cards.create");
+                request.expected_user_id = Some(7);
+                request.body = Some(serde_json::json!({"type":"character", "name":"draft", "description":"", "data":{"nested":{"preserved":true}}, "isPublic":false}));
+                let result = cloud_card_library_request(&state, &secrets, cache.get(), request).await;
+                if status == 200 {
+                    assert_eq!(result.unwrap_err().code, CloudErrorCode::InvalidResponse);
+                } else {
+                    let response = result.unwrap();
+                    assert_eq!(response.status, status);
+                    assert_eq!(response.body["success"], false);
+                    assert!(response.cache.is_none());
+                }
+                let (target, head, body) = server.last_card_request.lock().unwrap().clone().unwrap();
+                assert_eq!(target, "/api/data-cards");
+                assert!(head.starts_with("POST /api/data-cards HTTP/1.1"));
+                let body = body.unwrap();
+                assert_eq!(body["isPublic"], false);
+                assert_eq!(body["data"]["nested"]["preserved"], true);
+                assert!(body.get("expectedUserId").is_none());
+                assert_eq!(server.card_request_count.load(std::sync::atomic::Ordering::SeqCst), index + 1);
+                assert_eq!(load_session(&secrets).unwrap().unwrap().account.user_id, 7);
+            }
+        });
+    }
+
+    #[test]
+    fn card_library_create_truncated_response_is_network_error_without_replay() {
+        rt().block_on(async {
+            use std::io::{Read, Write};
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let state = CloudState::with_origin(&format!("http://{}", listener.local_addr().unwrap()));
+            let secrets = MemorySecrets::new();
+            let cache = TestCache::new("create-truncated");
+            store_session(&secrets, &stored_test_session()).unwrap();
+            let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let observed = count.clone();
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+                let mut bytes = [0u8; 4096];
+                let received = stream.read(&mut bytes).unwrap();
+                assert!(received > 0);
+                observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100\r\nConnection: close\r\n\r\n{").unwrap();
+                drop(stream);
+                listener.set_nonblocking(true).unwrap();
+                let deadline = std::time::Instant::now() + Duration::from_millis(200);
+                while std::time::Instant::now() < deadline {
+                    if listener.accept().is_ok() {
+                        observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    }
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            });
+            let mut request = card_request("data-cards.create");
+            request.expected_user_id = Some(7);
+            request.body = Some(serde_json::json!({"name":"draft", "isPublic":false}));
+            let error = cloud_card_library_request(&state, &secrets, cache.get(), request).await.unwrap_err();
+            assert_eq!(error.code, CloudErrorCode::NetworkError);
+            server.join().unwrap();
+            assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 1);
+            assert_eq!(load_session(&secrets).unwrap().unwrap().account.user_id, 7);
+        });
+    }
+
+    #[test]
+    fn card_library_late_401_uses_frozen_credentials_and_keeps_new_session() {
+        rt().block_on(async {
+            // 旧 uploader 的无 fence 创建也不能删除在途切换后的凭据。
+            for (route, expected) in [
+                ("data-cards.create", Some(7)),
+                ("data-cards.create", None),
+                ("user-capacity.query", Some(7)),
+            ] {
+                let server = spawn_mock_server();
+                let state = CloudState::with_origin(&server.origin);
+                let secrets = MemorySecrets::new();
+                let cache = TestCache::new("late-card-401");
+                store_session(&secrets, &stored_test_session()).unwrap();
+                *server.card_response_override.lock().unwrap() =
+                    Some((401, r#"{"success":false}"#.into()));
+                let (release, wait) = std::sync::mpsc::channel();
+                *server.card_reply_gate.lock().unwrap() = Some(wait);
+                let change_account = async {
+                    tokio::time::timeout(Duration::from_secs(3), async {
+                        while server.last_card_request.lock().unwrap().is_none() {
+                            tokio::time::sleep(Duration::from_millis(5)).await;
+                        }
+                    })
+                    .await
+                    .expect("request in flight");
+                    let mut next = stored_test_session();
+                    next.account.user_id = 8;
+                    next.cookie = "better-auth.session_token=account-B".into();
+                    store_session(&secrets, &next).unwrap();
+                    release.send(()).unwrap();
+                };
+                let mut request = card_request(route);
+                request.expected_user_id = expected;
+                let (response, ()) = tokio::join!(
+                    cloud_card_library_request(&state, &secrets, cache.get(), request),
+                    change_account
+                );
+                assert_eq!(response.unwrap().status, 401);
+                let current = load_session(&secrets).unwrap().unwrap();
+                assert_eq!(current.account.user_id, 8);
+                assert_eq!(current.cookie, "better-auth.session_token=account-B");
+                let (_, head, _) = server.last_card_request.lock().unwrap().clone().unwrap();
+                assert!(head.contains("better-auth.session_token=native.tok"));
+                assert!(!head.contains("account-B"));
+                assert_eq!(
+                    server
+                        .card_request_count
+                        .load(std::sync::atomic::Ordering::SeqCst),
+                    1
+                );
+            }
+        });
+    }
+
+    #[test]
     fn card_library_rejects_unknown_route_and_get_body() {
         rt().block_on(async {
             let server = spawn_mock_server();
@@ -5654,6 +5924,7 @@ mod tests {
                 &secrets,
                 cache.get(),
                 CloudRouteRequest {
+                    expected_user_id: None,
                     route_id: "public-data-cards.query".to_string(),
                     query: None,
                     body: Some(serde_json::json!({"x": 1})),
@@ -5723,6 +5994,7 @@ mod tests {
                 &secrets,
                 cache.get(),
                 CloudRouteRequest {
+                    expected_user_id: None,
                     route_id: "data-cards.create".to_string(),
                     query: None,
                     body: Some(serde_json::json!({
@@ -5796,6 +6068,7 @@ mod tests {
                 &secrets,
                 cache.get(),
                 CloudRouteRequest {
+                    expected_user_id: None,
                     route_id: "data-cards.create".to_string(),
                     query: None,
                     body: Some(serde_json::json!({
@@ -5817,6 +6090,7 @@ mod tests {
                 &secrets,
                 cache.get(),
                 CloudRouteRequest {
+                    expected_user_id: None,
                     route_id: "data-cards.create".to_string(),
                     query: None,
                     body: Some(serde_json::json!({
@@ -6080,6 +6354,7 @@ mod tests {
                 &state,
                 &secrets,
                 CloudRouteRequest {
+                    expected_user_id: None,
                     route_id: "messages.list".to_string(),
                     query: None,
                     body: Some(serde_json::json!({"x": 1})),
@@ -6140,6 +6415,7 @@ mod tests {
                 &state,
                 &secrets,
                 CloudRouteRequest {
+                    expected_user_id: None,
                     route_id: "messages.read".to_string(),
                     query: None,
                     body: Some(serde_json::json!({"ids": ["user:12"]})),
@@ -6190,6 +6466,7 @@ mod tests {
                 &state,
                 &secrets,
                 CloudRouteRequest {
+                    expected_user_id: None,
                     route_id: "messages.read".to_string(),
                     query: None,
                     body: Some(serde_json::json!({

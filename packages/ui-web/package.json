@@ -202,7 +202,12 @@
     "./team": "./src/team/index.ts",
     "./questionnaire-editor": "./src/questionnaire-editor/index.ts",
     "./card-forge": "./src/card-forge/index.ts",
-    "./card-forge.css": "./src/card-forge/styles.css"
+    "./card-forge.css": "./src/card-forge/styles.css",
+    "./cloud-save": {
+      "types": "./src/cloud-save/index.ts",
+      "import": "./src/cloud-save/index.ts",
+      "default": "./src/cloud-save/index.ts"
+    }
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",

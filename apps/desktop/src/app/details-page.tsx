@@ -1,3 +1,4 @@
+import { PrivateResultSave } from '../features/cloud-save/private-result-save';
 import { GenerationMarkdownPreview } from './generation-markdown-preview';
 import { generationActionClassNames, generationSubmitClassName } from '@mahoshojo/ui-web/generation-actions';
 import { QuestionnaireDraftPanel } from './questionnaire-draft-panel';
@@ -165,6 +166,9 @@ function DetailsForm({ session, restored }: { session: DetailsSession; restored:
   const cardLibraryHost = useDesktopCardLibraryHost();
   // 登录只决定是否附带会话/活动身份；System Default 公开路由对匿名放行（DESK-ONLINE-009）。
   const { store: cloudSessionStore } = useDesktopCloudSession();
+  const cloudSavingRef = useRef(false);
+  const [cloudSaving, setCloudSaving] = useState(false);
+  const onCloudSavingChange = useCallback((saving: boolean) => { cloudSavingRef.current = saving; setCloudSaving(saving); }, []);
   const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
   const [presetEntries, setPresetEntries] = useState<QuestionnairePresetEntry[]>([]);
@@ -232,12 +236,12 @@ function DetailsForm({ session, restored }: { session: DetailsSession; restored:
     },
   });
   const guard = useLeaveGuard(
-    () => session.isBusy() || session.hasUnsavedDraft() || aiStore.isPreparingGeneration(),
+    () => cloudSavingRef.current || session.isBusy() || session.hasUnsavedDraft() || aiStore.isPreparingGeneration(),
     '生成或保存尚未完成，或当前草稿未能保存。请等待、取消生成，或重试保存草稿后再离开。',
     '窗口关闭保护初始化失败，生成与保存暂不可用。请重新打开页面后重试。',
     () => {
       const current = session.getSnapshot();
-      if (current.saving || aiStore.isPreparingGeneration()) return false;
+      if (cloudSavingRef.current || current.saving || aiStore.isPreparingGeneration()) return false;
       const confirmDiscardUnpersisted = () => window.confirm('当前内容尚未写入草稿。确认放弃本页未持久化内容并离开？原有存档和已保存的本地卡不会删除。');
       if (current.phase !== 'generating') return !session.hasUnsavedDraft() || confirmDiscardUnpersisted();
       const memoryOnly = session.isDraftBlocked();
@@ -323,7 +327,7 @@ function DetailsForm({ session, restored }: { session: DetailsSession; restored:
     [draftSelections, provisionalBuiltin],
   );
   const mode = target.mode;
-  const busy = state.phase === 'generating' || state.saving || aiState.generationActive;
+  const busy = cloudSaving || state.phase === 'generating' || state.saving || aiState.generationActive;
   const showStreamPreview = state.phase === 'generating' && state.activeGenerationMode === 'stream';
   useEffect(() => () => aiStore.cancelPreparingGeneration(), [aiStore]);
   const blockedDraft = state.pendingRestore;
@@ -465,7 +469,7 @@ function DetailsForm({ session, restored }: { session: DetailsSession; restored:
     // 用户自备的选择集——选择集存在且流程非空就足以生成（与 Web 同口径，P2-r1）。
     // 悬空选择（含服务器侧被目录移除的系统模型）保留诊断值但禁止派发——
     // unavailableReason 与按钮 disabled 必须同口径（D5.1-AIP-r1-r1）。
-    if (!guard.ready || session.isBusy() || aiState.generationActive || !executionMode || submissionSelections.length === 0 || submissionFlow.length === 0 || questionnaireLoading || clientProfilesBlocked || current.pendingRestore || target.unavailableReason !== null) return;
+    if (cloudSavingRef.current || !guard.ready || session.isBusy() || aiState.generationActive || !executionMode || submissionSelections.length === 0 || submissionFlow.length === 0 || questionnaireLoading || clientProfilesBlocked || current.pendingRestore || target.unavailableReason !== null) return;
     if (target.location === 'client' && !target.providerTarget) return;
     if (!discardUnsavedResult) {
       if (session.hasUnsavedResult()) { pendingActionRef.current = 'generate'; setConfirmRegenerate('unsaved'); return; }
@@ -548,7 +552,7 @@ function DetailsForm({ session, restored }: { session: DetailsSession; restored:
   }, [session]);
 
   const handleQuickRandom = () => {
-    if (!guard.ready || busy || state.pendingRestore) return;
+    if (cloudSavingRef.current || !guard.ready || busy || state.pendingRestore) return;
     if (session.hasUnsavedResult()) {
       pendingActionRef.current = 'quick-random';
       setConfirmRegenerate('unsaved');
@@ -995,6 +999,7 @@ function DetailsForm({ session, restored }: { session: DetailsSession; restored:
                   )}
 
                   <button className={`${generationActionClassNames.primary} w-full`} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => { if (guard.ready) void session.saveResult(); }}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>
+                  <PrivateResultSave onBusyChange={onCloudSavingChange} data={resolvedResultPayload} disabled={!guard.ready || busy} className={`${generationActionClassNames.primary} w-full`} />
                 </QuestionnaireResultActions>}
             </section>}
           </div>

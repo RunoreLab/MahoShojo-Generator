@@ -25,6 +25,8 @@ import {
   DesktopAuthStateSchema,
   DesktopAuthorizeQuerySchema,
   DesktopCardLibraryResponseSchema,
+  DesktopCardLibraryRequestSchema,
+  DesktopCardLibraryRouteIdSchema,
   DesktopCloudErrorCodeSchema,
   DesktopCloudLoginOutcomeSchema,
   DesktopCloudMeProfileSchema,
@@ -72,6 +74,8 @@ type DesktopCloudFixture = {
   validAuthorizeQuery: Record<string, unknown>;
   invalidAuthorizeQueries: Record<string, unknown>[];
   cardLibrary: {
+    validRequests: unknown[];
+    invalidFenceRequests: unknown[];
     routes: Record<string, { method: string; path: string; auth: string }>;
     publicReadCache: {
       sourceRouteId: string;
@@ -630,4 +634,21 @@ describe('hosted preset BYOK 安全选择', () => {
       }
     });
   }
+});
+
+describe('card-library account-fenced wire contract', () => {
+  it('keeps the typed route allowlist aligned with native fixture', () => {
+    expect([...DesktopCardLibraryRouteIdSchema.options].sort()).toEqual(Object.keys(fixture.cardLibrary.routes).sort());
+    expect(fixture.cardLibrary.routes['user-capacity.query']).toEqual({ method: 'GET', path: '/api/user-capacity', auth: 'required' });
+  });
+  it('accepts frozen account IDs and legacy requests', () => {
+    for (const wire of fixture.cardLibrary.validRequests) {
+      expect(DesktopCardLibraryRequestSchema.safeParse(wire).success).toBe(true);
+    }
+  });
+  it('rejects unsafe IDs, non-camelCase fields and arbitrary URLs', () => {
+    for (const wire of fixture.cardLibrary.invalidFenceRequests) {
+      expect(DesktopCardLibraryRequestSchema.safeParse(wire).success).toBe(false);
+    }
+  });
 });

@@ -124,7 +124,11 @@ describe('createDesktopCardLibraryOnlinePort', () => {
 
     const failInvoke = makeInvoke(() => ({ status: 500, body: { error: '服务器繁忙' } }));
     const failPort = createDesktopCardLibraryOnlinePort(failInvoke);
-    expect(await failPort.uploadLocalRecord!(record)).toEqual({ ok: false, error: '服务器繁忙' });
+    expect(await failPort.uploadLocalRecord!(record)).toEqual({ ok: false, error: expect.stringContaining('结果不确定') });
+    for (const body of [{}, { success: true }, { success: true, id: ' ' }]) {
+      const ambiguous = createDesktopCardLibraryOnlinePort(makeInvoke(() => ({ status: 201, body })));
+      expect(await ambiguous.uploadLocalRecord!(record)).toEqual({ ok: false, error: expect.stringContaining('结果不确定') });
+    }
 
     const throwInvoke = vi.fn(async () => { throw { code: 'not-authenticated', message: '该操作需要登录云端账号' }; });
     const throwPort = createDesktopCardLibraryOnlinePort(throwInvoke);
