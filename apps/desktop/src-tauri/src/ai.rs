@@ -613,7 +613,20 @@ pub fn build_http_client(max_redirects: u8) -> Result<reqwest::Client, DirectAiE
     builder = if max_redirects == 0 {
         builder.redirect(reqwest::redirect::Policy::none())
     } else {
-        builder.redirect(reqwest::redirect::Policy::limited(max_redirects as usize))
+        let limited = reqwest::redirect::Policy::limited(max_redirects as usize);
+        builder.redirect(reqwest::redirect::Policy::custom(move |attempt| {
+            // 限次不是同源策略：reqwest 只移除固定名称的敏感头，不能保护
+            // Profile 的任意 secretHeaderRefs，也不能阻止 prompt body 跨源。
+            if attempt
+                .previous()
+                .first()
+                .is_none_or(|origin| origin.origin() != attempt.url().origin())
+            {
+                attempt.stop()
+            } else {
+                limited.redirect(attempt)
+            }
+        }))
     };
     builder
         .build()

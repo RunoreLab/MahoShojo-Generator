@@ -933,3 +933,158 @@ async fn target_custom_preserves_legacy_model_ids_above_new_input_limit() {
         if result.resolved_model_id.as_deref() == Some("a".repeat(256).as_str()))
     );
 }
+
+/// Read the full request, including a POST body, before closing a redirect socket.
+async fn read_full_request(stream: &mut TcpStream) -> String {
+    let mut bytes = Vec::new();
+    let mut buffer = [0_u8; 4096];
+    loop {
+        let read = stream
+            .read(&mut buffer)
+            .await
+            .expect("read fixture request");
+        if read == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&buffer[..read]);
+        if let Some(end) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+            let head = String::from_utf8_lossy(&bytes[..end]);
+            let length = head
+                .lines()
+                .filter_map(|line| line.split_once(':'))
+                .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                .map(|(_, value)| value.trim().parse::<usize>().unwrap())
+                .unwrap_or(0);
+            if bytes.len() >= end + 4 + length {
+                break;
+            }
+        }
+    }
+    String::from_utf8(bytes).expect("UTF-8 fixture request")
+}
+
+#[tokio::test]
+async fn cross_origin_redirect_never_transmits_prompt_or_secret_header() {
+    for status in [307, 308] {
+        let source = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let destination = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let source_url = format!("http://{}/v1", source.local_addr().unwrap());
+        let destination_url = format!("http://{}/leaked", destination.local_addr().unwrap());
+        let redirected = tokio::spawn(async move {
+            let accepted =
+                tokio::time::timeout(std::time::Duration::from_millis(500), destination.accept())
+                    .await;
+            if let Ok(Ok((mut stream, _))) = accepted {
+                let request = read_full_request(&mut stream).await;
+                write_response_head(&mut stream).await;
+                write_sse_raw(&mut stream, "data: [DONE]\n\n")
+                    .await
+                    .unwrap();
+                stream.shutdown().await.unwrap();
+                Some(request)
+            } else {
+                None
+            }
+        });
+        let origin = tokio::spawn(async move {
+            let (mut stream, _) = source.accept().await.unwrap();
+            let request = read_full_request(&mut stream).await;
+            stream
+            .write_all(format!("HTTP/1.1 {status} Redirect\r\nLocation: {destination_url}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").as_bytes())
+            .await
+            .unwrap();
+            request
+        });
+        let store = LocalStore::open_in_memory().unwrap();
+        let mut profile: serde_json::Value =
+            serde_json::from_str(&stored_profile("redirect", &source_url, false)).unwrap();
+        profile["transport"] = serde_json::json!({ "maxRedirects": 1 });
+        profile["secretHeaderRefs"] =
+            serde_json::json!({ "x-api-key": "provider:redirect:custom-key" });
+        store.put("redirect", &profile.to_string(), "t").unwrap();
+        let secrets = TestSecretStore::default();
+        secrets
+            .set("provider:redirect:custom-key", "fixture-private-key")
+            .unwrap();
+        let sink = CollectingSink::default();
+        let registry = RequestRegistry::default();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            stream_direct_ai(
+                "redirect",
+                request("req-redirect"),
+                &store,
+                &secrets,
+                &registry,
+                &sink,
+            ),
+        )
+        .await
+        .expect("redirect result must be bounded")
+        .unwrap();
+        let origin_request = origin.await.unwrap();
+        assert!(origin_request.contains("fixture-private-key"));
+        assert!(origin_request.contains("hello"));
+        assert!(
+            redirected.await.unwrap().is_none(),
+            "a cross-origin redirect must not send any request, prompt or custom secret header"
+        );
+        let events = sink.snapshot();
+        assert_well_formed(&events, "req-redirect");
+        assert!(matches!(
+            terminals(&events)[0],
+            AiExecutionResult::Failed(_)
+        ));
+        assert_eq!(registry.len(), 0);
+    }
+}
+
+#[tokio::test]
+async fn same_origin_redirects_preserve_headers_and_respect_the_configured_limit() {
+    for (limit, redirects, succeeds) in [(0, 1, false), (1, 1, true), (1, 2, false), (2, 2, true)] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/start", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let mut requests = Vec::new();
+            for index in 0..=redirects {
+                let Ok(Ok((mut stream, _))) =
+                    tokio::time::timeout(std::time::Duration::from_millis(500), listener.accept())
+                        .await
+                else {
+                    break;
+                };
+                requests.push(read_full_request(&mut stream).await);
+                let response = if index < redirects {
+                    format!("HTTP/1.1 307 Temporary Redirect\r\nLocation: /next/{index}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                } else {
+                    "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string()
+                };
+                stream.write_all(response.as_bytes()).await.unwrap();
+            }
+            requests
+        });
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            crate::ai::build_http_client(limit)
+                .unwrap()
+                .get(url)
+                .header("x-api-key", "same-origin-key")
+                .send(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            response
+                .as_ref()
+                .is_ok_and(|response| response.status().is_success()),
+            succeeds,
+            "limit={limit}, redirects={redirects}"
+        );
+        let requests = server.await.unwrap();
+        assert_eq!(requests.len(), (usize::from(limit) + 1).min(redirects + 1));
+        assert!(requests
+            .iter()
+            .all(|request| request.contains("x-api-key: same-origin-key")));
+    }
+}
+
