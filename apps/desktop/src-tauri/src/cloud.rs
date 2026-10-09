@@ -4848,10 +4848,12 @@ mod tests {
                 "cancel must interrupt the diagnostic body reader"
             );
             assert!(cancelled.unwrap().is_ok());
-            let events = sink.events.lock().unwrap();
-            assert_eq!(events.len(), 1);
-            assert_eq!(events[0].event, "error");
-            assert_eq!(events[0].data["code"], "cancelled");
+            {
+                let events = sink.events.lock().unwrap();
+                assert_eq!(events.len(), 1);
+                assert_eq!(events[0].event, "error");
+                assert_eq!(events[0].data["code"], "cancelled");
+            }
             assert_eq!(registry.len(), 0);
             assert!(
                 server.await.unwrap(),
