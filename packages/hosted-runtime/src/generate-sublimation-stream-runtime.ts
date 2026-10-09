@@ -1,3 +1,4 @@
+import { assertSublimationHistoryRetentionSupported, assertSublimationExtensionCompatibility } from '@mahoshojo/domain/sublimation';
 import {
   createGenerateSublimationStreamService,
   type GenerateSublimationService,
@@ -66,6 +67,7 @@ type StreamInput = {
   targetTemplate: unknown;
   loreText: string;
   customProviderPayload: unknown;
+  stateOptions: { readArenaHistory: boolean; readCurrentState: boolean };
 };
 
 type StreamOutput = {
@@ -79,6 +81,7 @@ const STREAM_CONTROL_FIELDS = [
   'language', 'userGuidance', 'narrativeHistory', 'fieldsToPreserve', 'isDowngrade',
   'allowReshapeNames', 'customProvider', 'targetTemplate', 'sourceTemplate',
   'arenaHistoryRetentionStrategy', 'questionnaires', 'questionnaireSelections',
+  'readArenaHistory', 'writeArenaHistory', 'readCurrentState', 'writeCurrentState',
 ] as const;
 
 export const createGenerateSublimationStreamRuntime = (
@@ -102,8 +105,15 @@ export const createGenerateSublimationStreamRuntime = (
           headers: { 'Content-Type': 'application/json' },
         }));
       }
+      try {
+        if (parsed.writeArenaHistory !== false) assertSublimationHistoryRetentionSupported(original.arena_history, parsed.arenaHistoryRetentionStrategy);
+        assertSublimationExtensionCompatibility(original, 'general');
+      } catch {
+        return respondStep(new Response(JSON.stringify({ error: '原卡历史或扩展格式暂不支持，请保留原卡并检查兼容性。' }), { status: 400, headers: { 'Content-Type': 'application/json' } }));
+      }
       return completeStep({
         original,
+        stateOptions: { readArenaHistory: parsed.readArenaHistory === true, readCurrentState: parsed.readCurrentState !== false },
         language: typeof parsed.language === 'string' ? parsed.language : 'zh-CN',
         userGuidance: typeof parsed.userGuidance === 'string'
           ? parsed.userGuidance.trim().slice(0, SUBLIMATION_USER_GUIDANCE_MAX_CHARS)
@@ -151,6 +161,7 @@ export const createGenerateSublimationStreamRuntime = (
       const telemetry: GenerationAiTelemetry = {};
       const result = await ports.generateWithStreamAI(buildSublimationStreamConfig({
         originalData: input.original,
+        stateOptions: input.stateOptions,
         language: input.language,
         userGuidance: input.userGuidance,
         narrativeHistory: input.narrativeHistory,

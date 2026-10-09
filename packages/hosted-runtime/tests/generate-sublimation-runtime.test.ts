@@ -432,3 +432,39 @@ describe('generate sublimation hosted runtime', () => {
     });
   });
 });
+
+it('stream consumes explicit state flags without sending control fields to the model', async () => {
+  const generateWithStreamAI = vi.fn(async (config: { prompt: string }) => {
+    expect(config.prompt).not.toContain('PRIVATE_STATE');
+    expect(config.prompt).toContain('HISTORY_MARKER');
+    for (const field of ['readArenaHistory', 'writeArenaHistory', 'readCurrentState', 'writeCurrentState']) expect(config.prompt).not.toContain(field);
+    return { response: new Response('markdown') };
+  });
+  const service = createGenerateSublimationStreamRuntime({ ...providerPorts,
+    checkRateLimit: async () => null, enforceSafety: async () => null,
+    shouldUseReasoningSse: () => false,
+    createReasoningSseBridge: () => { throw new Error('unused'); },
+    generateWithStreamAI, recordActivity: vi.fn(), logError: vi.fn(),
+  }).service;
+  const response = await service(request({ ...originalCharacter,
+    current_state: { summary: 'PRIVATE_STATE' }, arena_history: {entries:[{title:'HISTORY_MARKER',impact:'成长'}]},
+    readArenaHistory: true, readCurrentState: false, writeArenaHistory: true, writeCurrentState: false,
+  }));
+  expect(response.status).toBe(200); expect(generateWithStreamAI).toHaveBeenCalledOnce();
+});
+
+it.each([
+  { arena_history: { entries: ['legacy raw'] } },
+  { current_state: 'legacy raw state' },
+  { appearance: { ...originalCharacter.appearance, future_extension: 'keep' }, targetTemplate: 'canshou' },
+])('rejects unsupported preservation before invoking the structured model: %j', async (patch) => {
+  const generateWithAI = vi.fn();
+  const runtime = createGenerateSublimationRuntime({ ...providerPorts, presetIndex: {presets:[]},
+    defaultQuestions:{magicalGirl:[],canshou:[]}, allowGuidedNativeSigning:false,
+    loadPreset:async()=>null,loadDataCard:async()=>null,checkRateLimit:async()=>null,enforceSafety:async()=>null,
+    generateWithAI,verify:async()=>false,sign:vi.fn(),recordActivity:vi.fn(),buildResponse:({data})=>new Response(JSON.stringify(data)),
+    now:()=>new Date(),logError:vi.fn(),
+  });
+  const response=await runtime.service(request({...originalCharacter,...patch,writeArenaHistory:true}));
+  expect(response.status).toBe(400); expect(generateWithAI).not.toHaveBeenCalled();
+});

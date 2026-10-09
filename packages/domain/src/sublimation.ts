@@ -369,11 +369,18 @@ export const convertSublimationCharacterCard = (
   sourceTemplate: SublimationSourceTemplate = inferSublimationSourceTemplate(value),
 ): SublimationCharacterConversionResult => {
   if (!isObject(value)) throw new Error('无法转换：数据格式无效。');
-  const sanitized = sanitizeForConversion(value);
-  if (!isObject(sanitized)) throw new Error('无法转换：数据格式无效。');
-  if (target === 'general') return convertToGeneral(sanitized);
-  if (target === 'magical-girl') return convertToMagicalGirl(sanitized, sourceTemplate);
-  return convertToCanshou(sanitized, sourceTemplate);
+  assertSublimationExtensionCompatibility(value, target, sourceTemplate);
+  const sanitized = stripSublimationAuthority(value);
+  delete sanitized.templateId;
+  const converted = target === 'general'
+    ? convertToGeneral(sanitized)
+    : target === 'magical-girl'
+      ? convertToMagicalGirl(sanitized, sourceTemplate)
+      : convertToCanshou(sanitized, sourceTemplate);
+  return {
+    ...converted,
+    data: preserveSublimationCardExtensions(value, converted.data, target, sourceTemplate),
+  };
 };
 
 // ============================================================================
@@ -603,6 +610,122 @@ export const convertDataCard = (
   }
 };
 
+// Only these card-level fields represent trust, persistence identity or generation
+// bookkeeping. An opaque user extension may itself contain e.g. `signature` or
+// `templateId`; those nested keys are data and must not be recursively erased.
+const SUBLIMATION_AUTHORITY_FIELDS = new Set([
+  'signature', 'isNative', 'isPreset', 'isValid', 'isVerified', 'verificationStatus',
+  'sourceDataCardId', 'sourceDataCardUpdatedAt', 'arenaRoomKey', 'adjudicationSourceKey',
+  'permissions', 'generation_id', 'generationId', 'base_revision_hash',
+  'created_at', 'updated_at', 'createdAt', 'updatedAt', 'generated_at', 'generatedAt',
+]);
+
+const stripSublimationAuthority = (source: Record<string, unknown>): Record<string, unknown> => {
+  const result = cloneJson(source);
+  for (const key of SUBLIMATION_AUTHORITY_FIELDS) delete result[key];
+  if (isObject(result.metadata)) {
+    for (const key of SUBLIMATION_AUTHORITY_FIELDS) delete result.metadata[key];
+  }
+  return result;
+};
+
+const GENERAL_CHARACTER_META: Record<string, FieldMeta> = {
+  name: { type: 'string' },
+  content: { type: 'string' },
+};
+
+const getSublimationFieldMeta = (template: SublimationSourceTemplate): Record<string, FieldMeta> => {
+  if (template === 'magical-girl') return MAGICAL_GIRL_META;
+  if (template === 'canshou') return CANSHOU_META;
+  if (template === 'scenario') return SCENARIO_META;
+  if (template === 'general' || template === 'general-scenario') return GENERAL_CHARACTER_META;
+  return { ...SCENARIO_META, ...CANSHOU_META, ...MAGICAL_GIRL_META, ...GENERAL_CHARACTER_META };
+};
+
+// These are managed independently of generated body fields. History and state
+// obey their explicit write switches below; creator metadata and adjudications
+// already have lossless copy semantics in the existing domain converters.
+const SUBLIMATION_MANAGED_FIELDS = new Set([
+  'templateId', 'name', 'codename', 'title', 'content', '_battle_story',
+  'arena_history', 'current_state', 'creationInputs', 'buildState', 'adjudicationEvents',
+]);
+
+const getUserExtensions = (
+  source: Record<string, unknown>,
+  meta: Record<string, FieldMeta>,
+  topLevel = true,
+): Record<string, unknown> => Object.fromEntries(Object.entries(source).flatMap(([key, value]) => {
+  if (value === undefined || (topLevel && SUBLIMATION_MANAGED_FIELDS.has(key))) return [];
+  const definition = Object.prototype.hasOwnProperty.call(meta, key) ? meta[key] : undefined;
+  if (!definition || (topLevel && key === 'metadata')) return [[key, cloneJson(value)]];
+  if (definition.type !== 'object' || !isObject(value)) return [];
+  const nested = getUserExtensions(value, definition.children ?? {}, false);
+  return Object.keys(nested).length ? [[key, nested]] : [];
+}));
+
+export class SublimationExtensionConflictError extends Error {
+  readonly path: string;
+
+  constructor(path: string) {
+    super(`无法无损保留扩展字段「${path}」：其原路径与目标模板字段冲突，请选择通用角色模板或先调整该扩展。`);
+    this.name = 'SublimationExtensionConflictError';
+    this.path = path;
+  }
+}
+
+const mergeUserExtensions = (
+  target: Record<string, unknown>,
+  extensions: Record<string, unknown>,
+  targetMeta: Record<string, FieldMeta>,
+  prefix = '',
+): void => {
+  for (const [key, value] of Object.entries(extensions)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    const definition = Object.prototype.hasOwnProperty.call(targetMeta, key) ? targetMeta[key] : undefined;
+    if (definition && (definition.type !== 'object' || !isObject(value))) {
+      throw new SublimationExtensionConflictError(path);
+    }
+    let next = value;
+    if (definition && isObject(value)) {
+      next = isObject(target[key]) ? cloneJson(target[key]) : {};
+      mergeUserExtensions(next as Record<string, unknown>, value, definition.children ?? {}, path);
+    }
+    Object.defineProperty(target, key, { value: next, enumerable: true, writable: true, configurable: true });
+  }
+};
+
+/** Preflight before either hosted or direct generation spends a request. */
+export const assertSublimationExtensionCompatibility = (
+  source: Record<string, unknown>,
+  target: SublimationCharacterTemplate,
+  sourceTemplate: SublimationSourceTemplate = inferSublimationSourceTemplate(source),
+): void => {
+  const extensions = getUserExtensions(stripSublimationAuthority(source), getSublimationFieldMeta(sourceTemplate));
+  mergeUserExtensions({}, extensions, getSublimationFieldMeta(target));
+};
+
+/**
+ * Retain user JSON at its original paths without restoring rewritten body fields.
+ * The source owns opaque extensions; generated text cannot overwrite them. This
+ * returns an unsigned payload; hosted signing must happen only after finalization.
+ */
+export const preserveSublimationCardExtensions = (
+  source: Record<string, unknown>,
+  output: Record<string, unknown>,
+  target: SublimationCharacterTemplate,
+  sourceTemplate: SublimationSourceTemplate = inferSublimationSourceTemplate(source),
+): Record<string, unknown> => {
+  const sanitizedSource = stripSublimationAuthority(source);
+  const result = stripSublimationAuthority(output);
+  const extensions = getUserExtensions(sanitizedSource, getSublimationFieldMeta(sourceTemplate));
+  mergeUserExtensions(result, extensions, getSublimationFieldMeta(target));
+  copyKnownMetadata(sanitizedSource, result);
+  if (sanitizedSource.adjudicationEvents !== undefined) {
+    result.adjudicationEvents = cloneJson(sanitizedSource.adjudicationEvents);
+  }
+  return result;
+};
+
 export type ArenaHistoryRetentionStrategy = 'keep-all' | 'keep-sublimation-only' | 'reset-all';
 export const DEFAULT_ARENA_HISTORY_RETENTION_STRATEGY: ArenaHistoryRetentionStrategy =
   'keep-sublimation-only';
@@ -672,6 +795,16 @@ const canonicalizeEntryIds = (
   return { entries: canonical, maxId: currentMax };
 };
 
+export const assertSublimationHistoryRetentionSupported = (sourceArenaHistory: unknown, strategy: unknown): void => {
+  const history = isObject(sourceArenaHistory) ? sourceArenaHistory : {};
+  if (normalizeArenaHistoryRetentionStrategy(strategy) !== 'reset-all' && (
+    (sourceArenaHistory != null && !isObject(sourceArenaHistory))
+    || (history.attributes !== undefined && !isObject(history.attributes))
+    || (history.entries !== undefined && !Array.isArray(history.entries))
+    || (Array.isArray(history.entries) && history.entries.some((entry) => !isObject(entry)))
+  )) throw new Error('历战记录包含暂不支持的旧格式，请保留原卡并先检查历史，或明确选择重置历战记录。');
+};
+
 export const applySublimationArenaHistoryStrategy = (input: {
   sourceArenaHistory: unknown;
   strategy: unknown;
@@ -685,6 +818,7 @@ export const applySublimationArenaHistoryStrategy = (input: {
     ? history.entries.filter(isObject)
     : [];
   const strategy = normalizeArenaHistoryRetentionStrategy(input.strategy);
+  assertSublimationHistoryRetentionSupported(input.sourceArenaHistory, strategy);
   const retained = strategy === 'keep-all'
     ? cloneJson(sourceEntries)
     : strategy === 'keep-sublimation-only'
@@ -703,6 +837,7 @@ export const applySublimationArenaHistoryStrategy = (input: {
       last_sublimation_at: input.nowISO,
     }
     : {
+      ...cloneJson(attributes),
       world_line_id: typeof attributes.world_line_id === 'string' && attributes.world_line_id
         ? attributes.world_line_id
         : createWorldLineId(),
@@ -716,9 +851,18 @@ export const applySublimationArenaHistoryStrategy = (input: {
       last_sublimation_at: input.nowISO,
     };
   return {
+    ...(strategy === 'reset-all' ? {} : cloneJson(history)),
     attributes: nextAttributes,
     entries: [...canonical.entries, { ...newEntry, id: canonical.maxId + 1 }],
   };
+};
+
+/** Opaque legacy state must remain untouched unless its writable shape is understood. */
+export const assertSublimationCurrentStateWriteSupported = (value: unknown): void => {
+  if (value == null) return;
+  if (!isObject(value) || (value.fields !== undefined && !Array.isArray(value.fields))) {
+    throw new Error('当前状态包含暂不支持的旧格式，请关闭当前状态写入以完整保留原数据，或先检查该字段。');
+  }
 };
 
 export type BuildFinalSublimationDataInput = {
@@ -726,6 +870,7 @@ export type BuildFinalSublimationDataInput = {
   baseOutputData: Record<string, unknown>;
   updatedDataFromAI: Record<string, unknown> | null | undefined;
   targetTemplate: SublimationCharacterTemplate;
+  sourceTemplate?: SublimationSourceTemplate;
   allowReshapeNames: boolean;
   writeArenaHistory: boolean;
   writeCurrentState: boolean;
@@ -757,8 +902,16 @@ const safeDeepMerge = (
 export const buildFinalSublimationData = (
   input: BuildFinalSublimationDataInput,
 ): Record<string, unknown> => {
+  if (input.writeCurrentState) {
+    assertSublimationCurrentStateWriteSupported(input.originalCharacterData.current_state);
+  }
   const nowISO = input.nowISO ?? new Date().toISOString();
-  const result = safeDeepMerge(cloneJson(input.baseOutputData ?? {}), input.updatedDataFromAI ?? {});
+  const result = preserveSublimationCardExtensions(
+    input.originalCharacterData,
+    safeDeepMerge(cloneJson(input.baseOutputData ?? {}), input.updatedDataFromAI ?? {}),
+    input.targetTemplate,
+    input.sourceTemplate,
+  );
   result.templateId = input.targetTemplate === 'magical-girl'
     ? MAGICAL_GIRL_TEMPLATE_ID
     : input.targetTemplate === 'canshou'
@@ -801,10 +954,19 @@ export const buildFinalSublimationData = (
 
   if (input.writeCurrentState) {
     if (result.current_state) {
-      const state = isObject(result.current_state) ? result.current_state : {};
+      const state = stripSublimationAuthority(isObject(result.current_state) ? result.current_state : {});
       const originalState = isObject(input.originalCharacterData.current_state)
         ? input.originalCharacterData.current_state
         : {};
+      const stateMeta: Record<string, FieldMeta> = {
+        summary: { type: 'string' }, fields: { type: 'array' }, updated_at: { type: 'string' },
+      };
+      mergeUserExtensions(
+        state,
+        getUserExtensions(stripSublimationAuthority(originalState), stateMeta, false),
+        stateMeta,
+        'current_state',
+      );
       state.fields = Array.isArray(originalState.fields)
         ? cloneJson(originalState.fields)
         : Array.isArray(state.fields)

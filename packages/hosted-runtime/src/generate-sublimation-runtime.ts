@@ -1,4 +1,7 @@
 import {
+  assertSublimationHistoryRetentionSupported,
+  assertSublimationCurrentStateWriteSupported,
+  assertSublimationExtensionCompatibility,
   buildFinalSublimationData,
   convertSublimationCharacterCard,
   createBlankSublimationCharacterCard,
@@ -11,7 +14,7 @@ import {
   createGenerateSublimationService,
   type GenerateSublimationService,
 } from '@mahoshojo/hosted-api/generate-sublimation';
-import { completeStep } from '@mahoshojo/hosted-api/regular-generation';
+import { completeStep, respondStep } from '@mahoshojo/hosted-api/regular-generation';
 
 import {
   inferCustomProviderMode,
@@ -210,6 +213,14 @@ export const createGenerateSublimationRuntime = (
       sensitiveWordReason: '上传的角色档案或引导内容包含危险符文',
     }),
     resolveExecution: async (_request, input) => {
+      if (input.writeCurrentState) {
+        try { assertSublimationCurrentStateWriteSupported(input.original.current_state); }
+        catch { return respondStep(new Response(JSON.stringify({ error: '当前状态格式暂不支持写入，请保留原卡并关闭状态写入或先检查数据。' }), { status: 400, headers: { 'Content-Type': 'application/json' } })); }
+      }
+      if (input.writeArenaHistory) {
+        try { assertSublimationHistoryRetentionSupported(input.original.arena_history, input.arenaHistoryRetentionStrategy); }
+        catch { return respondStep(new Response(JSON.stringify({ error: '历战记录格式暂不支持保留，请检查原卡或明确选择重置历战记录。' }), { status: 400, headers: { 'Content-Type': 'application/json' } })); }
+      }
       const inferredSource = inferSublimationSourceTemplate(input.original);
       const sourceTemplate = isSourceTemplate(input.requestedSourceTemplate)
         ? input.requestedSourceTemplate
@@ -219,6 +230,8 @@ export const createGenerateSublimationRuntime = (
         : isTargetTemplate(sourceTemplate)
           ? sourceTemplate
           : 'general';
+      try { assertSublimationExtensionCompatibility(input.original, targetTemplate, sourceTemplate); }
+      catch { return respondStep(new Response(JSON.stringify({ error: '原卡扩展字段与目标模板冲突，请保留原卡并选择兼容模板。' }), { status: 400, headers: { 'Content-Type': 'application/json' } })); }
       let baseOutputData: Record<string, unknown>;
       try {
         const converted = convertSublimationCharacterCard(
@@ -346,6 +359,7 @@ export const createGenerateSublimationRuntime = (
       const hasQuestionnaireLore = Boolean(output.effectiveLoreText);
       const sublimatedData = buildFinalSublimationData({
         originalCharacterData: input.original,
+        sourceTemplate: output.sourceTemplate,
         baseOutputData: output.baseOutputData,
         updatedDataFromAI: updated,
         targetTemplate: output.targetTemplate,

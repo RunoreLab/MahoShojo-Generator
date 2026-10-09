@@ -214,7 +214,8 @@
       "types": "./src/adjudicator-normalize.ts",
       "import": "./src/adjudicator-normalize.ts",
       "default": "./src/adjudicator-normalize.ts"
-    }
+    },
+    "./sublimation-stream-result": "./src/sublimation-stream-result.ts"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",

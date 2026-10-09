@@ -6,6 +6,7 @@ import {
 } from '@mahoshojo/domain/questionnaire';
 import {
   SUBLIMATION_TEMPLATE_LABELS,
+  convertSublimationCharacterCard,
   type SublimationCharacterTemplate,
   type SublimationSourceTemplate,
 } from '@mahoshojo/domain/sublimation';
@@ -185,6 +186,16 @@ export const createSublimationGenerationCore = (input: {
     const skeleton = clone(input.baseOutputData);
     delete original.signature;
     delete skeleton.signature;
+    // Conversion to a generic card serializes source fields into content. Rebuild
+    // that prompt-only projection before omissions so excluded state cannot leak
+    // back through derived prose. The actual output skeleton remains untouched.
+    if (input.targetTemplate === 'general'
+      && (!input.stateOptions.readArenaHistory || !input.stateOptions.readCurrentState)) {
+      const readableSource = clone(original);
+      if (!input.stateOptions.readArenaHistory) delete readableSource.arena_history;
+      if (!input.stateOptions.readCurrentState) delete readableSource.current_state;
+      skeleton.content = convertSublimationCharacterCard(readableSource, 'general', input.sourceTemplate).data.content;
+    }
     const promptOmissions = new Set(effectiveOmissions);
     if (!input.stateOptions.readArenaHistory) promptOmissions.add('arena_history');
     if (!input.stateOptions.readCurrentState) promptOmissions.add('current_state');
@@ -336,11 +347,9 @@ export const extractSublimationSafetyText = (value: unknown): string => {
 
 export const pruneSublimationStreamCard = (
   data: Record<string, unknown>,
+  stateOptions = { readArenaHistory: false, readCurrentState: true },
 ): Record<string, unknown> => {
-  return sanitizeStoryPromptRecord(data, {
-    readArenaHistory: false,
-    readCurrentState: true,
-  }) ?? {};
+  return sanitizeStoryPromptRecord(data, stateOptions) ?? {};
 };
 
 export const buildSublimationStreamCore = (input: {
@@ -354,6 +363,7 @@ export const buildSublimationStreamCore = (input: {
   sourceTemplate: unknown;
   targetTemplate: unknown;
   loreText: string;
+  stateOptions?: { readArenaHistory: boolean; readCurrentState: boolean };
 }) => {
   const identity = typeof input.originalData.codename === 'string'
     ? input.originalData.codename.trim()
@@ -390,7 +400,7 @@ ${input.isDowngrade ? '（本次为“降级/退化”方向）' : ''}
 ${hints || '（无）'}
 ${lore}
 【原角色数据卡（JSON，已裁剪大字段）】
-${JSON.stringify(pruneSublimationStreamCard(input.originalData), null, 2)}
+${JSON.stringify(pruneSublimationStreamCard(input.originalData, input.stateOptions), null, 2)}
 
 【用户引导】
 ${input.userGuidance || '（无）'}

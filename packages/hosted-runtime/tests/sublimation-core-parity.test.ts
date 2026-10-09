@@ -30,7 +30,8 @@ describe('Sublimation 生成核迁移与 Hosted 行为保真', () => {
             { updatedCharacterData: { name: '雾灯「新生」', content: '完整新设定', future_extension: { lore: 'x' } }, sublimationEvent: { title: '成长', impact: '新经历' } }]) {
             expect(hash(JSON.stringify(hosted.schema.safeParse(value)))).toMatchSnapshot('schema-result');
           }
-          const streamInput = { ...input, modelOverride: 'custom-model' };
+          // Legacy stream callers did not declare state read controls.
+          const streamInput = { ...input, stateOptions: undefined, modelOverride: 'custom-model' };
           const stream = buildSublimationStreamConfig(streamInput);
           expect(stream.modelOverride).toBe('custom-model');
           expect(buildSublimationStreamCore(streamInput).prompt).toBe(stream.prompt);
