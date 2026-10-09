@@ -31,6 +31,8 @@ mod maintenance;
 #[cfg(test)]
 mod maintenance_contract_tests;
 mod provider_profile;
+#[cfg(test)]
+mod provider_profile_ipc_contract_tests;
 mod public_cache;
 mod restore;
 mod secret;

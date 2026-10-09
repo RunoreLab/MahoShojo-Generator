@@ -113,9 +113,9 @@ pub enum ProviderAdapter {
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileTransport {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub allow_public_http: Option<bool>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_redirects: Option<u8>,
 }
 
@@ -130,13 +130,13 @@ pub struct DirectProviderExecutionProfile {
     pub adapter: ProviderAdapter,
     pub base_url: String,
     pub model_id: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key_ref: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secret_header_refs: Option<BTreeMap<String, String>>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub public_headers: Option<BTreeMap<String, String>>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub transport: Option<ProfileTransport>,
 }
 

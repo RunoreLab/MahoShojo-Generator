@@ -119,17 +119,19 @@ const createNativeStub = (
         if (flags.failProfileRead) {
           throw { code: 'store-failure', message: 'read failed' };
         }
-        return profiles.get(args?.profileId as string) ?? null;
+        return profiles.has(args?.profileId as string) ? JSON.stringify(profiles.get(args?.profileId as string)) : null;
       case 'validate_provider_execution_profile':
         if (flags.failValidation) {
           throw { code: 'provider-profile-rejected', message: 'native rejected the profile' };
         }
-        return args?.document;
+        if (typeof args?.document !== 'string') throw new Error('expected string document');
+        return JSON.parse(args.document);
       case 'save_provider_profile': {
         if (flags.failProfileSave) {
           throw { code: 'store-failure', message: 'disk full' };
         }
-        const document = args?.document as DirectProviderProfileV1;
+        if (typeof args?.document !== 'string') throw new Error('expected string document');
+        const document = JSON.parse(args.document) as DirectProviderProfileV1;
         profiles.set(document.id, document);
         if (flags.failProfileSaveAfterWrite) {
           throw { code: 'store-failure', message: 'response lost after commit' };
@@ -810,6 +812,26 @@ describe('DesktopAiConfigStore', () => {
     expect(native.calls).toContain('delete_provider_secret');
   });
 
+  it('落盘核验忽略 JSON 省略的 undefined，但保留 null、false、0 的真实差异', async () => {
+    const profile = {
+      ...profileFixture(),
+      transport: undefined,
+      generationDefaults: { fixture: { nullable: null, enabled: false, count: 0 } },
+    };
+    const native = createNativeStub([profile]);
+    const store = createStore(createStorage(), native.invoke);
+    expect(JSON.parse(JSON.stringify(profile))).not.toHaveProperty('transport');
+    await expect(store.isSubmittedProfilePersisted(profile)).resolves.toBe(true);
+    await expect(store.isSubmittedProfilePersisted({
+      ...profile,
+      generationDefaults: { fixture: { enabled: false, count: 0 } },
+    })).resolves.toBe(false);
+    await expect(store.isSubmittedProfilePersisted({
+      ...profile,
+      generationDefaults: { fixture: { nullable: null, enabled: false, count: 1 } },
+    })).resolves.toBe(false);
+  });
+
   it('commit 响应丢失但写入已生效：按已保存收尾，staged 凭据不误删', async () => {
     // D5.1-AIP-r1-r1：IPC 报错 ≠ 未落盘。读回的记录逐字段等于本次候选时
     // 按成功路径收尾——staged ref 已被该 Profile 引用，删除会留悬空凭据。
@@ -887,7 +909,9 @@ describe('DesktopAiConfigStore', () => {
     );
 
     expect(failure).toBeInstanceOf(DesktopSaveConnectionCommitError);
-    expect((failure as Error).message).toContain('disk full');
+    expect((failure as Error).message).toContain('save_provider_profile');
+    expect((failure as Error).message).toContain('store-failure');
+    expect((failure as Error).message).not.toContain('disk full');
     expect((failure as Error).message).not.toContain('已保存');
     // 旧记录与旧凭据原样保留；staged ref 已回滚。
     expect(native.profiles.get('p_local')?.name).toBe('本地模型');

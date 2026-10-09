@@ -38,7 +38,9 @@ const installNativeStub = () => {
   invokeMock.mockImplementation(async (command, args) => {
     if (command === 'validate_provider_execution_profile') {
       if (args === undefined || args instanceof ArrayBuffer || ArrayBuffer.isView(args) || Array.isArray(args)) return undefined;
-      return (args as Record<string, unknown>).document;
+      const document = (args as Record<string, unknown>).document;
+      if (typeof document !== 'string') throw new Error('expected string document');
+      return JSON.parse(document);
     }
     if (command === 'list_provider_profile_ids') return [];
     return undefined;

@@ -1,0 +1,69 @@
+{
+  "profile": {
+    "version": 1,
+    "id": "profile-fixture",
+    "name": "本机模型",
+    "adapter": "openai-compatible",
+    "baseUrl": "http://127.0.0.1:11434/v1",
+    "modelId": "qwen3:8b",
+    "apiKeyRef": "provider:profile-fixture:api-key",
+    "secretHeaderRefs": {
+      "x-z-key": "provider:z:key",
+      "x-a-key": "provider:a:key"
+    },
+    "publicHeaders": {
+      "x-z": "last",
+      "x-a": "first"
+    },
+    "generationDefaults": {
+      "temperature": 0,
+      "fixture_options": {
+        "enabled": false,
+        "labels": [
+          "保留",
+          null
+        ]
+      }
+    },
+    "createdAt": "2026-09-30T00:00:00.000Z",
+    "updatedAt": "2026-09-30T00:00:00.000Z"
+  },
+  "validate": {
+    "command": "validate_provider_execution_profile",
+    "args": {
+      "document": "{\"id\":\"profile-fixture\",\"name\":\"本机模型\",\"adapter\":\"openai-compatible\",\"baseUrl\":\"http://127.0.0.1:11434/v1\",\"modelId\":\"qwen3:8b\",\"apiKeyRef\":\"provider:profile-fixture:api-key\",\"secretHeaderRefs\":{\"x-z-key\":\"provider:z:key\",\"x-a-key\":\"provider:a:key\"},\"publicHeaders\":{\"x-z\":\"last\",\"x-a\":\"first\"}}"
+    },
+    "response": {
+      "id": "profile-fixture",
+      "name": "本机模型",
+      "adapter": "openai-compatible",
+      "baseUrl": "http://127.0.0.1:11434/v1",
+      "modelId": "qwen3:8b",
+      "apiKeyRef": "provider:profile-fixture:api-key",
+      "secretHeaderRefs": {
+        "x-a-key": "provider:a:key",
+        "x-z-key": "provider:z:key"
+      },
+      "publicHeaders": {
+        "x-a": "first",
+        "x-z": "last"
+      }
+    }
+  },
+  "save": {
+    "command": "save_provider_profile",
+    "args": {
+      "document": "{\"version\":1,\"id\":\"profile-fixture\",\"name\":\"本机模型\",\"adapter\":\"openai-compatible\",\"baseUrl\":\"http://127.0.0.1:11434/v1\",\"modelId\":\"qwen3:8b\",\"apiKeyRef\":\"provider:profile-fixture:api-key\",\"secretHeaderRefs\":{\"x-z-key\":\"provider:z:key\",\"x-a-key\":\"provider:a:key\"},\"publicHeaders\":{\"x-z\":\"last\",\"x-a\":\"first\"},\"generationDefaults\":{\"temperature\":0,\"fixture_options\":{\"enabled\":false,\"labels\":[\"保留\",null]}},\"createdAt\":\"2026-09-30T00:00:00.000Z\",\"updatedAt\":\"2026-09-30T00:00:00.000Z\"}",
+      "updatedAt": "2026-09-30T00:00:00.000Z"
+    },
+    "response": null
+  },
+  "get": {
+    "command": "get_provider_profile",
+    "args": {
+      "profileId": "profile-fixture"
+    },
+    "response": "{\"version\":1,\"id\":\"profile-fixture\",\"name\":\"本机模型\",\"adapter\":\"openai-compatible\",\"baseUrl\":\"http://127.0.0.1:11434/v1\",\"modelId\":\"qwen3:8b\",\"apiKeyRef\":\"provider:profile-fixture:api-key\",\"secretHeaderRefs\":{\"x-z-key\":\"provider:z:key\",\"x-a-key\":\"provider:a:key\"},\"publicHeaders\":{\"x-z\":\"last\",\"x-a\":\"first\"},\"generationDefaults\":{\"temperature\":0,\"fixture_options\":{\"enabled\":false,\"labels\":[\"保留\",null]}},\"createdAt\":\"2026-09-30T00:00:00.000Z\",\"updatedAt\":\"2026-09-30T00:00:00.000Z\"}"
+  },
+  "missingResponse": null
+}

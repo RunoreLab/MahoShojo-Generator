@@ -29,7 +29,8 @@ const profile: DirectProviderProfileV1 = {
 const nativeAccepting = () =>
   vi.fn(async (command: string, _args?: Record<string, unknown>) => {
     if (command === VALIDATE_PROVIDER_EXECUTION_PROFILE_COMMAND) {
-      return toDirectProviderExecutionProfile(profile);
+      if (typeof _args?.document !== 'string') throw 'invalid args `document`: expected a string';
+      return JSON.parse(_args.document);
     }
     return undefined;
   });
@@ -41,10 +42,10 @@ describe('provider profile bridge', () => {
     await saveProviderProfile(invoke, profile);
 
     expect(invoke).toHaveBeenCalledWith(VALIDATE_PROVIDER_EXECUTION_PROFILE_COMMAND, {
-      document: toDirectProviderExecutionProfile(profile),
+      document: JSON.stringify(toDirectProviderExecutionProfile(profile)),
     });
     expect(invoke).toHaveBeenCalledWith(SAVE_PROVIDER_PROFILE_COMMAND, {
-      document: profile,
+      document: JSON.stringify(profile),
       updatedAt: profile.updatedAt,
     });
   });
@@ -57,7 +58,7 @@ describe('provider profile bridge', () => {
     const savedCall = invoke.mock.calls.find(
       (call) => call[0] === SAVE_PROVIDER_PROFILE_COMMAND,
     );
-    expect(savedCall?.[1]?.document).toEqual(profile);
+    expect(savedCall?.[1]?.document).toEqual(JSON.stringify(profile));
   });
 
   it('refuses to persist when client-side validation fails', async () => {
@@ -126,15 +127,15 @@ describe('provider profile bridge', () => {
   it('reports a missing profile as null rather than an error', async () => {
     await expect(getProviderProfile(vi.fn().mockResolvedValue(null), 'missing')).resolves.toBeNull();
     await expect(
-      getProviderProfile(vi.fn().mockResolvedValue(profile), 'profile-fixture'),
+      getProviderProfile(vi.fn().mockResolvedValue(JSON.stringify(profile)), 'profile-fixture'),
     ).resolves.toEqual(profile);
   });
 
   it('validates a stored document on the way out', async () => {
     const corrupted = { ...profile, baseUrl: 'not-a-url' };
-    await expect(getProviderProfile(vi.fn().mockResolvedValue(corrupted), 'p')).rejects.toThrow(
-      /client-side validation/u,
-    );
+    await expect(getProviderProfile(vi.fn().mockResolvedValue(JSON.stringify(corrupted)), 'p')).rejects.toMatchObject({
+      command: GET_PROVIDER_PROFILE_COMMAND, code: 'invalid-document',
+    });
   });
 
   it('keeps delete free of any path or SQL parameters', async () => {
@@ -150,8 +151,36 @@ describe('provider profile bridge', () => {
     const failure = await listProviderProfileIds(invoke).catch((error: unknown) => error);
 
     expect(failure).toBeInstanceOf(DesktopProviderProfileError);
-    expect(failure).toMatchObject({ code: 'store-failure' });
+    expect(failure).toMatchObject({ code: 'ipc-call-failed' });
     expect((failure as Error).message).not.toContain('raw driver panic');
+  });
+
+  it.each([undefined, {}, 42])('rejects non-string native documents: %s', async (value) => {
+    await expect(getProviderProfile(vi.fn().mockResolvedValue(value), 'p')).rejects.toMatchObject({
+      command: GET_PROVIDER_PROFILE_COMMAND, code: 'ipc-invalid-response',
+    });
+  });
+
+  it('does not expose malformed JSON or native argument material', async () => {
+    const secret = 'Bearer credential-sentinel';
+    const corrupted = await getProviderProfile(vi.fn().mockResolvedValue(secret), 'p').catch((error: unknown) => error);
+    expect(corrupted).toMatchObject({ code: 'invalid-document', command: GET_PROVIDER_PROFILE_COMMAND });
+    expect(String(corrupted)).not.toContain(secret);
+    for (const cause of [
+      `invalid args document: ${secret}`,
+      new Error(`invalid args document: ${secret}`),
+      { code: 'store-failure', message: secret },
+      { code: secret, message: secret },
+    ]) {
+      const error = await listProviderProfileIds(vi.fn().mockRejectedValue(cause)).catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(DesktopProviderProfileError);
+      expect(error).toMatchObject({
+        code: typeof cause === 'string' || cause instanceof Error ? 'ipc-invalid-arguments'
+          : cause.code === 'store-failure' ? 'store-failure' : 'ipc-call-failed',
+      });
+      expect(String(error)).toContain(LIST_PROVIDER_PROFILE_IDS_COMMAND);
+      expect(String(error)).not.toContain(secret);
+    }
   });
 
   it('uses command names that carry no endpoint or secret material', () => {

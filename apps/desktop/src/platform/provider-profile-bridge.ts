@@ -35,7 +35,7 @@ export class DesktopProviderProfileError extends Error {
   readonly code: string;
 
   constructor(command: string, code: string, message: string) {
-    super(message);
+    super(`${command}: ${message}`);
     this.name = 'DesktopProviderProfileError';
     this.command = command;
     this.code = code;
@@ -46,18 +46,27 @@ interface InvokeFn {
   (command: string, args?: Record<string, unknown>): Promise<unknown>;
 }
 
-/** 把 native 侧返回的失败归一成带稳定 code 的错误。未知形状一律 fail closed。 */
+// 只透传原生稳定代码，不展示反序列化文本、SQL、路径或第三方消息。
+const NATIVE_ERROR_CODES = new Set([
+  'store-unavailable', 'invalid-document', 'document-too-large', 'index-mismatch',
+  'record-tombstoned', 'transition-mismatch', 'record-missing', 'non-monotonic-timestamp',
+  'invalid-query', 'maintenance-busy', 'store-failure',
+  'provider-profile-malformed', 'provider-profile-unsupported-adapter',
+  'provider-profile-invalid-base-url', 'provider-profile-insecure-base-url',
+  'provider-profile-project-owned-endpoint', 'provider-profile-invalid-header',
+  'provider-profile-secret-header-overlap', 'provider-profile-invalid-secret-ref',
+]);
+
+/** Tauri 在进入命令前就可能拒绝参数；这不是 SQLite 的 store-failure。 */
 const toBridgeError = (command: string, cause: unknown): DesktopProviderProfileError => {
-  if (
-    cause !== null
-    && typeof cause === 'object'
-    && typeof (cause as { code?: unknown }).code === 'string'
-    && typeof (cause as { message?: unknown }).message === 'string'
-  ) {
-    const { code, message } = cause as { code: string; message: string };
-    return new DesktopProviderProfileError(command, code, message);
+  if (cause !== null && typeof cause === 'object' && 'code' in cause
+    && typeof cause.code === 'string' && NATIVE_ERROR_CODES.has(cause.code)) {
+    return new DesktopProviderProfileError(command, cause.code, `本机操作失败（${cause.code}）`);
   }
-  return new DesktopProviderProfileError(command, 'store-failure', 'local store call failed');
+  const raw = typeof cause === 'string' ? cause : cause instanceof Error ? cause.message : '';
+  const code = /invalid args?|missing required key|expected (?:a )?string/iu.test(raw)
+    ? 'ipc-invalid-arguments' : 'ipc-call-failed';
+  return new DesktopProviderProfileError(command, code, `本机通信失败（${code}）`);
 };
 
 const assertNativeAccepts = (
@@ -75,7 +84,15 @@ const assertNativeAccepts = (
       'native side returned a profile projection this client cannot read',
     );
   }
-  if (JSON.stringify(parsed.data) !== JSON.stringify(expected)) {
+  // Rust 的 header map 使用 BTreeMap；键插入顺序不是 wire 的业务语义。
+  // 两侧均已通过 strict schema，因此只做 JSON 对象键排序，不删字段、不转换值。
+  const canonical = (value: DirectProviderExecutionProfile): string => JSON.stringify(
+    value,
+    (_key, entry: unknown) => entry !== null && typeof entry === 'object' && !Array.isArray(entry)
+      ? Object.fromEntries(Object.entries(entry).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0))
+      : entry,
+  );
+  if (canonical(parsed.data) !== canonical(expected)) {
     throw new DesktopProviderProfileError(
       command,
       'provider-profile-mismatch',
@@ -112,7 +129,7 @@ export const validateProviderExecutionProfile = async (
   let echoed: unknown;
   try {
     echoed = await invoke(VALIDATE_PROVIDER_EXECUTION_PROFILE_COMMAND, {
-      document: projection,
+      document: JSON.stringify(projection),
     });
   } catch (cause) {
     throw toBridgeError(VALIDATE_PROVIDER_EXECUTION_PROFILE_COMMAND, cause);
@@ -129,7 +146,7 @@ export const saveProviderProfile = async (
 
   try {
     await invoke(SAVE_PROVIDER_PROFILE_COMMAND, {
-      document: validated,
+      document: JSON.stringify(validated),
       updatedAt: validated.updatedAt,
     });
   } catch (cause) {
@@ -163,8 +180,21 @@ export const getProviderProfile = async (
   } catch (cause) {
     throw toBridgeError(GET_PROVIDER_PROFILE_COMMAND, cause);
   }
-  if (result === null || result === undefined) return null;
-  return parseProviderProfileDocument(result);
+  if (result === null) return null;
+  if (typeof result !== 'string') {
+    throw new DesktopProviderProfileError(GET_PROVIDER_PROFILE_COMMAND, 'ipc-invalid-response', '本机返回的配置文档类型不正确');
+  }
+  let document: unknown;
+  try {
+    document = JSON.parse(result);
+  } catch {
+    throw new DesktopProviderProfileError(GET_PROVIDER_PROFILE_COMMAND, 'invalid-document', '已保存的配置不是有效 JSON');
+  }
+  const parsed = DirectProviderProfileV1Schema.safeParse(document);
+  if (!parsed.success) {
+    throw new DesktopProviderProfileError(GET_PROVIDER_PROFILE_COMMAND, 'invalid-document', '已保存的配置未通过校验');
+  }
+  return parsed.data;
 };
 
 export const deleteProviderProfile = async (

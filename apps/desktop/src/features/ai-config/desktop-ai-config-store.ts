@@ -108,6 +108,9 @@ const canonicalJson = (value: unknown): string => {
   }
   if (value !== null && typeof value === 'object') {
     const entries = Object.keys(value as Record<string, unknown>)
+      // Zod optional 字段可以显式为 undefined；真实 JSON 写入会省略它。
+      // 回读核验必须采用同样语义，否则会误删已被提交 Profile 引用的 staged Key。
+      .filter((key) => (value as Record<string, unknown>)[key] !== undefined)
       .sort()
       .map(
         (key) =>
