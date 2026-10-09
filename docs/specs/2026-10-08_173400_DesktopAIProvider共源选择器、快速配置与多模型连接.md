@@ -1,5 +1,7 @@
 # SPEC：Desktop AI Provider 共源选择器、快速配置与多模型连接
 
+> 2026-10-09 部分条款已被[预设独立身份与服务器 BYOK 修订](../decisions/2026-10-09_010600_DesktopAI预设独立身份与服务器BYOK修订.md)精确取代：预设不再必须保存为 Profile，服务器 BYOK 进入本轮，新输入模型 ID 统一 200。本文及实施记录保留历史含义，其余安全和兼容要求继续有效。
+
 - 日期：2026-10-08
 - 状态：`accepted`（产品/UX 目标与强制不变量已确认；AIP-1..4 + D5.1-AIP-r1 审查收口已实施，AIP-5 自动与实机验收保持 `PENDING`）
 - 规范标识：`SPEC-desktop-ai-provider-parity`；配套 [ADR](../decisions/2026-10-08_173300_DesktopAIProvider选择器与多模型连接体验统一.md)
