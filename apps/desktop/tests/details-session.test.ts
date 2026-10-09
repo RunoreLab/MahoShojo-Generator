@@ -204,6 +204,16 @@ describe('Details draft protection and restoration', () => {
     legacy.restoreDraft();
     expect(legacy.getSnapshot().draftSavedAt).toBeNull();
   });
+  it('silences ordinary automatic restoration but retains uncertain execution warnings', () => {
+    const completedRaw = JSON.stringify({ version: 1, ...draft, output: { mode: 'direct-local', phase: 'completed', rawText: 'body', card } });
+    const restored = harness(completedRaw).session;
+    restored.restoreDraft(false);
+    expect(restored.getSnapshot().message).toBeNull();
+    const uncertain = harness(JSON.stringify({ version: 1, ...draft, output: { mode: 'hosted-json', phase: 'uncertain', rawText: 'partial', card: null } })).session;
+    uncertain.restoreDraft(false);
+    expect(uncertain.getSnapshot().message).toContain('未能确认');
+    expect(uncertain.getSnapshot().phase).toBe('uncertain');
+  });
   it('read and remove failures protect existing storage', () => {
     const storage = { getItem: () => { throw new Error('denied'); }, setItem: vi.fn(), removeItem: () => { throw new Error('denied'); } };
     const { repository } = harness();

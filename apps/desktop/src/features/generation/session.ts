@@ -186,11 +186,11 @@ export class DesktopGenerationSession<
     this.publish({ draft: clone(draft), draftSaved: false });
     this.retryDraftSave();
   }
-  restoreDraft(): void {
+  restoreDraft(announce = true): void {
     if (this.disposed || !this.pending) return;
     const saved = this.pending;
     this.pending = null;
-    this.applyRestoredDraft(saved, true);
+    this.applyRestoredDraft(saved, announce);
   }
   /**
    * 应用一份已解析草稿。`announce` 控制「已恢复草稿」提示：显式点按「恢复草稿」
@@ -199,7 +199,7 @@ export class DesktopGenerationSession<
   private applyRestoredDraft(saved: StoredGenerationDraft<TDraft, TCardKind>, announce: boolean): void {
     if (saved.output) this.mode = saved.output.mode;
     const { version: _version, savedAt, output, ...restoredDraft } = saved;
-    this.publish({ draft: clone(restoredDraft) as TDraft, pendingRestore: false, draftSaved: true, draftSavedAt: savedAt ?? null, phase: output?.phase ?? 'idle', card: output?.card ?? null, cardKind: output?.card ? output.cardKind ?? this.family.defaultCardKind : this.family.defaultCardKind, resultRestored: output?.card != null, reasoning: null, rawText: output?.rawText ?? '', message: !announce ? null : output?.phase === 'uncertain' ? '已恢复草稿；上次生成的服务器执行结果未能确认，不会自动重新生成。' : output ? '已恢复草稿；不会自动重新生成。' : null });
+    this.publish({ draft: clone(restoredDraft) as TDraft, pendingRestore: false, draftSaved: true, draftSavedAt: savedAt ?? null, phase: output?.phase ?? 'idle', card: output?.card ?? null, cardKind: output?.card ? output.cardKind ?? this.family.defaultCardKind : this.family.defaultCardKind, resultRestored: output?.card != null, reasoning: null, rawText: output?.rawText ?? '', message: output?.phase === 'uncertain' ? '已恢复草稿；上次生成的服务器执行结果未能确认，不会自动重新生成。' : announce && output ? '已恢复草稿；不会自动重新生成。' : null });
   }
   discardDraft(): void {
     if (this.disposed || this.controller || this.state.saving) return;

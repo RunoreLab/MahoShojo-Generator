@@ -101,7 +101,7 @@ import { revokeBlobUrl } from '@mahoshojo/ui-web/client';
 import { CardLibraryModal, type BattleSelectionPayload, type CardLibrarySelectionContext } from '@mahoshojo/ui-web/card-library';
 import { ImagePreviewModal, useEscapeLayer } from '@mahoshojo/ui-web/modal';
 import { EncyclopediaLinks } from '@mahoshojo/ui-web/encyclopedia-views';
-import { ProductFooter } from '@mahoshojo/ui-web/shell';
+import { BackHomeLink, ProductFooter } from '@mahoshojo/ui-web/shell';
 import type { HomeAssetSource } from '@mahoshojo/ui-web/home';
 import { CREATOR_DRAFT_DEFAULT_RULE_IDS, CreatorSession } from '../features/creator/session';
 import type { CreatorExecutionMode } from '../features/creator/generation';
@@ -171,7 +171,7 @@ const describeRegenerateConfirm = (kind: ConfirmRegenerateKind): { title: string
     : '无法确认上次请求是否在服务器执行——它可能已经完成并计费。再次生成会发起新的请求，可能产生重复调用与费用。',
 });
 
-function CreatorForm({ session }: { session: CreatorSession }) {
+function CreatorForm({ session, restored }: { session: CreatorSession; restored: boolean }) {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const router = useRouter();
   const { openFixed } = useExternalLinks();
@@ -193,7 +193,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
   const [presetError, setPresetError] = useState<string | null>(null);
   const [questionnaireError, setQuestionnaireError] = useState<string | null>(null);
   const [questionnaireLoading, setQuestionnaireLoading] = useState(true);
-  const [selectionReady, setSelectionReady] = useState(false);
+  const [selectionReady, setSelectionReady] = useState(() => restored || state.draft.questionnaireSelections !== undefined);
   const [provisionalDefault, setProvisionalDefault] = useState<QuestionnaireSelection | null>(null);
   const [reload, setReload] = useState(0);
   const [questionIndex, setQuestionIndex] = useState(0);
@@ -203,7 +203,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
   const [actionInfo, setActionInfo] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [confirmRegenerate, setConfirmRegenerate] = useState<false | ConfirmRegenerateKind>(false);
-  const [showIntroduction, setShowIntroduction] = useState(true);
+  const [showIntroduction, setShowIntroduction] = useState(!restored);
   const [showQuestionnaireSettings, setShowQuestionnaireSettings] = useState(false);
   const [showPasteImport, setShowPasteImport] = useState(false);
   const [pasteText, setPasteText] = useState('');
@@ -390,9 +390,10 @@ function CreatorForm({ session }: { session: CreatorSession }) {
   // 用户主动清空选择集后不自动回填（selectionReady 闩锁与 Web 一致）。
   useEffect(() => {
     if (selectionReady || state.pendingRestore || selections.length > 0 || !provisionalDefault) return;
-    updateSelections([provisionalDefault]);
+    // 损坏旧草稿保持原值；默认预览本身不算用户的新修改。
+    if (!session.isDraftBlocked()) updateSelections([provisionalDefault]);
     setSelectionReady(true);
-  }, [selectionReady, state.pendingRestore, selections.length, provisionalDefault, updateSelections]);
+  }, [session, selectionReady, state.pendingRestore, selections.length, provisionalDefault, updateSelections]);
 
   // 切到残兽模板：以残兽默认问卷替换答题问卷，纯设定选择保留为 lore 叠加
   // （与 Web `reconcileQuestionnaireSelectionsForTemplate` 同源语义）。
@@ -512,6 +513,8 @@ function CreatorForm({ session }: { session: CreatorSession }) {
   );
   // 问卷集合变化后的答案重映射：旧 key 失配的回答按元数据匹配到新 key（与 Web 同效应）。
   useEffect(() => {
+    // 初始化预览不代表用户换卷，尤其不能让受保护草稿凭空变为未保存修改。
+    if (!selectionReady) return;
     const previousTargets = previousTargetsRef.current;
     const previousSignature = previousSignatureRef.current;
     previousTargetsRef.current = allQuestionTargets;
@@ -523,7 +526,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
       lookup: questionAnswerLookup,
     });
     session.updateDraft({ ...session.getSnapshot().draft, answers: remapped });
-  }, [allQuestionTargets, questionAnswerLookup, questionTargetSignature, session]);
+  }, [allQuestionTargets, questionAnswerLookup, questionTargetSignature, selectionReady, session]);
   // 题目流变化时尽量锚定当前题 key（跳题/选项引用会让 index 位移）。
   useEffect(() => {
     if (flow.length === 0) {
@@ -543,7 +546,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
   const mode = target.mode;
   const busy = state.phase === 'generating' || state.saving || aiState.generationActive;
   useEffect(() => () => aiStore.cancelPreparingGeneration(), [aiStore]);
-  const blockedDraft = state.pendingRestore || session.isDraftBlocked();
+  const blockedDraft = state.pendingRestore;
   const hostedMode: CreatorExecutionMode = generationMode === 'stream' ? 'hosted-stream' : 'hosted-json';
   const executionMode: CreatorExecutionMode | null = target.location === 'server' ? hostedMode : mode;
   // 本地 Provider 配置只门禁客户端执行：server 偏好由 hosted System Default 解析。
@@ -760,7 +763,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
   };
 
   const guard = useLeaveGuard(
-    () => session.isBusy() || (!session.getSnapshot().draftSaved && !session.getSnapshot().pendingRestore && !session.isDraftBlocked()),
+    () => session.isBusy() || session.hasUnsavedDraft(),
     '生成或保存尚未完成，或当前草稿未能保存。请等待、取消生成，或重试保存草稿后再离开。也可以确认清除草稿以放弃当前内容。',
     '窗口关闭保护初始化失败，生成与保存暂不可用。请重新打开页面后重试。',
     () => {
@@ -1074,6 +1077,12 @@ function CreatorForm({ session }: { session: CreatorSession }) {
         indexFallbackTargets={visibleQuestionTargets}
         answersByKey={answersByKey}
         onApplyAnswers={applyImportedAnswers}
+        onClearDraft={() => {
+          if (!window.confirm('确定要清空所有已保存的问卷答案吗？此操作不可撤销。')) return;
+          invalidatePresetLoads();
+          updateDraft({ answers: {} });
+          setActionInfo('存档已清空！');
+        }}
         onInfo={setActionInfo}
         onError={(message) => setActionError(`⚠️ ${message}`)}
         disabled={busy}
@@ -1159,12 +1168,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
         </div>
       )}
       <div className="text-center mt-4">
-        <button
-          onClick={() => void router.navigate({ to: '/' })}
-          className="footer-link"
-        >
-          返回首页
-        </button>
+        <BackHomeLink href="#/" onNavigate={() => void router.navigate({ to: '/' })} />
       </div>
     </>
   );
@@ -1298,31 +1302,25 @@ function CreatorForm({ session }: { session: CreatorSession }) {
       mainTitle={mainTitle}
       mainContent={(
         <>
-          {/* 草稿状态/门禁提示——Desktop 私有区段，Web 各页散在 storage draft 实现。 */}
-          <section aria-label="草稿" className="mb-4 rounded-lg border border-(--app-border) bg-(--app-surface-70) p-3 text-sm">
-            {state.pendingRestore && <div role="status" className="flex flex-wrap items-center gap-2"><span>发现上次草稿，请选择恢复或清除。</span><button className={actionClass} onClick={() => {
-              previousTargetsRef.current = null;
-              previousSignatureRef.current = null;
-              invalidatePresetLoads();
-              session.restoreDraft(); setShowIntroduction(false); setSelectionReady(true);
-            }}>恢复草稿</button></div>}
-            {state.draftError && <p role="alert">{state.draftError}</p>}
-            {!state.pendingRestore && !state.draftError && <p role="status">{state.draftSaved ? '当前内容已保存或无待保存变更。' : '当前内容尚未保存到草稿。'}</p>}
+          {state.draftError && <section aria-label="草稿保存问题" className="mb-4 text-sm">
+            <p role="alert">{state.draftError}</p>
             <div className="mt-2 flex flex-wrap gap-2">
-              {state.draftError && !session.isDraftBlocked() && <button className={actionClass} disabled={busy || state.pendingRestore} onClick={() => session.retryDraftSave()}>重试保存草稿</button>}
+              {!session.isDraftBlocked() && <button className={actionClass} disabled={busy || state.pendingRestore} onClick={() => session.retryDraftSave()}>重试保存草稿</button>}
               <button className={actionClass} disabled={busy} onClick={() => setConfirmClear(true)}>清除草稿</button>
             </div>
             {confirmClear && <div role="group" aria-label="确认清除草稿" className="mt-3 rounded border p-3">
               <p>确认清除本页回答、创作输入、生成结果和中断正文？已保存的本地卡不受影响。此操作无法撤销。</p>
               <button className={generationActionClassNames.destructive} disabled={busy} onClick={() => {
+                invalidatePresetLoads();
+                session.discardDraft();
+                if (session.getSnapshot().draftError) return;
                 previousTargetsRef.current = null;
                 previousSignatureRef.current = null;
-                invalidatePresetLoads();
-                session.discardDraft(); setConfirmClear(false); setQuestionIndex(0); setShowIntroduction(true); setSelectionReady(false); setProvisionalDefault(null);
+                setConfirmClear(false); setQuestionIndex(0); setShowIntroduction(true); setSelectionReady(false); setProvisionalDefault(null);
               }}>确认清除</button>
               <button className={actionClass} onClick={() => setConfirmClear(false)}>保留草稿</button>
             </div>}
-          </section>
+          </section>}
           {!guard.ready && !guard.message && <p role="status">正在初始化窗口关闭保护…</p>}
           {guard.message && <p role="alert">{guard.message}</p>}
           {profilesLoading && target.location === 'client' && <p role="status">正在读取本地 Provider 配置…</p>}
@@ -1412,7 +1410,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
       mainStage: 'status',
       mainContent: (
         <div className="space-y-3 text-center">
-          <div className="text-center text-lg">{questionnaireError ?? presetError ?? (state.pendingRestore ? '草稿待处理，请先选择恢复或清除。' : '加载中...')}</div>
+          <div className="text-center text-lg">{questionnaireError ?? presetError ?? '加载中...'}</div>
           {(questionnaireError || presetError) && <button className={actionClass} onClick={() => { setReload((value) => value + 1); }}>重新加载</button>}
         </div>
       ),
@@ -1422,7 +1420,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
     });
   }
 
-  if (flow.length === 0) {
+  if (flow.length === 0 && !state.card) {
     return renderWorkbenchPage({
       sidebarStage: 'questionnaire',
       mainStage: 'status',
@@ -1500,9 +1498,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
             </button>
           </div>
           <div className="text-center" style={{ marginTop: '2rem' }}>
-            <button onClick={() => void router.navigate({ to: '/' })} className="footer-link">
-              返回首页
-            </button>
+            <BackHomeLink href="#/" onNavigate={() => void router.navigate({ to: '/' })} />
           </div>
         </div>
       ),
@@ -1547,7 +1543,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
 }
 
 export function DesktopCreator() {
-  const [session, setSession] = useState<CreatorSession | null>(null);
+  const [ownedSession, setOwnedSession] = useState<{ session: CreatorSession; restored: boolean } | null>(null);
   useEffect(() => {
     const owner = new CreatorSession({
       storage: {
@@ -1566,10 +1562,13 @@ export function DesktopCreator() {
         primaryRuleId: CREATOR_DRAFT_DEFAULT_RULE_IDS[0] ?? null,
       },
     });
-    setSession(owner);
+    // 已解析的草稿在默认问卷与表单副作用启动前应用；不会发起生成。
+    const restored = owner.getSnapshot().pendingRestore;
+    if (restored) owner.restoreDraft(false);
+    setOwnedSession({ session: owner, restored });
     const onPageHide = () => owner.cancel();
     window.addEventListener('pagehide', onPageHide);
     return () => { window.removeEventListener('pagehide', onPageHide); owner.dispose(); };
   }, []);
-  return session ? <CreatorForm session={session} /> : <p role="status">正在准备创作工房…</p>;
+  return ownedSession ? <CreatorForm session={ownedSession.session} restored={ownedSession.restored} /> : <p role="status">正在准备创作工房…</p>;
 }

@@ -209,14 +209,15 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     expect(container.textContent).not.toContain('请以当前结果数据为准');
   });
 
-  it('gates generation on pending restore until the draft is explicitly restored', async () => {
+  it('automatically restores a valid draft before loading defaults without dispatching generation', async () => {
     window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft()));
     await mount();
-    // 待恢复期间选择集未就绪：停在状态页并如实说明，不出现可用的生成键。
-    expect(container.textContent).toContain('发现上次草稿，请选择恢复或清除。');
-    expect(container.textContent).toContain('草稿待处理，请先选择恢复或清除。');
-    expect([...container.querySelectorAll('button')].some((item) => item.textContent === '生成数据卡' || item.textContent === '直接生成')).toBe(false);
-    await click('恢复草稿');
+    expect(container.textContent).not.toContain('恢复草稿');
+    expect(container.textContent).not.toContain('当前内容已保存或无待保存变更。');
+    expect(container.querySelector('section[aria-label="草稿"]')).toBeNull();
+    expect(container.querySelector('a.footer-link[href="#/"]')?.textContent).toBe('返回首页');
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => url === presetIndex.presets[0].path)).toBe(false);
     expect(container.textContent).toContain('问题 1 /');
     expect(button('生成数据卡').disabled).toBe(false);
     await click('生成数据卡');
@@ -226,11 +227,170 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     expect(container.querySelector('[data-testid="result-signature-status"]')?.textContent).toContain('未签名');
   });
 
+  it('restores answers immediately but still waits for the native close guard before generation', async () => {
+    const releases: (() => void)[] = [];
+    mocks.listen.mockImplementation(() => new Promise<() => void>((resolve) => releases.push(() => resolve(vi.fn()))));
+    window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft()));
+    await mount();
+    expect(container.textContent).toContain('问题 1 /');
+    expect(button('恢复草稿')).toBeUndefined();
+    expect(button('生成数据卡').disabled).toBe(true);
+    await click('生成数据卡');
+    expect(mocks.execute).not.toHaveBeenCalled();
+    await act(async () => releases.forEach((release) => release()));
+    await settle();
+    expect(button('生成数据卡').disabled).toBe(false);
+    await click('生成数据卡');
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.execute.mock.calls[0]![1].answers).toHaveLength(1);
+  });
+
+  it('keeps a residual default draft on the introduction without getting stuck loading', async () => {
+    window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft({ answers: {} })));
+    await mount();
+    expect(button('开始回答问卷')).toBeTruthy();
+    expect(button('恢复草稿')).toBeUndefined();
+    expect(button('清除草稿')).toBeUndefined();
+    expect(button('清空存档')).toBeUndefined();
+    expect(mocks.execute).not.toHaveBeenCalled();
+    const home = container.querySelector<HTMLAnchorElement>('a.footer-link[href="#/"]');
+    expect(home?.textContent).toBe('返回首页');
+    await click('开始回答问卷');
+    expect(container.textContent).toContain('问题 1 /');
+  });
+
+  it('keeps a restored result reachable without any questionnaire and requires regeneration confirmation', async () => {
+    window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft({
+      answers: {},
+      questionnaireSelections: [],
+      output: { mode: 'direct-local', cardKind: 'magical-girl', card, rawText: JSON.stringify(card), phase: 'completed' },
+    })));
+    await mount();
+    expect(container.textContent).toContain('百合');
+    expect(container.textContent).not.toContain('当前没有可作答的题目');
+    expect(container.textContent).not.toContain('已恢复草稿');
+    expect(mocks.execute).not.toHaveBeenCalled();
+    await click('重新生成');
+    expect(container.querySelector('dialog[open]')?.textContent).toContain('当前结果尚未保存');
+    await click('取消');
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('百合');
+  });
+
+  it('restores uncertain hosted work without replay and retains explicit repeat-cost confirmation', async () => {
+    window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft({
+      output: { mode: 'hosted-json', card: null, cardKind: 'magical-girl', rawText: '上次中断的正文', phase: 'uncertain' },
+    })));
+    await mount();
+    expect(container.textContent).toContain('上次生成的服务器执行结果未能确认');
+    expect(container.querySelector('pre')?.textContent).toBe('上次中断的正文');
+    expect(mocks.execute).not.toHaveBeenCalled();
+    await click('重新生成');
+    expect(container.querySelector('dialog[open]')?.textContent).toContain('可能产生重复调用与费用');
+    await click('取消');
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(container.querySelector('pre')?.textContent).toBe('上次中断的正文');
+  });
+
+  it('clears only answers through the collapsed Web-style action and preserves creator settings and results', async () => {
+    const original = draft({
+      freeformBrief: '保留这条补充说明',
+      ruleInputsById: { 'arena-trpg-lite': { custom: 7 } },
+      output: { mode: 'direct-local', cardKind: 'magical-girl', card, rawText: JSON.stringify(card), phase: 'completed' },
+    });
+    window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(original));
+    await mount();
+    expect(button('清除草稿')).toBeUndefined();
+    expect(button('清空存档')).toBeUndefined();
+    await clickText('一键填充答案');
+    await click('清空存档');
+    expect(JSON.parse(window.localStorage.getItem(CREATOR_DRAFT_KEY)!).answers).toEqual(original.answers);
+    vi.mocked(window.confirm).mockReturnValue(true);
+    await click('清空存档');
+    const stored = JSON.parse(window.localStorage.getItem(CREATOR_DRAFT_KEY)!);
+    expect(stored).toMatchObject({ ...original, answers: {} });
+    expect(container.textContent).toContain('百合');
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it('retains corrupt storage while allowing temporary work and guarding unsaved changes', async () => {
+    window.localStorage.setItem(CREATOR_DRAFT_KEY, '{broken');
+    await mount();
+    expect(container.textContent).toContain('旧草稿无法读取');
+    expect(button('重试保存草稿')).toBeUndefined();
+    const beforeEdit = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(beforeEdit);
+    expect(beforeEdit.defaultPrevented).toBe(false);
+    await click('开始回答问卷');
+    await clickText('魔法少女（结构化）');
+    await click('还没想好');
+    expect(button('生成数据卡').disabled).toBe(false);
+    await click('生成数据卡');
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain('百合');
+    expect(window.localStorage.getItem(CREATOR_DRAFT_KEY)).toBe('{broken');
+    const afterEdit = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(afterEdit);
+    expect(afterEdit.defaultPrevented).toBe(true);
+    await click('清除草稿');
+    await click('保留草稿');
+    expect(window.localStorage.getItem(CREATOR_DRAFT_KEY)).toBe('{broken');
+    expect(container.textContent).toContain('百合');
+    await click('清除草稿');
+    expect(button('确认清除').classList.contains('ui-web-generation-action--destructive')).toBe(true);
+    await click('确认清除');
+    expect(container.textContent).not.toContain('旧草稿无法读取');
+    expect(button('开始回答问卷')).toBeTruthy();
+    expect(JSON.parse(window.localStorage.getItem(CREATOR_DRAFT_KEY)!).answers).toEqual({});
+    expect(storedSelectionIds()).toEqual(['magical-girl-default']);
+  });
+
+  it('keeps a failed corrupt-draft discard recoverable without resetting temporary work', async () => {
+    window.localStorage.setItem(CREATOR_DRAFT_KEY, '{broken');
+    await mount();
+    await click('开始回答问卷');
+    await clickText('魔法少女（结构化）');
+    await click('还没想好');
+    await click('生成数据卡');
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => { throw new Error('storage unavailable'); });
+    await click('清除草稿');
+    await click('确认清除');
+    expect(container.textContent).toContain('清除草稿失败');
+    expect(container.textContent).toContain('百合');
+    expect(window.localStorage.getItem(CREATOR_DRAFT_KEY)).toBe('{broken');
+    expect(button('保留草稿')).toBeTruthy();
+  });
+
+  it('shows a retry only on a real save failure and keeps navigation protected until it succeeds', async () => {
+    window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft()));
+    const router = await mount();
+    const originalSet = Storage.prototype.setItem;
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (key === CREATOR_DRAFT_KEY) throw new Error('quota');
+      originalSet.call(this, key, value);
+    });
+    await click('还没想好');
+    expect(container.textContent).toContain('草稿写入失败');
+    await act(async () => { void router.navigate({ to: '/' }); });
+    await settle();
+    expect(router.state.location.pathname).toBe('/creator');
+    const unload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(true);
+    write.mockRestore();
+    await click('重试保存草稿');
+    expect(container.textContent).not.toContain('草稿写入失败');
+    expect(button('清除草稿')).toBeUndefined();
+    await act(async () => { void router.navigate({ to: '/' }); });
+    await settle();
+    expect(router.state.location.pathname).toBe('/');
+  });
+
   it('projects the shared hosted-json request body with build rules and native-signature eligibility', async () => {
     aiConfig('server');
     window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft({ freeformBrief: '想要百合主题' })));
     mocks.execute.mockResolvedValue(completed('hosted-json', { card: { ...card, signature: 'sig' } }));
-    await mount(); await click('恢复草稿'); await click('生成数据卡');
+    await mount(); await click('生成数据卡');
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(mocks.execute.mock.calls[0]![0].profileId).toBe('');
     expect(mocks.execute.mock.calls[0]![2]).toMatchObject({ mode: 'hosted-json' });
@@ -253,7 +413,7 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     mocks.profiles.mockResolvedValue({ id: 'local', name: '远端模型', adapter: 'openai-compatible', baseUrl: 'https://api.example.com/v1', modelId: 'model' });
     mocks.execute.mockResolvedValue(completed('direct-remote'));
     window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft()));
-    await mount(); await click('恢复草稿'); await click('生成数据卡');
+    await mount(); await click('生成数据卡');
     expect(mocks.execute.mock.calls[0]![2]).toMatchObject({ mode: 'direct-remote' });
     expect([...container.querySelectorAll('h2.sr-only')].some((heading) => heading.textContent === '百合')).toBe(true);
     expect(container.querySelector('[data-testid="result-signature-status"]')?.textContent).toContain('未签名');
@@ -273,7 +433,7 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
         phase: 'completed',
       },
     })));
-    await mount(); await click('恢复草稿');
+    await mount();
     expect([...container.querySelectorAll('h2.sr-only')].some((heading) => heading.textContent === '百合')).toBe(true);
     expect(container.querySelector('[data-testid="result-signature-status"]')?.textContent).toContain('含签名字段（本机未验证）');
     expect(container.querySelector('[data-testid="result-signature-status"]')?.textContent).not.toContain('官方签名');
@@ -289,7 +449,7 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     };
     mocks.execute.mockResolvedValue(completed('hosted-stream', { card: generalCard, cardKind: 'general' }));
     window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft({ template: 'general', generationMode: 'stream' })));
-    await mount(); await click('恢复草稿'); await click('生成数据卡');
+    await mount(); await click('生成数据卡');
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(mocks.execute.mock.calls[0]![1].template).toBe('general');
     expect(mocks.execute.mock.calls[0]![2]).toMatchObject({ mode: 'hosted-stream' });
@@ -313,7 +473,7 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
       ruleInputsById: { 'removed-rule': { ignored: true } },
     })));
     await mount();
-    await click('恢复草稿');
+
     expect(container.textContent).toContain('问题 1 /');
     await settle();
     const stored = JSON.parse(window.localStorage.getItem(CREATOR_DRAFT_KEY)!) as {
@@ -361,7 +521,7 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     stubPresetRaceFetch(deferreds, { a: questionnaireA, b: questionnaireB });
     window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft({ allowMultipleQuestionnaires: true })));
     await mount();
-    await click('恢复草稿');
+
     await clickText('问卷设置');
     await pickPreset('preset-a');
     await pickPreset('preset-b');
@@ -375,19 +535,19 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     expect(storedSelectionIds()).toContain('magical-girl-default');
   });
 
-  it('drops a pending preset load once the draft is cleared mid-flight (G3-r1-r1)', async () => {
+  it('drops a pending preset load once answers are cleared mid-flight (G3-r1-r1)', async () => {
     // 加载途中清除草稿：该请求不再适用，响应落地也不得把问卷加回来。
     const questionnaireA = { ...questionnaire, id: 'preset-a-questionnaire', title: '预设问卷A' };
     const deferreds = new Map<string, () => void>();
     stubPresetRaceFetch(deferreds, { a: questionnaireA, b: questionnaire });
     window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft()));
     await mount();
-    await click('恢复草稿');
+
     await clickText('问卷设置');
     await pickPreset('preset-a');
-    await click('清除草稿');
-    expect(button('确认清除').classList.contains('ui-web-generation-action--destructive')).toBe(true);
-    await click('确认清除');
+    await clickText('一键填充答案');
+    vi.mocked(window.confirm).mockReturnValue(true);
+    await click('清空存档');
     await act(async () => deferreds.get('a')!());
     await settle();
     expect(storedSelectionIds()).not.toContain('preset-a-questionnaire');
@@ -400,7 +560,7 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     stubPresetRaceFetch(deferreds, { a: questionnaireA, b: questionnaire });
     window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft()));
     await mount();
-    await click('恢复草稿');
+
     await clickText('问卷设置');
     await pickPreset('preset-a');
     await clickText('残兽（结构化）');
@@ -418,7 +578,7 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     stubPresetRaceFetch(deferreds, { a: questionnaireA, b: questionnaire });
     window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft()));
     await mount();
-    await click('恢复草稿');
+
     await clickText('问卷设置');
     await pickPreset('preset-a');
     await clickText('粘贴导入 JSON');
@@ -438,7 +598,7 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
   it('refuses the un-wired scenario template with an explanatory error instead of dispatching', async () => {
     aiConfig('server');
     window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft({ template: 'scenario' })));
-    await mount(); await click('恢复草稿');
+    await mount();
     await click('生成数据卡');
     expect(mocks.execute).not.toHaveBeenCalled();
     expect(container.textContent).toContain('「情景（结构化）」模板暂未接入生成通路，请选择其他创作模板。');
@@ -459,7 +619,7 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
       modelsByProfileId: {},
     }));
     window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft()));
-    await mount(); await click('恢复草稿');
+    await mount();
     expect(container.textContent).toContain('已不在支持列表中');
     expect(button('生成数据卡').disabled).toBe(true);
     button('生成数据卡').click();

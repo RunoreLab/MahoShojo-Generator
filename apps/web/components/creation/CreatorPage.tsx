@@ -1,6 +1,7 @@
 'use client';
 
 import { generationActionClassNames, generationSubmitClassName } from '@mahoshojo/ui-web/generation-actions';
+import { BackHomeLink } from '@mahoshojo/ui-web/shell';
 import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import GeneralCharacterCard from '@/components/GeneralCharacterCard';
@@ -2582,12 +2583,7 @@ export const CreatorPage: React.FC = () => {
             </button>
           </div>
           <div className="text-center" style={{ marginTop: '2rem' }}>
-            <button
-              onClick={() => router.push('/')}
-              className="footer-link"
-            >
-              返回首页
-            </button>
+            <BackHomeLink onNavigate={() => router.push('/')} />
           </div>
         </div>
       ),
@@ -2659,12 +2655,7 @@ export const CreatorPage: React.FC = () => {
       )}
 
       <div className="text-center" style={{ marginTop: '1rem' }}>
-        <button
-          onClick={() => router.push('/')}
-          className="footer-link"
-        >
-          返回首页
-        </button>
+        <BackHomeLink onNavigate={() => router.push('/')} />
       </div>
     </>
   );
