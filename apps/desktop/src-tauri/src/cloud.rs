@@ -1852,7 +1852,14 @@ pub async fn stream_hosted_ai(
             .to_string();
         if !status.is_success() || !content_type.contains("text/event-stream") {
             // 错误 body 只用于诊断信息提取，读取必须有界——异常响应不得撑爆内存。
-            let text = read_bounded_text(response, HOSTED_ERROR_BODY_MAX_BYTES).await;
+            let text = tokio::select! {
+                biased;
+                _ = token.cancelled() => {
+                    emit(hosted_error_event("已取消", "cancelled"));
+                    return Ok(());
+                }
+                text = read_bounded_text(response, HOSTED_ERROR_BODY_MAX_BYTES) => text,
+            };
             let message = serde_json::from_str::<serde_json::Value>(&text)
                 .ok()
                 .and_then(|value| {
@@ -2046,9 +2053,21 @@ pub async fn hosted_ai_request(
             // 不转发可能包含上游凭据的原始失败正文。HTTP 状态仍供错误/限速分类。
             serde_json::json!({"error": "供应商生成失败，请检查凭据、模型或稍后重试"})
         } else if (200..300).contains(&status) {
-            read_bounded_json(response, "生成请求", HOSTED_JSON_RESPONSE_MAX_BYTES).await?
+            tokio::select! {
+                biased;
+                _ = token.cancelled() => {
+                    return Err(CloudError::new(CloudErrorCode::Cancelled, "已取消"));
+                }
+                body = read_bounded_json(response, "生成请求", HOSTED_JSON_RESPONSE_MAX_BYTES) => body?,
+            }
         } else {
-            let text = read_bounded_text(response, HOSTED_JSON_RESPONSE_MAX_BYTES).await;
+            let text = tokio::select! {
+                biased;
+                _ = token.cancelled() => {
+                    return Err(CloudError::new(CloudErrorCode::Cancelled, "已取消"));
+                }
+                text = read_bounded_text(response, HOSTED_JSON_RESPONSE_MAX_BYTES) => text,
+            };
             serde_json::from_str::<serde_json::Value>(&text).unwrap_or(serde_json::Value::Null)
         };
         Ok(CloudHostedJsonResponse { status, body })
@@ -4703,6 +4722,141 @@ mod tests {
                 .await
                 .unwrap_err();
             assert_eq!(error.code, CloudErrorCode::InvalidResponse);
+        });
+    }
+
+    /// 真实 socket：先完整响应 readiness，再立即发生成响应头和半截 body，等待客户端断连。
+    async fn delayed_hosted_body_server(
+        status: u16,
+        route: &'static str,
+    ) -> (String, oneshot::Receiver<()>, tokio::task::JoinHandle<bool>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let (headers_sent, headers_seen) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            for index in 0..2 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut buffer = Vec::new();
+                let mut chunk = [0u8; 4096];
+                let head_end = loop {
+                    let count = stream.read(&mut chunk).await.unwrap();
+                    assert!(count > 0);
+                    buffer.extend_from_slice(&chunk[..count]);
+                    if let Some(end) = find_subslice(&buffer, b"\r\n\r\n") {
+                        break end + 4;
+                    }
+                };
+                let head = String::from_utf8_lossy(&buffer[..head_end]);
+                let content_length = head
+                    .lines()
+                    .find_map(|line| {
+                        line.to_ascii_lowercase()
+                            .strip_prefix("content-length:")
+                            .and_then(|value| value.trim().parse::<usize>().ok())
+                    })
+                    .unwrap_or(0);
+                let expected_path = if index == 0 { DR_READINESS_PATH } else { route };
+                assert!(head.lines().next().unwrap().contains(expected_path));
+                while buffer.len() < head_end + content_length {
+                    let count = stream.read(&mut chunk).await.unwrap();
+                    assert!(count > 0);
+                    buffer.extend_from_slice(&chunk[..count]);
+                }
+                if index == 0 {
+                    let body =
+                        serde_json::json!({"ok": true, "contractVersion": HOSTED_CONTRACT_VERSION})
+                            .to_string();
+                    stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+                    stream.shutdown().await.unwrap();
+                } else {
+                    stream.write_all(format!("HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: 1000\r\nConnection: close\r\n\r\n{{\"data\":").as_bytes()).await.unwrap();
+                    let _ = headers_sent.send(());
+                    return matches!(
+                        tokio::time::timeout(Duration::from_secs(2), stream.read(&mut chunk)).await,
+                        Ok(Ok(0)) | Ok(Err(_))
+                    );
+                }
+            }
+            unreachable!()
+        });
+        (origin, headers_seen, server)
+    }
+
+    #[test]
+    fn audit_hosted_json_cancellation_drops_body_after_headers() {
+        rt().block_on(async {
+            for status in [200, 500] {
+                let (origin, headers_seen, server) =
+                    delayed_hosted_body_server(status, HOSTED_GENERATE_DETAILS_PATH).await;
+                let state = CloudState::with_origin(&origin);
+                let secrets = MemorySecrets::new();
+                let registry = crate::ai::RequestRegistry::default();
+                let operation =
+                    hosted_ai_request(&state, &secrets, &registry, hosted_json_request());
+                tokio::pin!(operation);
+                tokio::select! {
+                    result = &mut operation => panic!("body should remain pending: {result:?}"),
+                    _ = headers_seen => {},
+                }
+                tokio::select! {
+                    result = &mut operation => panic!("body should remain pending: {result:?}"),
+                    _ = tokio::time::sleep(Duration::from_millis(30)) => {},
+                }
+                assert!(registry.cancel("req-json-1"));
+                let cancelled =
+                    tokio::time::timeout(Duration::from_millis(500), &mut operation).await;
+                assert!(
+                    cancelled.is_ok(),
+                    "cancel must not wait for the response body or its 120s timeout, HTTP {status}"
+                );
+                assert_eq!(
+                    cancelled.unwrap().unwrap_err().code,
+                    CloudErrorCode::Cancelled
+                );
+                assert_eq!(registry.len(), 0);
+                assert!(
+                    server.await.unwrap(),
+                    "cancel must close the upstream socket"
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn audit_hosted_stream_cancellation_drops_slow_error_body_after_headers() {
+        rt().block_on(async {
+            let (origin, headers_seen, server) =
+                delayed_hosted_body_server(500, HOSTED_GENERATE_DETAILS_STREAM_PATH).await;
+            let state = CloudState::with_origin(&origin);
+            let secrets = MemorySecrets::new();
+            let registry = crate::ai::RequestRegistry::default();
+            let sink = VecSink::new();
+            let operation = stream_hosted_ai(&state, &secrets, &registry, hosted_request(), &sink);
+            tokio::pin!(operation);
+            tokio::select! {
+                result = &mut operation => panic!("body should remain pending: {result:?}"),
+                _ = headers_seen => {},
+            }
+            tokio::select! {
+                result = &mut operation => panic!("body should remain pending: {result:?}"),
+                _ = tokio::time::sleep(Duration::from_millis(30)) => {},
+            }
+            assert!(registry.cancel("req-1"));
+            let cancelled = tokio::time::timeout(Duration::from_millis(500), &mut operation).await;
+            assert!(
+                cancelled.is_ok(),
+                "cancel must interrupt the diagnostic body reader"
+            );
+            assert!(cancelled.unwrap().is_ok());
+            let events = sink.events.lock().unwrap();
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].event, "error");
+            assert_eq!(events[0].data["code"], "cancelled");
+            assert_eq!(registry.len(), 0);
+            assert!(
+                server.await.unwrap(),
+                "cancel must close the upstream socket"
+            );
         });
     }
 
