@@ -20,7 +20,8 @@ import {
   type AITextAttachment,
 } from '@mahoshojo/ai-core/reference-attachments';
 
-// 记录迁移前 Hosted 实现采集的行为快照，双端复用后锁死 prompt/schema/清洗漂移。
+// 以迁移前 Hosted 行为快照为基线，双端复用后锁死 prompt/schema/清洗漂移。
+// 结构化 prompt hash 已随五类字段说明移除宿主元数据而更新；schema、输出清洗与流式快照未改。
 const legacy = JSON.parse(
   readFileSync(new URL('../fixtures/free-generation-legacy.json', import.meta.url), 'utf8'),
 );

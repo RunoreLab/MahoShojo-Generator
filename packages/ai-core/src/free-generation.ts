@@ -157,8 +157,8 @@ export const buildFreeFieldGuide = (schemaId: FreeSchemaId): string => {
   - background：背景（可选）。
     - belief：信念/愿望/理念。
     - bonds：羁绊/关系。
-- templateId：模板标识（自由生成会被标记为“自由生成”来源）。
-- signature：原生签名（自由生成禁止输出）。
+模板标识由应用在生成后补充，不属于模型输出。
+自由生成禁止输出原生签名。
 `.trim();
     case 'canshou':
       return `
@@ -175,8 +175,8 @@ export const buildFreeFieldGuide = (schemaId: FreeSchemaId): string => {
 - origin：起源（可选）。
 - birthEnvironment：诞生环境（可选）。
 - researcherNotes：研究员备注（可选）。
-- templateId：模板标识（自由生成会被标记为“自由生成”来源）。
-- signature：原生签名（自由生成禁止输出）。
+模板标识由应用在生成后补充，不属于模型输出。
+自由生成禁止输出原生签名。
 `.trim();
     case 'scenario':
       return `
@@ -195,24 +195,22 @@ export const buildFreeFieldGuide = (schemaId: FreeSchemaId): string => {
   - events：核心事件（可选）。
   - atmosphere：整体氛围（可选）。
   - development：发展方向（可选字符串数组）。
-- metadata：元信息（可选）。
-  - created_at：创建时间（可选）。
-  - signature：原生签名（自由生成禁止输出）。
+创建时间由应用在生成后补充，不属于模型输出。
+自由生成禁止输出原生签名。
 `.trim();
     case 'general':
       return `
 字段含义（通用角色数据卡）：
-- templateId：固定为 "通用角色"。
 - name：角色名。
 - content：角色设定正文（建议 Markdown）。
-- current_state：当前状态（可选）。
+模板标识由应用在生成后补充，不属于模型输出；仅输出上述字段。
 `.trim();
     case 'general-scenario':
       return `
 字段含义（通用情景数据卡）：
-- templateId：固定为 "通用情景"。
 - title：情景名。
 - content：情景设定正文（建议 Markdown）。
+模板标识由应用在生成后补充，不属于模型输出；仅输出上述字段。
 `.trim();
   }
 };

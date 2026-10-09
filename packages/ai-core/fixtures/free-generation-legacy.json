@@ -164,7 +164,7 @@
           }
         }
       },
-      "structuredPromptSha256": "04745e02d8eab4adb153c3b8cab17d4e12841fac2c9d9ab450a5771c70522069",
+      "structuredPromptSha256": "b75634d1d37ecf5a1d3a5b9bb11eddb3cd82fb959d894458838ec61e0469b8bc",
       "output": {
         "codename": "C",
         "appearance": {
@@ -358,7 +358,7 @@
           }
         }
       },
-      "structuredPromptSha256": "033f8a8ee68d2aff322231f06186a643ec4aed6ecd8c8ef20c407142ddc1b131",
+      "structuredPromptSha256": "6d94316b022f51f99e30b98c91fb12beab209e48585dfe305a309c59955df113",
       "output": {
         "codename": "C",
         "appearance": {
@@ -465,7 +465,7 @@
           }
         }
       },
-      "structuredPromptSha256": "d468efc93e5f877e056bc4760a85d18f1603c30f8f4d437b63efcfc691bc0aa1",
+      "structuredPromptSha256": "46f94ac8f090be24e3433fa812737eef6dd2e6bdbe8abf2d45880fb437372164",
       "output": {
         "name": "N",
         "appearance": "",
@@ -545,7 +545,7 @@
           }
         }
       },
-      "structuredPromptSha256": "4fcdc675604bd2e4ef830376d98d14b4c0507ac2a5d12f631b9ed7c259cf763f",
+      "structuredPromptSha256": "bac496e16019b728fd241326662d94390c647d87322294e20e6c81a723e71f0d",
       "output": {
         "name": "N",
         "appearance": "",
@@ -652,7 +652,7 @@
           }
         }
       },
-      "structuredPromptSha256": "efd580f668263642e7ecf21f6694ca4a12489a3320dac2daa59ccd7cc5972514",
+      "structuredPromptSha256": "fa81308dc91a4671e184a09b1c99fce2fc0824933fb6c60a3b3b3f7549994674",
       "output": {
         "title": "T",
         "scenario_type": "x",
@@ -756,7 +756,7 @@
           }
         }
       },
-      "structuredPromptSha256": "ff8924374211f81f94f729c2eee8989d30c87a436ef52b81133580634bdcd246",
+      "structuredPromptSha256": "44c3cd28875def4bf3f7758d88a6a56c3d207eb7222248a8829ec787addbc285",
       "output": {
         "title": "T",
         "scenario_type": "x",
@@ -807,7 +807,7 @@
           }
         }
       },
-      "structuredPromptSha256": "9b89ee07928e0bf33df31cf6c50c19e685f0fef2f0847b94a496e42105a126e4",
+      "structuredPromptSha256": "683e8ae2a3b2ed370a393d17dcd511fedee11141410db9f194c6b9e6e28cc5d2",
       "output": {
         "name": "N",
         "content": "C",
@@ -837,7 +837,7 @@
           }
         }
       },
-      "structuredPromptSha256": "9c465a8ff731c8a1d9fd49ea7cb5cf9774b2de6ff49be6c2dbb81c40f14452ee",
+      "structuredPromptSha256": "c13ab1b912bcc5247650fd459ec6416dcef84a3dede62c64c2c9b6ce7d470dca",
       "output": {
         "name": "N",
         "content": "C",
@@ -874,7 +874,7 @@
           }
         }
       },
-      "structuredPromptSha256": "9be6b4be9d9d61cc8173e028125082bd53109fbeef76d0a6b5f1447260c8df4d",
+      "structuredPromptSha256": "ee5b504b408fc9998dff7ff01e982c2cfbe6a619ca8b16a860307af26cfa03eb",
       "output": {
         "title": "T",
         "content": "C",
@@ -904,7 +904,7 @@
           }
         }
       },
-      "structuredPromptSha256": "2f88be3dc82b63490f5a3d06a32d08447c6696c8d87a82da14ce8401fd9440ea",
+      "structuredPromptSha256": "7d0e1e443993de5ba98b6453bc3c8f6479ca0eccdda5e094cff2df1c05be327d",
       "output": {
         "title": "T",
         "content": "C",
