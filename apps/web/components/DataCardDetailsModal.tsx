@@ -15,6 +15,7 @@ import Badge from '@/components/badge/Badge';
 import type { BadgeDefinition } from '@/types/badge';
 import type { OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
 import { isReducedMotionActive } from '@mahoshojo/ui-web/device-preferences';
+import { useBaseModalAccessibility } from '@mahoshojo/ui-web/modal';
 
 type ApiTag = {
   id: string;
@@ -192,9 +193,7 @@ export default function DataCardDetailsModal({
   onSaveCopyToLocalLibrary,
   localLibrarySaveState,
 }: DataCardDetailsModalProps) {
-  const titleId = React.useId();
-  const dialogRef = useRef<HTMLDivElement | null>(null);
-  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const { titleId, dialogRef, initialFocusRef: closeButtonRef } = useBaseModalAccessibility({ isOpen, onClose, fallbackFocusRef });
   const canEditTags = isOwner || adminTagEditor;
   const [tagScope, setTagScope] = useState<'user' | 'system' | 'admin'>(adminTagEditor ? 'admin' : 'user');
   const [metaNonce, setMetaNonce] = useState(0);
@@ -242,63 +241,7 @@ export default function DataCardDetailsModal({
   const tagSearchInputRef = useRef<HTMLInputElement | null>(null);
   const moreActionsButtonRef = useRef<HTMLButtonElement | null>(null);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const previouslyFocused = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-    const fallbackFocus = fallbackFocusRef?.current ?? null;
-    const previousBodyOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    closeButtonRef.current?.focus();
-
-    return () => {
-      document.body.style.overflow = previousBodyOverflow;
-      if (previouslyFocused && document.contains(previouslyFocused)) {
-        previouslyFocused.focus();
-      } else {
-        fallbackFocus?.focus();
-      }
-    };
-  }, [fallbackFocusRef, isOpen]);
-
-  const handleDialogKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (isReportModalOpen) return;
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-      return;
-    }
-    if (event.key !== 'Tab') return;
-
-    const focusableSelector = [
-      'button:not([disabled])',
-      'a[href]',
-      'input:not([disabled])',
-      'select:not([disabled])',
-      'textarea:not([disabled])',
-      '[tabindex]:not([tabindex="-1"])',
-    ].join(',');
-    const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? [])]
-      .filter((element) => !element.hidden && element.getAttribute('aria-hidden') !== 'true');
-    if (focusable.length === 0) {
-      event.preventDefault();
-      dialogRef.current?.focus();
-      return;
-    }
-
-    const first = focusable[0]!;
-    const last = focusable.at(-1)!;
-    const current = document.activeElement;
-    if (event.shiftKey && current === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && current === last) {
-      event.preventDefault();
-      first.focus();
-    }
-  };
+  // 与管理/举报弹窗登记同一层级，只有最上层约束 Tab/Escape；滚动锁按层释放。
 
   const reloadMeta = useCallback(async (dataCardId: string) => {
     const requestId = (metaRequestIdRef.current += 1);
@@ -799,7 +742,6 @@ export default function DataCardDetailsModal({
         aria-hidden={isReportModalOpen ? 'true' : undefined}
         aria-labelledby={titleId}
         tabIndex={-1}
-        onKeyDown={handleDialogKeyDown}
         className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col"
       >
         {/* 头部 */}
