@@ -10,6 +10,16 @@ describe('private result fixed cloud routes', () => {
     } });
     expect(form.data.signature).toBe('unchanged');
   });
+  it('sends explicit scenario type and rejects unsupported types without guessing', async () => {
+    const invoke = vi.fn(async () => ({ status: 201, body: { success: true, id: 'new-copy' } }));
+    await createPrivateCloudCopy(invoke, 7, { ...form, type: 'scenario' });
+    expect(invoke.mock.calls[0]).toEqual(['cloud_card_library_request', { request: {
+      routeId: 'data-cards.create', expectedUserId: 7, body: { ...form, type: 'scenario', isPublic: false },
+    } }]);
+    invoke.mockClear();
+    expect((await createPrivateCloudCopy(invoke, 7, { ...form, type: 'questionnaire' as never })).kind).toBe('rejected');
+    expect(invoke).not.toHaveBeenCalled();
+  });
   it.each([{}, { success: true }, { success: true, id: ' ' }, { success: false, id: 'x' }])('does not accept ambiguous success %j', async (body) => {
     const invoke = vi.fn(async () => ({ status: 201, body }));
     expect((await createPrivateCloudCopy(invoke, 7, form)).kind).toBe('uncertain'); expect(invoke).toHaveBeenCalledTimes(1);

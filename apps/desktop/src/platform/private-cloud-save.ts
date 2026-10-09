@@ -1,6 +1,8 @@
 import { requestCardLibraryRoute } from './card-library-bridge';
 import { DesktopCloudError, type InvokeFn } from './cloud-bridge';
 
+export type PrivateResultCardType = 'character' | 'scenario';
+
 export type CloudCreateOutcome =
   | { kind: 'saved'; id: string }
   | { kind: 'rejected'; message: string }
@@ -20,15 +22,18 @@ export async function readPrivateCloudCapacity(invoke: InvokeFn, expectedUserId:
 }
 /** 单次显式创建：不重试，不修改本地结果，不生成/清理签名字段。 */
 export async function createPrivateCloudCopy(invoke: InvokeFn, expectedUserId: number, form: {
-  name: string; description: string; data: unknown;
+  name: string; description: string; data: unknown; type?: PrivateResultCardType;
 }): Promise<CloudCreateOutcome> {
+  if (form.type !== undefined && form.type !== 'character' && form.type !== 'scenario') {
+    return { kind: 'rejected', message: '结果类型不受支持，请保留当前结果并检查来源' };
+  }
   if (!form.name.trim() || form.name.length > 20 || form.description.length > 300) {
     return { kind: 'rejected', message: '请检查名称（1–20 字）和描述（最多 300 字）' };
   }
   try {
     const response = await requestCardLibraryRoute(invoke, {
       routeId: 'data-cards.create', expectedUserId,
-      body: { type: 'character', name: form.name, description: form.description, data: form.data, isPublic: false } as never,
+      body: { type: form.type ?? 'character', name: form.name, description: form.description, data: form.data, isPublic: false } as never,
     });
     const body = record(response.body);
     if (response.status >= 200 && response.status < 300 && body?.success === true &&

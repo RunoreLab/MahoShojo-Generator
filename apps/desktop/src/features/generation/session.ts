@@ -170,6 +170,13 @@ export class DesktopGenerationSession<
     }
   }
   getSnapshot = (): GenerationSessionState<TDraft, TCardKind> => this.state;
+  /** 只从已完成结果的家族 kind 读取保存类型，绝不从可编辑输入猜测。 */
+  resultCardType = (): 'character' | 'scenario' | null => {
+    const { card, cardKind, phase } = this.state;
+    if (!card || phase !== 'completed' || this.family.normalizeStoredCardKind(cardKind) !== cardKind) return null;
+    const type = this.family.cardTypeOf(cardKind);
+    return type === 'character' || type === 'scenario' ? type : null;
+  };
   isBusy = (): boolean => this.controller !== null || this.state.saving;
   hasUnsavedResult = (): boolean => this.state.card !== null && this.state.saveStatus !== 'saved' && this.state.saveStatus !== 'already-present';
   /** Corrupt or future-version storage is preserved until the user explicitly clears it. */

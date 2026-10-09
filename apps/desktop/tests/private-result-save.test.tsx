@@ -6,13 +6,13 @@ const mocks = vi.hoisted(() => ({ state: {} as any, epoch: 0, busy: (() => false
 vi.mock('../src/features/account/use-desktop-cloud-session', () => ({ useDesktopCloudSession: () => ({ state: mocks.state, store: { getSnapshot: () => mocks.state, getCredentialEpoch: () => mocks.epoch } }) }));
 vi.mock('../src/app/useLeaveGuard', () => ({ useLeaveGuard: (busy: () => boolean) => { mocks.busy = busy; return { ready: true, message: null }; } }));
 vi.mock('../src/platform/card-library-host', () => ({ useDesktopCardLibraryHost: () => ({}) }));
-vi.mock('@mahoshojo/ui-web/card-library', () => ({ CardLibraryModal: ({ isOpen, onClose, initialTab, visibleTabs }: any) => isOpen ? <div data-testid="own-cloud-library" data-tab={initialTab} data-tabs={visibleTabs.join(',')}><button onClick={onClose}>关闭卡库</button></div> : null }));
+vi.mock('@mahoshojo/ui-web/card-library', () => ({ CardLibraryModal: ({ isOpen, onClose, initialTab, visibleTabs, selectedType }: any) => isOpen ? <div data-testid="own-cloud-library" data-type={selectedType} data-tab={initialTab} data-tabs={visibleTabs.join(',')}><button onClick={onClose}>关闭卡库</button></div> : null }));
 import { PrivateResultSave } from '../src/features/cloud-save/private-result-save';
 let root: Root; let container: HTMLDivElement;
 const invoke = vi.fn(); const onBusyChange = vi.fn();
 const data = { name: '结果A', signature: 'original' };
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
-const render = (value: unknown = data) => act(async () => { root.render(<PrivateResultSave data={value} invokeFn={invoke} onBusyChange={onBusyChange} />); await flush(); });
+const render = (value: unknown = data, cardType: 'character' | 'scenario' = 'character') => act(async () => { root.render(<PrivateResultSave data={value} cardType={cardType} invokeFn={invoke} onBusyChange={onBusyChange} />); await flush(); });
 const button = (text: string) => [...document.querySelectorAll('button')].find((node) => node.textContent === text)!;
 const click = (text: string) => act(async () => { button(text).click(); await flush(); });
 const deferred = () => { let resolve!: (v: unknown) => void; const promise = new Promise((yes) => { resolve = yes; }); return { promise, resolve }; };
@@ -31,6 +31,35 @@ describe('private result cloud-save UI', () => {
     await render(); await click('保存私有云端副本'); expect(document.querySelector('input[type=checkbox]')).toBeNull(); expect(writes()).toHaveLength(0);
     await click('保存'); expect(writes()).toHaveLength(1); expect(writes()[0][1].request.body).toMatchObject({ name: '结果A', isPublic: false, data });
     expect(container.textContent).toContain('本地结果保持不变');
+  });
+  it('uses scenario title, description, fixed type and matching own-library filter', async () => {
+    const scenario = { title: '雨中相会', name: '不应选择角色名', extension: { future: true } };
+    await render(scenario, 'scenario'); await click('保存私有云端副本');
+    expect(document.querySelector<HTMLInputElement>('input')?.value).toBe('雨中相会');
+    invoke.mockResolvedValueOnce({ status: 500, body: {} }); await click('保存');
+    expect(writes()[0][1].request.body).toEqual({ type: 'scenario', name: '雨中相会', description: '情景数据卡', data: scenario, isPublic: false });
+    await click('检查“我的云端卡”'); expect(document.querySelector('[data-testid=own-cloud-library]')?.getAttribute('data-type')).toBe('scenario');
+  });
+  it.each(['saved', 'pending', 'uncertain'] as const)('resets %s on type-only change without replay or late state', async (ending) => {
+    const value = { title: '情景标题', name: '角色标题' };
+    await render(value); await click('保存私有云端副本'); const pending = deferred();
+    invoke.mockReturnValueOnce(ending === 'pending' ? pending.promise : Promise.resolve({ status: ending === 'saved' ? 201 : 500, body: { success: true, id: 'old' } }));
+    await click('保存'); await render(value, 'scenario');
+    if (ending === 'pending') await act(async () => { pending.resolve({ status: 201, body: { success: true, id: 'old' } }); await flush(); });
+    expect(writes()).toHaveLength(1); expect(container.textContent).not.toContain('已保存私有');
+    await click('保存私有云端副本'); expect(document.querySelector<HTMLInputElement>('input')?.value).toBe('情景标题'); expect(button('保存').disabled).toBe(false);
+  });
+  it('ignores late capacity on type-only scope change', async () => {
+    const pending = deferred(); invoke.mockReturnValueOnce(pending.promise);
+    await render(); await click('保存私有云端副本'); await render(data, 'scenario'); await click('保存私有云端副本');
+    await act(async () => { pending.resolve({ status: 200, body: { success: true, capacity: 1, usedSlots: 1 } }); await flush(); });
+    expect(button('保存').disabled).toBe(false); expect(document.body.textContent).toContain('0/10 槽');
+  });
+  it('checks host busy synchronously again at submit instead of trusting rendered disabled', async () => {
+    let blocked = false;
+    await act(async () => { root.render(<PrivateResultSave data={data} invokeFn={invoke} isBlocked={() => blocked} />); await flush(); });
+    await click('保存私有云端副本'); blocked = true; await click('保存'); expect(writes()).toHaveLength(0);
+    blocked = false; await click('保存'); expect(writes()).toHaveLength(1);
   });
   it('single-flights repeated clicks, blocks modal dismissal and leaving during create', async () => {
     await render(); await click('保存私有云端副本'); const pending = deferred(); invoke.mockReturnValueOnce(pending.promise);

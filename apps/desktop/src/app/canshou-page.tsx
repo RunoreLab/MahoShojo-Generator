@@ -1043,7 +1043,7 @@ function CanshouForm({ session, restored }: { session: CanshouSession; restored:
                       />
                     )}
 
-                  <PrivateResultSave onBusyChange={onCloudSavingChange} data={resolvedResultPayload} disabled={!guard.ready || busy} className={`${generationActionClassNames.primary} w-full`} />
+                  <PrivateResultSave isBlocked={() => session.isBusy() || aiStore.isPreparingGeneration()} onBusyChange={onCloudSavingChange} data={resolvedResultPayload} disabled={!guard.ready || busy} className={`${generationActionClassNames.primary} w-full`} />
                   <button className={`${generationActionClassNames.primary} flex-1`} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => { if (guard.ready) void session.saveResult(); }}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>
                 </QuestionnaireResultActions>}
                 <CanshouLorePanel open={showDetails} onOpenChange={(open) => updateDraft({ showDetails: open })} />
