@@ -193,7 +193,8 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
   const [presetError, setPresetError] = useState<string | null>(null);
   const [questionnaireError, setQuestionnaireError] = useState<string | null>(null);
   const [questionnaireLoading, setQuestionnaireLoading] = useState(true);
-  const [selectionReady, setSelectionReady] = useState(() => restored || state.draft.questionnaireSelections !== undefined);
+  // 已恢复回答不代表选择集存在：旧草稿缺字段仍加载默认问卷，显式 [] 则保持为空。
+  const [selectionReady, setSelectionReady] = useState(() => state.draft.questionnaireSelections !== undefined);
   const [provisionalDefault, setProvisionalDefault] = useState<QuestionnaireSelection | null>(null);
   const [reload, setReload] = useState(0);
   const [questionIndex, setQuestionIndex] = useState(0);
@@ -764,11 +765,15 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
 
   const guard = useLeaveGuard(
     () => session.isBusy() || session.hasUnsavedDraft(),
-    '生成或保存尚未完成，或当前草稿未能保存。请等待、取消生成，或重试保存草稿后再离开。也可以确认清除草稿以放弃当前内容。',
+    '生成或保存尚未完成，或当前草稿未能保存。请等待、取消生成或重试保存；也可以确认放弃本页未保存内容后离开。',
     '窗口关闭保护初始化失败，生成与保存暂不可用。请重新打开页面后重试。',
     () => {
       const current = session.getSnapshot();
-      if (current.saving || current.phase !== 'generating') return false;
+      if (current.saving || aiStore.isPreparingGeneration()) return false;
+      if (current.phase !== 'generating') {
+        return session.hasUnsavedDraft()
+          && window.confirm('当前内容尚未保存到草稿。确认放弃本页未保存的内容并离开？已保存的本地卡和原草稿不受影响。');
+      }
       if (!window.confirm('生成尚未完成。确认终止生成并离开？已收到的正文将保留在本机草稿中。')) return false;
       session.cancel();
       return session.getSnapshot().draftSaved;
@@ -1081,7 +1086,9 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
           if (!window.confirm('确定要清空所有已保存的问卷答案吗？此操作不可撤销。')) return;
           invalidatePresetLoads();
           updateDraft({ answers: {} });
-          setActionInfo('存档已清空！');
+          setActionInfo(session.getSnapshot().draftSaved
+            ? '存档已清空！'
+            : '当前页面的答案已清空，但原存档仍保留。');
         }}
         onInfo={setActionInfo}
         onError={(message) => setActionError(`⚠️ ${message}`)}
@@ -1221,7 +1228,7 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
           jsonSaveMode={jsonSaveMode}
           onJsonSaveModeChange={(next) => updateDraft({ jsonSaveMode: next })}
           recommendedJsonMode={recommendedJsonMode}
-          footerNote="提示：偏好设置已保存在本机草稿中，下次打开仍会保留；切换不会丢失生成结果。"
+          footerNote="切换保存方式不会丢失生成结果。"
         />
         <DetailsFieldGuidePanel
           theme={APP_FIELD_GUIDE_THEME}

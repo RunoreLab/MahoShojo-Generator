@@ -77,6 +77,25 @@ describe('Desktop Creator session', () => {
     expect(pending.getSnapshot().draft).toMatchObject({ template: 'canshou', freeformBrief: '写一只兽', language: 'en' });
   });
 
+  it('保留显式空问卷选择，与缺选择字段的旧草稿区分', () => {
+    const withEmpty = storage();
+    withEmpty.map.set(CREATOR_DRAFT_KEY, JSON.stringify({
+      version: 1, ...initialDraft, freeformBrief: '只用自由说明', questionnaireSelections: [],
+    }));
+    const emptySession = new CreatorSession({ storage: withEmpty, repository: repo(), initialDraft });
+    emptySession.restoreDraft();
+    expect(emptySession.getSnapshot().draft.questionnaireSelections).toEqual([]);
+
+    const omitted = storage();
+    omitted.map.set(CREATOR_DRAFT_KEY, JSON.stringify({
+      version: 1, ...initialDraft, answers: { q1: '旧回答' },
+    }));
+    const legacySession = new CreatorSession({ storage: omitted, repository: repo(), initialDraft });
+    legacySession.restoreDraft();
+    expect(legacySession.getSnapshot().draft.questionnaireSelections).toBeUndefined();
+    expect(legacySession.getSnapshot().draft.answers).toEqual({ q1: '旧回答' });
+  });
+
   it('非法模板字段判损坏并阻断；非法 cardKind 回退默认', () => {
     const s = storage();
     s.map.set(CREATOR_DRAFT_KEY, JSON.stringify({

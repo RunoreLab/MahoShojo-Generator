@@ -92,6 +92,10 @@ const parseDraftFields = (value: Record<string, unknown>): CreatorDraft => {
     generationMode: value.generationMode,
     freeformBrief: value.freeformBrief,
   };
+  // Creator 允许只用自由说明/规则；显式空选择不能当成旧草稿缺字段而回填默认问卷。
+  if (Array.isArray(value.questionnaireSelections) && value.questionnaireSelections.length === 0) {
+    draft.questionnaireSelections = [];
+  }
   if (Array.isArray(value.selectedRuleIds)
     && value.selectedRuleIds.every((id) => typeof id === 'string')) {
     draft.selectedRuleIds = [...new Set(value.selectedRuleIds)];

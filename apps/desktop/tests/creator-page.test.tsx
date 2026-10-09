@@ -227,6 +227,31 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     expect(container.querySelector('[data-testid="result-signature-status"]')?.textContent).toContain('未签名');
   });
 
+  it('loads the default questionnaire for legacy restored answers with omitted selections without losing answers', async () => {
+    const legacy = draft();
+    delete (legacy as Record<string, unknown>).questionnaireSelections;
+    window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(legacy));
+    await mount();
+    expect(container.textContent).toContain('问题 1 /');
+    expect(container.textContent).not.toContain('当前没有可作答的题目');
+    expect(button('开始回答问卷')).toBeUndefined();
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => url === presetIndex.presets[0].path)).toBe(true);
+    expect(JSON.parse(window.localStorage.getItem(CREATOR_DRAFT_KEY)!).answers).toEqual(legacy.answers);
+    expect(mocks.execute).not.toHaveBeenCalled();
+    await click('生成数据卡');
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.execute.mock.calls[0]![1].answers).toEqual([expect.objectContaining({ answer: '善良' })]);
+  });
+
+  it('preserves explicitly empty restored selections instead of injecting a default questionnaire', async () => {
+    window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft({ questionnaireSelections: [], freeformBrief: '只使用补充说明' })));
+    await mount();
+    expect(container.textContent).toContain('当前没有可作答的题目');
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => url === presetIndex.presets[0].path)).toBe(false);
+    expect(storedSelectionIds()).toEqual([]);
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
   it('restores answers immediately but still waits for the native close guard before generation', async () => {
     const releases: (() => void)[] = [];
     mocks.listen.mockImplementation(() => new Promise<() => void>((resolve) => releases.push(() => resolve(vi.fn()))));
@@ -309,8 +334,46 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     await click('清空存档');
     const stored = JSON.parse(window.localStorage.getItem(CREATOR_DRAFT_KEY)!);
     expect(stored).toMatchObject({ ...original, answers: {} });
+    expect(container.textContent).toContain('存档已清空！');
     expect(container.textContent).toContain('百合');
     expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it('reports only an in-memory answer clear when quota prevents persistence and retains the original stored answers', async () => {
+    const original = JSON.stringify(draft());
+    window.localStorage.setItem(CREATOR_DRAFT_KEY, original);
+    await mount();
+    const originalSet = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (key === CREATOR_DRAFT_KEY) throw new Error('quota');
+      originalSet.call(this, key, value);
+    });
+    await clickText('一键填充答案');
+    vi.mocked(window.confirm).mockReturnValue(true);
+    await click('清空存档');
+    expect(window.localStorage.getItem(CREATOR_DRAFT_KEY)).toBe(original);
+    expect(container.textContent).not.toContain('存档已清空！');
+    expect(container.textContent).toContain('当前页面的答案已清空，但原存档仍保留。');
+    expect(container.textContent).toContain('草稿写入失败');
+    await click('生成数据卡');
+    expect(mocks.execute.mock.calls[0]![1].answers).toEqual([]);
+  });
+
+  it('does not claim a successful stored clear or persisted preferences for memory-only work over corrupt storage', async () => {
+    window.localStorage.setItem(CREATOR_DRAFT_KEY, '{broken');
+    await mount();
+    await click('开始回答问卷');
+    await click('还没想好');
+    await clickText('一键填充答案');
+    vi.mocked(window.confirm).mockReturnValue(true);
+    await click('清空存档');
+    expect(window.localStorage.getItem(CREATOR_DRAFT_KEY)).toBe('{broken');
+    expect(container.textContent).not.toContain('存档已清空！');
+    expect(container.textContent).toContain('当前页面的答案已清空，但原存档仍保留。');
+    await click('生成数据卡');
+    expect(mocks.execute.mock.calls[0]![1].answers).toEqual([]);
+    expect(container.textContent).not.toContain('偏好设置已保存在本机草稿中');
+    expect(container.textContent).toContain('切换保存方式不会丢失生成结果。');
   });
 
   it('retains corrupt storage while allowing temporary work and guarding unsaved changes', async () => {
@@ -343,6 +406,30 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     expect(button('开始回答问卷')).toBeTruthy();
     expect(JSON.parse(window.localStorage.getItem(CREATOR_DRAFT_KEY)!).answers).toEqual({});
     expect(storedSelectionIds()).toEqual(['magical-girl-default']);
+  });
+
+  it('allows confirmed departure after saving a memory-only result without touching corrupt stored data', async () => {
+    window.localStorage.setItem(CREATOR_DRAFT_KEY, '{broken');
+    const router = await mount();
+    await click('开始回答问卷');
+    await click('还没想好');
+    await click('生成数据卡');
+    await click('保存到本地卡库');
+    expect(mocks.save).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain('已保存到本地卡库。');
+    const remove = vi.spyOn(Storage.prototype, 'removeItem');
+    const write = vi.spyOn(Storage.prototype, 'setItem');
+    await act(async () => { void router.navigate({ to: '/' }); });
+    await settle();
+    expect(router.state.location.pathname).toBe('/creator');
+    expect(window.confirm).toHaveBeenLastCalledWith(expect.stringContaining('确认放弃本页未保存的内容并离开'));
+    vi.mocked(window.confirm).mockReturnValue(true);
+    await act(async () => { void router.navigate({ to: '/' }); });
+    await settle();
+    expect(router.state.location.pathname).toBe('/');
+    expect(window.localStorage.getItem(CREATOR_DRAFT_KEY)).toBe('{broken');
+    expect(remove.mock.calls.some(([key]) => key === CREATOR_DRAFT_KEY)).toBe(false);
+    expect(write.mock.calls.some(([key]) => key === CREATOR_DRAFT_KEY)).toBe(false);
   });
 
   it('keeps a failed corrupt-draft discard recoverable without resetting temporary work', async () => {
