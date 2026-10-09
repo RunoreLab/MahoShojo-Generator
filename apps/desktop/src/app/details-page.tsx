@@ -999,7 +999,7 @@ function DetailsForm({ session, restored }: { session: DetailsSession; restored:
                   )}
 
                   <button className={`${generationActionClassNames.primary} w-full`} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => { if (guard.ready) void session.saveResult(); }}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>
-                  <PrivateResultSave isBlocked={() => session.isBusy() || aiStore.isPreparingGeneration()} onBusyChange={onCloudSavingChange} data={resolvedResultPayload} disabled={!guard.ready || busy} className={`${generationActionClassNames.primary} w-full`} />
+                  {session.resultCardType() === 'character' && <PrivateResultSave isBlocked={() => session.isBusy() || aiStore.isPreparingGeneration()} onBusyChange={onCloudSavingChange} data={resolvedResultPayload} disabled={!guard.ready || busy} className={`${generationActionClassNames.primary} w-full`} />}
                 </QuestionnaireResultActions>}
             </section>}
           </div>

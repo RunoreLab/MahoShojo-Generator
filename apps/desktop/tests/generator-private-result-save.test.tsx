@@ -38,7 +38,7 @@ const cards = {
   'general-scenario': { templateId: '通用情景', title: '已完成通用情景', content: '# 完整情景\n\n结果正文' },
 };
 type Kind = keyof typeof cards;
-type Page = 'canshou' | 'free' | 'creator' | 'scenario' | 'sublimation';
+type Page = 'details' | 'canshou' | 'free' | 'creator' | 'scenario' | 'sublimation';
 type Mode = 'stream' | 'non-stream';
 const matrix: { page: Page; kind: Kind; mode: Mode }[] = [
   { page: 'canshou', kind: 'canshou', mode: 'non-stream' }, { page: 'canshou', kind: 'general', mode: 'stream' },
@@ -96,7 +96,7 @@ describe('all actual generator hosts reuse the private completed-result save', (
     const data = resultData(kind);
     // The existing family owns completion normalization; save must preserve that full
     // completed snapshot rather than reconstructing it from current controls or raw output.
-    const validate = { free: validateFreeCard, creator: validateCreatorResultCard, scenario: validateScenarioCard, canshou: (kind: Kind, data: unknown) => kind === 'canshou' ? normalizeCanshouResultCard(data) : validateFreeCard('general', data), sublimation: validateSublimationCard }[page];
+    const validate = { details: validateFreeCard, free: validateFreeCard, creator: validateCreatorResultCard, scenario: validateScenarioCard, canshou: (kind: Kind, data: unknown) => kind === 'canshou' ? normalizeCanshouResultCard(data) : validateFreeCard('general', data), sublimation: validateSublimationCard }[page];
     const completedData = validate(kind as never, data);
     const output = { phase: 'completed', mode: 'direct-local', cardKind: kind, card: data, rawText: JSON.stringify(data) };
     mocks.execute.mockResolvedValue({ ...output, status: 'completed' });
@@ -185,6 +185,13 @@ describe('all actual generator hosts reuse the private completed-result save', (
     expect(button('保存到本地卡库')).toBeTruthy(); expect(mocks.execute).not.toHaveBeenCalled();
     await act(async () => finish({ status: 400, body: { error: 'mock refusal' } })); await flush();
     expect(button('保存到本地卡库')).toBeTruthy();
+  });
+
+  it.each(['details', 'canshou', 'free', 'creator', 'scenario', 'sublimation'] as const)('%s never offers cloud save for a restored non-completed output carrying a card', async (page) => {
+    const kind = page === 'scenario' ? 'general-scenario' : 'general';
+    window.localStorage.setItem(`mahoshojo.desktop.${page}.draft.v1`, JSON.stringify({ version: 1, ...draftFor(page, kind, 'stream'), output: { phase: 'uncertain', mode: 'direct-local', cardKind: kind, card: resultData(kind), rawText: 'partial' } }));
+    await mount(page);
+    expect(button('保存私有云端副本')).toBeUndefined(); expect(writes()).toHaveLength(0); expect(mocks.execute).not.toHaveBeenCalled();
   });
 
 });
