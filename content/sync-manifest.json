@@ -19,7 +19,9 @@
       "questionnaire-logo.svg",
       "questionnaire-title.svg",
       "scenario-shadow.webp",
-      "scenario.webp"
+      "scenario.webp",
+      "sublimation.svg",
+      "sublimation-white.svg"
     ],
     "web": [
       "arena-card-white.webp",
@@ -27,7 +29,6 @@
       "card-forge-white.svg",
       "magic-tea-party-white.svg",
       "party-white.svg",
-      "sublimation-white.svg",
       "tavern-white.svg"
     ]
   }
