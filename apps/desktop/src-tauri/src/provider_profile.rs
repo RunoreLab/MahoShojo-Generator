@@ -226,7 +226,8 @@ fn is_loopback_host(host: &str) -> bool {
 }
 
 fn is_project_owned_host(host: &str) -> bool {
-    let normalized = host.to_ascii_lowercase();
+    // DNS 绝对域名的末尾根标签点不改变目标归属。
+    let normalized = host.trim_end_matches('.').to_ascii_lowercase();
     PROJECT_DOMAIN_SUFFIXES
         .iter()
         .any(|suffix| normalized == *suffix || normalized.ends_with(&format!(".{suffix}")))
@@ -573,6 +574,9 @@ mod tests {
             "api.mahoshojo.colanns.me",
             "colanns.me",
             "deep.nested.mahoshojo.colanns.me",
+            "mahoshojo.colanns.me.",
+            "COLANNS.ME.",
+            "deep.nested.mahoshojo.colanns.me.",
         ] {
             let profile = serde_json::json!({
                 "id": "p",
@@ -598,6 +602,7 @@ mod tests {
             "mahoshojo.example.com",
             "mahoshojo.colanns.me.evil.example",
             "notcolanns.me",
+            "mahoshojo.colanns.me.evil.example.",
         ] {
             let profile = serde_json::json!({
                 "id": "p",
