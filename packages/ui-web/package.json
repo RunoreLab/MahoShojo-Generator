@@ -198,7 +198,8 @@
       "default": "./src/sublimation/index.ts"
     },
     "./tavern": "./src/tavern/index.ts",
-    "./tavern-default-base": "./src/tavern/default-base.ts"
+    "./tavern-default-base": "./src/tavern/default-base.ts",
+    "./team": "./src/team/index.ts"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",
