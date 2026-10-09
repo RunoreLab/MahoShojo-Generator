@@ -81,7 +81,7 @@ export function DesktopCardForge() {
       <p className="text-sm text-gray-600">文件只在本机处理。远程图片不会加载；插图支持静态 PNG / JPEG / WebP，最大 10 MiB、16 MP、单边 8192 像素。</p>
       {source ? <p className="text-sm">当前来源：{source.name} · {dirty ? '有未导出的编辑' : '无未导出的编辑'}</p> : null}
       {source?.warning ? <p role="status" className="text-sm text-amber-700">{source.warning}</p> : null}
-      {source ? <p className="text-sm text-amber-700">工坊 JSON 是规范化编辑存档，不是原件：旧版外层元数据（如 sourceCardData、sourceCardType）与效果条目中 type / description 以外的扩展字段不写入存档；导出原始 JSON 可完整保留原始字节和未知字段。未加载的图片不会写入新存档。</p> : null}
+      {source ? <p className="text-sm text-amber-700">工坊 JSON 是规范化编辑存档，不是原件：原存档 createdAt、旧版外层元数据（如 sourceCardData、sourceCardType）、插图/裁剪对象的额外字段，以及效果条目中 type / description 以外的扩展字段不写入存档；导出原始 JSON 可完整保留原始字节和未知字段。未加载的图片不会写入新存档。</p> : null}
       {busy ? <p role="status">正在处理本地文件…</p> : null}
       {error ? <p role="alert" className="text-red-700">{error}</p> : null}
       {notice ? <p role="status">{notice}</p> : null}

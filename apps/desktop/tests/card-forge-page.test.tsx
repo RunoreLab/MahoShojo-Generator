@@ -28,7 +28,7 @@ describe('Desktop local forge host journey', () => {
       await act(async () => choose(input, inputFile(original)));
       expect(container.querySelector('.gc-name-text')?.textContent).toBe('原卡');
       expect([...container.querySelectorAll('img')].some((image) => image.src.includes('example.com'))).toBe(false);
-      expect(container.textContent).toContain('不写入存档'); expect(container.textContent).toContain('图片未加载');
+      expect(container.textContent).toContain('不写入存档'); expect(container.textContent).toContain('原存档 createdAt'); expect(container.textContent).toContain('插图/裁剪对象的额外字段'); expect(container.textContent).toContain('图片未加载');
       await act(async () => button('导出原始 JSON（完整原件）').click());
       expect(new TextDecoder('utf-8', { ignoreBOM: true }).decode(await mocks.download.mock.calls[0][0].arrayBuffer())).toBe(original);
       const color = [...container.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.style.backgroundColor)!;

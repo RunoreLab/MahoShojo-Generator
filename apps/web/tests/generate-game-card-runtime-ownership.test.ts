@@ -1,3 +1,4 @@
+import * as sharedGameCardPresentation from '@mahoshojo/domain/game-card-presentation';
 import { readFileSync } from 'node:fs';
 
 import * as aiCoreGameCard from '@mahoshojo/ai-core/game-card-generation';
@@ -85,6 +86,12 @@ describe('generate game card runtime ownership', () => {
     expect(domainSource).not.toMatch(
       /GAME_CARD_SYSTEM_PROMPT|GameCardGenerationConfig|RARITY_LABELS|CARD_TYPE_LABELS|ELEMENT_LABELS|RARITY_COLORS|ELEMENT_COLORS/,
     );
-    expect(presentationSource).toMatch(/RARITY_LABELS|RARITY_COLORS|ELEMENT_COLORS/);
+    expect(presentationSource).toContain("from '@mahoshojo/domain/game-card-presentation'");
+    expect(gameCardPresentation.RARITY_LABELS).toBe(sharedGameCardPresentation.RARITY_LABELS);
+    expect(gameCardPresentation.RARITY_COLORS).toBe(sharedGameCardPresentation.RARITY_COLORS);
+    expect(gameCardPresentation.ELEMENT_COLORS).toBe(sharedGameCardPresentation.ELEMENT_COLORS);
+    const sharedPresentationSource = readFileSync(new URL('../../../packages/domain/src/game-card-presentation.ts', import.meta.url), 'utf8');
+    expect(sharedPresentationSource).toMatch(/RARITY_LABELS|RARITY_COLORS|ELEMENT_COLORS/);
+    expect(sharedPresentationSource).not.toMatch(/from\s+['"]@\/|GAME_CARD_SYSTEM_PROMPT|GameCardGenerationConfig/);
   });
 });
