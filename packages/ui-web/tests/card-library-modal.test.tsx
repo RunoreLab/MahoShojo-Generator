@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { LocalCardRecordV1 } from '@mahoshojo/local-library/record';
 import type { CardRepository } from '@mahoshojo/local-library/repository';
 import { AnnouncementCenter } from '../src/announcement/AnnouncementCenter';
+import { BaseModal } from '../src/modal/BaseModal';
 
 import {
   CardLibraryModal,
@@ -1110,6 +1111,37 @@ test('先关闭卡库不解除其上公告的滚动锁或抢走焦点，公告�
     expect(document.body.style.overflow).toBe('hidden');
     expect(document.activeElement).toBe(announcementFocus);
     await click(document.querySelector<HTMLButtonElement>('[aria-label="关闭详情"]')!);
+    expect(document.body.style.overflow).toBe('auto');
+  } finally {
+    await act(async () => root.render(null));
+    document.body.style.overflow = originalOverflow;
+  }
+});
+
+
+test.each(['library-lower', 'library-upper'] as const)('卡库与BaseModal混用 %s：下层先关、上层最后归还页面入口', async (order) => {
+  const { host } = createHost([]);
+  const originalOverflow = document.body.style.overflow;
+  const mount = (lower: boolean, upper: boolean) => (
+    <>
+      <button data-mixed-opener>页面入口</button>
+      <BaseModal isOpen={order === 'library-lower' ? upper : lower} title="共享弹窗" onClose={() => {}}>内容</BaseModal>
+      <CardLibraryModal host={host} isOpen={order === 'library-lower' ? lower : upper} onClose={vi.fn()} selectedType="character" initialTab="local" visibleTabs={['local']} />
+    </>
+  );
+  document.body.style.overflow = 'auto';
+  try {
+    await act(async () => root.render(mount(false, false)));
+    const opener = document.querySelector<HTMLButtonElement>('[data-mixed-opener]')!;
+    opener.focus();
+    await act(async () => root.render(mount(true, false)));
+    await act(async () => root.render(mount(true, true)));
+    const upperFocus = document.activeElement;
+    await act(async () => root.render(mount(false, true)));
+    expect(document.activeElement).toBe(upperFocus);
+    expect(document.body.style.overflow).toBe('hidden');
+    await act(async () => root.render(mount(false, false)));
+    expect(document.activeElement).toBe(opener);
     expect(document.body.style.overflow).toBe('auto');
   } finally {
     await act(async () => root.render(null));

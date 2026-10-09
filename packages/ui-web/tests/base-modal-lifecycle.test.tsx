@@ -74,6 +74,7 @@ it('keeps focus in a newer modal when a lower modal closes first', () => {
   expect(document.body.style.overflow).toBe('hidden');
   render(mount(false, false));
   expect(document.body.style.overflow).toBe('auto');
+  expect(document.activeElement).toBe(container.querySelector('[data-opener]'));
 });
 
 it('retains the lower modal lock and focus until normal top-down closing completes', () => {
@@ -107,4 +108,32 @@ it('balances StrictMode subscriptions and preserves an existing host scroll lock
   render(<StrictMode><BaseModal isOpen title="再开" onClose={() => {}}>内容</BaseModal></StrictMode>);
   render(null);
   expect(document.body.style.overflow).toBe('scroll');
+});
+
+
+it('falls back to a surviving lower layer after the middle layer closes first', () => {
+  const mount = (lower: boolean, middle: boolean, upper: boolean) => (
+    <>
+      <button data-opener>页面入口</button>
+      <BaseModal isOpen={lower} title="下层" onClose={() => {}}>下层内容</BaseModal>
+      <BaseModal isOpen={middle} title="中层" onClose={() => {}}>中层内容</BaseModal>
+      <BaseModal isOpen={upper} title="上层" onClose={() => {}}>上层内容</BaseModal>
+    </>
+  );
+  render(mount(false, false, false));
+  const opener = container.querySelector<HTMLButtonElement>('[data-opener]')!;
+  opener.focus();
+  render(mount(true, false, false));
+  const lowerFocus = document.activeElement;
+  render(mount(true, true, false));
+  render(mount(true, true, true));
+  const upperFocus = document.activeElement;
+  render(mount(true, false, true));
+  expect(document.activeElement).toBe(upperFocus);
+  render(mount(true, false, false));
+  expect(document.activeElement).toBe(lowerFocus);
+  expect(document.body.style.overflow).toBe('hidden');
+  render(mount(false, false, false));
+  expect(document.activeElement).toBe(opener);
+  expect(document.body.style.overflow).toBe('auto');
 });

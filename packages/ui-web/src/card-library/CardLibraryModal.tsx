@@ -22,7 +22,7 @@ import { useLocalDataCards } from './use-local-data-cards';
 import { useLocalLibraryAutoSave } from './use-local-library-auto-save';
 import { ChevronDown, Filter, HardDrive } from 'lucide-react';
 import { BaseModal } from '../modal/BaseModal';
-import { acquireBodyScrollLock } from '../modal/body-scroll-lock';
+import { acquireModalEnvironment } from '../modal/modal-environment';
 import { isTopmostFocusTrapLayer, useEscapeLayer } from '../modal/escape-stack';
 import { ModalTabs, modalTabIds, type ModalTabItem } from '../modal/ModalTabs';
 import { buttonClassName } from './Button';
@@ -327,10 +327,7 @@ export function CardLibraryModal({
 
   useEffect(() => {
     if (!isOpen) return;
-    const previouslyFocused = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-    const releaseBodyScroll = acquireBodyScrollLock();
+    const modalEnvironment = acquireModalEnvironment();
     const modal = modalRef.current;
     closeButtonRef.current?.focus();
 
@@ -370,13 +367,11 @@ export function CardLibraryModal({
 
     return () => {
       document.removeEventListener('keydown', onKeyDown);
-      releaseBodyScroll();
+      modalEnvironment.releaseScroll();
       // 上层公告/确认框仍持有焦点时，下层异步关闭不能将它拉回页面入口。
       const canRestoreFocus = document.activeElement === document.body
         || modal?.contains(document.activeElement);
-      if (canRestoreFocus && previouslyFocused && document.contains(previouslyFocused)) {
-        previouslyFocused.focus();
-      }
+      if (canRestoreFocus) modalEnvironment.restoreFocus();
     };
   }, [isOpen, modalLayerId]);
 
