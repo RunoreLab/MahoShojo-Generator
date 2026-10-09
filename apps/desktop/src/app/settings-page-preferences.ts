@@ -31,9 +31,9 @@ import {
   type PagePreferenceSource,
 } from '@mahoshojo/ui-web/settings';
 
-import { CANSHOU_DRAFT_KEY } from '../features/canshou/session';
+import { CANSHOU_DRAFT_KEY, validateCanshouDraftDocument } from '../features/canshou/session';
 import { createEmptyFreeDraftDocument, FREE_DRAFT_KEY, validateFreeDraftDocument } from '../features/free/session';
-import { DETAILS_DRAFT_KEY } from '../features/details/session';
+import { DETAILS_DRAFT_KEY, validateDetailsDraftDocument } from '../features/details/session';
 import { createEmptyQuestionnaireDraftDocument } from '../features/questionnaire/session';
 
 const QUESTIONNAIRE_DRAFT_PREFERENCE_FIELDS: readonly PagePreferenceField[] = [
@@ -53,6 +53,7 @@ export const DESKTOP_DETAILS_PREFERENCES: PagePreferenceSource = {
   scope: 'fields',
   fields: QUESTIONNAIRE_DRAFT_PREFERENCE_FIELDS,
   createDocumentForFirstWrite: createEmptyQuestionnaireDraftDocument,
+  validateDocument: validateDetailsDraftDocument,
 };
 
 export const DESKTOP_CANSHOU_PREFERENCES: PagePreferenceSource = {
@@ -63,6 +64,7 @@ export const DESKTOP_CANSHOU_PREFERENCES: PagePreferenceSource = {
   scope: 'fields',
   fields: QUESTIONNAIRE_DRAFT_PREFERENCE_FIELDS,
   createDocumentForFirstWrite: createEmptyQuestionnaireDraftDocument,
+  validateDocument: validateCanshouDraftDocument,
 };
 
 export const DESKTOP_FREE_PREFERENCES: PagePreferenceSource = {

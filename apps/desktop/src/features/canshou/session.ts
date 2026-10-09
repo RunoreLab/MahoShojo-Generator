@@ -7,6 +7,7 @@ import {
 import { CANSHOU_DEFAULT_QUESTIONNAIRE_ID } from './questionnaire';
 import {
   QuestionnaireGenerationSession,
+  validateQuestionnaireDraftDocument,
   type QuestionnaireDraft,
   type QuestionnaireDraftStorage,
   type QuestionnaireExecutor,
@@ -29,6 +30,10 @@ const CANSHOU_SESSION_FAMILY: QuestionnaireSessionFamily<'canshou', CanshouGener
   structuredTitleFallback: '未命名残兽',
   normalizeStructuredCard: normalizeCanshouResultCard,
   executeGeneration: executeCanshouGeneration,
+};
+
+export const validateCanshouDraftDocument = (raw: string): void => {
+  validateQuestionnaireDraftDocument(raw, CANSHOU_SESSION_FAMILY);
 };
 
 /**

@@ -60,6 +60,7 @@ vi.mock('@tauri-apps/api/window', () => ({
 }));
 
 import { createDesktopRouter } from '../src/app/router';
+import { DESKTOP_CANSHOU_PREFERENCES, DESKTOP_DETAILS_PREFERENCES } from '../src/app/settings-page-preferences';
 import { DETAILS_DRAFT_KEY } from '../src/features/details/session';
 import { resetDesktopCloudSessionStoreForTests } from '../src/features/account/use-desktop-cloud-session';
 import { resetDesktopAiConfigStoreForTests } from '../src/features/ai-config/use-desktop-ai-config';
@@ -672,13 +673,14 @@ describe('desktop settings shell', () => {
 });
 
 describe('desktop settings page preferences', () => {
+  const draftOutput = { mode: 'direct-local', phase: 'cancelled', rawText: '保留正文', card: null, some: 'result' };
   const seedDetailsDraft = () => {
     window.localStorage.setItem(
       DETAILS_DRAFT_KEY,
       JSON.stringify({
         version: 1,
         answers: { q1: '答复内容' },
-        output: { some: 'result' },
+        output: draftOutput,
         language: 'zh-CN',
         imageSaveMode: 'download',
         jsonSaveMode: 'download',
@@ -738,7 +740,7 @@ describe('desktop settings page preferences', () => {
     expect(draft.imageSaveMode).toBe('modal');
     // 字段级手术：草稿与结果原样保留。
     expect(draft.answers).toEqual({ q1: '答复内容' });
-    expect(draft.output).toEqual({ some: 'result' });
+    expect(draft.output).toEqual(draftOutput);
     expect(draft.language).toBe('zh-CN');
   });
 
@@ -762,9 +764,57 @@ describe('desktop settings page preferences', () => {
       expect(draft).not.toHaveProperty(key);
     }
     expect(draft.answers).toEqual({ q1: '答复内容' });
-    expect(draft.output).toEqual({ some: 'result' });
+    expect(draft.output).toEqual(draftOutput);
     // 草稿自有字段不属于「页偏好」，重置不动它。
     expect(draft.language).toBe('zh-CN');
     expect(draft.version).toBe(1);
+  });
+});
+
+describe.each([DESKTOP_DETAILS_PREFERENCES, DESKTOP_CANSHOU_PREFERENCES])('$pageId settings draft protection feedback', (source) => {
+  const validDraft = { version: 1, answers: { q1: '保留回答' }, language: 'zh-CN', imageSaveMode: 'download', showDetails: true };
+  const findCard = (): HTMLElement => {
+    const card = [...container.querySelectorAll('h3')].find((heading) => heading.textContent === source.title)?.closest('section');
+    expect(card).toBeDefined();
+    return card!;
+  };
+  const findButton = (card: HTMLElement, text: string): HTMLButtonElement | null =>
+    [...card.querySelectorAll('button')].find((button) => button.textContent === text) ?? null;
+
+  it.each([
+    ['future version', { ...validDraft, version: 99 }],
+    ['invalid answers', { ...validDraft, answers: { q1: 7 } }],
+  ])('shows the protection message and disables edits/reset for %s', async (_label, draft) => {
+    const raw = JSON.stringify(draft, null, 2);
+    window.localStorage.setItem(source.storageKey, raw);
+    await mountAt('/settings?section=generation');
+
+    const card = findCard();
+    expect(card.textContent).toContain('草稿数据无法解析，为保护内容暂不可在此修改');
+    expect(card.querySelector('[role="radio"], [role="switch"], input')).toBeNull();
+    const reset = findButton(card, '重置该页偏好');
+    expect(reset?.disabled).toBe(true);
+    await click(reset);
+    expect(findButton(card, '确认重置')).toBeNull();
+    expect(card.querySelector('[role="status"]')).toBeNull();
+    expect(window.localStorage.getItem(source.storageKey)).toBe(raw);
+  });
+
+  it.each(['write', 'reset'])('reports a failed %s if the draft becomes unsupported after render', async (action) => {
+    window.localStorage.setItem(source.storageKey, JSON.stringify(validDraft));
+    await mountAt('/settings?section=generation');
+    const card = findCard();
+    if (action === 'reset') await click(findButton(card, '重置该页偏好'));
+
+    // 模拟 UI 仍持有旧读结果、提交前存储已改变；写入必须重新过 owner 校验。
+    const raw = JSON.stringify({ ...validDraft, version: 99, extension: { keep: true } }, null, 2);
+    window.localStorage.setItem(source.storageKey, raw);
+    await click(findButton(card, action === 'write' ? '预览弹窗保存' : '确认重置'));
+
+    expect(card.querySelector('[role="alert"]')?.textContent).toContain(action === 'write' ? '写入失败' : '重置失败');
+    expect(card.querySelector('[role="status"]')).toBeNull();
+    expect(card.textContent).toContain('草稿数据无法解析，为保护内容暂不可在此修改');
+    expect(findButton(card, '重置该页偏好')?.disabled).toBe(true);
+    expect(window.localStorage.getItem(source.storageKey)).toBe(raw);
   });
 });

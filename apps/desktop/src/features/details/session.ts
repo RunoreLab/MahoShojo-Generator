@@ -7,6 +7,7 @@ import {
 import { BUILTIN_DEFAULT_QUESTIONNAIRE_ID } from './questionnaire';
 import {
   QuestionnaireGenerationSession,
+  validateQuestionnaireDraftDocument,
   type QuestionnaireDraft,
   type QuestionnaireDraftStorage,
   type QuestionnaireExecutor,
@@ -29,6 +30,10 @@ const DETAILS_SESSION_FAMILY: QuestionnaireSessionFamily<'magical-girl', Details
   structuredTitleFallback: '未命名魔法少女',
   normalizeStructuredCard: normalizeMagicalGirlDetailsResultCard,
   executeGeneration: executeDetailsGeneration,
+};
+
+export const validateDetailsDraftDocument = (raw: string): void => {
+  validateQuestionnaireDraftDocument(raw, DETAILS_SESSION_FAMILY);
 };
 
 /**

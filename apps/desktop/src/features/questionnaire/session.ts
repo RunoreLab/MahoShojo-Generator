@@ -12,6 +12,7 @@ import type { CardRepository } from '@mahoshojo/local-library/repository';
 import type { DesktopAiExecutionOptions } from '../../platform/desktop-ai-execution';
 import {
   DesktopGenerationSession,
+  parseStoredGenerationDraft,
   type GenerationDraftStorage,
   type GenerationSessionFamily,
   type GenerationSessionState,
@@ -230,6 +231,14 @@ const adaptQuestionnaireSessionFamily = <
     prepareLocalCard: (card) => { if (card.userAnswers === undefined) card.userAnswers = []; },
     executeGeneration: family.executeGeneration,
   };
+};
+
+/** 复用页面的完整草稿解析；设置只取校验结果，不回写规范化后的草稿。 */
+export const validateQuestionnaireDraftDocument = <
+  TStructuredKind extends string,
+  TIntent extends QuestionnaireGenerationIntent,
+>(raw: string, family: QuestionnaireSessionFamily<TStructuredKind, TIntent>): void => {
+  parseStoredGenerationDraft(raw, adaptQuestionnaireSessionFamily(family));
 };
 
 /**
