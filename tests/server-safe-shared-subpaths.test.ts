@@ -261,6 +261,7 @@ describe('server-safe shared entrypoints stay free of React hooks', () => {
       './modal',
       './narrative-history',
       './questionnaire',
+      './questionnaire-editor',
       './scenario',
       './settings',
       './shell',

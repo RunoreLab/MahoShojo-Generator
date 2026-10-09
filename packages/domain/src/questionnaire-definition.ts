@@ -13,7 +13,7 @@ import {
  * （optionsFrom/suggestionsFrom）。Web 各玩法页与 Desktop /details 共用同一份，
  * 不另起 Desktop 问卷体系（`SPEC-desktop-online-ai-integration-v1`）。
  *
- * 网站专属的问卷 logo 预设常量与站点素材路径仍留在 Web 文件里；
+ * 问卷 logo 预设常量与素材路径由共享 questionnaire-logo 承载；
  * `logoUrl` 的站外地址准入走 domain 的媒体白名单（与 Web 原口径一致）。
  */
 

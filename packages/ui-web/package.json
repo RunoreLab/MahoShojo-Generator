@@ -199,7 +199,8 @@
     },
     "./tavern": "./src/tavern/index.ts",
     "./tavern-default-base": "./src/tavern/default-base.ts",
-    "./team": "./src/team/index.ts"
+    "./team": "./src/team/index.ts",
+    "./questionnaire-editor": "./src/questionnaire-editor/index.ts"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",

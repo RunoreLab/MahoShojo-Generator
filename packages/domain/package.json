@@ -230,7 +230,8 @@
     "./tavern-card/recommend": "./src/tavern-card/recommend.ts",
     "./team-merge": "./src/team-merge.ts",
     "./team-input": "./src/team-input.ts",
-    "./questionnaire-editor": "./src/questionnaire-editor.ts"
+    "./questionnaire-editor": "./src/questionnaire-editor.ts",
+    "./questionnaire-logo": "./src/questionnaire-logo.ts"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",

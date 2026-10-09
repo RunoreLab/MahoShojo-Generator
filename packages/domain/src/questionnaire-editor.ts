@@ -1,10 +1,11 @@
+import { SafeJsonValueSchema } from '@mahoshojo/contracts/json-value';
 import { normalizeQuestionnaireDefinition, sanitizeQuestionnaireLogoUrl, MAX_QUESTIONNAIRE_IMPORT_BYTES, type QuestionnaireConditionOperator, type QuestionnaireCondition, type QuestionnaireDefinition, type QuestionnaireJumpRule, type QuestionnaireOption, type QuestionnaireQuestion, type QuestionnaireQuestionRef } from './questionnaire-definition';
 import { exceedsUtf8ByteLimit } from './data-card-size';
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 const omitKeys = (record: Record<string, unknown>, keys: readonly string[]) => Object.fromEntries(Object.entries(record).filter(([key]) => !keys.includes(key)));
 // Editing a questionnaire never confers verified origin or native eligibility.
-const safeExtensions = (record: Record<string, unknown>) => omitKeys(record, ['signature', '_signature', 'origin', 'provenance', 'nativeAllowed', '__proto__', 'constructor', 'prototype']);
+const safeExtensions = (record: Record<string, unknown>) => omitKeys(record, ['signature', 'isPreset', '_native', '_isNative', 'isNative', 'nativeAllowed']);
 const TOP_KEYS = ['id', 'kind', 'title', 'description', 'loreMarkdown', 'logoUrl', 'version', 'nativeAllowed', 'questions'];
 const QUESTION_KEYS = ['id', 'question', 'type', 'placeholder', 'suggestions', 'options', 'optionsFrom', 'suggestionsFrom', 'allowCustom', 'helperText', 'maxLength', 'required', 'displayIf', 'jump'];
 
@@ -223,8 +224,9 @@ export function buildEditableQuestionnaire({ questions, questionnaireId, kind, t
       let extra: Record<string, unknown> = {};
       if (q.extraJson.trim()) {
         try {
+          if (exceedsUtf8ByteLimit(q.extraJson, MAX_QUESTIONNAIRE_IMPORT_BYTES)) throw new Error();
           const parsed: unknown = JSON.parse(q.extraJson);
-          if (!isRecord(parsed)) throw new Error();
+          if (!SafeJsonValueSchema.safeParse(parsed).success || !isRecord(parsed)) throw new Error();
           extra = parsed;
         } catch {
           errors.push(`第 ${index + 1} 题的“额外字段 JSON”无法解析`);
@@ -318,6 +320,9 @@ export function buildEditableQuestionnaire({ questions, questionnaireId, kind, t
       questions: cleanedQuestions,
     };
 
+    const serialized = JSON.stringify(payload, null, 2);
+    if (exceedsUtf8ByteLimit(serialized, MAX_QUESTIONNAIRE_IMPORT_BYTES)) errors.push('编辑结果超过 1 MiB，请精简后再导出或保存。');
+    if (!SafeJsonValueSchema.safeParse(JSON.parse(serialized)).success) errors.push('编辑结果包含不安全键、过深结构或过多节点。');
     return {
       questionnaireData: payload,
       jsonError: errors.length > 0 ? errors[0] : null,
@@ -326,7 +331,8 @@ export function buildEditableQuestionnaire({ questions, questionnaireId, kind, t
 
 export function importEditableQuestionnaire(sourceText: string, kind: 'magical-girl' | 'canshou' = 'magical-girl'): EditableQuestionnaire {
   if (exceedsUtf8ByteLimit(sourceText, MAX_QUESTIONNAIRE_IMPORT_BYTES)) throw new Error('问卷 JSON 超过大小上限（1 MiB）。');
-  const raw: unknown = JSON.parse(sourceText);
+  const raw: unknown = JSON.parse(sourceText.startsWith('\uFEFF') ? sourceText.slice(1) : sourceText);
+  if (!SafeJsonValueSchema.safeParse(raw).success) throw new Error('JSON 包含不安全键、过深结构或过多节点。');
   if (!isRecord(raw)) throw new Error('问卷 JSON 无法识别，请检查格式');
   const normalized = normalizeQuestionnaireDefinition(raw, { fallbackKind: kind, nativeAllowed: false });
   if (!normalized) throw new Error('问卷 JSON 无法识别，请检查格式');
