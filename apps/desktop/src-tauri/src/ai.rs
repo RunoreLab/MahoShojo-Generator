@@ -31,6 +31,29 @@ use futures_util::StreamExt;
 /// 单个 delta 事件的聚合阈值。太小会把 IPC 变成瓶颈，太大则让首字延迟变差。
 const DELTA_FLUSH_CHARS: usize = 48;
 const DELTA_FLUSH_INTERVAL: Duration = Duration::from_millis(40);
+/// TypeScript 字符串长度按 UTF-16 单元计数，不能用 Rust chars().count() 代替。
+/// 共享 fixture 同时对拍此值与 ai-core 的 AI_STREAM_MAX_DELTA_CHARS。
+pub(crate) const AI_STREAM_MAX_DELTA_UTF16_UNITS: usize = 65_536;
+
+fn bounded_delta_chunks(mut remaining: &str) -> impl Iterator<Item = &str> {
+    std::iter::from_fn(move || {
+        if remaining.is_empty() {
+            return None;
+        }
+        let mut units = 0;
+        let mut end = remaining.len();
+        for (index, character) in remaining.char_indices() {
+            units += character.len_utf16();
+            if units > AI_STREAM_MAX_DELTA_UTF16_UNITS {
+                end = index;
+                break;
+            }
+        }
+        let (chunk, tail) = remaining.split_at(end);
+        remaining = tail;
+        Some(chunk)
+    })
+}
 
 #[cfg(test)]
 pub(crate) const STREAM_FIXTURE: &str =
@@ -843,33 +866,43 @@ pub async fn run_stream(
      -> Result<(), DirectAiError> {
         if !pending_reasoning.is_empty() {
             let delta = std::mem::take(pending_reasoning);
-            on_event
-                .send(AiStreamEvent::ReasoningDelta {
-                    request_id: request_id.clone(),
-                    contract_version,
-                    mode,
-                    sequence: *sequence,
-                    delta,
-                })
-                .map_err(|_| {
-                    DirectAiError::new(DirectAiErrorCode::Cancelled, "the event channel was closed")
-                })?;
-            *sequence += 1;
+            for chunk in bounded_delta_chunks(&delta) {
+                on_event
+                    .send(AiStreamEvent::ReasoningDelta {
+                        request_id: request_id.clone(),
+                        contract_version,
+                        mode,
+                        sequence: *sequence,
+                        delta: chunk.to_owned(),
+                    })
+                    .map_err(|_| {
+                        DirectAiError::new(
+                            DirectAiErrorCode::Cancelled,
+                            "the event channel was closed",
+                        )
+                    })?;
+                *sequence += 1;
+            }
         }
         if !pending_text.is_empty() {
             let delta = std::mem::take(pending_text);
-            on_event
-                .send(AiStreamEvent::TextDelta {
-                    request_id: request_id.clone(),
-                    contract_version,
-                    mode,
-                    sequence: *sequence,
-                    delta,
-                })
-                .map_err(|_| {
-                    DirectAiError::new(DirectAiErrorCode::Cancelled, "the event channel was closed")
-                })?;
-            *sequence += 1;
+            for chunk in bounded_delta_chunks(&delta) {
+                on_event
+                    .send(AiStreamEvent::TextDelta {
+                        request_id: request_id.clone(),
+                        contract_version,
+                        mode,
+                        sequence: *sequence,
+                        delta: chunk.to_owned(),
+                    })
+                    .map_err(|_| {
+                        DirectAiError::new(
+                            DirectAiErrorCode::Cancelled,
+                            "the event channel was closed",
+                        )
+                    })?;
+                *sequence += 1;
+            }
         }
         Ok(())
     };

@@ -1,7 +1,18 @@
 use crate::ai::{
     AiExecutionFinishReason, AiExecutionMode, AiExecutionResult, AiStreamEvent, RequestRegistry,
-    STREAM_FIXTURE,
+    AI_STREAM_MAX_DELTA_UTF16_UNITS, STREAM_FIXTURE,
 };
+
+#[test]
+fn native_delta_limit_matches_the_shared_typescript_fixture() {
+    let fixture: serde_json::Value = serde_json::from_str(STREAM_FIXTURE).unwrap();
+    assert_eq!(
+        fixture["maxDeltaChars"]
+            .as_u64()
+            .expect("shared delta limit"),
+        AI_STREAM_MAX_DELTA_UTF16_UNITS as u64,
+    );
+}
 
 #[test]
 fn every_finish_reason_uses_the_canonical_kebab_case_wire_value() {

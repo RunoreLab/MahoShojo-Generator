@@ -1322,3 +1322,113 @@ async fn a_bare_done_marker_is_a_single_invalid_response_terminal() {
         matches!(terminals(&events)[0], AiExecutionResult::Failed(result) if result.error.code == "invalid-response")
     );
 }
+
+async fn assert_large_delta_preserves_text_within_utf16_limits(
+    label: &str,
+    text: String,
+    reasoning: String,
+) {
+    let chunk = serde_json::json!({
+        "choices": [{"delta": {"content": text, "reasoning_content": reasoning}, "finish_reason": "stop"}]
+    });
+    let wire = format!("data: {chunk}\n\ndata: [DONE]\n\n");
+    let server = spawn_sse_server(Scenario::RawBytes(wire.into_bytes())).await;
+    let store = LocalStore::open_in_memory().unwrap();
+    store
+        .put(
+            "large",
+            &stored_profile("large", &server.base_url, false),
+            "t",
+        )
+        .unwrap();
+    let sink = CollectingSink::default();
+    let registry = RequestRegistry::default();
+    stream_direct_ai(
+        "large",
+        request("req-large"),
+        &store,
+        &TestSecretStore::default(),
+        &registry,
+        &sink,
+    )
+    .await
+    .unwrap();
+    let events = sink.snapshot();
+    assert_well_formed(&events, "req-large");
+    let text_deltas: Vec<&str> = events
+        .iter()
+        .filter_map(|event| match event {
+            AiStreamEvent::TextDelta { delta, .. } => Some(delta.as_str()),
+            _ => None,
+        })
+        .collect();
+    let reasoning_deltas: Vec<&str> = events
+        .iter()
+        .filter_map(|event| match event {
+            AiStreamEvent::ReasoningDelta { delta, .. } => Some(delta.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        text_deltas.concat(),
+        text,
+        "text must not be lost or reordered"
+    );
+    assert_eq!(
+        reasoning_deltas.concat(),
+        reasoning,
+        "reasoning must not be lost or reordered"
+    );
+    assert!(
+        matches!(terminals(&events)[0], AiExecutionResult::Completed(result)
+        if result.output.text.as_deref() == Some(text.as_str()) && result.output.reasoning.as_deref() == Some(reasoning.as_str()))
+    );
+    if let Ok(directory) = std::env::var("MAHO_NATIVE_EVENT_FIXTURE_DIR") {
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(
+            std::path::Path::new(&directory).join(format!("large-{label}.json")),
+            serde_json::to_vec(&events).unwrap(),
+        )
+        .unwrap();
+    }
+    for delta in text_deltas.iter().chain(reasoning_deltas.iter()) {
+        assert!(!delta.is_empty());
+        assert!(
+            delta.encode_utf16().count() <= 65_536,
+            "{label}: emitted delta has {} UTF-16 units, beyond the canonical 65,536 limit",
+            delta.encode_utf16().count()
+        );
+    }
+    assert_eq!(registry.len(), 0);
+}
+
+#[tokio::test]
+async fn oversized_ascii_provider_delta_is_split_without_truncation() {
+    assert_large_delta_preserves_text_within_utf16_limits(
+        "ascii",
+        "a".repeat(65_537),
+        "b".repeat(65_539),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn oversized_astral_provider_delta_is_split_at_utf16_boundaries() {
+    assert_large_delta_preserves_text_within_utf16_limits(
+        "astral",
+        format!("{}🪄终", "a".repeat(65_535)),
+        "🧠".repeat(40_000),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn delta_at_the_exact_utf16_limit_is_preserved() {
+    assert_large_delta_preserves_text_within_utf16_limits(
+        "exact",
+        "a".repeat(65_536),
+        "🧠".repeat(32_768),
+    )
+    .await;
+}
+

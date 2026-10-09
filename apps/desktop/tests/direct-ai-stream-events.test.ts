@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { AiStreamEventSchema } from '@mahoshojo/ai-core/stream-events';
+import { AI_STREAM_MAX_DELTA_CHARS, AiStreamEventSchema } from '@mahoshojo/ai-core/stream-events';
 import { AiExecutionFinishReasonSchema } from '@mahoshojo/contracts/ai-execution';
 
 /**
@@ -18,9 +18,13 @@ const fixture = JSON.parse(
     path.join(import.meta.dirname, '..', '..', '..', 'packages', 'contracts', 'fixtures', 'ai-stream-events.json'),
     'utf8',
   ),
-) as { identity: Record<string, unknown>; events: unknown[]; finishReasons: string[] };
+) as { identity: Record<string, unknown>; events: unknown[]; finishReasons: string[]; maxDeltaChars: number };
 
 describe('AiStreamEvent cross-runtime fixture', () => {
+  it('shares the UTF-16 delta size boundary with native', () => {
+    expect(fixture.maxDeltaChars).toBe(AI_STREAM_MAX_DELTA_CHARS);
+  });
+
   it('covers every finish reason with the same wire spelling as native', () => {
     expect(fixture.finishReasons).toEqual(AiExecutionFinishReasonSchema.options);
     for (const reason of fixture.finishReasons) {
