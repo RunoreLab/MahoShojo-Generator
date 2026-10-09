@@ -3,18 +3,18 @@ import { createPrivateCloudCopy, readPrivateCloudCapacity } from '../src/platfor
 const form = { name: '角色', description: '描述', data: { name: '角色', signature: 'unchanged', extra: { future: true } } };
 describe('private result fixed cloud routes', () => {
   it('sends fixed private create with owner fence and preserves complete data', async () => {
-    const invoke = vi.fn(async () => ({ status: 201, body: { success: true, id: 'new-copy' } }));
+    const invoke = vi.fn(async () => ({ status: 201, body: { success: true, id: 'new-copy', ownerUserId: 7, accountFenceVersion: 1 } }));
     expect(await createPrivateCloudCopy(invoke, 7, form)).toEqual({ kind: 'saved', id: 'new-copy' });
     expect(invoke).toHaveBeenCalledExactlyOnceWith('cloud_card_library_request', { request: {
-      routeId: 'data-cards.create', expectedUserId: 7, body: { type: 'character', ...form, isPublic: false },
+      routeId: 'data-cards.create', expectedUserId: 7, body: { type: 'character', ...form, isPublic: 0 },
     } });
     expect(form.data.signature).toBe('unchanged');
   });
   it('sends explicit scenario type and rejects unsupported types without guessing', async () => {
-    const invoke = vi.fn(async () => ({ status: 201, body: { success: true, id: 'new-copy' } }));
+    const invoke = vi.fn(async () => ({ status: 201, body: { success: true, id: 'new-copy', ownerUserId: 7, accountFenceVersion: 1 } }));
     await createPrivateCloudCopy(invoke, 7, { ...form, type: 'scenario' });
     expect(invoke.mock.calls[0]).toEqual(['cloud_card_library_request', { request: {
-      routeId: 'data-cards.create', expectedUserId: 7, body: { ...form, type: 'scenario', isPublic: false },
+      routeId: 'data-cards.create', expectedUserId: 7, body: { ...form, type: 'scenario', isPublic: 0 },
     } }]);
     invoke.mockClear();
     expect((await createPrivateCloudCopy(invoke, 7, { ...form, type: 'questionnaire' as never })).kind).toBe('rejected');

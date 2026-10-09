@@ -117,7 +117,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
       return undefined as never;
     });
     window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify(draft()));
-    const router = await mount(); await submitQuestionnaire(); await click('保存私有云端副本');
+    const router = await mount(); await submitQuestionnaire(); await click('保存到云端');
     await act(async () => { [...document.querySelectorAll('button')].find((node) => node.textContent === '保存')!.click(); }); await settle();
     expect(button('重新生成').disabled).toBe(true); expect(button('保存到本地卡库').disabled).toBe(true);
     await act(async () => { void router.navigate({ to: '/' }); }); await settle(); expect(router.state.location.pathname).toBe('/details');

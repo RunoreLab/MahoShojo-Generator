@@ -1,6 +1,7 @@
 import { z } from './zod';
 
 import { SafeJsonValueSchema } from './json-value';
+import { OwnedDataCardReplaceRequestSchema } from './data-cards';
 import { ProviderModelIdSchema, ProviderPresetIdSchema } from './provider-target';
 
 /**
@@ -527,6 +528,8 @@ export const DesktopCardLibraryRouteIdSchema = z.enum([
   // 需要账号会话（无会话时 native 直接 `not-authenticated` fail-closed）
   'data-cards.query',
   'data-cards.create',
+  'data-cards.replace-target.query',
+  'data-cards.replace',
   'user-capacity.query',
   'favorites.query',
   'favorites.add',
@@ -550,11 +553,26 @@ export type DesktopCardLibraryRouteId = z.infer<typeof DesktopCardLibraryRouteId
  */
 export const DesktopCardLibraryRequestSchema = z.object({
   routeId: DesktopCardLibraryRouteIdSchema,
-  // 新建私有云副本由 caller 冻结账号；optional 保持已有调用兼容。
+  // 安全新建/替换及替换预览必须由 caller 冻结账号；其余旧读取可省略。
   expectedUserId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
   query: z.record(z.string().max(64), z.string().max(1024)).optional(),
   body: SafeJsonValueSchema.optional(),
-}).strict();
+}).strict().superRefine((request, context) => {
+  const owned = ['data-cards.create', 'data-cards.replace-target.query', 'data-cards.replace'].includes(request.routeId);
+  if (!owned) return;
+  const reject = (message: string) => context.addIssue({ code: 'custom', message });
+  if (request.expectedUserId === undefined) { reject('安全云端写入/替换预览必须冻结所属账号'); return; }
+  if (request.routeId === 'data-cards.replace-target.query') {
+    const query = z.object({ id: z.string().trim().min(1).max(200), expectedUserId: z.literal(String(request.expectedUserId)).optional() }).strict();
+    if (request.body !== undefined || !query.safeParse(request.query).success) reject('替换目标查询参数无效');
+    return;
+  }
+  if (request.query && Object.keys(request.query).length > 0) { reject('云端写入不允许额外查询参数'); return; }
+  const body = request.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) { reject('云端写入缺少 JSON 对象请求体'); return; }
+  if (body.expectedUserId !== undefined && body.expectedUserId !== request.expectedUserId) { reject('请求体所属账号与冻结账号不符'); return; }
+  if (request.routeId === 'data-cards.replace' && !OwnedDataCardReplaceRequestSchema.safeParse({ ...body, expectedUserId: request.expectedUserId }).success) reject('替换只允许目标 ID、类型、版本和正文');
+});
 export type DesktopCardLibraryRequest = z.infer<typeof DesktopCardLibraryRequestSchema>;
 
 /**

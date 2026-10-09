@@ -112,7 +112,7 @@ describe('all actual generator hosts reuse the private completed-result save', (
       } else await click(page === 'scenario' ? '生成情景' : page === 'sublimation' ? '开始升华' : '生成数据卡');
       expect(mocks.execute).toHaveBeenCalledTimes(1);
     } else expect(mocks.execute).not.toHaveBeenCalled();
-    expect(button('保存私有云端副本')).toBeTruthy(); expect(writes()).toHaveLength(0);
+    expect(button('保存到云端')).toBeTruthy(); expect(writes()).toHaveLength(0);
     // Editable input changes after completion never decide the completed card's cloud type.
     if (page === 'free') {
       const select = container.querySelector<HTMLSelectElement>('[aria-label="选择 Schema"]')!;
@@ -123,21 +123,21 @@ describe('all actual generator hosts reuse the private completed-result save', (
       const control = [...container.querySelectorAll<HTMLButtonElement>('button[data-creator-surface="subpanel"]')].find((node) => node.querySelector('span')?.textContent?.startsWith(targetLabel));
       expect(control).toBeTruthy(); await act(async () => control!.click()); await flush();
     }
-    await click('保存私有云端副本');
+    await click('保存到云端');
     const generationCount = mocks.execute.mock.calls.length;
     const regenerate = button(page === 'sublimation' ? '重新升华' : '重新生成');
     const clear = button('清除草稿');
     await act(async () => { button('保存').click(); button('保存').click(); regenerate?.click(); clear?.click(); }); await flush();
     expect(writes()).toHaveLength(1); expect(mocks.execute).toHaveBeenCalledTimes(generationCount);
-    expect(writes()[0][1].request).toEqual({ routeId: 'data-cards.create', expectedUserId: 7, body: { type: kind === 'scenario' || kind === 'general-scenario' ? 'scenario' : 'character', name: kind === 'magical-girl' ? '已完成少女' : kind === 'canshou' ? '已完成残兽' : kind === 'general' ? '已完成角色' : kind === 'scenario' ? '已完成情景' : '已完成通用情景', description: kind === 'scenario' || kind === 'general-scenario' ? '情景数据卡' : '角色数据卡', data: completedData, isPublic: false } });
+    expect(writes()[0][1].request).toEqual({ routeId: 'data-cards.create', expectedUserId: 7, body: { type: kind === 'scenario' || kind === 'general-scenario' ? 'scenario' : 'character', name: kind === 'magical-girl' ? '已完成少女' : kind === 'canshou' ? '已完成残兽' : kind === 'general' ? '已完成角色' : kind === 'scenario' ? '已完成情景' : '已完成通用情景', description: kind === 'scenario' || kind === 'general-scenario' ? '情景数据卡' : '角色数据卡', data: completedData, isPublic: 0 } });
     expect(button('保存到本地卡库').disabled).toBe(true);
     await act(async () => { void router.navigate({ to: '/' }); }); await flush(); expect(router.state.location.pathname).toBe(`/${page}`);
     const preventDefault = vi.fn(); await act(async () => { closeHandlers.forEach((handler) => handler({ preventDefault })); }); expect(preventDefault).toHaveBeenCalled();
     await act(async () => finish({ status: 500, body: { error: 'after insert' } })); await flush();
     expect(document.body.textContent).toContain('服务器可能已创建副本'); expect(button('保存').disabled).toBe(true);
-    await click('取消'); await click('保存私有云端副本'); expect(writes()).toHaveLength(1); expect(button('保存').disabled).toBe(true);
+    await click('取消'); await click('保存到云端'); expect(writes()).toHaveLength(1); expect(button('保存').disabled).toBe(true);
     expect(mocks.save).not.toHaveBeenCalled(); expect(button('保存到本地卡库').disabled).toBe(false);
-    if (page === 'scenario') expect([...document.querySelectorAll('button')].filter((node) => node.textContent === '保存私有云端副本')).toHaveLength(1);
+    if (page === 'scenario') expect([...document.querySelectorAll('button')].filter((node) => node.textContent === '保存到云端')).toHaveLength(1);
   });
   it('creator keeps the completed card when confirm-clear and cloud submit occur in one tick', async () => {
     const data = resultData('general');
@@ -147,7 +147,7 @@ describe('all actual generator hosts reuse the private completed-result save', (
     const control = [...container.querySelectorAll<HTMLButtonElement>('button[data-creator-surface="subpanel"]')].find((node) => node.querySelector('span')?.textContent?.startsWith('通用情景'))!;
     await act(async () => control.click()); await flush();
     await click('清除草稿'); const clear = button('确认清除'); expect(clear).toBeTruthy();
-    await click('保存私有云端副本');
+    await click('保存到云端');
     await act(async () => { button('保存').click(); clear.click(); }); await flush();
     expect(writes()).toHaveLength(1); expect(button('保存到本地卡库')).toBeTruthy();
     await act(async () => finish({ status: 400, body: { error: 'mock refusal' } })); await flush();
@@ -162,15 +162,15 @@ describe('all actual generator hosts reuse the private completed-result save', (
     mocks.readAttachments.mockReturnValueOnce(new Promise((resolve) => { finishA = resolve; })).mockReturnValueOnce(new Promise((resolve) => { finishB = resolve; }));
     const input = container.querySelector<HTMLInputElement>('[aria-label="参考附件"] input[type=file]')!;
     const read = async () => { await act(async () => { Object.defineProperty(input, 'files', { configurable: true, value: [new File(['input'], 'input.txt')] }); input.dispatchEvent(new Event('change', { bubbles: true })); }); await flush(); };
-    await read(); expect(button('保存私有云端副本').disabled).toBe(true);
-    await click('清空附件'); await click('保存私有云端副本'); expect(button('保存')).toBeTruthy(); await click('取消');
+    await read(); expect(button('保存到云端').disabled).toBe(true);
+    await click('清空附件'); await click('保存到云端'); expect(button('保存')).toBeTruthy(); await click('取消');
     await read(); await act(async () => finishA({ added: [], skipped: 0 })); await flush();
-    expect(button('保存私有云端副本').disabled).toBe(true); expect(document.body.textContent).toContain('正在读取附件');
-    await click('清空附件'); await click('保存私有云端副本');
+    expect(button('保存到云端').disabled).toBe(true); expect(document.body.textContent).toContain('正在读取附件');
+    await click('清空附件'); await click('保存到云端');
     await act(async () => { button('保存').click(); input.dispatchEvent(new Event('change', { bubbles: true })); }); await flush();
     expect(writes()).toHaveLength(1); expect(mocks.readAttachments).toHaveBeenCalledTimes(2);
-    await act(async () => { finishB({ added: [], skipped: 0 }); finish({ status: 201, body: { success: true, id: 'copy' } }); }); await flush();
-    expect(writes()[0][1].request.body.data).toEqual(data); expect(document.body.textContent).toContain('已保存私有云端副本');
+    await act(async () => { finishB({ added: [], skipped: 0 }); finish({ status: 201, body: { success: true, id: 'copy', ownerUserId: 7, accountFenceVersion: 1 } }); }); await flush();
+    expect(writes()[0][1].request.body.data).toEqual(data); expect(document.body.textContent).toContain('已保存到云端');
   });
   it('sublimation blocks same-tick source import and discard without sending input or lore', async () => {
     const data = resultData('general'); const key = 'mahoshojo.desktop.sublimation.draft.v1';
@@ -178,7 +178,7 @@ describe('all actual generator hosts reuse the private completed-result save', (
     await mount('sublimation');
     const text = container.querySelector<HTMLTextAreaElement>('#source-json')!;
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(text, JSON.stringify({ templateId: '通用角色', name: '不应替换', content: '新素材' })); text.dispatchEvent(new Event('input', { bubbles: true })); });
-    await click('保存私有云端副本');
+    await click('保存到云端');
     await act(async () => { button('保存').click(); button('从文本加载设定').click(); button('清除草稿').click(); }); await flush();
     expect(writes()).toHaveLength(1); expect(writes()[0][1].request.body.data).toEqual(data);
     expect(JSON.parse(window.localStorage.getItem(key)!).originalData).toEqual(cards.general);
@@ -191,7 +191,7 @@ describe('all actual generator hosts reuse the private completed-result save', (
     const kind = page === 'scenario' ? 'general-scenario' : 'general';
     window.localStorage.setItem(`mahoshojo.desktop.${page}.draft.v1`, JSON.stringify({ version: 1, ...draftFor(page, kind, 'stream'), output: { phase: 'uncertain', mode: 'direct-local', cardKind: kind, card: resultData(kind), rawText: 'partial' } }));
     await mount(page);
-    expect(button('保存私有云端副本')).toBeUndefined(); expect(writes()).toHaveLength(0); expect(mocks.execute).not.toHaveBeenCalled();
+    expect(button('保存到云端')).toBeUndefined(); expect(writes()).toHaveLength(0); expect(mocks.execute).not.toHaveBeenCalled();
   });
 
 });

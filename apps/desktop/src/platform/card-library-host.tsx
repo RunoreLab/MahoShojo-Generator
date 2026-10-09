@@ -28,7 +28,7 @@ import {
 import type { LocalCardRecordV1 } from '@mahoshojo/local-library/record';
 
 import { requestCardLibraryRoute } from './card-library-bridge';
-import { CLOUD_CREATE_UNCERTAIN_MESSAGE } from './private-cloud-save';
+import { createCloudCard } from './private-cloud-save';
 import { DesktopCloudError, type InvokeFn } from './cloud-bridge';
 import { queryPublicReadCache, readPublicCacheCard } from './public-cache-bridge';
 import { downloadTextFile } from './download-text-file';
@@ -119,12 +119,12 @@ const serializePublicListQuery = (query: CardLibraryPublicListQuery): Record<str
  * `required` 路由由 native 在无会话时 fail-closed（`not-authenticated`），
  * `optional` 路由断网/未登录照样工作（与 Web 公开库语义一致）。
  */
-export const createDesktopCardLibraryOnlinePort = (invokeFn: InvokeFn): CardLibraryOnlinePort => {
+export const createDesktopCardLibraryOnlinePort = (invokeFn: InvokeFn, expectedUserId?: number): CardLibraryOnlinePort => {
   const call = (
     routeId: DesktopCardLibraryRouteId,
     query?: Record<string, string>,
     body?: unknown,
-  ) => requestCardLibraryRoute(invokeFn, { routeId, ...(query ? { query } : {}), ...(body !== undefined ? { body: body as never } : {}) });
+  ) => requestCardLibraryRoute(invokeFn, { routeId, ...(expectedUserId !== undefined && ['data-cards.query', 'favorites.query', 'favorites.add', 'favorites.remove', 'decks.query', 'deck-cards.query'].includes(routeId) ? { expectedUserId } : {}), ...(query ? { query } : {}), ...(body !== undefined ? { body: body as never } : {}) });
 
   return {
     fetchSummaryPage: async (source, query, signal) => {
@@ -301,26 +301,11 @@ export const createDesktopCardLibraryOnlinePort = (invokeFn: InvokeFn): CardLibr
      * 本地记录保持不变（DESK-ONLINE-010）。
      */
     uploadLocalRecord: async (record: LocalCardRecordV1) => {
-      try {
-        const res = await call('data-cards.create', undefined, {
-          type: record.cardType,
-          name: record.title,
-          description: '',
-          data: record.data,
-          isPublic: 0,
-        });
-        const body = asRecord(res.body);
-        if (res.status < 200 || res.status >= 300 || body?.success !== true || typeof body?.id !== 'string' || !body.id.trim()) {
-          return { ok: false, error: [400, 401, 403, 413, 429].includes(res.status)
-            ? bodyError(res.body) ?? `上传被拒绝（HTTP ${res.status}）`
-            : CLOUD_CREATE_UNCERTAIN_MESSAGE };
-        }
-        return { ok: true };
-      } catch (cause) {
-        return { ok: false, error: cause instanceof DesktopCloudError && ['not-authenticated', 'invalid-request'].includes(cause.code)
-          ? describeCause(cause, '上传请求被拒绝')
-          : CLOUD_CREATE_UNCERTAIN_MESSAGE };
-      }
+      if (expectedUserId === undefined) return { ok: false, error: '请先确认云端账号，再上传本地副本' };
+      const outcome = await createCloudCard(invokeFn, expectedUserId, {
+        type: record.cardType, name: record.title, description: '', data: record.data, isPublic: 0,
+      });
+      return outcome.kind === 'saved' ? { ok: true } : { ok: false, error: outcome.message };
     },
   };
 };
@@ -477,7 +462,7 @@ export function useDesktopCardLibraryHost(): CardLibraryHost {
         userId: state.account?.userId ?? null,
         userBadges: [],
       },
-      online: createDesktopCardLibraryOnlinePort((command, args) => invoke(command, args as never)),
+      online: createDesktopCardLibraryOnlinePort((command, args) => invoke(command, args as never), state.account?.userId),
       local: {
         repository: new IpcLocalCardRepository((command, args) => invoke(command, args as never)),
       },

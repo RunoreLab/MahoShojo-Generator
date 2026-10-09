@@ -117,22 +117,23 @@ describe('createDesktopCardLibraryOnlinePort', () => {
     const okInvoke = makeInvoke((request) => {
       expect(request.routeId).toBe('data-cards.create');
       expect(request.body).toMatchObject({ type: 'questionnaire', name: '本地问卷', isPublic: 0 });
-      return { status: 200, body: { success: true, id: 'cloud-9' } };
+      expect(request.expectedUserId).toBe(7);
+      return { status: 201, body: { success: true, id: 'cloud-9', ownerUserId: 7, accountFenceVersion: 1 } };
     });
-    const port = createDesktopCardLibraryOnlinePort(okInvoke);
+    const port = createDesktopCardLibraryOnlinePort(okInvoke, 7);
     expect(await port.uploadLocalRecord!(record)).toEqual({ ok: true });
 
     const failInvoke = makeInvoke(() => ({ status: 500, body: { error: '服务器繁忙' } }));
-    const failPort = createDesktopCardLibraryOnlinePort(failInvoke);
+    const failPort = createDesktopCardLibraryOnlinePort(failInvoke, 7);
     expect(await failPort.uploadLocalRecord!(record)).toEqual({ ok: false, error: expect.stringContaining('结果不确定') });
     for (const body of [{}, { success: true }, { success: true, id: ' ' }]) {
-      const ambiguous = createDesktopCardLibraryOnlinePort(makeInvoke(() => ({ status: 201, body })));
+      const ambiguous = createDesktopCardLibraryOnlinePort(makeInvoke(() => ({ status: 201, body })), 7);
       expect(await ambiguous.uploadLocalRecord!(record)).toEqual({ ok: false, error: expect.stringContaining('结果不确定') });
     }
 
     const throwInvoke = vi.fn(async () => { throw { code: 'not-authenticated', message: '该操作需要登录云端账号' }; });
-    const throwPort = createDesktopCardLibraryOnlinePort(throwInvoke);
-    expect(await throwPort.uploadLocalRecord!(record)).toEqual({ ok: false, error: '需要登录云端账号' });
+    const throwPort = createDesktopCardLibraryOnlinePort(throwInvoke, 7);
+    expect(await throwPort.uploadLocalRecord!(record)).toEqual({ ok: false, error: expect.stringContaining('账号状态') });
     // 调用方（CardLibraryModal/调用点）保留本地记录——端口不触碰本地库。
   });
 
@@ -153,4 +154,17 @@ describe('createDesktopCardLibraryOnlinePort', () => {
     expect(await failPort.fetchCardMetaBatch!(['c1'], signal())).toBeNull();
     expect(await failPort.fetchAuthorBadgesBatch!([1], signal())).toBeNull();
   });
+  it('fences owned reads without blocking anonymous public paths', async () => {
+    const invoke = makeInvoke((request) => {
+      if (request.routeId === 'data-cards.query') expect(request.expectedUserId).toBe(7);
+      else expect(request.expectedUserId).toBeUndefined();
+      return { status: 200, body: { success: true, card: { id: 'card', data: '{}' }, tags: [] } };
+    });
+    const port = createDesktopCardLibraryOnlinePort(invoke, 7);
+    await port.loadFullCard({ id: 'card' }, 'my', new AbortController().signal);
+    await port.loadFullCard({ id: 'card' }, 'public', new AbortController().signal);
+    await port.listTags?.(new AbortController().signal);
+    expect(invoke).toHaveBeenCalledTimes(3);
+  });
+
 });
