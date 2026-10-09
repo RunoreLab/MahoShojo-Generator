@@ -51,4 +51,4 @@ export {
   normalizeProfileSignature,
   PROFILE_SIGNATURE_MAX_LENGTH,
   type ProfileSignatureEditorState,
-} from './profile-signature';
+} from './profile-text-editor';
