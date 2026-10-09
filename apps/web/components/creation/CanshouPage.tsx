@@ -1,6 +1,6 @@
 'use client';
 
-import { generationActionClassNames } from '@mahoshojo/ui-web/generation-actions';
+import { generationActionClassNames, generationSubmitClassName } from '@mahoshojo/ui-web/generation-actions';
 import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useProviderModeCooldown } from '@/lib/cooldown';
@@ -1292,7 +1292,7 @@ export const CanshouPage: React.FC = () => {
               <div className="mt-4 flex flex-col items-center justify-center gap-2">
                 <button
                   type="button"
-                  className="generate-button"
+                  className={generationSubmitClassName}
                   onClick={() => {
                     setSelectedQuestionnaires([]);
                     setSelectionReady(false);
@@ -1641,7 +1641,7 @@ export const CanshouPage: React.FC = () => {
                         <button
                           onClick={handleRegenerate}
                           disabled={submitting || isCooldown}
-                          className="generate-button"
+                          className={generationSubmitClassName}
                           style={{ marginTop: '0.5rem', backgroundColor: '#a855f7', backgroundImage: 'linear-gradient(to right, #a855f7, #d946ef)' }}
                         >
                           {isCooldown ? `冷却中 (${remainingTime}s)` : submitting ? '重新生成中...' : '不满意？再来一次'}
@@ -1715,7 +1715,7 @@ export const CanshouPage: React.FC = () => {
                         <button
                           onClick={handleRegenerate}
                           disabled={submitting || isCooldown}
-                          className="generate-button"
+                          className={generationSubmitClassName}
                           style={{ marginTop: '0.5rem', backgroundColor: '#a855f7', backgroundImage: 'linear-gradient(to right, #a855f7, #d946ef)' }}
                         >
                           {isCooldown ? `冷却中 (${remainingTime}s)` : submitting ? '重新生成中...' : '不满意？再来一次'}

@@ -1,6 +1,6 @@
 'use client';
 
-import { generationActionClassNames } from '@mahoshojo/ui-web/generation-actions';
+import { generationActionClassNames, generationSubmitClassName } from '@mahoshojo/ui-web/generation-actions';
 import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
@@ -558,7 +558,7 @@ export const ScenarioPage: React.FC = () => {
             </div>
 
             <div className="mt-4 flex flex-col gap-3">
-              <button onClick={handleGenerate} disabled={isGenerating || isCooldown} className="generate-button">
+              <button onClick={handleGenerate} disabled={isGenerating || isCooldown} className={generationSubmitClassName}>
                 {isCooldown ? `冷却中 (${remainingTime}s)` : isGenerating ? '正在构建舞台...' : '生成情景'}
               </button>
               {isGenerating && generationMode === 'stream' ? (

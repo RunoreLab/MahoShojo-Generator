@@ -1,5 +1,8 @@
 import type { ComponentPropsWithRef } from 'react';
 
+/** 大型生成按钮保留既有视觉，间距交还当前生成页容器。 */
+export const generationSubmitClassName = 'generate-button ui-web-generation-submit';
+
 /** 生成页已有的三类操作层级；不拥有派发、保存、确认或可信度判定。 */
 export const generationActionClassNames = {
   primary: 'ui-web-generation-action ui-web-generation-action--primary',

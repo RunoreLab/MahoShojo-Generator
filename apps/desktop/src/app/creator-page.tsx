@@ -1,4 +1,4 @@
-import { generationActionClassNames } from '@mahoshojo/ui-web/generation-actions';
+import { generationActionClassNames, generationSubmitClassName } from '@mahoshojo/ui-web/generation-actions';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Link, useRouter } from '@tanstack/react-router';
@@ -1147,7 +1147,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
         nextButtonClass={actionClass}
       />}
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <button className="generate-button" disabled={!canGenerateNow} onClick={() => generate()}>
+        <button className={generationSubmitClassName} disabled={!canGenerateNow} onClick={() => generate()}>
           {state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '生成数据卡' : '重新生成'}
         </button>
         {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}
@@ -1455,7 +1455,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
             </div>
           )}
           <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-            <button className="generate-button" disabled={!canGenerateNow} onClick={() => generate()}>
+            <button className={generationSubmitClassName} disabled={!canGenerateNow} onClick={() => generate()}>
               {state.phase === 'generating' ? '正在生成…' : '直接生成'}
             </button>
             {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}

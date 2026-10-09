@@ -727,3 +727,10 @@
   background: rgba(15, 23, 42, 0.72);
   color: #f1f5f9;
 }
+
+/* 仅显式接入的生成页主按钮去除遗留外边距，不改变其它页面的大按钮。 */
+@layer components {
+  .generate-button.ui-web-generation-submit {
+    margin-bottom: 0;
+  }
+}

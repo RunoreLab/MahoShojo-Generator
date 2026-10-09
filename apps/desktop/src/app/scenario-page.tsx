@@ -1,4 +1,4 @@
-import { generationActionClassNames } from '@mahoshojo/ui-web/generation-actions';
+import { generationActionClassNames, generationSubmitClassName } from '@mahoshojo/ui-web/generation-actions';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from '@tanstack/react-router';
@@ -285,7 +285,7 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
             </fieldset>
             <TokenIndicator text={tokenEstimateText} />
             <div className="flex flex-wrap gap-2">
-              <button className="generate-button" disabled={!guard.ready || busy || !hasAnyAnswer(draft.answers) || !executionMode || target.unavailableReason !== null || (target.location === 'client' && !target.providerTarget) || clientProfilesBlocked || blockedDraft} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '生成情景' : '重新生成'}</button>
+              <button className={generationSubmitClassName} disabled={!guard.ready || busy || !hasAnyAnswer(draft.answers) || !executionMode || target.unavailableReason !== null || (target.location === 'client' && !target.providerTarget) || clientProfilesBlocked || blockedDraft} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '生成情景' : '重新生成'}</button>
               {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}
                   {aiState.generationActive && aiStore.isPreparingGeneration() && <button className={actionClass} onClick={() => {
                     aiStore.cancelPreparingGeneration();

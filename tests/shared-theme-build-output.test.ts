@@ -120,6 +120,8 @@ const expectSharedOutput = (css: string, artifact: string): void => {
   expect(declarationsFor('.ui-web-questionnaire-step-button:focus-visible')['outline-offset'], artifact).toBe('3px');
   expect(declarationsFor('.blue-theme .ui-web-questionnaire-step-button').background, artifact).toContain('linear-gradient');
   // 结果保存与导出消费同一有限操作层级，不能只在 Desktop 加覆盖 CSS。
+  expect(declarationsFor('.generate-button.ui-web-generation-submit')['margin-bottom'], artifact).toBe('0');
+  expect(declarationsFor('.generate-button')['margin-bottom'], artifact).toBe('20px');
   expect(declarationsFor('.ui-web-generation-action'), artifact).toMatchObject({
     'min-height': '44px', 'border-radius': '12px', 'font-size': '16px',
   });

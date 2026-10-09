@@ -1,6 +1,6 @@
 'use client';
 
-import { generationActionClassNames } from '@mahoshojo/ui-web/generation-actions';
+import { generationActionClassNames, generationSubmitClassName } from '@mahoshojo/ui-web/generation-actions';
 import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import GeneralCharacterCard from '@/components/GeneralCharacterCard';
@@ -2476,7 +2476,7 @@ export const CreatorPage: React.FC = () => {
             <div className="flex flex-col items-center justify-center gap-2">
               <button
                 type="button"
-                className="generate-button"
+                className={generationSubmitClassName}
                 onClick={() => {
                   invalidatePresetLoads();
                   setSelectedQuestionnaires([]);

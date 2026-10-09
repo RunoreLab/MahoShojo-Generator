@@ -1,6 +1,6 @@
 'use client';
 
-import { generationActionClassNames } from '@mahoshojo/ui-web/generation-actions';
+import { generationActionClassNames, generationSubmitClassName } from '@mahoshojo/ui-web/generation-actions';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import MagicalGirlCard from '@/components/MagicalGirlCard';
 import GeneralCharacterCard from '@/components/GeneralCharacterCard';
@@ -1472,7 +1472,7 @@ export const DetailsPage: React.FC = () => {
               <div className="mt-4 flex flex-col items-center justify-center gap-2">
                 <button
                   type="button"
-                  className="generate-button"
+                  className={generationSubmitClassName}
                   onClick={() => {
                     setSelectedQuestionnaires([]);
                     setSelectionReady(false);

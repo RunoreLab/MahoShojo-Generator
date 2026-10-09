@@ -1,6 +1,6 @@
 'use client';
 
-import { generationActionClassNames } from '@mahoshojo/ui-web/generation-actions';
+import { generationActionClassNames, generationSubmitClassName } from '@mahoshojo/ui-web/generation-actions';
 import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -832,7 +832,7 @@ export function FreePage() {
           <button
             onClick={handleGenerate}
             disabled={submitting || isCooldown || isReadingAttachments}
-            className="generate-button"
+            className={generationSubmitClassName}
           >
             {isCooldown ? `冷却中 (${remainingTime}s)` : submitting ? '生成中...' : '开始生成'}
           </button>
