@@ -1,6 +1,46 @@
 use crate::ai::{
-    AiExecutionMode, AiExecutionResult, AiStreamEvent, RequestRegistry, STREAM_FIXTURE,
+    AiExecutionFinishReason, AiExecutionMode, AiExecutionResult, AiStreamEvent, RequestRegistry,
+    STREAM_FIXTURE,
 };
+
+#[test]
+fn every_finish_reason_uses_the_canonical_kebab_case_wire_value() {
+    let fixture: serde_json::Value =
+        serde_json::from_str(STREAM_FIXTURE).expect("shared fixture must be valid JSON");
+    let completed_event = fixture["events"]
+        .as_array()
+        .expect("events array")
+        .iter()
+        .find(|event| event["result"]["status"] == "completed")
+        .expect("fixture must contain a completed result");
+
+    let reasons = [
+        AiExecutionFinishReason::Stop,
+        AiExecutionFinishReason::Length,
+        AiExecutionFinishReason::ContentFilter,
+        AiExecutionFinishReason::ToolCalls,
+        AiExecutionFinishReason::Other,
+    ];
+    let wire_values = fixture["finishReasons"]
+        .as_array()
+        .expect("shared finish reasons");
+    assert_eq!(reasons.len(), wire_values.len());
+    for (reason, wire) in reasons.into_iter().zip(wire_values) {
+        assert_eq!(serde_json::to_value(reason).unwrap(), *wire);
+        let mut event = completed_event.clone();
+        event["result"]["finishReason"] = serde_json::json!(wire);
+        let parsed: AiStreamEvent = serde_json::from_value(event.clone())
+            .expect("every canonical finish reason must deserialize");
+        assert_eq!(serde_json::to_value(parsed).unwrap(), event);
+    }
+
+    for legacy_wire in ["contentFilter", "toolCalls"] {
+        assert!(
+            serde_json::from_value::<AiExecutionFinishReason>(serde_json::json!(legacy_wire))
+                .is_err()
+        );
+    }
+}
 
 #[test]
 fn deserializes_every_event_shape_from_the_shared_typescript_fixture() {

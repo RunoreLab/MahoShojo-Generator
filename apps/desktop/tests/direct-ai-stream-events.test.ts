@@ -4,6 +4,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { AiStreamEventSchema } from '@mahoshojo/ai-core/stream-events';
+import { AiExecutionFinishReasonSchema } from '@mahoshojo/contracts/ai-execution';
 
 /**
  * 跨运行时一致性门禁（`SPEC-desktop-client-v1` DESK-033）。
@@ -17,9 +18,16 @@ const fixture = JSON.parse(
     path.join(import.meta.dirname, '..', '..', '..', 'packages', 'contracts', 'fixtures', 'ai-stream-events.json'),
     'utf8',
   ),
-) as { identity: Record<string, unknown>; events: unknown[] };
+) as { identity: Record<string, unknown>; events: unknown[]; finishReasons: string[] };
 
 describe('AiStreamEvent cross-runtime fixture', () => {
+  it('covers every finish reason with the same wire spelling as native', () => {
+    expect(fixture.finishReasons).toEqual(AiExecutionFinishReasonSchema.options);
+    for (const reason of fixture.finishReasons) {
+      expect(AiExecutionFinishReasonSchema.parse(reason)).toBe(reason);
+    }
+  });
+
   it('validates every event with the authoritative ai-core schema', () => {
     expect(fixture.events.length).toBeGreaterThanOrEqual(5);
 

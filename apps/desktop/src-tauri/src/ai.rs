@@ -143,7 +143,7 @@ pub struct AiExecutionUsage {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "kebab-case")]
 pub enum AiExecutionFinishReason {
     Stop,
     Length,

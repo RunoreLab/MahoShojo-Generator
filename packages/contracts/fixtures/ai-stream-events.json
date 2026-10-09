@@ -1,5 +1,6 @@
 {
   "$comment": "AiStreamEvent 的跨运行时 fixture。TypeScript 侧由 apps/desktop/tests/direct-ai-stream-events.test.ts 用 @mahoshojo/ai-core 的 AiStreamEventSchema 校验；Rust 侧由 apps/desktop/src-tauri/src/ai.rs 通过 include_str! 在编译期读入并反序列化。任何一侧新增或改名事件字段都会让另一侧失败。",
+  "finishReasons": ["stop", "length", "content-filter", "tool-calls", "other"],
   "identity": {
     "requestId": "req-1",
     "contractVersion": 1,
