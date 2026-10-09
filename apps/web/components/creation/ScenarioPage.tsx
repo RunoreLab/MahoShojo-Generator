@@ -1,5 +1,6 @@
 'use client';
 
+import { generationActionClassNames } from '@mahoshojo/ui-web/generation-actions';
 import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
@@ -588,17 +589,16 @@ export const ScenarioPage: React.FC = () => {
                 <div className="bg-gray-100 p-4 rounded-lg font-mono text-xs overflow-x-auto">
                   <pre>{JSON.stringify(resultData, null, 2)}</pre>
                 </div>
-                <div className="flex flex-col md:flex-row justify-center mt-6">
-                  <button onClick={() => downloadJson(resultData)} className="generate-button flex-1">
+                <div className="flex flex-col md:flex-row justify-center gap-2 mt-6">
+                  <button onClick={() => downloadJson(resultData)} className={`${generationActionClassNames.secondary} flex-1`}>
                     下载情景文件
                   </button>
                   <SaveToCloudButton
                     data={resultData}
                     buttonText="保存到云端"
-                    className="generate-button flex-1"
-                    style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+                    className={`${generationActionClassNames.primary} flex-1`}
                   />
-                  <button onClick={() => copyToClipboard(resultData)} className="generate-button flex-1" style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}>
+                  <button onClick={() => copyToClipboard(resultData)} className={`${generationActionClassNames.secondary} flex-1`}>
                     复制到剪贴板
                   </button>
                 </div>
@@ -668,18 +668,17 @@ export const ScenarioPage: React.FC = () => {
                     <pre>{JSON.stringify(generalScenarioDraft, null, 2)}</pre>
                   </div>
 
-                  <div className="flex flex-col md:flex-row justify-center mt-2">
-                    <button onClick={() => downloadJson(generalScenarioDraft)} className="generate-button flex-1">
+                  <div className="flex flex-col md:flex-row justify-center gap-2 mt-2">
+                    <button onClick={() => downloadJson(generalScenarioDraft)} className={`${generationActionClassNames.secondary} flex-1`}>
                       下载通用情景卡
                     </button>
                     <SaveToCloudButton
                       data={generalScenarioDraft}
                       cardType="scenario"
                       buttonText="保存到云端"
-                      className="generate-button flex-1"
-                      style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+                      className={`${generationActionClassNames.primary} flex-1`}
                     />
-                    <button onClick={() => copyToClipboard(generalScenarioDraft)} className="generate-button flex-1" style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}>
+                    <button onClick={() => copyToClipboard(generalScenarioDraft)} className={`${generationActionClassNames.secondary} flex-1`}>
                       复制到剪贴板
                     </button>
                   </div>

@@ -1,3 +1,4 @@
+import { generationActionClassNames } from '@mahoshojo/ui-web/generation-actions';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from '@tanstack/react-router';
@@ -61,7 +62,7 @@ import { useLeaveGuard } from './useLeaveGuard';
  */
 const DESKTOP_ASSET_SOURCE: HomeAssetSource = { baseUrl: '/' };
 
-const actionClass = 'rounded-lg border border-(--app-border) px-4 py-2 disabled:opacity-50';
+const actionClass = generationActionClassNames.secondary;
 
 type DeviceType = 'mobile' | 'desktop' | 'unknown';
 
@@ -235,7 +236,7 @@ function FreeForm({ session }: { session: FreeSession }) {
               </div>
               {confirmClear && <div role="group" aria-label="确认清除草稿" className="mt-3 rounded border p-3">
                 <p>确认清除本页提示词、生成结果和中断正文？已保存的本地卡不受影响。此操作无法撤销。</p>
-                <button className={actionClass} disabled={busy} onClick={() => { session.discardDraft(); clearAttachments(); setConfirmClear(false); }}>确认清除</button>
+                <button className={generationActionClassNames.destructive} disabled={busy} onClick={() => { session.discardDraft(); clearAttachments(); setConfirmClear(false); }}>确认清除</button>
                 <button className={actionClass} onClick={() => setConfirmClear(false)}>保留草稿</button>
               </div>}
             </section>
@@ -315,7 +316,7 @@ function FreeForm({ session }: { session: FreeSession }) {
               {state.saveError && <p role="alert">{state.saveError}</p>}
               <div className="flex flex-wrap gap-2">
                 <button autoFocus className={actionClass} disabled={busy} onClick={() => setConfirmRegenerate(false)}>取消</button>
-                {confirmRegenerate === 'unsaved' && <button className={actionClass} disabled={busy} onClick={async () => { if (await session.saveResult()) { setConfirmRegenerate(false); generate(true); } }}>{state.saving ? '正在保存…' : '保存后重新生成'}</button>}
+                {confirmRegenerate === 'unsaved' && <button className={generationActionClassNames.primary} disabled={busy} onClick={async () => { if (await session.saveResult()) { setConfirmRegenerate(false); generate(true); } }}>{state.saving ? '正在保存…' : '保存后重新生成'}</button>}
                 <button className={actionClass} disabled={busy} onClick={() => { setConfirmRegenerate(false); generate(true); }}>确定重新生成</button>
               </div>
             </dialog>
@@ -346,7 +347,7 @@ function FreeForm({ session }: { session: FreeSession }) {
                     <FreeJsonResult data={card} />
                   </FreeResultPanel>
                 )}
-                <button className={actionClass} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => { if (guard.ready) void session.saveResult(); }}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>
+                <button className={generationActionClassNames.primary} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => { if (guard.ready) void session.saveResult(); }}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>
                 {state.saveStatus === 'saved' && <p role="status">已保存到本地卡库。</p>}
                 {state.saveStatus === 'already-present' && <p role="status">本地卡库已存在相同内容，原记录保持不变。</p>}
                 {state.saveError && <p role="alert">{state.saveError}</p>}
@@ -369,7 +370,7 @@ function FreeForm({ session }: { session: FreeSession }) {
                   />
                   )}>
                     {jsonSaveMode === 'text' && <button className={`${actionClass} flex-1`} onClick={() => downloadTextFile(resultJsonName, JSON.stringify(card, null, 2))}>下载 JSON 文件</button>}
-                    <button className="generate-button flex-1" onClick={() => { void navigator.clipboard?.writeText(JSON.stringify(card, null, 2)).then(() => setActionInfo('✅ 数据卡 JSON 已复制到剪贴板')).catch(() => setActionError('复制失败，请手动选择 JSON 内容后复制。')); }}>复制到剪贴板</button>
+                    <button className={`${actionClass} flex-1`} onClick={() => { void navigator.clipboard?.writeText(JSON.stringify(card, null, 2)).then(() => setActionInfo('✅ 数据卡 JSON 已复制到剪贴板')).catch(() => setActionError('复制失败，请手动选择 JSON 内容后复制。')); }}>复制到剪贴板</button>
                   </FreeResultActions>
                 </FreeResultPanel>
               </section>}

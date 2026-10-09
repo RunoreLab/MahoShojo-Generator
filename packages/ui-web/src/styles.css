@@ -143,6 +143,124 @@
   }
 }
 
+/* 生成与结果操作沿用 Web 的圆角、渐变和主题 token；不再借用带整宽/外边距的 generate-button。
+   仅保存/生成、辅助操作、明确不可撤销的清除三档，布局宽度由宿主容器决定。 */
+@layer components {
+  .ui-web-generation-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-width: 0;
+    min-height: 44px;
+    padding: 10px 16px;
+    border: 1px solid var(--app-border-strong);
+    border-radius: 12px;
+    color: var(--app-text);
+    background: var(--app-surface);
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.5;
+    text-align: center;
+    text-decoration: none;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  }
+
+  .ui-web-generation-action--primary {
+    border-color: transparent;
+    color: white;
+    background: linear-gradient(45deg, var(--app-accent), var(--app-accent-strong));
+  }
+
+  .ui-web-generation-action--primary:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 20px var(--app-accent-shadow);
+  }
+
+  .ui-web-generation-action--secondary:hover:not(:disabled) {
+    border-color: var(--app-accent);
+    background: var(--app-surface-strong);
+  }
+
+  /* 与现有卡库危险操作同一红色语义；不让清除入口抢占保存的主操作层级。 */
+  .ui-web-generation-action--destructive {
+    border-color: #fca5a5;
+    color: #b91c1c;
+  }
+
+  .ui-web-generation-action--destructive:hover:not(:disabled) {
+    background: #fef2f2;
+    border-color: #ef4444;
+  }
+
+  .ui-web-generation-action:focus-visible {
+    outline: 3px solid var(--app-accent);
+    outline-offset: 3px;
+  }
+
+  .ui-web-generation-action:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+
+  /* Details 沿用已有 Web 蓝色生成主题。 */
+  .blue-theme .ui-web-generation-action--primary {
+    background: linear-gradient(45deg, #3b82f6, #1d4ed8);
+  }
+
+  .blue-theme .ui-web-generation-action--primary:hover:not(:disabled) {
+    box-shadow: 0 10px 20px rgba(59, 130, 246, 0.35);
+  }
+
+  .blue-theme .ui-web-generation-action:focus-visible {
+    outline-color: #3b82f6;
+  }
+
+  :root[data-color-mode='dark'] .ui-web-generation-action--destructive {
+    border-color: #991b1b;
+    color: #fca5a5;
+  }
+
+  :root[data-color-mode='dark'] .ui-web-generation-action--destructive:hover:not(:disabled) {
+    background: #450a0a;
+    border-color: #ef4444;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-color-mode]) .ui-web-generation-action--destructive {
+      border-color: #991b1b;
+      color: #fca5a5;
+    }
+
+    :root:not([data-color-mode]) .ui-web-generation-action--destructive:hover:not(:disabled) {
+      background: #450a0a;
+      border-color: #ef4444;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ui-web-generation-action {
+      transition: none;
+    }
+
+    .ui-web-generation-action:hover:not(:disabled) {
+      transform: none;
+    }
+  }
+
+  :root[data-motion='reduce'] .ui-web-generation-action {
+    transition: none;
+  }
+
+  :root[data-motion='reduce'] .ui-web-generation-action:hover:not(:disabled) {
+    transform: none;
+  }
+}
+
 /* Shared questionnaire and magical-girl result view details. */
 .result-item {
   margin-bottom: 20px;

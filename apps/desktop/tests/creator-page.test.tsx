@@ -170,10 +170,12 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     expect(mocks.execute.mock.calls[0]![1]).toMatchObject({ template: 'magical-girl', language: 'zh-CN' });
     expect(mocks.execute.mock.calls[0]![1].buildRuleRequests).toEqual([{ ruleId: 'arena-trpg-lite', version: expect.any(String), inputs: expect.any(Object) }]);
     expect(mocks.execute.mock.calls[0]![2]).toMatchObject({ mode: 'direct-local', modelId: 'model' });
-    expect(container.textContent).toContain('百合 · 未签名');
+    expect([...container.querySelectorAll('h2.sr-only')].some((heading) => heading.textContent === '百合')).toBe(true);
+    expect(container.querySelector('[data-testid="result-signature-status"]')?.textContent).toContain('未签名');
     // 原生性概览按通路如实投影（G3-r1）：direct 本来就不签名，不是「签名失败」。
     expect(container.textContent).toContain('当前执行通路不支持官方签名，结果为非原生');
     expect(container.textContent).not.toContain('签名失败');
+    expect(button('保存到本地卡库').classList.contains('ui-web-generation-action--primary')).toBe(true);
     await click('保存到本地卡库');
     expect(mocks.save).toHaveBeenCalledTimes(1);
     expect(container.textContent).toContain('已保存到本地卡库。');
@@ -185,7 +187,8 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     await clickText('魔法少女（结构化）');
     await click('还没想好');
     await click('生成数据卡');
-    expect(container.textContent).toContain('百合 · 未签名');
+    expect([...container.querySelectorAll('h2.sr-only')].some((heading) => heading.textContent === '百合')).toBe(true);
+    expect(container.querySelector('[data-testid="result-signature-status"]')?.textContent).toContain('未签名');
     // 首次完成：侧栏按发起生成时的快照投影——题数与阶段如实。
     expect(container.textContent).toContain('创作完成');
     expect(container.textContent).toMatch(/共 \d+ 题，已进入结果阶段/);
@@ -198,7 +201,8 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     expect(container.textContent).toContain('正在生成');
     await act(async () => resolveSecond!(completed('direct-local')));
     await settle();
-    expect(container.textContent).toContain('百合 · 未签名');
+    expect([...container.querySelectorAll('h2.sr-only')].some((heading) => heading.textContent === '百合')).toBe(true);
+    expect(container.querySelector('[data-testid="result-signature-status"]')?.textContent).toContain('未签名');
     // 快照归属本次生成意图：完成后侧栏仍按新快照投影（修复前回落为无快照兜底文案）。
     expect(container.textContent).toContain('创作完成');
     expect(container.textContent).toMatch(/共 \d+ 题，已进入结果阶段/);
@@ -218,7 +222,8 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     await click('生成数据卡');
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(mocks.execute.mock.calls[0]![1].answers).toHaveLength(1);
-    expect(container.textContent).toContain('百合 · 未签名');
+    expect([...container.querySelectorAll('h2.sr-only')].some((heading) => heading.textContent === '百合')).toBe(true);
+    expect(container.querySelector('[data-testid="result-signature-status"]')?.textContent).toContain('未签名');
   });
 
   it('projects the shared hosted-json request body with build rules and native-signature eligibility', async () => {
@@ -250,7 +255,8 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft()));
     await mount(); await click('恢复草稿'); await click('生成数据卡');
     expect(mocks.execute.mock.calls[0]![2]).toMatchObject({ mode: 'direct-remote' });
-    expect(container.textContent).toContain('百合 · 未签名');
+    expect([...container.querySelectorAll('h2.sr-only')].some((heading) => heading.textContent === '百合')).toBe(true);
+    expect(container.querySelector('[data-testid="result-signature-status"]')?.textContent).toContain('未签名');
     expect(container.textContent).toContain('当前执行通路不支持官方签名，结果为非原生');
     expect(container.textContent).not.toContain('签名失败');
   });
@@ -268,8 +274,9 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
       },
     })));
     await mount(); await click('恢复草稿');
-    expect(container.textContent).toContain('百合 · 含签名字段（本机未验证）');
-    expect(container.textContent).not.toContain('· 官方签名');
+    expect([...container.querySelectorAll('h2.sr-only')].some((heading) => heading.textContent === '百合')).toBe(true);
+    expect(container.querySelector('[data-testid="result-signature-status"]')?.textContent).toContain('含签名字段（本机未验证）');
+    expect(container.querySelector('[data-testid="result-signature-status"]')?.textContent).not.toContain('官方签名');
     expect(container.textContent).toContain('请以当前结果数据为准');
   });
 
@@ -286,9 +293,10 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(mocks.execute.mock.calls[0]![1].template).toBe('general');
     expect(mocks.execute.mock.calls[0]![2]).toMatchObject({ mode: 'hosted-stream' });
-    expect(container.textContent).toContain('雾都巡夜人 · 未签名');
+    expect([...container.querySelectorAll('h2.sr-only')].some((heading) => heading.textContent === '雾都巡夜人')).toBe(true);
+    expect(container.querySelector('[data-testid="result-signature-status"]')?.textContent).toContain('未签名');
     // 流式通路不可携带官方签名标签；概览如实记「不支持签名」而非「签名失败」。
-    expect(container.textContent).not.toContain('· 官方签名');
+    expect(container.querySelector('[data-testid="result-signature-status"]')?.textContent).not.toContain('官方签名');
     expect(container.textContent).toContain('当前执行通路不支持官方签名，结果为非原生');
     expect(container.textContent).not.toContain('签名失败');
     await click('保存到本地卡库');
@@ -378,6 +386,7 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     await clickText('问卷设置');
     await pickPreset('preset-a');
     await click('清除草稿');
+    expect(button('确认清除').classList.contains('ui-web-generation-action--destructive')).toBe(true);
     await click('确认清除');
     await act(async () => deferreds.get('a')!());
     await settle();

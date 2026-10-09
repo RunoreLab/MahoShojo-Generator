@@ -375,7 +375,8 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     await click('取消');
     expect(container.querySelector('dialog')?.open).toBe(false);
-    expect(container.textContent).toContain('百合 · 未签名');
+    expect([...container.querySelectorAll('h2.sr-only')].some((heading) => heading.textContent === '百合')).toBe(true);
+    expect(container.querySelector('[data-testid="result-signature-status"]')?.textContent).toContain('未签名');
     await click('重新生成');
     mocks.save.mockRejectedValueOnce(new Error('disk'));
     await click('保存后重新生成');
@@ -436,7 +437,8 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     await click('发送问卷并生成');
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(mocks.execute.mock.calls[0]![2]).toMatchObject({ mode: 'direct-local', modelId: 'model' });
-    expect(container.textContent).toContain('百合 · 未签名');
+    expect([...container.querySelectorAll('h2.sr-only')].some((heading) => heading.textContent === '百合')).toBe(true);
+    expect(container.querySelector('[data-testid="result-signature-status"]')?.textContent).toContain('未签名');
     expect(container.textContent).toContain('礼服');
     expect(container.querySelector('pre')?.textContent).toBe(JSON.stringify(card));
     const resultSection = container.querySelector('[aria-label="生成结果"]')!;
@@ -444,6 +446,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     expect(resultSection.parentElement?.parentElement).toBe(inputCard.parentElement);
     expect(mocks.scrollResult).toHaveBeenCalledTimes(1);
     expect(mocks.scrollResult.mock.instances[0]).toBe(resultSection.parentElement);
+    expect(button('保存到本地卡库').classList.contains('ui-web-generation-action--primary')).toBe(true);
     await click('保存到本地卡库');
     expect(mocks.save).toHaveBeenCalledTimes(1);
     expect(container.textContent).toContain('已保存到本地卡库。');
@@ -752,7 +755,9 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     }));
     await mount(); await click('恢复草稿');
     const heading = container.querySelector('section[aria-label="生成结果"] h2');
-    expect(heading?.textContent).toBe('百合 · 含签名字段（本机未验证）');
+    expect(heading?.textContent).toBe('百合');
+    expect(heading?.classList.contains('sr-only')).toBe(true);
+    expect(container.querySelector('[data-testid="result-signature-status"]')?.textContent).toBe('含签名字段（本机未验证）');
     await click('保存到本地卡库');
     expect(mocks.save).toHaveBeenCalledWith(expect.objectContaining({
       provenance: { kind: 'signature-unverified', signature: 'server-issued-signature', execution: 'hosted' },

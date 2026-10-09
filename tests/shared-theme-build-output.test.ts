@@ -65,8 +65,11 @@ const expectSharedOutput = (css: string, artifact: string): void => {
   const stylesheet = postcss.parse(css);
   const declarationsFor = (selector: string): Record<string, string> => {
     const declarations: Record<string, string> = {};
-    stylesheet.walkRules(selector, (rule) => {
-      rule.walkDecls((declaration) => { declarations[declaration.prop] = declaration.value; });
+    const normalizeSelector = (value: string) => value.replace(/\[([^=\]]+)=['"]([^'"]+)['"]\]/g, '[$1=$2]');
+    stylesheet.walkRules((rule) => {
+      if (normalizeSelector(rule.selector) === normalizeSelector(selector)) {
+        rule.walkDecls((declaration) => { declarations[declaration.prop] = declaration.value; });
+      }
     });
     return declarations;
   };
@@ -77,6 +80,18 @@ const expectSharedOutput = (css: string, artifact: string): void => {
   expect(declarationsFor('.ui-web-questionnaire-step-button'), artifact).toMatchObject({ 'min-height': '48px', 'border-radius': '12px' });
   expect(declarationsFor('.ui-web-questionnaire-step-button:focus-visible')['outline-offset'], artifact).toBe('3px');
   expect(declarationsFor('.blue-theme .ui-web-questionnaire-step-button').background, artifact).toContain('linear-gradient');
+  // 结果保存与导出消费同一有限操作层级，不能只在 Desktop 加覆盖 CSS。
+  expect(declarationsFor('.ui-web-generation-action'), artifact).toMatchObject({
+    'min-height': '44px', 'border-radius': '12px', 'font-size': '16px',
+  });
+  expect(declarationsFor('.ui-web-generation-action--primary').background, artifact).toContain('linear-gradient');
+  expect(declarationsFor('.ui-web-generation-action--secondary:hover:not(:disabled)')['border-color'], artifact).toBe('var(--app-accent)');
+  expect(declarationsFor('.ui-web-generation-action--destructive').color, artifact).toBe('#b91c1c');
+  expect(declarationsFor('.ui-web-generation-action:focus-visible')['outline-offset'], artifact).toBe('3px');
+  expect(declarationsFor('.ui-web-generation-action:disabled'), artifact).toMatchObject({ cursor: 'not-allowed', transform: 'none' });
+  expect(declarationsFor(":root[data-motion='reduce'] .ui-web-generation-action").transition, artifact).toBe('none');
+  expect(declarationsFor(":root[data-motion='reduce'] .ui-web-generation-action:hover:not(:disabled)").transform, artifact).toBe('none');
+  expect(declarationsFor('.blue-theme .ui-web-generation-action--primary').background, artifact).toContain('linear-gradient');
   expect(declarationsFor('.creator-workbench-shell .container'), artifact).toMatchObject({ 'max-width': 'none', padding: '0' });
   expect(declarationsFor('.creator-workbench-shell .card'), artifact).toMatchObject({ 'max-width': 'none', 'margin-top': '1rem' });
   expect(declarationsFor('.creator-workbench-shell .result-card'), artifact).toMatchObject({ 'max-width': 'none' });

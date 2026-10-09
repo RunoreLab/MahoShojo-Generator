@@ -1,5 +1,6 @@
 'use client';
 
+import { generationActionClassNames } from '@mahoshojo/ui-web/generation-actions';
 import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import GeneralCharacterCard from '@/components/GeneralCharacterCard';
@@ -2746,20 +2747,18 @@ export const CreatorPage: React.FC = () => {
                     <div className="text-center">
                       <h3 className="text-lg font-medium text-gray-800" style={{ marginBottom: '1rem' }}>后续操作</h3>
                       <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                        <button onClick={() => downloadStreamedGeneralCard(streamedGeneralCard)} className="generate-button flex-1">
+                        <button onClick={() => downloadStreamedGeneralCard(streamedGeneralCard)} className={`${generationActionClassNames.secondary} flex-1`}>
                           {streamedGeneralCard.templateId === GENERAL_SCENARIO_TEMPLATE_ID ? '下载通用情景卡' : '下载通用角色卡'}
                         </button>
                         <SaveToCloudButton
                           data={streamedGeneralCard}
                           cardType={streamedGeneralCard.templateId === GENERAL_SCENARIO_TEMPLATE_ID ? 'scenario' : 'character'}
                           buttonText="保存到云端"
-                          className="generate-button flex-1"
-                          style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+                          className={`${generationActionClassNames.primary} flex-1`}
                         />
                         <button
                           onClick={() => void copyStreamedGeneralCard(streamedGeneralCard)}
-                          className="generate-button flex-1"
-                          style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}
+                          className={`${generationActionClassNames.secondary} flex-1`}
                         >
                           复制到剪贴板
                         </button>
@@ -2930,7 +2929,7 @@ export const CreatorPage: React.FC = () => {
                         <SaveToCloudButton
                           data={resolvedResultPayload}
                           buttonText="保存到云端"
-                          style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+                          className={`${generationActionClassNames.primary} flex-1`}
                         />
                       </>
                     )}

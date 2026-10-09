@@ -1,3 +1,4 @@
+import { generationActionClassNames } from '@mahoshojo/ui-web/generation-actions';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Link, useRouter } from '@tanstack/react-router';
@@ -120,7 +121,7 @@ import { useLeaveGuard } from './useLeaveGuard';
 /** Desktop 的资源服务根（与 `routes.tsx` 中同名常量同义）。 */
 const DESKTOP_ASSET_SOURCE: HomeAssetSource = { baseUrl: '/' };
 
-const actionClass = 'rounded-lg border border-(--app-border) px-4 py-2 disabled:opacity-50';
+const actionClass = generationActionClassNames.secondary;
 
 type DeviceType = 'mobile' | 'desktop' | 'unknown';
 type LayoutMode = 'mobile' | 'desktop';
@@ -1146,7 +1147,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
         nextButtonClass={actionClass}
       />}
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <button className={actionClass} disabled={!canGenerateNow} onClick={() => generate()}>
+        <button className="generate-button" disabled={!canGenerateNow} onClick={() => generate()}>
           {state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '生成数据卡' : '重新生成'}
         </button>
         {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}
@@ -1170,14 +1171,14 @@ function CreatorForm({ session }: { session: CreatorSession }) {
 
   const creatorResultContent = (
     <div ref={resultSectionRef} className="flex flex-col gap-3">
-      {resolvedResultPayload && <h2 className="text-xl font-semibold">
+      {resolvedResultPayload && <h2 className="sr-only">
         {state.cardKind === 'general-scenario'
           ? (typeof resolvedResultPayload.title === 'string' && resolvedResultPayload.title ? resolvedResultPayload.title : '未命名情景')
           : state.cardKind === 'canshou'
             ? (typeof resolvedResultPayload.name === 'string' && resolvedResultPayload.name ? resolvedResultPayload.name : '未命名残兽')
             : (typeof resolvedResultPayload.name === 'string' && resolvedResultPayload.name ? resolvedResultPayload.name : typeof resolvedResultPayload.codename === 'string' && resolvedResultPayload.codename ? resolvedResultPayload.codename : '未命名角色')}
-        {' · '}{resultSignatureLabel}
       </h2>}
+      {resolvedResultPayload && <p data-testid="result-signature-status" className="text-sm text-(--app-text-muted)">{resultSignatureLabel}</p>}
       {state.cardKind === 'general' && resolvedResultPayload && (
         <GeneralCharacterCard
           general={resolvedResultPayload as unknown as GeneralCharacterCardData}
@@ -1204,7 +1205,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
         />
       )}
       {resolvedResultPayload && <>
-        <button className={actionClass} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => { if (guard.ready) void session.saveResult(); }}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>
+        <button className={generationActionClassNames.primary} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => { if (guard.ready) void session.saveResult(); }}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>
         {state.saveStatus === 'saved' && <p role="status">已保存到本地卡库。</p>}
         {state.saveStatus === 'already-present' && <p role="status">本地卡库已存在相同内容，原记录保持不变。</p>}
         {state.saveError && <p role="alert">{state.saveError}</p>}
@@ -1313,7 +1314,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
             </div>
             {confirmClear && <div role="group" aria-label="确认清除草稿" className="mt-3 rounded border p-3">
               <p>确认清除本页回答、创作输入、生成结果和中断正文？已保存的本地卡不受影响。此操作无法撤销。</p>
-              <button className={actionClass} disabled={busy} onClick={() => {
+              <button className={generationActionClassNames.destructive} disabled={busy} onClick={() => {
                 previousTargetsRef.current = null;
                 previousSignatureRef.current = null;
                 invalidatePresetLoads();
@@ -1356,7 +1357,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
             {state.saveError && <p role="alert">{state.saveError}</p>}
             <div className="flex flex-wrap gap-2">
               <button autoFocus className={actionClass} disabled={busy} onClick={() => setConfirmRegenerate(false)}>取消</button>
-              {confirmRegenerate === 'unsaved' && <button className={actionClass} disabled={busy} onClick={async () => { if (await session.saveResult()) { setConfirmRegenerate(false); generate(true); } }}>{state.saving ? '正在保存…' : '保存后重新生成'}</button>}
+              {confirmRegenerate === 'unsaved' && <button className={generationActionClassNames.primary} disabled={busy} onClick={async () => { if (await session.saveResult()) { setConfirmRegenerate(false); generate(true); } }}>{state.saving ? '正在保存…' : '保存后重新生成'}</button>}
               <button className={actionClass} disabled={busy} onClick={() => { setConfirmRegenerate(false); generate(true); }}>确定重新生成</button>
             </div>
           </dialog>
@@ -1454,7 +1455,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
             </div>
           )}
           <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-            <button className={actionClass} disabled={!canGenerateNow} onClick={() => generate()}>
+            <button className="generate-button" disabled={!canGenerateNow} onClick={() => generate()}>
               {state.phase === 'generating' ? '正在生成…' : '直接生成'}
             </button>
             {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}

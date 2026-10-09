@@ -1,5 +1,6 @@
 'use client';
 
+import { generationActionClassNames } from '@mahoshojo/ui-web/generation-actions';
 import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -504,7 +505,7 @@ export function FreePage() {
       )}>
           <button
             onClick={() => downloadJson(data, fileName)}
-            className="generate-button flex-1"
+            className={`${generationActionClassNames.secondary} flex-1`}
           >
             下载 JSON
           </button>
@@ -512,13 +513,11 @@ export function FreePage() {
             data={data}
             cardType={kind}
             buttonText="保存到云端"
-            className="generate-button flex-1"
-            style={{ backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+            className={`${generationActionClassNames.primary} flex-1`}
           />
           <button
             onClick={() => void copyToClipboard(data, kind === 'scenario' ? '情景卡' : '角色卡')}
-            className="generate-button flex-1"
-            style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}
+            className={`${generationActionClassNames.secondary} flex-1`}
           >
             复制到剪贴板
           </button>

@@ -181,7 +181,12 @@
       "default": "./src/messages/index.ts"
     },
     "./markdown.css": "./src/markdown/markdown.css",
-    "./product-shell.css": "./src/product-shell.css"
+    "./product-shell.css": "./src/product-shell.css",
+    "./generation-actions": {
+      "types": "./src/generation-actions/index.tsx",
+      "import": "./src/generation-actions/index.tsx",
+      "default": "./src/generation-actions/index.tsx"
+    }
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",

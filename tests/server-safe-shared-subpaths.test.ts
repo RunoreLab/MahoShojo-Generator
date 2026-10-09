@@ -214,6 +214,7 @@ describe('server-safe shared entrypoints stay free of React hooks', () => {
     // `./settings` 与 `./device-preferences` 是 d5.1-s1 的设置页与设备偏好客户端状态机：
     // `app/settings/page.tsx` 只经 `'use client'` 的 SettingsRouteProviders 挂载它们，
     // RSC 消费的仅是同目录的 `./device-preferences-init`（已登记在 server-safe 列）。
+    // `./generation-actions` 只由生成页与 SaveJsonButton 客户端操作消费；不新增 RSC 导入链。
     expect(unlisted.sort()).toEqual([
       './ai-provider',
       './announcement',
@@ -230,6 +231,7 @@ describe('server-safe shared entrypoints stay free of React hooks', () => {
       './device-preferences',
       './encyclopedia-views',
       './free',
+      './generation-actions',
       './local-archive',
       './local-cards',
       './markdown',

@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 
+import { GenerationActionButton } from '../generation-actions';
 import { downloadBlob } from '../client/blob';
 
 export type SaveJsonMode = 'download' | 'text';
@@ -69,9 +70,9 @@ export function SaveJsonButton<T>({ data, mode, recommendedMode, resolveFileName
             ? '推荐：直接下载 JSON 文件，适合桌面端或支持下载的浏览器'
             : '实验功能：部分移动端浏览器也支持直接下载，如失败请切换到复制模式'}
         </p>
-        <button onClick={downloadJson} className="generate-button w-full">
+        <GenerationActionButton onClick={downloadJson} className="w-full">
           {recommendedMode === 'download' ? downloadLabel ?? '💾 下载设定文件' : '🧪 尝试直接下载 JSON'}
-        </button>
+        </GenerationActionButton>
       </div>
     );
   }
@@ -85,13 +86,9 @@ export function SaveJsonButton<T>({ data, mode, recommendedMode, resolveFileName
       </div>
       <div className="flex items-center justify-between mb-2 gap-2">
         <span className="text-xs text-gray-500 dark:text-gray-400">{statusMessage}</span>
-        <button
-          onClick={handleCopy}
-          className="rounded-md border border-indigo-200 bg-white px-3 py-1 text-xs font-medium text-indigo-600 hover:border-indigo-400 hover:text-indigo-700 dark:border-indigo-700 dark:bg-slate-800 dark:text-indigo-300 dark:hover:border-indigo-500"
-          type="button"
-        >
+        <GenerationActionButton onClick={handleCopy}>
           复制 JSON
-        </button>
+        </GenerationActionButton>
       </div>
       <textarea
         value={jsonPayload}

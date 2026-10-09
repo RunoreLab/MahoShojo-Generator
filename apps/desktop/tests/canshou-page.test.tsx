@@ -394,13 +394,15 @@ describe('Desktop Canshou real route and session UI (native adapter mock)', () =
     await click('发送问卷并生成');
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(mocks.execute.mock.calls[0]![2]).toMatchObject({ mode: 'direct-local', modelId: 'model' });
-    expect(container.textContent).toContain('巢穴回声 · 未签名');
+    expect([...container.querySelectorAll('h2.sr-only')].some((heading) => heading.textContent === '巢穴回声')).toBe(true);
+    expect(container.querySelector('[data-testid="result-signature-status"]')?.textContent).toContain('未签名');
     expect(container.textContent).toContain('雾状表皮');
     expect(container.querySelector('.ui-web-questionnaire-answer-input')).toBeNull();
     expect(container.querySelector('[aria-label="问卷来源"]')).toBeNull();
     expect(container.querySelector('[aria-label="介绍"]')).toBeNull();
     expect(container.querySelector('.container > .card')?.contains(container.querySelector('[aria-label="生成结果"]'))).toBe(true);
     expect(mocks.scrollResult).toHaveBeenCalledTimes(1);
+    expect(button('保存到本地卡库').classList.contains('ui-web-generation-action--primary')).toBe(true);
     await click('保存到本地卡库');
     expect(mocks.save).toHaveBeenCalledTimes(1);
     expect(container.textContent).toContain('已保存到本地卡库。');
@@ -418,7 +420,8 @@ describe('Desktop Canshou real route and session UI (native adapter mock)', () =
     expect(button('返回编辑答案')).toBe(viewToggle);
     expect(document.activeElement).toBe(viewToggle);
     expect(container.querySelector('.ui-web-questionnaire-answer-input')).toBeNull();
-    expect(container.textContent).toContain('巢穴回声 · 未签名');
+    expect([...container.querySelectorAll('h2.sr-only')].some((heading) => heading.textContent === '巢穴回声')).toBe(true);
+    expect(container.querySelector('[data-testid="result-signature-status"]')?.textContent).toContain('未签名');
     expect(container.textContent).toContain('已保存到本地卡库。');
     expect(button('保存到本地卡库').disabled).toBe(true);
     expect(window.localStorage.getItem(CANSHOU_DRAFT_KEY)).toBe(savedDraft);

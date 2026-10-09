@@ -1,5 +1,6 @@
 'use client';
 
+import { generationActionClassNames } from '@mahoshojo/ui-web/generation-actions';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import MagicalGirlCard from '@/components/MagicalGirlCard';
 import GeneralCharacterCard from '@/components/GeneralCharacterCard';
@@ -1829,7 +1830,7 @@ export const DetailsPage: React.FC = () => {
                     <div className="text-center">
                       <h3 className="text-lg font-medium text-gray-800" style={{ marginBottom: '1rem' }}>后续操作</h3>
                       <div className="flex flex-col gap-3">
-                        <button onClick={() => downloadStreamedGeneralCard(streamedGeneralCard)} className="generate-button">
+                        <button onClick={() => downloadStreamedGeneralCard(streamedGeneralCard)} className={generationActionClassNames.secondary}>
                           下载通用角色卡
                         </button>
                         {/* SaveToCloudButton 内部为「保存 + 替换」双按钮，独占一列避免与相邻按钮挤压 */}
@@ -1838,14 +1839,13 @@ export const DetailsPage: React.FC = () => {
                             data={streamedGeneralCard}
                             cardType="character"
                             buttonText="保存到云端"
-                            className="generate-button w-full"
-                            style={{ marginLeft: 0, backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+                            className={`${generationActionClassNames.primary} w-full`}
+                            style={{ marginLeft: 0 }}
                           />
                         </div>
                         <button
                           onClick={() => void copyStreamedGeneralCard(streamedGeneralCard)}
-                          className="generate-button"
-                          style={{ backgroundColor: '#3b82f6', backgroundImage: 'linear-gradient(to right, #3b82f6, #2563eb)' }}
+                          className={generationActionClassNames.secondary}
                         >
                           复制到剪贴板
                         </button>
@@ -1918,8 +1918,8 @@ export const DetailsPage: React.FC = () => {
                           <SaveToCloudButton
                             data={resolvedResultPayload}
                             buttonText="保存到云端"
-                            className="generate-button w-full"
-                            style={{ marginLeft: 0, backgroundColor: '#22c55e', backgroundImage: 'linear-gradient(to right, #22c55e, #16a34a)' }}
+                            className={`${generationActionClassNames.primary} w-full`}
+                            style={{ marginLeft: 0 }}
                           />
                         </div>
                       </>

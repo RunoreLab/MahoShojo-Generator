@@ -1,3 +1,4 @@
+import { generationActionClassNames } from '@mahoshojo/ui-web/generation-actions';
 import { QuestionnaireDraftPanel } from './questionnaire-draft-panel';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
@@ -98,7 +99,7 @@ import { useLeaveGuard } from './useLeaveGuard';
  */
 const DESKTOP_ASSET_SOURCE: HomeAssetSource = { baseUrl: '/' };
 
-const actionClass = 'rounded-lg border border-(--app-border) px-4 py-2 disabled:opacity-50';
+const actionClass = generationActionClassNames.secondary;
 
 type DeviceType = 'mobile' | 'desktop' | 'unknown';
 
@@ -743,7 +744,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
               onReload={() => { setReload((value) => value + 1); void aiStore.refreshProfiles(); }}
               confirmation={confirmClear && <div role="group" aria-label="确认清除草稿" className="mt-3 rounded border p-3">
                 <p>确认清除本页回答、生成结果和中断正文？已保存的本地卡不受影响。此操作无法撤销。</p>
-                <button className={actionClass} disabled={busy} onClick={() => {
+                <button className={generationActionClassNames.destructive} disabled={busy} onClick={() => {
                   // 同「恢复草稿」：清空后重新注入的默认选择不应拿旧基线做重映射。
                   previousTargetsRef.current = null;
                   previousSignatureRef.current = null;
@@ -932,7 +933,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
                   disabled={busy}
                 />
                 <div className="flex flex-wrap gap-2">
-                  <button className={actionClass} disabled={generationDisabled} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '发送问卷并生成' : '重新生成'}</button>
+                  <button className="generate-button" disabled={generationDisabled} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '发送问卷并生成' : '重新生成'}</button>
                   {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}
 
                 </div>
@@ -944,7 +945,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
               {state.saveError && <p role="alert">{state.saveError}</p>}
               <div className="flex flex-wrap gap-2">
                 <button autoFocus className={actionClass} disabled={busy} onClick={() => setConfirmRegenerate(false)}>取消</button>
-                {confirmRegenerate === 'unsaved' && <button className={actionClass} disabled={busy} onClick={async () => { if (await session.saveResult()) { setConfirmRegenerate(false); runPendingAction(true); } }}>{state.saving ? '正在保存…' : '保存后重新生成'}</button>}
+                {confirmRegenerate === 'unsaved' && <button className={generationActionClassNames.primary} disabled={busy} onClick={async () => { if (await session.saveResult()) { setConfirmRegenerate(false); runPendingAction(true); } }}>{state.saving ? '正在保存…' : '保存后重新生成'}</button>}
                 <button className={actionClass} disabled={busy} onClick={() => { setConfirmRegenerate(false); runPendingAction(true); }}>确定重新生成</button>
               </div>
             </dialog>
@@ -982,10 +983,10 @@ function CanshouForm({ session }: { session: CanshouSession }) {
             <div ref={resultSectionRef}>
               {showResult && state.card && <section aria-label="生成结果" className="flex flex-col gap-3">
                 {resultAnswerNotice && <p role="status" className="text-sm text-(--app-text-muted)">{resultAnswerNotice}</p>}
-                <h2 className="text-xl font-semibold">
+                <h2 className="sr-only">
                   {typeof state.card.name === 'string' && state.card.name ? state.card.name : '未命名残兽'}
-                  {' · '}{resultSignatureLabel}
                 </h2>
+                <p data-testid="result-signature-status" className="text-sm text-(--app-text-muted)">{resultSignatureLabel}</p>
                 {state.cardKind === 'general'
                   ? <GeneralCharacterCard
                       general={state.card as GeneralCharacterCardData}
@@ -999,7 +1000,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
                       imageSaveMode={imageSaveMode}
                       saveButtonLabel={imageSaveButtonLabel}
                     />}
-                <button className={actionClass} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => { if (guard.ready) void session.saveResult(); }}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>
+                <button className={generationActionClassNames.primary} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => { if (guard.ready) void session.saveResult(); }}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>
                 {state.saveStatus === 'saved' && <p role="status">已保存到本地卡库。</p>}
                 {state.saveStatus === 'already-present' && <p role="status">本地卡库已存在相同内容，原记录保持不变。</p>}
                 {state.saveError && <p role="alert">{state.saveError}</p>}
