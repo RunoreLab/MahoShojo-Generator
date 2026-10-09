@@ -381,6 +381,8 @@ export default function SaveToCloudButton({
             return;
           }
           void (async () => {
+            const ownerContext = context;
+            const preparation = operation.current + 1;
             let hadResolveError = false;
             const resolvedData = await resolveData().catch((error) => {
               hadResolveError = true;
@@ -388,6 +390,7 @@ export default function SaveToCloudButton({
               alert(error instanceof Error ? error.message : '准备替换数据失败。');
               return null;
             });
+            if (!mounted.current || ownerContext !== latestContext.current || preparation !== operation.current) return;
             if (!resolvedData) {
               if (!hadResolveError) {
                 alert('没有可替换的数据。');

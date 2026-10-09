@@ -79,4 +79,15 @@ describe('Web result actual owned API and shared confirmation', () => {
     await render(); await choose(); vi.spyOn(authStorage, 'getAuth').mockResolvedValue({ ...auth, authKey: 'changed-mock' }); await click('确认替换');
     expect(writes()).toHaveLength(0); expect(document.body.textContent).toContain('登录状态已改变');
   });
+  test.each(['source', 'account'])('late getData preparation gives no stale %s alert or picker', async (kind) => {
+    let finish!: (data: unknown) => void;
+    const getData = () => new Promise((resolve) => { finish = resolve; });
+    await act(async () => { root.render(<SaveToCloudButton data={data} getData={getData} />); await flush(); });
+    await click('替换已有');
+    if (kind === 'account') mocks.user = { id: 8 };
+    await act(async () => { root.render(<SaveToCloudButton data={kind === 'source' ? { name: '新结果' } : data} getData={getData} />); await flush(); });
+    await act(async () => { finish(data); await flush(); });
+    expect(window.alert).not.toHaveBeenCalled(); expect(button('选择目标')).toBeUndefined(); expect(fetcher).not.toHaveBeenCalled();
+  });
+
 });
