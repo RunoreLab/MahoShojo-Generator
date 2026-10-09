@@ -50,6 +50,33 @@ describe('Desktop local forge host journey', () => {
       expect(fetch).not.toHaveBeenCalled();
     } finally { act(() => root.unmount()); container.remove(); }
   });
+  it('uploads validated local raster, exports and reimports crop state without external requests', async () => {
+    (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal('Blob', NodeBlob); const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.stubGlobal('Image', class { naturalWidth = 1; naturalHeight = 1; onload: (() => void) | null = null; onerror: (() => void) | null = null; set src(value: string) { if (value) queueMicrotask(() => this.onload?.()); } });
+    const container = document.createElement('div'); const root = createRoot(container);
+    const png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF6sAAAAASUVORK5CYII='), (c) => c.charCodeAt(0));
+    try {
+      await act(async () => root.render(<DesktopCardForge />));
+      const input = container.querySelector<HTMLInputElement>('[aria-label="导入卡牌 JSON"]')!;
+      await act(async () => choose(input, inputFile(JSON.stringify(face))));
+      await act(async () => choose(container.querySelector<HTMLInputElement>('[aria-label="选择本地插图"]')!, { name: 'local.png', size: png.length, arrayBuffer: async () => png.buffer }));
+      const ratio = container.querySelector<HTMLSelectElement>('[aria-label="卡面插图比例"]')!;
+      act(() => { ratio.value = '3:4'; ratio.dispatchEvent(new Event('change', { bubbles: true })); });
+      const scale = container.querySelector<HTMLInputElement>('[aria-label="图片缩放"]')!;
+      act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(scale, '2'); scale.dispatchEvent(new Event('input', { bubbles: true })); });
+      const exportButton = [...container.querySelectorAll('button')].find((button) => button.textContent === '导出工坊 JSON（含本地插图）')!;
+      await act(async () => exportButton.click());
+      const json = await mocks.download.mock.calls[0][0].text(); const result = JSON.parse(json);
+      expect(result.illustration).toMatchObject({ source: 'uploaded', aspectRatio: '3:4', transform: { scale: 2, x: 0, y: 0 } });
+      expect(result.illustration.dataUrl).toMatch(/^data:image\/png;base64,/);
+      await act(async () => choose(input, inputFile(json, 'round-trip.json')));
+      expect(container.querySelector<HTMLSelectElement>('[aria-label="卡面插图比例"]')!.value).toBe('3:4');
+      expect(container.querySelector<HTMLInputElement>('[aria-label="图片缩放"]')!.value).toBe('2');
+      expect(fetch).not.toHaveBeenCalled();
+    } finally { act(() => root.unmount()); }
+  });
   it('blocks repeated actions and route/native close during import and suppresses late import after unmount', async () => {
     (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);

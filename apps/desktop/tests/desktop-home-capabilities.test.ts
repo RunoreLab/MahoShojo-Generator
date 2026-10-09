@@ -19,8 +19,12 @@ describe('desktop capability snapshot', () => {
     expect(readCapability(snapshot, '/character-party').kind).toBe('available');
   });
 
+  it('exposes the delivered local card forge route', () => {
+    expect(readCapability(snapshot, '/card-forge').kind).toBe('available');
+  });
+
   it('does not declare Web-only homepage entries', () => {
-    for (const href of ['/magic-tea-party', '/card-forge']) {
+    for (const href of ['/magic-tea-party']) {
       expect(readCapability(snapshot, href).kind).toBe('unknown');
     }
   });
