@@ -463,7 +463,9 @@ function CanshouForm({ session }: { session: CanshouSession }) {
     const submissionFlow = buildQuestionnaireFlow(submissionItems, current.draft.answers).flow;
     // `questionnaireError` 不进门禁：它只描述内置问卷加载失败，而当前生效的可能是
     // 用户自备的选择集——选择集存在且流程非空就足以生成（与 Web 同口径，P2-r1）。
-    if (!guard.ready || session.isBusy() || !executionMode || submissionSelections.length === 0 || submissionFlow.length === 0 || questionnaireLoading || clientProfilesBlocked || current.pendingRestore || session.isDraftBlocked()) return;
+    // 悬空选择（含服务器侧被目录移除的系统模型）保留诊断值但禁止派发——
+    // unavailableReason 与按钮 disabled 必须同口径（D5.1-AIP-r1-r1）。
+    if (!guard.ready || session.isBusy() || !executionMode || submissionSelections.length === 0 || submissionFlow.length === 0 || questionnaireLoading || clientProfilesBlocked || current.pendingRestore || session.isDraftBlocked() || target.unavailableReason !== null) return;
     if (target.location === 'client' && !selected) return;
     if (!discardUnsavedResult) {
       if (session.hasUnsavedResult()) { pendingActionRef.current = 'generate'; setConfirmRegenerate('unsaved'); return; }
@@ -700,6 +702,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
         : null;
   const generationDisabled = !guard.ready || busy || questionnaireLoading || clientProfilesBlocked
     || effectiveSelections.length === 0 || flow.length === 0 || !executionMode
+    || target.unavailableReason !== null
     || (target.location === 'client' && !selected) || blockedDraft;
   const hasLoreOnly = effectiveSelections.length > 0 && flowItems.length === 0
     && effectiveSelections.some((selection) => Boolean(selection.questionnaire.loreMarkdown?.trim()));

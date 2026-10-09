@@ -13,6 +13,7 @@ import {
   AiProviderCustomSelect,
   AdvancedGenerationSettings,
   describeAiDirectUnsupportedReason,
+  type AiProviderSelectOption,
 } from '@mahoshojo/ui-web/ai-provider';
 import { type DirectProviderProfileV1 } from '@mahoshojo/contracts/provider-profile';
 
@@ -327,12 +328,31 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
                 （D5.1-AIP-r1，与 Web system+modelId 语义一致）。 */}
             <span className="battle-lite-muted-text">使用系统默认配置 · 系统模型</span>
             <AiProviderCustomSelect
-              options={SYSTEM_PROVIDER_OPTION.models.map((model) => ({
-                value: model.value,
-                label: model.label,
-                description: model.description,
-                kind: 'model',
-              }))}
+              options={(() => {
+                const options: AiProviderSelectOption[] = SYSTEM_PROVIDER_OPTION.models.map(
+                  (model) => ({
+                    value: model.value,
+                    label: model.label,
+                    description: model.description,
+                    kind: 'model' as const,
+                  }),
+                );
+                // 系统模型悬空（曾选、后被目录移除）：保留原值作 disabled
+                // 诊断项，不静默回落——本下拉即重新选择入口。
+                const selected = state.selection.systemModelId;
+                if (
+                  selected !== undefined &&
+                  !SYSTEM_PROVIDER_OPTION.models.some((model) => model.value === selected)
+                ) {
+                  options.unshift({
+                    value: selected,
+                    label: selected,
+                    disabled: true,
+                    disabledReason: '该系统模型已不在支持列表中，请重新选择',
+                  });
+                }
+                return options;
+              })()}
               value={state.selection.systemModelId ?? 'default'}
               onChange={(id) => store.selectSystemModel(id)}
               placeholder="选择系统模型"

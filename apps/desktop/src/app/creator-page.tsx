@@ -777,6 +777,8 @@ function CreatorForm({ session }: { session: CreatorSession }) {
     && !questionnaireLoading
     && guard.ready
     && executionMode !== null
+    // 悬空选择（含服务器侧被目录移除的系统模型）保留诊断值但禁止派发（D5.1-AIP-r1-r1）。
+    && target.unavailableReason === null
     && !clientProfilesBlocked
     && !(target.location === 'client' && !selected);
 

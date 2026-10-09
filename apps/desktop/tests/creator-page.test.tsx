@@ -434,4 +434,27 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     expect(mocks.execute).not.toHaveBeenCalled();
     expect(container.textContent).toContain('「情景（结构化）」模板暂未接入生成通路，请选择其他创作模板。');
   });
+
+  it('blocks generation while the saved system model has left the catalog', async () => {
+    // D5.1-AIP-r1-r1：曾选系统模型被目录移除——解析层保留诊断值并告警，
+    // 生成按钮禁用；即使绕过按钮状态派发，入口守卫也不触达执行器。
+    window.localStorage.setItem(DESKTOP_AI_CONFIG_STORAGE_KEY, JSON.stringify({
+      version: 3,
+      selection: {
+        executionPreference: 'server',
+        clientConnectionId: 'local',
+        systemModelId: 'retired-model',
+      },
+      hiddenPresetIds: [],
+      generationOverrides: {},
+      modelsByProfileId: {},
+    }));
+    window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft()));
+    await mount(); await click('恢复草稿');
+    expect(container.textContent).toContain('已不在支持列表中');
+    expect(button('生成数据卡').disabled).toBe(true);
+    button('生成数据卡').click();
+    await settle();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
 });

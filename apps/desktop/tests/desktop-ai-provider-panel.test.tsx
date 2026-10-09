@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
   navigate: vi.fn(async () => undefined),
   profileIds: ['p1', 'p2'] as string[],
+  saveProfile: vi.fn(async () => undefined),
 }));
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async (command: string) => {
@@ -72,7 +73,7 @@ const profiles: Record<string, DirectProviderProfileV1> = {
 vi.mock('../src/platform/provider-profile-bridge', () => ({
   listProviderProfileIds: async () => [...mocks.profileIds],
   getProviderProfile: async (_invoke: unknown, id: string) => profiles[id] ?? null,
-  saveProviderProfile: async () => undefined,
+  saveProviderProfile: (...args: unknown[]) => mocks.saveProfile(...args),
   deleteProviderProfile: async () => undefined,
   validateProviderExecutionProfile: async (_invoke: unknown, doc: unknown) => doc,
 }));
@@ -104,6 +105,7 @@ beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   vi.clearAllMocks();
   mocks.profileIds = ['p1', 'p2'];
+  mocks.saveProfile.mockResolvedValue(undefined);
   window.localStorage.clear();
   seedOverlay({
     version: 3,
@@ -370,5 +372,105 @@ describe('DesktopAiProviderPanel', () => {
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(mocks.execute.mock.calls[0]![0]).toMatchObject({ mode: 'direct-local', modelId: 'm1' });
     expect(container.textContent).toContain('测试输出：你好');
+  });
+
+  it('selects a real connection whose id collides with the preset namespace', async () => {
+    // preset:deepseek 是合法 Profile ID（字符集允许 ':'）：裸值会与 preset:
+    // 前缀撞名，连接必须经 conn: 前缀编码才能正确落回「我的连接」语义，
+    // 而不是被分派成目录预设打开编辑器（D5.1-AIP-r1-r1）。
+    profiles['preset:deepseek'] = {
+      version: 1,
+      id: 'preset:deepseek',
+      name: '撞名连接',
+      adapter: 'openai-compatible',
+      baseUrl: 'http://127.0.0.1:9999/v1',
+      modelId: 'deepseek-chat',
+      createdAt: '2026-10-05T00:00:00.000Z',
+      updatedAt: '2026-10-05T00:00:00.000Z',
+    };
+    mocks.profileIds = ['p1', 'preset:deepseek'];
+    try {
+      await mount();
+      await pickConnectionOption('撞名连接');
+      // 命中的是真实连接：原子激活为当前连接，不打开预设直配编辑器。
+      expect(getDesktopAiConfigStore().getSnapshot().selection).toEqual({
+        executionPreference: 'client',
+        clientConnectionId: 'preset:deepseek',
+      });
+      expect(container.textContent).not.toContain('新建连接');
+      expect(container.textContent).toContain('接收方：http://127.0.0.1:9999/v1');
+      expect(container.textContent).toContain('模型：deepseek-chat');
+    } finally {
+      delete profiles['preset:deepseek'];
+    }
+  });
+
+  it('warns and offers reselection when the saved system model left the catalog', async () => {
+    // 服务器位置：曾选的系统模型被目录移除后，保留原值供诊断、禁用项
+    // 告警 + 生效模型下拉即重选入口——不得静默回落「默认策略」。
+    seedOverlay({
+      version: 3,
+      selection: {
+        executionPreference: 'server',
+        clientConnectionId: 'p1',
+        systemModelId: 'retired-model',
+      },
+      hiddenPresetIds: [],
+      generationOverrides: {},
+      modelsByProfileId: {},
+    });
+    await mount();
+    expect(container.textContent).toContain('所选系统模型已不在支持列表中，请重新选择');
+    const modelTrigger = triggers()[1]!;
+    expect(modelTrigger.textContent).toContain('retired-model');
+    await act(async () => modelTrigger.click());
+    await settle();
+    const danglingOption = [...container.querySelectorAll('[role="option"]')].find((item) =>
+      item.textContent?.includes('retired-model'),
+    )!;
+    expect(danglingOption.getAttribute('aria-disabled')).toBe('true');
+    expect(danglingOption.textContent).toContain('已不在支持列表中');
+
+    // 同一下拉里重新选择有效模型后告警解除。
+    const glmOption = [...container.querySelectorAll('[role="option"]')].find(
+      (item) => item.querySelector('.battle-lite-strong-text')?.textContent === 'GLM 5.3 Flash',
+    )!;
+    await act(async () => (glmOption as HTMLElement).click());
+    await settle();
+    expect(getDesktopAiConfigStore().getSnapshot().selection.systemModelId).toBe('glm-5.3-flash');
+    expect(container.textContent).not.toContain('已不在支持列表中');
+  });
+
+  it('disables cancel while a save transaction is still in flight', async () => {
+    // 「取消」的语义是放弃未提交的表单，不是撤销已发起的保存事务——
+    // savingConnection 期间允许关闭会让迟到的落盘看起来像「取消后仍保存」。
+    await mount();
+    const trigger = triggers()[0]!;
+    await act(async () => trigger.click());
+    await settle();
+    await act(async () =>
+      buttons().find((item) => item.textContent?.includes('编辑「一号」'))!.click(),
+    );
+    await settle();
+    expect(container.textContent).toContain('编辑连接');
+
+    let releaseSave: (() => void) | null = null;
+    mocks.saveProfile.mockImplementation((_invoke: unknown, doc: unknown) => {
+      // 模拟真实落盘：resolve 之后回读必须能拿到本次候选文档，
+      // 否则保存后核验会按「结果不确定」如实报错。
+      profiles[(doc as DirectProviderProfileV1).id] = doc as DirectProviderProfileV1;
+      return new Promise<void>((resolve) => {
+        releaseSave = resolve;
+      });
+    });
+    await act(async () => button('保存连接')!.click());
+    await settle();
+    expect(button('取消').disabled).toBe(true);
+    expect(button('保存中…').disabled).toBe(true);
+
+    releaseSave!();
+    await settle();
+    // 事务收尾后编辑器关闭，不会出现「已取消但仍落盘」的错位结果。
+    expect(container.textContent).not.toContain('编辑连接');
   });
 });

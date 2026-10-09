@@ -185,7 +185,9 @@ function FreeForm({ session }: { session: FreeSession }) {
   }, [attachments, draft.prompt]);
 
   const generate = (discardUnsavedResult = false) => {
-    if (!guard.ready || busy || !executionMode || isReadingAttachments || blockedDraft) return;
+    // 悬空选择（含服务器侧被目录移除的系统模型）保留诊断值但禁止派发——
+    // unavailableReason 与按钮 disabled 必须同口径（D5.1-AIP-r1-r1）。
+    if (!guard.ready || busy || !executionMode || isReadingAttachments || blockedDraft || target.unavailableReason !== null) return;
     if (target.location === 'client' && !selected) return;
     if (!discardUnsavedResult) {
       if (session.hasUnsavedResult()) { setConfirmRegenerate('unsaved'); return; }
@@ -298,7 +300,7 @@ function FreeForm({ session }: { session: FreeSession }) {
             </fieldset>
             <TokenIndicator text={tokenEstimateText} />
             <div className="flex flex-wrap gap-2">
-              <button className="generate-button" disabled={!guard.ready || busy || !draft.prompt.trim() || !executionMode || isReadingAttachments || (target.location === 'client' && !selected) || clientProfilesBlocked || blockedDraft} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '生成数据卡' : '重新生成'}</button>
+              <button className="generate-button" disabled={!guard.ready || busy || !draft.prompt.trim() || !executionMode || isReadingAttachments || target.unavailableReason !== null || (target.location === 'client' && !selected) || clientProfilesBlocked || blockedDraft} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '生成数据卡' : '重新生成'}</button>
               {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}
             </div>
             <dialog ref={regenerateDialog} aria-labelledby="regenerate-title" aria-describedby="regenerate-description" className="m-auto max-w-lg rounded-lg border border-(--app-border) bg-(--app-surface) p-5 text-(--app-text) backdrop:bg-black/40" onCancel={(event) => { event.preventDefault(); if (!session.isBusy()) setConfirmRegenerate(false); }}>

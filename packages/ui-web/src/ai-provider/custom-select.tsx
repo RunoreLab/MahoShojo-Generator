@@ -61,7 +61,6 @@ const computeVisibleBoundary = (element: HTMLElement): { top: number; bottom: nu
 
 const MENU_MAX_HEIGHT = 256;
 const MENU_GAP = 8;
-const MENU_MIN_HEIGHT = 96;
 
 const computeMenuPlacement = (
   trigger: HTMLElement,
@@ -75,7 +74,9 @@ const computeMenuPlacement = (
   const space = openUpward ? above : below;
   return {
     openUpward,
-    maxHeight: Math.max(MENU_MIN_HEIGHT, Math.min(MENU_MAX_HEIGHT, space)),
+    // 不设最小高度：可视空间不足时如实收缩（overflow-y-auto 仍可滚动到
+    // 全部项）——强制下限会让弹层超出裁切边界，反而让所有选项不可达。
+    maxHeight: Math.min(MENU_MAX_HEIGHT, Math.max(space, 0)),
   };
 };
 
@@ -310,6 +311,10 @@ export const AiProviderCustomSelect = ({
   );
 
   const activeItem = isOpen && activeIndex >= 0 ? navItems[activeIndex] : undefined;
+  // APG Select-Only Combobox：aria-activedescendant 只能引用 listbox 内的
+  // option 后代。操作区动作渲染在 listbox 之外的 group 里——键盘焦点移动到
+  // 动作项时该属性必须置空，否则指向语义上不属于选项集合的元素。
+  const activeDescendantId = activeItem?.type === 'option' ? activeItem.id : undefined;
   const isActive = (id: string) => activeItem?.id === id;
 
   const optionClassName = (option: AiProviderSelectOption, id: string) =>
@@ -383,7 +388,7 @@ export const AiProviderCustomSelect = ({
         aria-haspopup="listbox"
         aria-expanded={isOpen}
         aria-controls={isOpen ? `${listId}-menu` : undefined}
-        aria-activedescendant={activeItem?.id}
+        aria-activedescendant={activeDescendantId}
         disabled={disabled}
       >
         {renderSelected()}

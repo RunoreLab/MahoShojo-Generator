@@ -41,9 +41,11 @@ import {
 import {
   DESKTOP_AI_CONFIG_STORAGE_KEY,
   DesktopAiConfigStore,
+  DesktopSaveConnectionCommitError,
   type DesktopAiConfigKvStorage,
   type DesktopAiConfigInvokeFn,
 } from '../src/features/ai-config/desktop-ai-config-store';
+import { saveConnectionDraft } from '../src/features/ai-config/connection-editor';
 
 const NOW = '2026-10-05T00:00:00.000Z';
 const now = () => NOW;
@@ -90,29 +92,48 @@ const createNativeStub = (
     failSecretProbe?: boolean;
     failValidation?: boolean;
     failProfileSave?: boolean;
+    /** 写入已生效但响应回程报错（IPC 失败 ≠ 未落盘）。 */
+    failProfileSaveAfterWrite?: boolean;
+    /** 落盘核验读不到：`get_provider_profile` 本身报错。 */
+    failProfileRead?: boolean;
   } = {},
 ) => {
   const profiles = new Map(initial.map((profile) => [profile.id, profile]));
   const secrets = new Set<string>();
   const calls: string[] = [];
+  // 可变故障开关：测试可在 init/保存途中翻转（如先正常加载、再让核验读取失败）。
+  const flags = {
+    failSecretProbe: false,
+    failValidation: false,
+    failProfileSave: false,
+    failProfileSaveAfterWrite: false,
+    failProfileRead: false,
+    ...options,
+  };
   const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
     calls.push(command);
     switch (command) {
       case 'list_provider_profile_ids':
         return [...profiles.keys()];
       case 'get_provider_profile':
+        if (flags.failProfileRead) {
+          throw { code: 'store-failure', message: 'read failed' };
+        }
         return profiles.get(args?.profileId as string) ?? null;
       case 'validate_provider_execution_profile':
-        if (options.failValidation) {
+        if (flags.failValidation) {
           throw { code: 'provider-profile-rejected', message: 'native rejected the profile' };
         }
         return args?.document;
       case 'save_provider_profile': {
-        if (options.failProfileSave) {
+        if (flags.failProfileSave) {
           throw { code: 'store-failure', message: 'disk full' };
         }
         const document = args?.document as DirectProviderProfileV1;
         profiles.set(document.id, document);
+        if (flags.failProfileSaveAfterWrite) {
+          throw { code: 'store-failure', message: 'response lost after commit' };
+        }
         return undefined;
       }
       case 'delete_provider_profile':
@@ -122,7 +143,7 @@ const createNativeStub = (
         secrets.add(args?.secretRef as string);
         return undefined;
       case 'has_provider_secret':
-        if (options.failSecretProbe) throw new Error('keychain unavailable');
+        if (flags.failSecretProbe) throw new Error('keychain unavailable');
         return secrets.has(args?.secretRef as string);
       case 'delete_provider_secret':
         secrets.delete(args?.secretRef as string);
@@ -131,7 +152,7 @@ const createNativeStub = (
         throw new Error(`unexpected command ${command}`);
     }
   }) as unknown as DesktopAiConfigInvokeFn;
-  return { invoke, profiles, secrets, calls };
+  return { invoke, profiles, secrets, calls, flags };
 };
 
 const createStore = (
@@ -787,6 +808,150 @@ describe('DesktopAiConfigStore', () => {
     // staged ref 已回滚删除，凭据库只剩旧 ref——旧 Profile 仍指向旧凭据。
     expect([...native.secrets]).toEqual(['provider:p_local:api-key']);
     expect(native.calls).toContain('delete_provider_secret');
+  });
+
+  it('commit 响应丢失但写入已生效：按已保存收尾，staged 凭据不误删', async () => {
+    // D5.1-AIP-r1-r1：IPC 报错 ≠ 未落盘。读回的记录逐字段等于本次候选时
+    // 按成功路径收尾——staged ref 已被该 Profile 引用，删除会留悬空凭据。
+    const storage = createStorage();
+    const native = createNativeStub([profileFixture()], { failProfileSaveAfterWrite: true });
+    native.secrets.add('provider:p_local:api-key');
+    const store = createStore(storage, native.invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
+
+    const result = await store.saveConnection({
+      id: 'p_local',
+      name: '改名',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      modelId: 'qwen3:8b',
+      apiKey: 'sk-new-key',
+    });
+    expect(result).toEqual({ profileId: 'p_local', persisted: true });
+
+    const saved = native.profiles.get('p_local')!;
+    expect(saved.name).toBe('改名');
+    expect(saved.apiKeyRef).toMatch(/^provider-key:[0-9a-f-]{36}$/u);
+    // staged ref 保留（Profile 正在引用）；旧凭据按成功路径清理。
+    expect(native.secrets.has(saved.apiKeyRef!)).toBe(true);
+    expect(native.secrets.has('provider:p_local:api-key')).toBe(false);
+    expect(native.calls).toContain('delete_provider_secret');
+  });
+
+  it('commit 报错且落盘核验读不到记录：保守保留 staged 凭据，报错如实失败', async () => {
+    // 核验本身失败时盲删可能让已落盘 Profile 指向不存在的凭据——宁可留下
+    // 无引用的孤儿 secret，也不制造悬空引用。
+    const storage = createStorage();
+    const native = createNativeStub([profileFixture()], { failProfileSave: true });
+    native.secrets.add('provider:p_local:api-key');
+    const store = createStore(storage, native.invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
+
+    native.flags.failProfileRead = true;
+    await expect(
+      store.saveConnection({
+        id: 'p_local',
+        name: '改名',
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        modelId: 'qwen3:8b',
+        apiKey: 'sk-new-key',
+      }),
+    ).rejects.toBeInstanceOf(DesktopSaveConnectionCommitError);
+
+    // staged ref 没有被删除——若写入实际已生效，Profile 指向的凭据仍在。
+    const stagedRefs = [...native.secrets].filter((ref) => ref.startsWith('provider-key:'));
+    expect(stagedRefs).toHaveLength(1);
+    expect(native.secrets.has('provider:p_local:api-key')).toBe(true);
+    expect(native.calls).not.toContain('delete_provider_secret');
+  });
+
+  it('编辑既有连接提交失败：saveConnectionDraft 不冒报「已保存」', async () => {
+    // r1-r1 审查回归：旧记录仍在 ≠ 本次修改已保存——核验必须比对候选文档。
+    const storage = createStorage();
+    const native = createNativeStub([profileFixture()], { failProfileSave: true });
+    native.secrets.add('provider:p_local:api-key');
+    const store = createStore(storage, native.invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
+
+    const failure = await saveConnectionDraft(store, {
+      id: 'p_local',
+      name: '改名',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      modelId: 'qwen3:8b',
+      apiKey: 'sk-new-key',
+    }).then(
+      () => null,
+      (cause: unknown) => cause,
+    );
+
+    expect(failure).toBeInstanceOf(DesktopSaveConnectionCommitError);
+    expect((failure as Error).message).toContain('disk full');
+    expect((failure as Error).message).not.toContain('已保存');
+    // 旧记录与旧凭据原样保留；staged ref 已回滚。
+    expect(native.profiles.get('p_local')?.name).toBe('本地模型');
+    expect([...native.secrets]).toEqual(['provider:p_local:api-key']);
+  });
+
+  it('commit 已落盘但激活链路未跟上：如实呈现「已保存但未启用」', async () => {
+    // save_provider_profile 的 IPC 报错读回核验时发现候选已落盘——
+    // saveConnectionDraft 应投影为部分成功，而不是报错失败或静默成功。
+    const storage = createStorage();
+    const native = createNativeStub([profileFixture()], { failProfileSaveAfterWrite: true });
+    native.secrets.add('provider:p_local:api-key');
+    const store = createStore(storage, native.invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
+
+    // 提交核验通过：saveConnection 已按已保存收尾，激活语义不在编辑保存路径内。
+    await expect(
+      saveConnectionDraft(store, {
+        id: 'p_local',
+        name: '改名',
+        baseUrl: 'http://127.0.0.1:11434/v1',
+        modelId: 'qwen3:8b',
+        apiKey: 'sk-new-key',
+      }),
+    ).resolves.toBeUndefined();
+    expect(native.profiles.get('p_local')?.name).toBe('改名');
+    // 编辑既有连接不做激活——选择保持原样。
+    expect(store.getSnapshot().selection).toEqual(clientSelection(null));
+  });
+
+  it('保存成功但激活写盘失败：如实报告「已保存但未启用」', async () => {
+    const storage = createStorage();
+    const native = createNativeStub();
+    const store = createStore(storage, native.invoke);
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().overlayState).toBe('ready'));
+
+    // 只在激活写盘（含 p_new 的选择更新）时失败；Profile/凭据落盘不受影响。
+    const original = storage.setItem.bind(storage);
+    vi.spyOn(storage, 'setItem').mockImplementation((key, value) => {
+      if (value.includes('"clientConnectionId":"p_new"')) throw new Error('quota exceeded');
+      original(key, value);
+    });
+
+    const failure = await saveConnectionDraft(
+      store,
+      {
+        id: 'p_new',
+        name: '新连接',
+        baseUrl: 'http://127.0.0.1:1234/v1',
+        modelId: 'm',
+        apiKey: 'sk-secret',
+      },
+      { activate: true },
+    ).then(
+      () => null,
+      (cause: unknown) => cause,
+    );
+
+    expect((failure as Error).message).toContain('连接已保存，但启用为当前连接失败');
+    // Profile 与 staged 凭据确实已落盘——部分成功被如实区分。
+    expect(native.profiles.has('p_new')).toBe(true);
+    expect(store.getSnapshot().selection).toEqual(clientSelection(null));
   });
 
   it('new-connection save failure leaves no orphan credential behind', async () => {

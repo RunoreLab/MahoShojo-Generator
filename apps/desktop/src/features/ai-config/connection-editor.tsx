@@ -11,7 +11,11 @@ import type { DirectProviderProfileV1 } from '@mahoshojo/contracts/provider-prof
 import type { AIModelOption } from '@mahoshojo/ai-core/provider-catalog';
 
 import { ProfileDraftError, type ProfileDraft } from '../providers/profile-draft';
-import type { DesktopAiConfigStore } from './desktop-ai-config-store';
+import {
+  DesktopSaveConnectionCommitError,
+  type DesktopAiConfigStore,
+  type DesktopSaveConnectionResult,
+} from './desktop-ai-config-store';
 
 export const newConnectionId = () => `conn_${Math.random().toString(36).slice(2, 12)}`;
 
@@ -44,38 +48,61 @@ export const saveConnectionDraft = async (
   draft: ProfileDraft,
   options: { activate?: boolean } = {},
 ): Promise<void> => {
+  // 阶段一：native 提交事务。只有提交阶段的失败才需要核验候选是否已落盘
+  // （DesktopSaveConnectionCommitError 携带本次候选文档）；草稿校验、单飞
+  // 互斥拒绝等从未触达持久化的错误原样透传。
+  let result: DesktopSaveConnectionResult;
   try {
-    const result = await store.saveConnection(draft);
-    if (!result.persisted) {
-      // 保存主流程返回但 native 记录核验失败——不声称已保存，也不假装全失败。
-      throw new Error(
-        '连接保存结果无法核验：本地存储未返回该连接记录，请检查系统凭据/存储后重试',
-      );
-    }
-    if (options.activate === true) {
-      store.activateConnection(draft.id);
-      // 激活是显式操作但不抛出内部细节（未知 Profile/无效模型静默 no-op）；
-      // 这里做结果核验——选择没真正切过去就按「已保存但未启用」处理。
-      const selection = store.getSnapshot().selection;
-      if (
-        selection.executionPreference !== 'client' ||
-        selection.clientConnectionId !== draft.id
-      ) {
-        throw new Error('配置写入失败（激活未生效）');
+    result = await store.saveConnection(draft);
+  } catch (cause) {
+    if (cause instanceof DesktopSaveConnectionCommitError) {
+      // 「同 ID 记录存在」不等于「本次修改已保存」——编辑既有连接失败时旧
+      // 版本仍在。按完整候选文档核验落盘版本；核验不到才按失败上报。
+      const persisted = await store
+        .isSubmittedProfilePersisted(cause.candidate)
+        .catch(() => false);
+      if (persisted) {
+        // 已落盘但响应回程失败——如实呈现部分成功；重试沿用同一
+        // draft.id，不产生第二条 Profile。
+        throw new Error(
+          options.activate === true
+            ? `连接已保存，但启用为当前连接失败：${cause.message}。可在连接列表中对该连接「设为当前」。`
+            : `连接已保存，但保存结果返回失败：${cause.message}。连接内容已生效，可关闭编辑器。`,
+        );
       }
     }
-  } catch (cause) {
-    // native 记录核验而非信任本地列表缓存：Profile 已落盘但激活/刷新未跟上
-    // 属于部分成功，重试沿用同一 draft.id，不产生第二条 Profile。
-    const persisted = await store.isProfilePersisted(draft.id).catch(() => false);
-    if (persisted) {
+    throw cause;
+  }
+
+  // 阶段二：提交返回后的核验与激活。Profile 本体已确认提交——失败如实
+  // 呈现为「已保存但未启用/核验」，不回退成「保存失败」。
+  if (!result.persisted) {
+    // 保存主流程返回但 native 记录核验失败——不声称已保存，也不假装全失败。
+    throw new Error(
+      '连接保存结果无法核验：本地存储未返回该连接记录，请检查系统凭据/存储后重试',
+    );
+  }
+  if (options.activate === true) {
+    try {
+      store.activateConnection(draft.id);
+    } catch (cause) {
       throw new Error(
         `连接已保存，但启用为当前连接失败：${
           cause instanceof Error ? cause.message : '配置写入失败'
         }。可在连接列表中对该连接「设为当前」。`,
       );
     }
-    throw cause;
+    // 激活是显式操作但不抛出内部细节（未知 Profile/无效模型静默 no-op）；
+    // 这里做结果核验——选择没真正切过去就按「已保存但未启用」处理。
+    const selection = store.getSnapshot().selection;
+    if (
+      selection.executionPreference !== 'client' ||
+      selection.clientConnectionId !== draft.id
+    ) {
+      throw new Error(
+        '连接已保存，但启用为当前连接失败：配置写入未生效。可在连接列表中对该连接「设为当前」。',
+      );
+    }
   }
 };
 
@@ -273,7 +300,10 @@ export const ConnectionEditor = ({
         </button>
         <button
           type="button"
-          className="rounded-lg border border-(--app-border-strong) px-3 py-1.5 text-xs"
+          className="rounded-lg border border-(--app-border-strong) px-3 py-1.5 text-xs disabled:opacity-50"
+          // 保存进行中禁止关闭编辑器：取消=「放弃未提交的表单」，不是撤销已
+          // 发起的保存事务——此时关闭会让迟到的成功看起来像「取消后仍保存」。
+          disabled={saving}
           onClick={cancelEditing}
         >
           取消

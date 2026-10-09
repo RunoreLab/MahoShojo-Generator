@@ -1232,6 +1232,10 @@ pub async fn cloud_online_status(
  *   与 Web `customProvider:{providerId:'system'}` 同语义）：模型选择与
  *   生成覆盖。注入时 native 固定写 `providerId:'system'` + 空 `apiKey`，
  *   renderer 没有指定其他 Provider 或携带凭据的通道；
+ * - `generationOverrides` 走严格受检结构（字段/类型/范围/大小受 wire
+ *   契约约束，native 独立复核而非透传 renderer 输入），且注入完成后
+ *   按最终 HTTP body 的 UTF-8 字节数重新校验路由预算——注入导致超限时
+ *   在出站前拒绝（D5.1-AIP-r1-r1）；
  * - 服务器 BYOK 在 native 持有并校验的 Provider 绑定落地前保持关闭（DESK-093）：
  *   `byok`/`secretRef`/`providerId`/`apiKey` 等字段由 `deny_unknown_fields`
  *   在 IPC 反序列化时直接拒绝，renderer 没有自选服务端凭据的通道；
@@ -1257,6 +1261,13 @@ fn hosted_body_max_bytes(route_id: &str) -> usize {
         _ => HOSTED_BODY_DEFAULT_MAX_BYTES,
     }
 }
+/// `systemConfig.generationOverrides` 序列化后的字节上限：合法覆盖只有
+/// `maxOutputTokens`/`temperature`/`thinking` 三个字段，规范化后不过百余字节——
+/// 给嵌套余量到 8 KiB，超出即视为非法载荷而非「宽松的透传」。
+const HOSTED_GENERATION_OVERRIDES_MAX_BYTES: usize = 8 * 1024;
+/// `generationOverrides.maxOutputTokens` 上限：与 ai-core
+/// `MAX_CUSTOM_PROVIDER_OUTPUT_TOKENS` / wire schema `1_000_000` 同源。
+const HOSTED_GENERATION_OVERRIDE_MAX_OUTPUT_TOKENS: u64 = 1_000_000;
 /// hosted SSE 单帧上限：帧超过即视为上游协议异常。
 const HOSTED_SSE_MAX_FRAME_BYTES: usize = 512 * 1024;
 /// hosted SSE 待解析缓冲上限（未闭合残帧不得无限堆积）。
@@ -1284,12 +1295,37 @@ pub struct HostedSseEvent {
 /// hosted「使用系统默认配置」通道的非秘密偏好（D5.1-AIP-r1）。
 /// 不含任何凭据字段：`providerId`/`apiKey`/`secretRef` 之类由
 /// `deny_unknown_fields` 直接拒绝——它们不是可选，是不存在。
+/// optional 字段的显式 `null` 拒绝：契约 `.optional()` 只接受「字段缺省」，
+/// 而 serde 的 Option 语义会把 `null` 折叠成缺省无法区分——字段存在时统一
+/// 走本 helper，null 按类型错误拒绝，其余值照常反序列化。
+fn de_optional_non_null<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    let value = serde_json::Value::deserialize(deserializer).map_err(serde::de::Error::custom)?;
+    if value.is_null() {
+        return Err(serde::de::Error::custom(
+            "字段不得为 null（缺省与 null 语义不同）",
+        ));
+    }
+    serde_json::from_value(value)
+        .map(Some)
+        .map_err(serde::de::Error::custom)
+}
+
+/// hosted「使用系统默认配置」通道的非秘密偏好（D5.1-AIP-r1）。
+/// 不含任何凭据字段：`providerId`/`apiKey`/`secretRef` 之类由
+/// `deny_unknown_fields` 直接拒绝——它们不是可选，是不存在。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CloudHostedSystemConfig {
     /// 系统通道模型 ID（'default' = 服务器默认顺序）。
+    #[serde(default, deserialize_with = "de_optional_non_null")]
     pub model_id: Option<String>,
-    /// 逐模型生成覆盖（`UserGenerationOverrides` wire 形状；服务端再校验）。
+    /// 逐模型生成覆盖（`UserGenerationOverrides` wire 形状；结构、字段类型、
+    /// 范围与大小在 `normalize_hosted_generation_overrides` 独立受检）。
+    #[serde(default, deserialize_with = "de_optional_non_null")]
     pub generation_overrides: Option<serde_json::Value>,
 }
 
@@ -1299,11 +1335,132 @@ pub struct CloudHostedGenerateRequest {
     pub request_id: String,
     pub route_id: String,
     pub body: serde_json::Value,
+    /// 显式 `null` 与缺省不同待遇（契约 `.optional()` 只接受缺省）。
+    #[serde(default, deserialize_with = "de_optional_non_null")]
     pub system_config: Option<CloudHostedSystemConfig>,
 }
 
 fn invalid_request(message: impl Into<String>) -> CloudError {
     CloudError::new(CloudErrorCode::InvalidRequest, message)
+}
+
+/// `generationOverrides` 的严格受检（D5.1-AIP-r1-r1）：与
+/// `DesktopHostedGenerationOverridesSchema` / `UserGenerationOverridesSchema`
+/// 同语义——strict 对象、字段类型/范围受检、显式 null 与缺省不同待遇、
+/// 原始值大小有界。native 不依赖 renderer schema，独立 fail-closed。
+///
+/// 返回 `Ok(None)` 表示「无实质覆盖」（空对象 / 全字段缺省），与 Web
+/// `hasMeaningfulGenerationOverrides` 折叠语义一致；注入值按规范字段重建，
+/// renderer 输入本身不透传。
+fn normalize_hosted_generation_overrides(
+    value: &serde_json::Value,
+) -> Result<Option<serde_json::Value>, CloudError> {
+    // 原始载荷大小有界：严格校验之前先拒绝巨型嵌套。
+    let size = serde_json::to_vec(value)
+        .map_err(|_| invalid_request("generationOverrides 无法序列化"))?
+        .len();
+    if size > HOSTED_GENERATION_OVERRIDES_MAX_BYTES {
+        return Err(invalid_request("generationOverrides 超出大小上限"));
+    }
+    let serde_json::Value::Object(map) = value else {
+        return Err(invalid_request("generationOverrides 必须是 JSON 对象"));
+    };
+    let mut normalized = serde_json::Map::new();
+    for (key, field) in map {
+        match key.as_str() {
+            "maxOutputTokens" => {
+                // 契约要求 1..=1_000_000 的整数。`as_f64` + fract==0 与 zod
+                // `int()` 同语义：`5e5`/`500000.0` 这类整数值浮点字面量也
+                // 算整数；NaN/±inf 在 JSON 中不存在，无需另行排除。
+                let tokens = field.as_f64().filter(|f| f.fract() == 0.0);
+                match tokens {
+                    Some(t)
+                        if (1.0..=HOSTED_GENERATION_OVERRIDE_MAX_OUTPUT_TOKENS as f64)
+                            .contains(&t) =>
+                    {
+                        normalized
+                            .insert("maxOutputTokens".to_string(), serde_json::json!(t as u64));
+                    }
+                    _ => {
+                        return Err(invalid_request(
+                            "generationOverrides.maxOutputTokens 必须是 1..=1_000_000 的整数",
+                        ))
+                    }
+                }
+            }
+            "temperature" => match field.as_f64() {
+                // 契约 `finite().min(0)`：上限由服务端按模型能力裁决，native 不硬编码。
+                Some(temperature) if temperature.is_finite() && temperature >= 0.0 => {
+                    normalized.insert("temperature".to_string(), serde_json::json!(temperature));
+                }
+                _ => {
+                    return Err(invalid_request(
+                        "generationOverrides.temperature 必须是不小于 0 的有限数字",
+                    ))
+                }
+            },
+            "thinking" => {
+                normalized.insert(
+                    "thinking".to_string(),
+                    normalize_hosted_thinking_override(field)?,
+                );
+            }
+            _ => {
+                return Err(invalid_request(format!(
+                    "generationOverrides 含未知字段 {key:?}"
+                )));
+            }
+        }
+    }
+    Ok(if normalized.is_empty() {
+        None
+    } else {
+        Some(serde_json::Value::Object(normalized))
+    })
+}
+
+/// `thinking` 子对象的严格受检：与 `DesktopHostedThinkingOverrideSchema`
+/// 同语义——strict 对象、`mode` 必填且只能为 `default`/`disabled`/`enabled`、
+/// `effort` 仅在 `mode=enabled` 时可携带已知档位（显式 null 按类型错误拒绝）。
+fn normalize_hosted_thinking_override(
+    value: &serde_json::Value,
+) -> Result<serde_json::Value, CloudError> {
+    let serde_json::Value::Object(map) = value else {
+        return Err(invalid_request(
+            "generationOverrides.thinking 必须是 JSON 对象",
+        ));
+    };
+    for key in map.keys() {
+        if key != "mode" && key != "effort" {
+            return Err(invalid_request("generationOverrides.thinking 含未知字段"));
+        }
+    }
+    // 缺省、null、非字符串、未知枚举值统一按非法 mode 拒绝。
+    let mode = match map.get("mode").and_then(serde_json::Value::as_str) {
+        Some(mode @ ("default" | "disabled" | "enabled")) => mode,
+        _ => return Err(invalid_request("generationOverrides.thinking.mode 非法")),
+    };
+    let effort = match map.get("effort") {
+        None => None,
+        Some(effort_value) => match effort_value.as_str() {
+            Some(effort @ ("minimal" | "low" | "medium" | "high" | "xhigh" | "max")) => {
+                Some(effort)
+            }
+            _ => return Err(invalid_request("generationOverrides.thinking.effort 非法")),
+        },
+    };
+    // zod union：`effort` 只存在于 mode=enabled 变体；default/disabled 携带
+    // effort（含显式 null）即 strict 失败。
+    if mode != "enabled" && effort.is_some() {
+        return Err(invalid_request(
+            "generationOverrides.thinking.effort 仅在 mode=enabled 时允许",
+        ));
+    }
+    let mut normalized = serde_json::json!({ "mode": mode });
+    if let Some(effort) = effort {
+        normalized["effort"] = serde_json::json!(effort);
+    }
+    Ok(normalized)
 }
 
 /// 组装最终请求体：校验业务 body 形态与大小，并按 `systemConfig` 注入
@@ -1332,24 +1489,28 @@ fn build_hosted_request_body(
     // 折叠语义与 Web `buildCustomProviderPayload` 一致：'default' 且无生成
     // 覆盖时不注入（普通系统默认），不给服务器发无意义载荷。
     if let Some(config) = &request.system_config {
-        let model_id = config
-            .model_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|id| !id.is_empty())
-            .unwrap_or("default");
+        // 契约 `modelId: string.min(1)`：字段缺省 = 服务器默认；显式空串/纯空白
+        // 是非法输入，不是「未指定」——按 `trim` 后为空拒绝而非静默折叠。
+        let model_id = match config.model_id.as_deref() {
+            None => "default",
+            Some(raw) => {
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    return Err(invalid_request("系统通道模型 ID 无效"));
+                }
+                trimmed
+            }
+        };
         // 形状校验（native 独立 fail-closed）：非空短字符串、无控制字符；
         // 是否在系统公开清单内由服务端裁决——目录唯一事实源不在 native。
         if model_id.chars().count() > 256 || model_id.chars().any(|c| c.is_control()) {
             return Err(invalid_request("系统通道模型 ID 无效"));
         }
-        // 生成覆盖必须是 JSON 对象；空对象视同无覆盖（Web
-        // hasMeaningfulGenerationOverrides 语义），内容合法性由服务端 schema 仲裁。
+        // 生成覆盖按 wire 契约严格受检（结构/字段/范围/大小全部由 native
+        // 复核）；空对象视同无覆盖（Web hasMeaningfulGenerationOverrides 语义）。
         let overrides = match &config.generation_overrides {
             None => None,
-            Some(serde_json::Value::Object(map)) if map.is_empty() => None,
-            Some(value @ serde_json::Value::Object(_)) => Some(value.clone()),
-            Some(_) => return Err(invalid_request("generationOverrides 必须是对象")),
+            Some(value) => normalize_hosted_generation_overrides(value)?,
         };
         if model_id != "default" || overrides.is_some() {
             let Some(result_body) = result.as_object_mut() else {
@@ -1366,6 +1527,17 @@ fn build_hosted_request_body(
             }
             result_body.insert("customProvider".to_string(), custom_provider);
         }
+    }
+    // 注入后复核：customProvider 会扩大 body，renderer 侧的大小预算只在注入
+    // 前成立。最终 HTTP body 的 UTF-8 字节数必须重新对照路由上限，否则
+    // oversized systemConfig 能绕过有界输入保证（D5.1-AIP-r1-r1）。
+    let final_size = serde_json::to_vec(&result)
+        .map_err(|_| invalid_request("生成请求 body 无法序列化"))?
+        .len();
+    if final_size > hosted_body_max_bytes(&request.route_id) {
+        return Err(invalid_request(
+            "生成请求 body 注入系统通道配置后超出大小上限",
+        ));
     }
     Ok(result)
 }
@@ -3560,6 +3732,181 @@ mod tests {
             "secretRef": "provider-key:abc"
         });
         assert!(serde_json::from_value::<CloudHostedGenerateRequest>(with_secret_ref).is_err());
+    }
+
+    /// `generationOverrides` 严格受检（D5.1-AIP-r1-r1）：strict 对象、
+    /// 字段类型/范围/大小由 native 独立复核——绕过 renderer schema 的
+    /// IPC 调用必须在 native 侧 fail-closed。
+    #[test]
+    fn hosted_generation_overrides_strict_validation() {
+        let assert_rejected = |overrides: serde_json::Value| {
+            let mut request = hosted_request();
+            request.system_config = Some(CloudHostedSystemConfig {
+                model_id: None,
+                generation_overrides: Some(overrides),
+            });
+            assert_eq!(
+                build_hosted_request_body(&request).unwrap_err().code,
+                CloudErrorCode::InvalidRequest,
+            );
+        };
+
+        // 未知字段（strict：白名单外一律拒绝，含凭据走私）。
+        assert_rejected(serde_json::json!({"temperature": 0.4, "apiKey": "sk"}));
+        assert_rejected(serde_json::json!({"effort": "high"}));
+        assert_rejected(serde_json::json!({"temperature": 0.4, "extra": {"nested": []}}));
+        // 非对象。
+        assert_rejected(serde_json::json!("flat"));
+        assert_rejected(serde_json::json!([{"temperature": 0.4}]));
+        // 类型错误：数字字段给字符串/布尔、显式 null（与缺省不同待遇）。
+        assert_rejected(serde_json::json!({"temperature": "hot"}));
+        assert_rejected(serde_json::json!({"temperature": true}));
+        assert_rejected(serde_json::json!({"temperature": null}));
+        assert_rejected(serde_json::json!({"maxOutputTokens": "1024"}));
+        assert_rejected(serde_json::json!({"maxOutputTokens": null}));
+        // 数值越界：maxOutputTokens 必须 1..=1_000_000 整数；temperature >= 0 有限。
+        assert_rejected(serde_json::json!({"maxOutputTokens": 0}));
+        assert_rejected(serde_json::json!({"maxOutputTokens": -5}));
+        assert_rejected(serde_json::json!({"maxOutputTokens": 1_000_001}));
+        assert_rejected(serde_json::json!({"maxOutputTokens": 1.5}));
+        assert_rejected(serde_json::json!({"temperature": -0.1}));
+        // thinking 子对象：strict + mode 必填三选一 + effort 仅 enabled。
+        assert_rejected(serde_json::json!({"thinking": "enabled"}));
+        assert_rejected(serde_json::json!({"thinking": {"mode": "turbo"}}));
+        assert_rejected(serde_json::json!({"thinking": {}}));
+        assert_rejected(serde_json::json!({"thinking": {"mode": null}}));
+        assert_rejected(serde_json::json!({"thinking": {"mode": "enabled", "effort": "extreme"}}));
+        assert_rejected(serde_json::json!({"thinking": {"mode": "enabled", "effort": null}}));
+        assert_rejected(serde_json::json!({"thinking": {"mode": "default", "effort": "low"}}));
+        assert_rejected(serde_json::json!({"thinking": {"mode": "disabled", "effort": "max"}}));
+        assert_rejected(serde_json::json!({"thinking": {"mode": "enabled", "extra": 1}}));
+        // 超长原始载荷（strict 之前先有界）。
+        assert_rejected(
+            serde_json::json!({"thinking": {"mode": "enabled", "note": "x".repeat(HOSTED_GENERATION_OVERRIDES_MAX_BYTES)}}),
+        );
+        assert_rejected(
+            serde_json::json!({"pad": "x".repeat(HOSTED_GENERATION_OVERRIDES_MAX_BYTES)}),
+        );
+
+        // 合法覆盖原样注入并规范化（整数值浮点字面量按整数处理）。
+        let mut ok = hosted_request();
+        ok.system_config = Some(CloudHostedSystemConfig {
+            model_id: None,
+            generation_overrides: Some(serde_json::json!({
+                "temperature": 0.7,
+                "maxOutputTokens": 1024,
+                "thinking": {"mode": "enabled", "effort": "high"},
+            })),
+        });
+        let provider = build_hosted_request_body(&ok).unwrap()["customProvider"].clone();
+        assert_eq!(provider["generationOverrides"]["temperature"], 0.7);
+        assert_eq!(provider["generationOverrides"]["maxOutputTokens"], 1024);
+        assert_eq!(
+            provider["generationOverrides"]["thinking"]["mode"],
+            "enabled"
+        );
+        assert_eq!(
+            provider["generationOverrides"]["thinking"]["effort"],
+            "high"
+        );
+
+        // 合法子集：enabled 无 effort、default/disabled 无 effort。
+        let mut thin = hosted_request();
+        thin.system_config = Some(CloudHostedSystemConfig {
+            model_id: None,
+            generation_overrides: Some(serde_json::json!({"thinking": {"mode": "disabled"}})),
+        });
+        let provider = build_hosted_request_body(&thin).unwrap()["customProvider"].clone();
+        assert_eq!(
+            provider["generationOverrides"]["thinking"]["mode"],
+            "disabled"
+        );
+
+        // 顶层 optional 字段显式 null 按类型错误拒绝（契约 `.optional()` ≠ `null`）。
+        let null_overrides = serde_json::json!({
+            "requestId": "req-1",
+            "routeId": HOSTED_ROUTE_DETAILS_STREAM,
+            "body": {"answers": []},
+            "systemConfig": {"modelId": "glm-5.3-flash", "generationOverrides": null}
+        });
+        assert!(serde_json::from_value::<CloudHostedGenerateRequest>(null_overrides).is_err());
+        let null_system_config = serde_json::json!({
+            "requestId": "req-1",
+            "routeId": HOSTED_ROUTE_DETAILS_STREAM,
+            "body": {"answers": []},
+            "systemConfig": null
+        });
+        assert!(serde_json::from_value::<CloudHostedGenerateRequest>(null_system_config).is_err());
+        // 空 systemConfig 合法（全字段缺省 → 无注入）。
+        let empty_config = serde_json::json!({
+            "requestId": "req-1",
+            "routeId": HOSTED_ROUTE_DETAILS_STREAM,
+            "body": {"answers": []},
+            "systemConfig": {}
+        });
+        assert!(serde_json::from_value::<CloudHostedGenerateRequest>(empty_config).is_ok());
+        // 空字符串 modelId 按契约 min(1) 拒绝（而非静默折叠为 default）。
+        let mut empty_model = hosted_request();
+        empty_model.system_config = Some(CloudHostedSystemConfig {
+            model_id: Some("  ".to_string()),
+            generation_overrides: None,
+        });
+        assert_eq!(
+            build_hosted_request_body(&empty_model).unwrap_err().code,
+            CloudErrorCode::InvalidRequest
+        );
+    }
+
+    /// 注入后预算复核（D5.1-AIP-r1-r1）：原始 body 恰好贴着路由上限时，
+    /// `customProvider` 注入会把最终 HTTP body 推过线——必须在出站前拒绝。
+    #[test]
+    fn hosted_body_budget_rechecked_after_system_config_injection() {
+        // 贴近 256 KiB 上限的合法 body（注入前仍在预算内）。
+        let mut near_limit = hosted_request();
+        let pad = "x".repeat(HOSTED_BODY_DEFAULT_MAX_BYTES - 4096);
+        near_limit.body = serde_json::json!({"answers": [], "pad": pad});
+        assert!(build_hosted_request_body(&near_limit).is_ok());
+        // 同一份 body + systemConfig → 注入后超过 256 KiB → 拒绝。
+        near_limit.system_config = Some(CloudHostedSystemConfig {
+            model_id: Some("glm-5.3-flash".to_string()),
+            generation_overrides: Some(serde_json::json!({
+                "temperature": 0.7,
+                "maxOutputTokens": 2048,
+                "thinking": {"mode": "enabled", "effort": "high"},
+            })),
+        });
+        // 注入量很小不足以超限：先确认正常注入路径仍通过。
+        assert!(build_hosted_request_body(&near_limit).is_ok());
+
+        // 真正贴边：让注入后的增量越过上限。
+        let mut edge = hosted_request();
+        let prefix_overhead = serde_json::to_vec(&serde_json::json!({"answers": [], "pad": ""}))
+            .unwrap()
+            .len();
+        let injection_overhead = serde_json::to_vec(&serde_json::json!({
+            "customProvider": {
+                "providerId": "system",
+                "modelId": "glm-5.3-flash",
+                "apiKey": "",
+            }
+        }))
+        .unwrap()
+        .len()
+            - 2; // 合入现有对象时去掉外层花括号开销
+        let pad =
+            "x".repeat(HOSTED_BODY_DEFAULT_MAX_BYTES - prefix_overhead - injection_overhead + 8);
+        edge.body = serde_json::json!({"answers": [], "pad": pad});
+        // 注入前恰好在上限之内；注入 customProvider 后必然越线。
+        let pre_size = serde_json::to_vec(&edge.body).unwrap().len();
+        assert!(pre_size <= HOSTED_BODY_DEFAULT_MAX_BYTES);
+        edge.system_config = Some(CloudHostedSystemConfig {
+            model_id: Some("glm-5.3-flash".to_string()),
+            generation_overrides: None,
+        });
+        assert_eq!(
+            build_hosted_request_body(&edge).unwrap_err().code,
+            CloudErrorCode::InvalidRequest
+        );
     }
 
     #[test]

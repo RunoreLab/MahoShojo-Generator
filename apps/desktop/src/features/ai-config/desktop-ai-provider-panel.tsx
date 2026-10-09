@@ -54,12 +54,14 @@ import {
 import { ConnectionTestSection } from './connection-test';
 
 /**
- * 「使用系统默认配置」在选择器中的取值。
- * `system` 与 `preset:*` 前缀是宿主保留值：连接 ID 恒为 `conn_*` 生成且
- * store 显式拒绝 `system` 草稿 ID，取值空间不冲突（DESK-ONLINE-002/004）。
+ * Provider 下拉取值空间：`system` / `preset:<id>` / `conn:<id>` 三者互斥。
+ * Profile ID 规则允许 `:`（如 `preset:deepseek` 是合法的连接 ID），裸 ID
+ * 会与预设前缀撞名——连接一律经 `conn:` 前缀进入取值空间，回调处统一解码。
  */
 const SYSTEM_OPTION_VALUE = 'system';
+const CONN_OPTION_PREFIX = 'conn:';
 const presetOptionValue = (presetId: string) => `preset:${presetId}`;
+const connOptionValue = (profileId: string) => `${CONN_OPTION_PREFIX}${profileId}`;
 
 export interface DesktopAiProviderPanelCopy {
   /** 服务器通路两种生成方式的输出说明。 */
@@ -182,7 +184,8 @@ export const DesktopAiProviderPanel = ({
         };
       }),
     ...state.profiles.map((item) => ({
-      value: item.id,
+      // conn:<id> 包装：连接 ID 允许含 ':'（如 preset:deepseek），裸值会撞预设前缀。
+      value: connOptionValue(item.id),
       label: item.name,
       description: `默认模型 ${item.modelId}`,
       group: '我的连接',
@@ -190,7 +193,11 @@ export const DesktopAiProviderPanel = ({
     })),
   ];
   const providerValue =
-    target.location === 'server' ? SYSTEM_OPTION_VALUE : (state.selection.clientConnectionId ?? '');
+    target.location === 'server'
+      ? SYSTEM_OPTION_VALUE
+      : state.selection.clientConnectionId !== null
+        ? connOptionValue(state.selection.clientConnectionId)
+        : '';
 
   const providerActions: AiProviderSelectAction[] = [
     { id: 'new-connection', label: '＋ 新建自定义连接' },
@@ -222,9 +229,14 @@ export const DesktopAiProviderPanel = ({
       if (entry) openPresetEditor(entry);
       return;
     }
-    // 生成入口选连接=立即用它执行：连接、执行位置与模型作为同一次受检
-    // overlay 更新原子落盘（DESK-AIP-003.3）。
-    store.activateConnection(value);
+    // conn:<id> 解码回真实 Profile ID——裸 ID 可能形似 preset:*，只在解码后进入激活语义。
+    if (value.startsWith(CONN_OPTION_PREFIX)) {
+      // 生成入口选连接=立即用它执行：连接、执行位置与模型作为同一次受检
+      // overlay 更新原子落盘（DESK-AIP-003.3）。
+      store.activateConnection(value.slice(CONN_OPTION_PREFIX.length));
+      return;
+    }
+    // 未知前缀（外部注入的非法取值）不派发——选择器值空间只有上述三类。
   };
 
   const effectiveModelId = target.modelId;
@@ -488,9 +500,9 @@ export const DesktopAiProviderPanel = ({
             中保存 Provider。{copy.emptyProfilesHint}
           </p>
         )}
-      {target.location === 'client' && target.unavailableReason !== null && (
-        <p role="status">{target.unavailableReason}</p>
-      )}
+      {/* 不可用原因对两个执行位置统一展示：服务器侧悬空系统模型同样需要
+          告警与重选入口（模型下拉即重选入口，见上方 disabled 诊断项）。 */}
+      {target.unavailableReason !== null && <p role="status">{target.unavailableReason}</p>}
 
       {editing !== null && (
         <ConnectionEditor

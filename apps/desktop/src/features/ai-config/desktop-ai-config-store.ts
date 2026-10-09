@@ -97,6 +97,48 @@ export interface DesktopSaveConnectionResult {
   persisted: boolean;
 }
 
+/**
+ * Profile 文档的规范序列化：对象键排序、数组保序。
+ * native 按 opaque JSON 存取，回读字段序可能与写入时不同；比较
+ * 「落盘的是不是本次提交的候选」必须用与字段序无关的口径。
+ */
+const canonicalJson = (value: unknown): string => {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalJson(item)).join(',')}]`;
+  }
+  if (value !== null && typeof value === 'object') {
+    const entries = Object.keys(value as Record<string, unknown>)
+      .sort()
+      .map(
+        (key) =>
+          `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`,
+      );
+    return `{${entries.join(',')}}`;
+  }
+  return JSON.stringify(value);
+};
+
+/**
+ * 保存事务在 native 提交阶段失败的错误投影（D5.1-AIP-r1-r1）。
+ *
+ * 到这一步说明候选 Profile 已装配、native 校验/凭据写入/落盘中至少一步
+ * 已发起——IPC 报错不代表写入未发生，结果处于「不确定」区间。错误携带
+ * 本次提交的候选 Profile，调用方用 `isSubmittedProfilePersisted(candidate)`
+ * 核验「落盘的是不是这一版」：编辑既有连接失败时旧版本仍在，「同 ID 记录
+ * 存在」的存在性核验会把失败误报成已保存。
+ */
+export class DesktopSaveConnectionCommitError extends Error {
+  /** 本次提交尝试落盘的候选 Profile。 */
+  readonly candidate: DirectProviderProfileV1;
+
+  constructor(candidate: DirectProviderProfileV1, cause: unknown) {
+    super(cause instanceof Error ? cause.message : '连接保存失败');
+    this.name = 'DesktopSaveConnectionCommitError';
+    this.candidate = candidate;
+    this.cause = cause;
+  }
+}
+
 const INITIAL_STATE: DesktopAiConfigState = {
   overlayState: 'loading',
   overlayError: null,
@@ -518,19 +560,40 @@ export class DesktopAiConfigStore {
    *
    * 带新 Key 的保存走 **staged secretRef** 事务：
    *   validate(带新 ref 的候选) → set(新 ref, 明文) → save(候选)
-   *   ├─ 任一步失败：删除新 ref 回滚，旧 Profile + 旧凭据完全不受影响；
+   *   ├─ 失败且读回落盘记录确认不是本次候选：删除新 ref 回滚，
+   *     旧 Profile + 旧凭据完全不受影响；
+   *   ├─ 失败但读回的落盘记录就是本次候选：写入实际已生效（响应回程
+   *     丢失），按成功收尾；
+   *   ├─ 失败且落盘核验读不到记录：保守保留 staged ref——盲删可能让已
+   *     落盘 Profile 指向不存在的凭据；
    *   └─ 成功：删除旧 ref。
    * 若直接往旧 `apiKeyRef` 写新 Key，`save_provider_profile` 失败会让旧 Profile
    * 静默开始使用新凭据；staged ref 即使回滚清理也失败，最多只留下一个没有任何
    * Profile 引用的孤儿 secret。ref 不拼长 profileId，避免撞 256 字符上限。
    */
   /**
-   * native 记录核验：该 Profile 是否已保存可读。
-   * 用于区分「保存完全失败」与「已落盘但列表刷新/激活未跟上」的部分成功。
+   * native 记录核验：该 Profile 是否已保存可读（存在性探针）。
+   * 只回答「有没有」，不回答「是不是本次提交的版本」——编辑既有连接失败时
+   * 旧版本仍在，存在性核验不能用作保存结果的判定（会误报已保存）。
+   * 保存核验请用 `isSubmittedProfilePersisted`。
    */
   isProfilePersisted = async (profileId: string): Promise<boolean> => {
     const profile = await getProviderProfile(this.deps.invoke, profileId).catch(() => null);
     return profile !== null;
+  };
+
+  /**
+   * 提交核验：native 落盘的记录是否就是本次提交的候选版本（D5.1-AIP-r1-r1）。
+   * 按完整文档内容比较（规范序列化，与字段序无关）——`updatedAt` 与 staged
+   * `apiKeyRef` 随每次提交刷新，任一不同即表示落盘的不是本次候选。
+   */
+  isSubmittedProfilePersisted = async (
+    candidate: DirectProviderProfileV1,
+  ): Promise<boolean> => {
+    const persisted = await getProviderProfile(this.deps.invoke, candidate.id).catch(
+      () => null,
+    );
+    return persisted !== null && canonicalJson(persisted) === canonicalJson(candidate);
   };
 
   /** 入口级单飞互斥（r1-B）：同一时刻只允许一个保存事务。 */
@@ -621,17 +684,34 @@ export class DesktopAiConfigStore {
 
       try {
         // Profile 先过 native 校验（含投影回显）再写凭据：校验失败不动凭据。
-        await validateProviderExecutionProfile(this.deps.invoke, profile);
+        // 用 schema 归一后的 `validated` 作候选——落盘的就是这份文档，后续
+        // 核验按它比对（未归一的对象若携带 schema 外字段会让比对误报不一致）。
+        profile = await validateProviderExecutionProfile(this.deps.invoke, profile);
         if (stagedApiKeyRef !== undefined && plaintextApiKey !== undefined) {
           await setProviderSecret(this.deps.invoke, stagedApiKeyRef, plaintextApiKey);
         }
         await saveProviderProfile(this.deps.invoke, profile);
       } catch (cause) {
-        // 回滚 staged 凭据：旧 Profile 与其 apiKeyRef 指向的凭据保持原样。
-        if (stagedApiKeyRef !== undefined) {
-          await deleteProviderSecret(this.deps.invoke, stagedApiKeyRef).catch(() => undefined);
+        // 提交结果不确定（IPC 报错不代表写入未发生）：先读回落盘记录再决定。
+        const landed = await getProviderProfile(this.deps.invoke, profile.id).then(
+          (doc) => ({ ok: true as const, doc }),
+          () => ({ ok: false as const, doc: null }),
+        );
+        const committed =
+          landed.ok &&
+          landed.doc !== null &&
+          canonicalJson(landed.doc) === canonicalJson(profile);
+        if (!committed) {
+          // 明确读到旧版本或缺失 → staged ref 没有引用方，删除完成回滚；
+          // 核验本身失败（landed.ok === false）时保守保留——盲删可能让已
+          // 落盘 Profile 指向不存在的凭据，孤儿 secret 至多浪费一条不可达记录。
+          if (stagedApiKeyRef !== undefined && landed.ok) {
+            await deleteProviderSecret(this.deps.invoke, stagedApiKeyRef).catch(() => undefined);
+          }
+          throw new DesktopSaveConnectionCommitError(profile, cause);
         }
-        throw cause;
+        // 读回的记录逐字段等于本次候选——写入实际生效，错误发生在响应回程；
+        // staged ref 已被该 Profile 引用，落入下方成功路径照常收尾。
       }
       // 保存成功后旧凭据变为孤儿，尽力清理（失败只留下不可达 secret）。
       if (
@@ -641,10 +721,11 @@ export class DesktopAiConfigStore {
         await deleteProviderSecret(this.deps.invoke, existing.apiKeyRef).catch(() => undefined);
       }
       await this.refreshProfiles();
-      // native 记录核验：区分「保存失败」与「已落盘但后续环节未跟上」。
+      // 提交核验：按本次候选的完整文档比对，而不是只查同 ID 存在性——
+      // 编辑既有连接失败时旧版本仍在，存在性核验会把失败误报成已保存。
       // 不做激活——「记住/启用这条连接」是调用方经 `activateConnection` 的
       // 显式操作（r1-B：编辑保存不得偷改当前选择）。
-      const persisted = await this.isProfilePersisted(profile.id);
+      const persisted = await this.isSubmittedProfilePersisted(profile);
       return { profileId: profile.id, persisted };
     } finally {
       this.publish({ savingConnection: false });

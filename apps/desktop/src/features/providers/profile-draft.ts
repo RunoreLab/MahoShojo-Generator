@@ -156,8 +156,18 @@ export const saveProfileDraft = async (
     }
     await saveProviderProfile(tauriInvoke, profile);
   } catch (cause) {
+    // IPC 报错不代表写入未发生：staged ref 可能已被实际落盘的 Profile 引用，
+    // 盲删会留悬空引用。读回记录确认它没被引用才回滚删除；读回本身失败时
+    // 保守保留（孤儿 secret 至多浪费一条不可达记录，盲删可能让已落盘
+    // Profile 指向不存在的凭据）。
     if (stagedRef !== undefined) {
-      await deleteProviderSecret(tauriInvoke, stagedRef).catch(() => undefined);
+      const landed = await getProviderProfile(tauriInvoke, profile.id).then(
+        (doc) => ({ ok: true as const, doc }),
+        () => ({ ok: false as const, doc: null }),
+      );
+      if (landed.ok && landed.doc?.apiKeyRef !== stagedRef) {
+        await deleteProviderSecret(tauriInvoke, stagedRef).catch(() => undefined);
+      }
     }
     throw cause;
   }

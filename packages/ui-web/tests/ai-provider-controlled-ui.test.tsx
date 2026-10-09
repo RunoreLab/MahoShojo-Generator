@@ -200,6 +200,83 @@ describe('AiProviderCustomSelect（AIP-1 分组/动作/键盘）', () => {
     });
     expect(menuOf()).toBeNull();
   });
+
+  it('aria-activedescendant 不指向 listbox 外的操作项（APG Select-Only）', async () => {
+    const onChange = vi.fn();
+    const onAction = vi.fn();
+    await render(
+      <AiProviderCustomSelect
+        options={options}
+        value="p1"
+        onChange={onChange}
+        placeholder="选择供应商"
+        actions={[{ id: 'new', label: '＋ 新建自定义连接' }]}
+        onAction={onAction}
+      />,
+    );
+    await act(async () => triggerOf().click());
+    // 活动项是 option 时：activedescendant 指向 listbox 内 role=option 的元素。
+    const optionDescendant = triggerOf().getAttribute('aria-activedescendant');
+    expect(optionDescendant).toBeTruthy();
+    const optionElement = document.getElementById(optionDescendant!)!;
+    expect(optionElement.getAttribute('role')).toBe('option');
+    expect(menuOf()!.contains(optionElement)).toBe(true);
+
+    // 键盘移到操作区动作：动作渲染在 listbox 外的独立 group，不属于选项
+    // 集合——activedescendant 必须置空，而不是把动作宣布成 option。
+    await act(async () => {
+      keydown(triggerOf(), 'End');
+    });
+    expect(triggerOf().getAttribute('aria-activedescendant')).toBeNull();
+    // 动作的高亮与激活本身不受影响（视觉 class + Enter 派发仍在）。
+    await act(async () => {
+      keydown(triggerOf(), 'Enter');
+    });
+    expect(onAction).toHaveBeenCalledWith('new');
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('可用空间极小时按实际高度限高，不强制最小高度溢出裁切', async () => {
+    // 修复前 MENU_MIN_HEIGHT=96 强制下限：裁切边界内只剩几像素时菜单
+    // 仍渲染 96px，整体被边界裁掉、任何选项都不可达。现在如实收缩到
+    // 可用空间（overflow-y-auto 保持可滚动）。
+    let wrapper: HTMLDivElement | null = null;
+    await render(
+      <div
+        ref={(element) => {
+          wrapper = element;
+        }}
+        style={{ overflowY: 'auto' }}
+      >
+        <AiProviderCustomSelect
+          options={options}
+          value=""
+          onChange={() => {}}
+          placeholder="选择供应商"
+        />
+      </div>,
+    );
+    const rect = (top: number, bottom: number) =>
+      ({
+        top,
+        bottom,
+        left: 0,
+        right: 100,
+        width: 100,
+        height: bottom - top,
+        x: 0,
+        y: top,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    // 裁切祖先可视框 700..740；触发器 712..724 → 下方可用空间仅 8px。
+    vi.spyOn(wrapper!, 'getBoundingClientRect').mockReturnValue(rect(700, 740));
+    const trigger = triggerOf();
+    vi.spyOn(trigger, 'getBoundingClientRect').mockReturnValue(rect(712, 724));
+    await act(async () => trigger.click());
+    const menu = menuOf()!.parentElement as HTMLElement;
+    expect(menu.style.maxHeight).toBe('8px');
+    expect(menu.className).toContain('overflow-y-auto');
+  });
 });
 
 describe('AiExecutionLocationField（SegmentedControl 共源）', () => {

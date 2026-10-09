@@ -649,4 +649,31 @@ describe('Desktop Canshou real route and session UI (native adapter mock)', () =
     expect(mocks.execute.mock.calls[0]![3].aborted).toBe(true);
     await act(async () => finish({ status: 'cancelled', mode: 'direct-local', rawText: '刷新前正文', reason: 'aborted' }));
   });
+
+  it('blocks generation while the saved system model has left the catalog', async () => {
+    // D5.1-AIP-r1-r1：曾选系统模型被目录移除——解析层保留诊断值并告警，
+    // 生成按钮禁用；即使绕过按钮状态派发，入口守卫也不触达执行器。
+    window.localStorage.setItem(DESKTOP_AI_CONFIG_STORAGE_KEY, JSON.stringify({
+      version: 3,
+      selection: {
+        executionPreference: 'server',
+        clientConnectionId: 'local',
+        systemModelId: 'retired-model',
+      },
+      hiddenPresetIds: [],
+      generationOverrides: {},
+      modelsByProfileId: {},
+    }));
+    storeStepQuestionnaire(
+      [{ id: 'q1', question: '题一', options: ['答A'] }],
+      { q1: '答' },
+    );
+    await mount();
+    await click('恢复草稿');
+    expect(container.textContent).toContain('已不在支持列表中');
+    expect(button('发送问卷并生成').disabled).toBe(true);
+    button('发送问卷并生成').click();
+    await settle();
+    expect(mocks.execute).not.toHaveBeenCalled();
+  });
 });
