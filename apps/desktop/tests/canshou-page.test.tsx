@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { invoke } from '@tauri-apps/api/core';
+import { resetDesktopCloudSessionStoreForTests } from '../src/features/account/use-desktop-cloud-session';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { act, StrictMode } from 'react';
@@ -60,7 +62,7 @@ const draft = () => ({
 });
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  vi.clearAllMocks(); window.localStorage.clear();
+  vi.clearAllMocks(); vi.mocked(invoke).mockReset(); resetDesktopCloudSessionStoreForTests(); window.localStorage.clear();
   window.localStorage.setItem(DESKTOP_AI_CONFIG_STORAGE_KEY, JSON.stringify({
     version: 2,
     selection: { executionPreference: 'client', clientConnectionId: 'local' },
@@ -174,6 +176,34 @@ describe('Desktop Canshou real route and session UI (native adapter mock)', () =
       expect(mocks.save).not.toHaveBeenCalled();
     }
   });
+
+  it('protects the actual result while explicit private cloud creation is in flight', async () => {
+    const account = { userId: 7, username: 'mock-user' }; const expires = '2099-01-01T00:00:00.000Z';
+    let finish!: (value: unknown) => void;
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
+      if (command === 'cloud_cached_account') return { account, sessionExpiresAt: expires } as never;
+      if (command === 'cloud_auth_status') return { state: 'active', account, sessionExpiresAt: expires } as never;
+      if (command === 'cloud_card_library_request') {
+        const request = (args as any).request;
+        if (request.routeId === 'user-capacity.query') return { status: 200, body: { success: true, capacity: 10, usedSlots: 0 } } as never;
+        if (request.routeId === 'data-cards.create') return await new Promise((resolve) => { finish = resolve; }) as never;
+      }
+      return undefined as never;
+    });
+    window.localStorage.setItem(CANSHOU_DRAFT_KEY, JSON.stringify(draft()));
+    const router = await mount(); await submitQuestionnaire(); await click('保存私有云端副本');
+    await act(async () => { [...document.querySelectorAll('button')].find((node) => node.textContent === '保存')!.click(); }); await settle();
+    expect(button('重新生成').disabled).toBe(true); expect(button('保存到本地卡库').disabled).toBe(true);
+    await act(async () => { void router.navigate({ to: '/' }); }); await settle(); expect(router.state.location.pathname).toBe('/canshou');
+    const prevented = vi.fn(); await act(async () => { close({ preventDefault: prevented }); }); expect(prevented).toHaveBeenCalled();
+    expect(mocks.execute).toHaveBeenCalledTimes(1); expect(container.textContent).toContain('巢穴回声');
+    await act(async () => finish({ status: 500, body: { error: 'after insert' } })); await settle();
+    expect(document.body.textContent).toContain('服务器可能已创建副本'); expect(button('保存到本地卡库').disabled).toBe(false);
+    expect(vi.mocked(invoke).mock.calls.filter(([cmd, args]) => cmd === 'cloud_card_library_request' && (args as any).request.routeId === 'data-cards.create')).toHaveLength(1);
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+
 
   it('does not reinterpret restored raw output as an active Markdown stream after selecting stream', async () => {
     window.localStorage.setItem(CANSHOU_DRAFT_KEY, JSON.stringify({

@@ -1,3 +1,4 @@
+import { PrivateResultSave } from '../features/cloud-save/private-result-save';
 import { GenerationMarkdownPreview } from './generation-markdown-preview';
 import { generationActionClassNames } from '@mahoshojo/ui-web/generation-actions';
 import { QuestionnaireDraftPanel } from './questionnaire-draft-panel';
@@ -162,6 +163,9 @@ function CanshouForm({ session, restored }: { session: CanshouSession; restored:
   const cardLibraryHost = useDesktopCardLibraryHost();
   // 登录只决定是否附带会话/活动身份；System Default 公开路由对匿名放行（DESK-ONLINE-009）。
   const { store: cloudSessionStore } = useDesktopCloudSession();
+  const cloudSavingRef = useRef(false);
+  const [cloudSaving, setCloudSaving] = useState(false);
+  const onCloudSavingChange = useCallback((saving: boolean) => { cloudSavingRef.current = saving; setCloudSaving(saving); }, []);
   const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
   const [presetEntries, setPresetEntries] = useState<QuestionnairePresetEntry[]>([]);
@@ -237,12 +241,12 @@ function CanshouForm({ session, restored }: { session: CanshouSession; restored:
     },
   });
   const guard = useLeaveGuard(
-    () => session.isBusy() || session.hasUnsavedDraft() || aiStore.isPreparingGeneration(),
+    () => cloudSavingRef.current || session.isBusy() || session.hasUnsavedDraft() || aiStore.isPreparingGeneration(),
     '生成或保存尚未完成，或当前草稿未能保存。请等待、取消生成，或重试保存草稿后再离开。',
     '窗口关闭保护初始化失败，生成与保存暂不可用。请重新打开页面后重试。',
     () => {
       const current = session.getSnapshot();
-      if (current.saving || aiStore.isPreparingGeneration()) return false;
+      if (cloudSavingRef.current || current.saving || aiStore.isPreparingGeneration()) return false;
       const confirmDiscardUnpersisted = () => window.confirm('当前内容尚未写入草稿。确认放弃本页未持久化内容并离开？原有存档和已保存的本地卡不会删除。');
       if (current.phase !== 'generating') return !session.hasUnsavedDraft() || confirmDiscardUnpersisted();
       const memoryOnly = session.isDraftBlocked();
@@ -290,9 +294,11 @@ function CanshouForm({ session, restored }: { session: CanshouSession; restored:
   const selections: readonly QuestionnaireSelection[] = draftSelections ?? [];
   const allowMultiple = state.draft.allowMultipleQuestionnaires === true;
   const updateDraft = (patch: Partial<typeof state.draft>) => {
+    if (cloudSavingRef.current) return;
     session.updateDraft({ ...session.getSnapshot().draft, ...patch });
   };
   const updateSelections = useCallback((next: QuestionnaireSelection[]) => {
+    if (cloudSavingRef.current) return;
     session.updateDraft({ ...session.getSnapshot().draft, questionnaireSelections: next });
   }, [session]);
   // 合法草稿已在首次渲染前恢复；没有持久化选择集时才加载默认内置问卷。
@@ -330,7 +336,7 @@ function CanshouForm({ session, restored }: { session: CanshouSession; restored:
   // 首份问卷的描述展示在页首 logo 下方（与 Web `/canshou` 同一位置）。
   const primaryQuestionnaire = effectiveSelections[0]?.questionnaire;
   const mode = target.mode;
-  const busy = state.phase === 'generating' || state.saving || aiState.generationActive;
+  const busy = cloudSaving || state.phase === 'generating' || state.saving || aiState.generationActive;
   const showStreamPreview = state.phase === 'generating' && state.activeGenerationMode === 'stream';
   useEffect(() => () => aiStore.cancelPreparingGeneration(), [aiStore]);
   const blockedDraft = state.pendingRestore;
@@ -469,7 +475,7 @@ function CanshouForm({ session, restored }: { session: CanshouSession; restored:
     // 用户自备的选择集——选择集存在且流程非空就足以生成（与 Web 同口径，P2-r1）。
     // 悬空选择（含服务器侧被目录移除的系统模型）保留诊断值但禁止派发——
     // unavailableReason 与按钮 disabled 必须同口径（D5.1-AIP-r1-r1）。
-    if (!guard.ready || session.isBusy() || aiState.generationActive || !executionMode || submissionSelections.length === 0 || submissionFlow.length === 0 || questionnaireLoading || clientProfilesBlocked || current.pendingRestore || target.unavailableReason !== null) return;
+    if (cloudSavingRef.current || !guard.ready || session.isBusy() || aiState.generationActive || !executionMode || submissionSelections.length === 0 || submissionFlow.length === 0 || questionnaireLoading || clientProfilesBlocked || current.pendingRestore || target.unavailableReason !== null) return;
     if (target.location === 'client' && !target.providerTarget) return;
     if (!discardUnsavedResult) {
       if (session.hasUnsavedResult()) { pendingActionRef.current = 'generate'; setConfirmRegenerate('unsaved'); return; }
@@ -518,13 +524,13 @@ function CanshouForm({ session, restored }: { session: CanshouSession; restored:
     else generate();
   };
   const handleOptionSelect = (value: string) => {
-    if (!flowItem || !guard.ready || session.isBusy() || session.getSnapshot().pendingRestore) return;
+    if (cloudSavingRef.current || !flowItem || !guard.ready || session.isBusy() || session.getSnapshot().pendingRestore) return;
     const nextAnswers = { ...session.getSnapshot().draft.answers, [flowItem.key]: value };
     updateDraft({ answers: nextAnswers });
     proceedToNextQuestion(nextAnswers);
   };
   const handleNext = () => {
-    if (!flowItem || !guard.ready || session.isBusy() || session.getSnapshot().pendingRestore) return;
+    if (cloudSavingRef.current || !flowItem || !guard.ready || session.isBusy() || session.getSnapshot().pendingRestore) return;
     const nextAnswers = session.getSnapshot().draft.answers;
     if (question?.required === true && !nextAnswers[flowItem.key]?.trim()) {
       setActionError('本题为必答，请填写后再继续。');
@@ -540,7 +546,7 @@ function CanshouForm({ session, restored }: { session: CanshouSession; restored:
     formatQuestionnaireAnswers(collectQuestionnaireAnswerExportItems(visibleQuestionTargets, answersByKey)),
   ].filter(Boolean).join('\n\n');
   const handleClearAnswers = () => {
-    if (busy || !window.confirm('确定要清空所有已保存的问卷答案吗？此操作不可撤销。')) return;
+    if (cloudSavingRef.current || busy || !window.confirm('确定要清空所有已保存的问卷答案吗？此操作不可撤销。')) return;
     updateDraft({ answers: {} });
     setQuestionIndex(0);
     setActionInfo(session.getSnapshot().draftSaved ? '存档已清空！' : '当前答案已清空，原存档仍保留；本次更改尚未保存。');
@@ -548,6 +554,7 @@ function CanshouForm({ session, restored }: { session: CanshouSession; restored:
 
   /** 快速随机：纯本机产出（不经模型），结果走与生成完成相同的相位与保存通路。 */
   const runQuickRandom = useCallback(() => {
+    if (cloudSavingRef.current) return;
     try {
       const data = generateRandomCanshou();
       session.applyLocalResult(data, 'canshou', true);
@@ -563,7 +570,7 @@ function CanshouForm({ session, restored }: { session: CanshouSession; restored:
   }, [session]);
 
   const handleQuickRandom = () => {
-    if (!guard.ready || busy || state.pendingRestore) return;
+    if (cloudSavingRef.current || !guard.ready || busy || state.pendingRestore) return;
     if (session.hasUnsavedResult()) {
       pendingActionRef.current = 'quick-random';
       setConfirmRegenerate('unsaved');
@@ -1036,6 +1043,7 @@ function CanshouForm({ session, restored }: { session: CanshouSession; restored:
                       />
                     )}
 
+                  <PrivateResultSave onBusyChange={onCloudSavingChange} data={resolvedResultPayload} disabled={!guard.ready || busy} className={`${generationActionClassNames.primary} w-full`} />
                   <button className={`${generationActionClassNames.primary} flex-1`} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => { if (guard.ready) void session.saveResult(); }}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>
                 </QuestionnaireResultActions>}
                 <CanshouLorePanel open={showDetails} onOpenChange={(open) => updateDraft({ showDetails: open })} />
