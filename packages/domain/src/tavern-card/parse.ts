@@ -55,7 +55,7 @@ export function parseTavernCandidates(chunks: PngTextChunk[]): TavernCardCandida
     let parseMethod: TavernCardCandidate['parseMethod'] = 'base64-json';
 
     try {
-      const decoded = new TextDecoder('utf-8', { fatal: false }).decode(decodeBase64ToBytes(text));
+      const decoded = new TextDecoder('utf-8', { fatal: true }).decode(decodeBase64ToBytes(text));
       parsed = JSON.parse(decoded);
       parseMethod = 'base64-json';
     } catch {
@@ -154,7 +154,7 @@ const buildCandidatesMeta = (chunks: PngTextChunk[]): TavernImportMeta['candidat
     let parseMethod: TavernCardCandidate['parseMethod'] = 'base64-json';
 
     try {
-      const decoded = new TextDecoder('utf-8', { fatal: false }).decode(decodeBase64ToBytes(chunk.text));
+      const decoded = new TextDecoder('utf-8', { fatal: true }).decode(decodeBase64ToBytes(chunk.text));
       parsed = JSON.parse(decoded);
       parseMethod = 'base64-json';
       ok = isLikelyTavernCard(parsed);
@@ -263,6 +263,7 @@ export function parseTavernCardFromPngBytes(bytes: Uint8Array): TavernParseResul
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    if (message === 'TAVERN_LIMIT_EXCEEDED') return createParseError('PAYLOAD_DECODE_FAILED', '酒馆卡超过本地解析大小或文本块数量上限。');
     if (message === 'NOT_PNG') {
       return createParseError('NOT_PNG', '文件不是 PNG。');
     }

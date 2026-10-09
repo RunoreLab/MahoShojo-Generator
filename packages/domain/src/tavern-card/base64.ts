@@ -28,6 +28,9 @@ const stripBase64Whitespace = (input: string): string => {
 export function decodeBase64ToBytes(input: string): Uint8Array {
   const normalized = stripBase64Whitespace(input.trim());
   if (!normalized) return new Uint8Array();
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(normalized)) {
+    throw new Error('Base64 包含非法字符或填充');
+  }
   if (normalized.length % 4 !== 0) {
     throw new Error('Base64 长度不是 4 的倍数');
   }

@@ -9,3 +9,5 @@ export * from './worldbook';
 export * from './scenario';
 export * from './limits';
 export * from './recommend';
+export * from './general';
+export * from './document';

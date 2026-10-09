@@ -1,6 +1,7 @@
 import type { PngTextChunk, TavernChunkType } from './types';
 import { crc32Concat } from './crc32';
-import { unzlibSync } from 'fflate';
+import { Unzlib } from 'fflate';
+import { MAX_TAVERN_FILE_BYTES, MAX_TAVERN_PNG_TEXT_BYTES } from './limits';
 
 const PNG_SIGNATURE = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -36,6 +37,7 @@ export function assertPngSignature(bytes: Uint8Array): void {
 }
 
 export function parsePngChunkRanges(bytes: Uint8Array): PngChunkRange[] {
+  if (bytes.byteLength > MAX_TAVERN_FILE_BYTES) throw new Error('TAVERN_LIMIT_EXCEEDED');
   assertPngSignature(bytes);
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const ranges: PngChunkRange[] = [];
@@ -56,6 +58,7 @@ export function parsePngChunkRanges(bytes: Uint8Array): PngChunkRange[] {
     if (type === 'IEND') break;
   }
 
+  if (!ranges.some((range) => range.type === 'IEND')) throw new Error('PNG_TRUNCATED');
   return ranges;
 }
 
@@ -68,13 +71,29 @@ const parseTextKeywordAndPayload = (data: Uint8Array): { keyword: string; payloa
 };
 
 const decodeUtf8 = (bytes: Uint8Array): string => {
-  return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+  catch { return ''; } // Damaged/non-UTF8 metadata cannot become a silently repaired JSON candidate.
 };
 
 const inflateZlibOrNull = (bytes: Uint8Array): Uint8Array | null => {
+  const parts: Uint8Array[] = [];
+  let size = 0;
   try {
-    return unzlibSync(bytes);
-  } catch {
+    // Incremental input bounds the expansion allocated before the callback checks the budget.
+    const decoder = new Unzlib((chunk) => {
+      size += chunk.length;
+      if (size > MAX_TAVERN_PNG_TEXT_BYTES) throw new Error('TAVERN_LIMIT_EXCEEDED');
+      parts.push(chunk);
+    });
+    for (let offset = 0; offset < bytes.length; offset += 1024) {
+      decoder.push(bytes.subarray(offset, offset + 1024), offset + 1024 >= bytes.length);
+    }
+    const out = new Uint8Array(size);
+    let offset = 0;
+    for (const part of parts) { out.set(part, offset); offset += part.length; }
+    return out;
+  } catch (error) {
+    if (error instanceof Error && error.message === 'TAVERN_LIMIT_EXCEEDED') throw error;
     return null;
   }
 };
@@ -82,6 +101,12 @@ const inflateZlibOrNull = (bytes: Uint8Array): Uint8Array | null => {
 export function extractPngTextChunks(bytes: Uint8Array): PngTextChunk[] {
   const ranges = parsePngChunkRanges(bytes);
   const chunks: PngTextChunk[] = [];
+  let totalTextBytes = 0;
+  const append = (chunk: PngTextChunk) => {
+    totalTextBytes += new TextEncoder().encode(chunk.text).byteLength + chunk.keyword.length + 12;
+    if (totalTextBytes > MAX_TAVERN_PNG_TEXT_BYTES) throw new Error('TAVERN_LIMIT_EXCEEDED');
+    chunks.push(chunk);
+  };
 
   for (const range of ranges) {
     const chunkType = range.type as TavernChunkType;
@@ -90,7 +115,7 @@ export function extractPngTextChunks(bytes: Uint8Array): PngTextChunk[] {
     if (range.type === 'tEXt') {
       const parsed = parseTextKeywordAndPayload(data);
       if (!parsed) continue;
-      chunks.push({ chunkType, keyword: parsed.keyword, text: decodeUtf8(parsed.payload) });
+      append({ chunkType, keyword: parsed.keyword, text: decodeUtf8(parsed.payload) });
       continue;
     }
 
@@ -113,9 +138,9 @@ export function extractPngTextChunks(bytes: Uint8Array): PngTextChunk[] {
       if (compressionFlag === 1) {
         const inflated = inflateZlibOrNull(payload);
         if (!inflated) continue;
-        chunks.push({ chunkType, keyword, text: decodeUtf8(inflated) });
+        append({ chunkType, keyword, text: decodeUtf8(inflated) });
       } else {
-        chunks.push({ chunkType, keyword, text: decodeUtf8(payload) });
+        append({ chunkType, keyword, text: decodeUtf8(payload) });
       }
       continue;
     }
@@ -129,7 +154,7 @@ export function extractPngTextChunks(bytes: Uint8Array): PngTextChunk[] {
       const payload = data.subarray(nullIndex + 2);
       const inflated = inflateZlibOrNull(payload);
       if (!inflated) continue;
-      chunks.push({ chunkType, keyword, text: decodeUtf8(inflated) });
+      append({ chunkType, keyword, text: decodeUtf8(inflated) });
       continue;
     }
   }
@@ -213,6 +238,7 @@ export function replacePngTextChunks(
     replacementChunks.reduce((sum, part) => sum + part.length, 0) +
     iendParts.reduce((sum, part) => sum + part.length, 0);
 
+  if (totalLength > MAX_TAVERN_FILE_BYTES) throw new Error('TAVERN_LIMIT_EXCEEDED');
   const out = new Uint8Array(totalLength);
   let cursor = 0;
   for (const part of keptParts) {
