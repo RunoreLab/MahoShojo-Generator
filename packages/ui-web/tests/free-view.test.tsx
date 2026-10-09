@@ -158,3 +158,15 @@ it('does not duplicate panel ids across disclosure instances', () => {
   expect(new Set(ids).size).toBe(2);
   expect(ids.every((id) => id && document.getElementById(id))).toBe(true);
 });
+
+it('keeps prompt actions and generation sections in the actual Web order', async () => {
+  const { FreeFormSections, FreePromptActions } = await import('../src/free');
+  const copy = vi.fn(); const clear = vi.fn();
+  act(() => root.render(<FreeFormSections schema="Schema" prompt={<FreePromptField value="钟楼" onChange={vi.fn()} actions={<FreePromptActions canCopy onCopy={copy} onClear={clear} />} />} attachments="附件" mode="方式" language="语言" provider="供应商" actions="生成操作" tokens="Tokens" />));
+  const text = container.textContent!;
+  for (const [before, after] of [['Schema', '提示词'], ['清空存档', '附件'], ['附件', '方式'], ['方式', '语言'], ['语言', '供应商'], ['供应商', '生成操作'], ['生成操作', 'Tokens']]) expect(text.indexOf(before)).toBeLessThan(text.indexOf(after));
+  act(() => [...container.querySelectorAll('button')].find((button) => button.textContent === '复制提示词')!.click());
+  act(() => [...container.querySelectorAll('button')].find((button) => button.textContent === '清空存档')!.click());
+  expect(copy).toHaveBeenCalledOnce(); expect(clear).toHaveBeenCalledOnce();
+  expect(container.querySelectorAll('textarea')).toHaveLength(1);
+});

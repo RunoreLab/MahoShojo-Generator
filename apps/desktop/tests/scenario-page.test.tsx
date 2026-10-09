@@ -74,16 +74,15 @@ const mount = async () => {
 };
 
 describe('Desktop Scenario route and session UI (native adapter mock)', () => {
-  it('restores answers draft on explicit action, generates once and saves the card', async () => {
+  it('restores answers draft automatically, generates once and saves the card', async () => {
     window.localStorage.setItem(SCENARIO_DRAFT_KEY, JSON.stringify(
       storedDraft({ '故事发生的场景是怎样的？': '雨后的天台' }),
     ));
     await mount();
     expect(container.querySelector('[data-testid="page-scenario"]')).toBeTruthy();
     expect(mocks.execute).not.toHaveBeenCalled();
-    // 待恢复期间生成门禁关闭。
-    expect(button('生成情景').disabled).toBe(true);
-    await click('恢复草稿');
+    expect(button('生成情景').disabled).toBe(false);
+    expect(button('恢复草稿')).toBeUndefined();
     const textarea = [...container.querySelectorAll('textarea')].find(
       (el) => el.getAttribute('aria-label') === '故事发生的场景是怎样的？',
     )!;
@@ -130,7 +129,6 @@ describe('Desktop Scenario route and session UI (native adapter mock)', () => {
       output: { mode: 'hosted-stream', cardKind: 'general-scenario', card: general, rawText: general.content, phase: 'completed' },
     }));
     await mount();
-    await click('恢复草稿');
     const result = container.querySelector('[aria-label="生成结果"]')!;
     expect(result.classList.contains('card')).toBe(true);
     expect(result.querySelector('.card')).toBeNull();
@@ -150,7 +148,6 @@ describe('Desktop Scenario route and session UI (native adapter mock)', () => {
     });
     window.localStorage.setItem(SCENARIO_DRAFT_KEY, JSON.stringify(storedDraft({ '故事发生的场景是怎样的？': '钟楼' })));
     await mount();
-    await click('恢复草稿');
     await click('生成情景');
     const exports = container.querySelector('[aria-label="保存原始数据"]')!;
     const text = exports.querySelector('textarea')!;
@@ -176,7 +173,6 @@ describe('Desktop Scenario route and session UI (native adapter mock)', () => {
       storedDraft({ '故事发生的场景是怎样的？': 'x' }),
     ));
     await mount();
-    await click('恢复草稿');
     await click('生成情景');
     await click('重新生成');
     expect(container.querySelector('dialog')?.open).toBe(true);
@@ -194,7 +190,6 @@ describe('Desktop Scenario route and session UI (native adapter mock)', () => {
       scenarioTitleHint: '夜雨',
     }));
     await mount();
-    await click('恢复草稿');
     // D5.1-AIP-r1：草稿的流式偏好不改写、切回服务器即恢复；客户端只按
     // 生效的「非流式」呈现。标题输入与 Web 一样保留可见，并明确提示仅流式回退；
     // 可见不改变派发条件。
@@ -218,7 +213,6 @@ describe('Desktop Scenario route and session UI (native adapter mock)', () => {
       output: { mode: 'hosted-json', cardKind: 'scenario', card: signed, rawText: 'x', phase: 'completed' },
     }));
     await mount();
-    await click('恢复草稿');
     // 可编辑 localStorage 恢复的签名卡：本机未验证，不得宣称官方签名（G2-r1）。
     expect(container.textContent).toContain('含签名字段（本机未验证）');
     expect(container.textContent).not.toContain('官方签名（服务器生成）');
@@ -243,7 +237,6 @@ describe('Desktop Scenario route and session UI (native adapter mock)', () => {
       storedDraft({ '故事发生的场景是怎样的？': 'x' }),
     ));
     await mount();
-    await click('恢复草稿');
     await click('生成情景');
     // 断言执行器确实收到 hosted-json 意图（而非客户端意图配服务器假结果）。
     expect((mocks.execute.mock.calls[0]![2] as { mode: string }).mode).toBe('hosted-json');
@@ -272,7 +265,6 @@ describe('Desktop Scenario route and session UI (native adapter mock)', () => {
       storedDraft({ '故事发生的场景是怎样的？': 'x' }),
     ));
     await mount();
-    await click('恢复草稿');
     await click('生成情景');
     expect((mocks.execute.mock.calls[0]![2] as { mode: string }).mode).toBe('direct-local');
     // 只断言结果标题区：页面静态文案（客户端说明「结果不带官方签名」）自带该词。
@@ -306,11 +298,117 @@ describe('Desktop Scenario route and session UI (native adapter mock)', () => {
       storedDraft({ '故事发生的场景是怎样的？': '雨后的天台' }),
     ));
     await mount();
-    await click('恢复草稿');
     expect(container.textContent).toContain('已不在支持列表中');
     expect(button('生成情景').disabled).toBe(true);
     button('生成情景').click();
     await settle();
     expect(mocks.execute).not.toHaveBeenCalled();
   });
+});
+
+it('creates, edits, exports and saves the common Markdown workspace without generating or replacing the structured result', async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  window.localStorage.setItem(SCENARIO_DRAFT_KEY, JSON.stringify(storedDraft({ '故事发生的场景是怎样的？': '钟楼' })));
+  await mount();
+  await click('生成情景');
+  await click('将生成结果转为通用情景卡');
+  const editor = () => container.querySelector('[aria-label="通用情景卡编辑器"]')!;
+  expect(editor().querySelector('textarea')?.value).toContain('天台上的一次对话');
+  const textarea = editor().querySelector('textarea')!;
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, '# 新的设定\n\n未保存编辑'); textarea.dispatchEvent(new Event('input', { bubbles: true })); });
+  const saved = JSON.parse(window.localStorage.getItem(SCENARIO_DRAFT_KEY)!);
+  expect(saved.generalScenarioDraft.content).toBe('# 新的设定\n\n未保存编辑');
+  expect(saved.output.card.title).toBe(scenarioCard.title);
+  await click('创建空白通用情景卡');
+  expect(window.confirm).toHaveBeenCalled();
+  expect(textarea.value).toBe('# 新的设定\n\n未保存编辑');
+  const action = (label: string) => [...editor().querySelectorAll('button')].find((item) => item.textContent === label)!;
+  await act(async () => { action('下载通用情景卡').click(); action('复制到剪贴板').click(); });
+  expect(mocks.download).toHaveBeenLastCalledWith('通用情景_雨后采访.json', JSON.stringify(saved.generalScenarioDraft, null, 2));
+  expect(writeText).toHaveBeenLastCalledWith(JSON.stringify(saved.generalScenarioDraft, null, 2));
+  let finish: () => void = () => undefined;
+  mocks.save.mockImplementationOnce(() => new Promise((resolve) => { finish = () => resolve({ written: true }); }));
+  await act(async () => { action('保存到本地卡库').click(); action('保存到本地卡库').click(); });
+  expect(mocks.save).toHaveBeenCalledTimes(1);
+  expect(editor().querySelector('textarea')?.disabled).toBe(true);
+  await act(async () => finish());
+  expect(mocks.save).toHaveBeenLastCalledWith(expect.objectContaining({ provenance: { kind: 'unsigned', execution: 'edited' } }));
+  expect(container.querySelector('[aria-label="生成结果"] h2')?.textContent).toBe(scenarioCard.title);
+  expect(mocks.execute).toHaveBeenCalledTimes(1);
+  await act(async () => root.unmount()); root = createRoot(container);
+  await mount();
+  expect(editor().querySelector('textarea')?.value).toBe('# 新的设定\n\n未保存编辑');
+  expect(mocks.execute).toHaveBeenCalledTimes(1);
+  vi.mocked(window.confirm).mockReturnValue(true);
+  await click('清空本地草稿');
+  expect(editor().querySelector('textarea')).toBeNull();
+  expect(container.querySelector('[aria-label="生成结果"] h2')?.textContent).toBe(scenarioCard.title);
+  expect(mocks.save).toHaveBeenCalledTimes(1);
+});
+
+it('keeps corrupt Scenario source but allows new answers and generation', async () => {
+  const corrupt = '{broken-scenario';
+  window.localStorage.setItem(SCENARIO_DRAFT_KEY, corrupt);
+  await mount();
+  expect(container.textContent).toContain('自动保存暂不可用');
+  expect(container.textContent).not.toContain('当前输入会自动保存到本机');
+  const input = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="故事发生的场景是怎样的？"]')!;
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, '新舞台'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+  expect(button('生成情景').disabled).toBe(false);
+  await click('生成情景');
+  expect(mocks.execute).toHaveBeenCalledTimes(1);
+  expect(window.localStorage.getItem(SCENARIO_DRAFT_KEY)).toBe(corrupt);
+});
+
+it.each(['route', 'close'] as const)('confirms leaving a memory-only Scenario draft via %s without deleting the protected source', async (kind) => {
+  const corrupt = '{protected-scenario'; window.localStorage.setItem(SCENARIO_DRAFT_KEY, corrupt);
+  const router = await mount();
+  const input = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="故事发生的场景是怎样的？"]')!;
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, '新内容'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+  const close = mocks.listen.mock.calls.at(-1)![0] as (event: { preventDefault: () => void }) => void;
+  const denied = vi.fn();
+  await act(async () => { if (kind === 'route') void router.navigate({ to: '/' }); else close({ preventDefault: denied }); }); await settle();
+  expect(container.querySelector('[data-testid="page-scenario"]')).not.toBeNull();
+  if (kind === 'close') expect(denied).toHaveBeenCalled();
+  vi.mocked(window.confirm).mockReturnValue(true);
+  const accepted = vi.fn();
+  await act(async () => { if (kind === 'route') void router.navigate({ to: '/' }); else close({ preventDefault: accepted }); }); await settle();
+  if (kind === 'route') expect(container.querySelector('[data-testid="page-scenario"]')).toBeNull();
+  else expect(accepted).not.toHaveBeenCalled();
+  expect(window.localStorage.getItem(SCENARIO_DRAFT_KEY)).toBe(corrupt);
+});
+
+it('clears a restored Markdown editor without resurrecting it from the preserved generated general card', async () => {
+  const general = { templateId: '通用情景', title: '保留结果', content: '# 保留正文' };
+  window.localStorage.setItem(SCENARIO_DRAFT_KEY, JSON.stringify({
+    ...storedDraft({ '故事发生的场景是怎样的？': '旧回答' }), selectedLanguage: 'en', generationMode: 'stream',
+    output: { mode: 'hosted-stream', cardKind: 'general-scenario', card: general, rawText: general.content, phase: 'completed' },
+  }));
+  await mount();
+  expect(container.querySelector('[aria-label="通用情景卡编辑器"] textarea')).not.toBeNull();
+  vi.mocked(window.confirm).mockReturnValue(true);
+  await click('清空本地草稿');
+  const stored = JSON.parse(window.localStorage.getItem(SCENARIO_DRAFT_KEY)!);
+  expect(stored).toMatchObject({ generalScenarioDraft: null, generationMode: 'non-stream', selectedLanguage: 'zh-CN', output: { card: general, rawText: general.content, phase: 'completed' } });
+  expect(container.querySelector('[aria-label="生成结果"]')).not.toBeNull();
+  expect(container.querySelector('[aria-label="通用情景卡编辑器"] textarea')).toBeNull();
+  await act(async () => root.unmount()); root = createRoot(container); await mount();
+  expect(container.querySelector('[aria-label="通用情景卡编辑器"] textarea')).toBeNull();
+  expect(container.querySelector('[aria-label="生成结果"]')).not.toBeNull();
+  expect(mocks.execute).not.toHaveBeenCalled();
+});
+
+it('reports a failed Scenario clear persistence without losing the generated result or old stored bytes', async () => {
+  const general = { templateId: '通用情景', title: '草稿', content: '# 旧编辑' };
+  const raw = JSON.stringify({ ...storedDraft({ '故事发生的场景是怎样的？': '旧回答' }), generalScenarioDraft: general, output: { mode: 'hosted-json', cardKind: 'scenario', card: { ...scenarioCard, metadata: { ...scenarioCard.metadata, signature: 'old-signed' } }, rawText: 'raw', phase: 'completed' } });
+  window.localStorage.setItem(SCENARIO_DRAFT_KEY, raw); await mount();
+  const original = Storage.prototype.setItem;
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) { if (key === SCENARIO_DRAFT_KEY) throw new Error('quota'); return original.call(this, key, value); });
+  vi.mocked(window.confirm).mockReturnValue(true); await click('清空本地草稿');
+  expect(container.textContent).toContain('自动保存暂不可用');
+  expect(container.textContent).toContain('草稿写入失败');
+  expect(container.textContent).toContain('含签名字段（本机未验证）');
+  expect(container.querySelector('[aria-label="通用情景卡编辑器"] textarea')).toBeNull();
+  expect(window.localStorage.getItem(SCENARIO_DRAFT_KEY)).toBe(raw);
 });

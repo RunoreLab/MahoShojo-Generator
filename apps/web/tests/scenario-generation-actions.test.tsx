@@ -3,12 +3,12 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ dispatch: vi.fn(), download: vi.fn(), save: vi.fn(), copy: vi.fn() }));
+const mocks = vi.hoisted(() => ({ dispatch: vi.fn(), download: vi.fn(), save: vi.fn(), copy: vi.fn(), navigate: vi.fn() }));
 vi.mock('@/lib/use-generation-api-intent-latch', () => ({ useGenerationApiIntentLatch: () => ({ tryAcquire: () => ({ dispatch: mocks.dispatch }) }) }));
 vi.mock('@/lib/auth', () => ({ authStorage: { getActivityHeaders: async () => ({}), getAuthHeader: async () => null } }));
 vi.mock('@/lib/cooldown', () => ({ useProviderModeCooldown: () => ({ isCooldown: false, startCooldown: vi.fn(), remainingTime: 0, otherRemainingTime: 0 }) }));
 vi.mock('@/lib/content-safety/client', () => ({ getSensitiveWordRedirectTarget: async () => null }));
-vi.mock('@/lib/app-router-adapter', () => ({ useAppRouterAdapter: () => ({ push: vi.fn() }) }));
+vi.mock('@/lib/app-router-adapter', () => ({ useAppRouterAdapter: () => ({ push: mocks.navigate }) }));
 vi.mock('@/components/ai/ProviderCooldownNotice', () => ({ ProviderCooldownNotice: () => null }));
 vi.mock('@/components/Footer', () => ({ default: () => null }));
 vi.mock('@/components/AiProviderSelector', () => ({ default: () => null }));
@@ -61,4 +61,73 @@ it('gives save and export the same finite hierarchy as Desktop without changing 
   expect(mocks.dispatch).toHaveBeenCalledOnce();
   expect(mocks.download).toHaveBeenCalledTimes(2);
   expect(editor.querySelector('textarea')?.value).toBe(general.content);
+});
+
+it('preserves corrupt Scenario bytes and sets the dirty baseline after preferences restore', async () => {
+  const key = 'mahoshojo.scenario.page-draft.v1';
+  const corrupt = '{broken-scenario'; localStorage.setItem(key, corrupt);
+  localStorage.setItem('mahoshojo.scenario.preferences.v1', JSON.stringify({ generationMode: 'non-stream', selectedLanguage: 'en', scenarioTitleHint: '旧标题', isAdvancedVisible: true, fieldsToKeepEmpty: ['elements.roles'] }));
+  await act(async () => root.render(<ScenarioPage />));
+  expect(container.textContent).toContain('自动保存暂不可用');
+  expect(container.textContent).not.toContain('已自动保存于');
+  const initialLeave = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(initialLeave); expect(initialLeave.defaultPrevented).toBe(false);
+  const input = container.querySelector('textarea')!;
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, '新输入'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+  const leave = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(leave); expect(leave.defaultPrevented).toBe(true);
+  expect(localStorage.getItem(key)).toBe(corrupt);
+  await act(async () => findButton(container, '生成情景').click());
+  expect(mocks.dispatch).toHaveBeenCalledOnce();
+  expect(localStorage.getItem(key)).toBe(corrupt);
+  expect(container.textContent).toContain('tokens');
+});
+
+
+it('protects a fresh memory-only result even when the restored form itself is unchanged', async () => {
+  const key = 'mahoshojo.scenario.page-draft.v1';
+  localStorage.setItem(key, '{broken-scenario');
+  await act(async () => root.render(<ScenarioPage />));
+  const initialLeave = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(initialLeave); expect(initialLeave.defaultPrevented).toBe(false);
+  await act(async () => findButton(container, '生成情景').click());
+  expect(mocks.dispatch).toHaveBeenCalledOnce();
+  const leave = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(leave); expect(leave.defaultPrevented).toBe(true);
+  expect(localStorage.getItem(key)).toBe('{broken-scenario');
+});
+
+
+it('asks exactly once for an encyclopedia link and honors both responses with a memory-only draft', async () => {
+  localStorage.setItem('mahoshojo.scenario.page-draft.v1', '{broken-scenario');
+  await act(async () => root.render(<ScenarioPage />));
+  const input = container.querySelector('textarea')!;
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, '新内容'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  const link = container.querySelector<HTMLAnchorElement>('a[href="/encyclopedia/scenario-generator"]')!;
+  await act(async () => link.click());
+  expect(confirm).toHaveBeenCalledTimes(1);
+  expect(mocks.navigate).not.toHaveBeenCalled();
+  confirm.mockReturnValue(true);
+  await act(async () => link.click());
+  expect(confirm).toHaveBeenCalledTimes(2);
+  expect(mocks.navigate).toHaveBeenCalledExactlyOnceWith('/encyclopedia/scenario-generator');
+});
+
+it('clears only Scenario inputs and Markdown editor while retaining the generated result', async () => {
+  await act(async () => root.render(<ScenarioPage />));
+  await act(async () => findButton(container, '生成情景').click());
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  await act(async () => findButton(container, '清空本地草稿').click());
+  expect(container.querySelector('[aria-label="结构化情景结果"] h2')?.textContent).toBe(structured.title);
+  expect(container.querySelector('[aria-label="通用情景卡编辑器"] textarea')).toBeNull();
+  expect(container.querySelector<HTMLTextAreaElement>('textarea[aria-label="故事发生的场景是怎样的？"]')?.value).toBe('');
+});
+
+it('clearing in a memory-only Scenario session leaves corrupt original bytes untouched', async () => {
+  const key = 'mahoshojo.scenario.page-draft.v1'; const raw = '{broken-scenario'; localStorage.setItem(key, raw);
+  await act(async () => root.render(<ScenarioPage />));
+  await act(async () => findButton(container, '生成情景').click());
+  vi.spyOn(window, 'confirm').mockReturnValue(true);
+  await act(async () => findButton(container, '清空本地草稿').click());
+  expect(localStorage.getItem(key)).toBe(raw);
+  expect(container.querySelector('[aria-label="结构化情景结果"] h2')?.textContent).toBe(structured.title);
+  expect(container.textContent).toContain('自动保存暂不可用');
+  const leave = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(leave); expect(leave.defaultPrevented).toBe(true);
 });

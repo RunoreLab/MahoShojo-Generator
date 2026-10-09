@@ -77,3 +77,33 @@ it('surfaces structured output and the general editor individually without doubl
   expect(container.querySelector('a[href="/"]')?.closest('.card')).toBeNull();
   expect(container.querySelector('textarea')?.value).toBe('可编辑 Markdown');
 });
+
+it('uses the Web section order, compact local hint, and controlled Markdown workspace', async () => {
+  const { ScenarioFormSections, ScenarioDraftNotice, GeneralScenarioEditor } = await import('../src/scenario');
+  const clear = vi.fn(); const edit = vi.fn(); const create = vi.fn(); const convert = vi.fn();
+  act(() => root.render(<>
+    <ScenarioFormSections inputs={<ScenarioDraftNotice storageLabel="本机" onClear={clear} />} advanced="高级字段" provider="供应商" language="语言" mode="方式" actions="生成" tokens="Tokens" />
+    <GeneralScenarioEditor draft={{ templateId: '通用情景', title: '钟楼', content: '# 雨夜', extra: { retained: true } }} onCreate={create} onConvert={convert} canConvert onChange={edit} />
+  </>));
+  const text = container.textContent!;
+  for (const [before, after] of [['高级字段', '供应商'], ['供应商', '语言'], ['语言', '方式'], ['方式', '生成'], ['生成', 'Tokens']]) expect(text.indexOf(before)).toBeLessThan(text.indexOf(after));
+  expect(text).toContain('当前输入会自动保存到本机');
+  expect(text).not.toContain('浏览器');
+  expect(text).not.toContain('恢复草稿');
+  const byText = (label: string) => [...container.querySelectorAll('button')].find((button) => button.textContent === label)!;
+  act(() => { byText('清空本地草稿').click(); byText('创建空白通用情景卡').click(); byText('将生成结果转为通用情景卡').click(); });
+  expect(clear).toHaveBeenCalledOnce(); expect(create).toHaveBeenCalledOnce(); expect(convert).toHaveBeenCalledOnce();
+  const input = container.querySelector<HTMLInputElement>('#general-scenario-title')!;
+  act(() => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '新标题'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+  expect(edit).toHaveBeenCalledWith({ title: '新标题' });
+  expect(container.querySelector('details')?.open).toBe(false);
+  expect(container.querySelector('pre')?.textContent).toContain('"retained": true');
+});
+
+it('does not claim an old save time or successful autosave after storage fails', async () => {
+  const { ScenarioDraftNotice } = await import('../src/scenario');
+  act(() => root.render(<ScenarioDraftNotice storageLabel="本机" updatedAt={1000} saveUnavailable onClear={vi.fn()} />));
+  expect(container.textContent).toContain('自动保存暂不可用');
+  expect(container.textContent).not.toContain('已自动保存于');
+  expect(container.textContent).not.toContain('当前输入会自动保存');
+});

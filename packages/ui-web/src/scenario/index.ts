@@ -10,3 +10,5 @@ export { ScenarioPageLayout, type ScenarioPageLayoutProps } from './ScenarioPage
 export { ScenarioTitleField, ScenarioQuestionFields, ScenarioBlankFields, ScenarioLanguageField } from './ScenarioFields';
 export { ScenarioResultSurface, type ScenarioResultSurfaceProps } from './ScenarioResultSurface';
 export { ScenarioResultContent, ScenarioJsonDetails } from './ScenarioResultContent';
+export { ScenarioFormSections, ScenarioDraftNotice, SCENARIO_CLEAR_DRAFT_CONFIRM } from './ScenarioFormSections';
+export { GeneralScenarioEditor } from './GeneralScenarioEditor';

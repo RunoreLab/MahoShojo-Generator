@@ -4,6 +4,8 @@ import { generationActionClassNames, generationSubmitClassName } from '@mahoshoj
 import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { BackHomeLink } from '@mahoshojo/ui-web/shell';
+import { useUnsavedPageGuard } from '@mahoshojo/ui-web/client';
 import { useAppRouterAdapter } from '@/lib/app-router-adapter';
 
 import Footer from '@/components/Footer';
@@ -43,6 +45,8 @@ import type { CharacterCardPortraitAsset } from '@/types/visual-asset';
 // 流式白名单以 ai-core 为准，不再本地另存一份。
 import {
   FreePageLayout,
+  FreeFormSections,
+  FreePromptActions,
   FreeResultActions,
   FreeResultPanel,
   FreeJsonResult,
@@ -185,6 +189,11 @@ export function FreePage() {
   const [schemaId, setSchemaId] = useState<FreeSchemaId>('general');
   const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
   const [prompt, setPrompt] = useState<string>('');
+  const [draftReady, setDraftReady] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const draftStorageBlocked = useRef(false);
+  const unsavedDraft = useRef(false);
+  const blockedDraftBaseline = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -234,7 +243,7 @@ export function FreePage() {
 
   // 本地存档：对齐问卷生成的“自动保存”
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || !draftReady) return;
     try {
       const payload = {
         schemaId,
@@ -244,18 +253,24 @@ export function FreePage() {
         showFieldGuide,
         showLanguageSection,
       };
-      window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(payload));
+      const serialized = JSON.stringify(payload);
+      if (draftStorageBlocked.current) { blockedDraftBaseline.current ??= serialized; unsavedDraft.current = serialized !== blockedDraftBaseline.current; return; }
+      window.localStorage.setItem(LOCAL_STORAGE_KEY, serialized);
+      unsavedDraft.current = false;
+      setDraftError(null);
     } catch {
-      // localStorage 可能不可用，忽略
+      unsavedDraft.current = true;
+      setDraftError('存档写入失败，当前内容仅保留在此页面。请先复制提示词。');
     }
-  }, [generationMode, prompt, schemaId, selectedLanguage, showFieldGuide, showLanguageSection]);
+  }, [draftReady, generationMode, prompt, schemaId, selectedLanguage, showFieldGuide, showLanguageSection]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
       const saved = window.localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (!saved) return;
+      if (saved === null) return;
       const parsed = JSON.parse(saved) as any;
+      if (!parsed || typeof parsed !== 'object' || !FREE_SCHEMA_OPTIONS.some((option) => option.id === parsed.schemaId) || !['stream', 'non-stream'].includes(parsed.generationMode) || typeof parsed.prompt !== 'string' || (parsed.selectedLanguage !== undefined && typeof parsed.selectedLanguage !== 'string') || (parsed.showFieldGuide !== undefined && typeof parsed.showFieldGuide !== 'boolean') || (parsed.showLanguageSection !== undefined && typeof parsed.showLanguageSection !== 'boolean')) throw new Error('invalid draft');
       if (parsed?.schemaId) setSchemaId(parsed.schemaId);
       if (parsed?.generationMode) setGenerationMode(parsed.generationMode);
       if (typeof parsed?.prompt === 'string') setPrompt(parsed.prompt);
@@ -263,14 +278,21 @@ export function FreePage() {
       if (typeof parsed?.showFieldGuide === 'boolean') setShowFieldGuide(parsed.showFieldGuide);
       if (typeof parsed?.showLanguageSection === 'boolean') setShowLanguageSection(parsed.showLanguageSection);
     } catch {
-      // 忽略损坏的存档
+      draftStorageBlocked.current = true;
+      setDraftError('旧存档无法读取，已保留原数据；可以继续填写和生成，当前新内容请先复制保存。');
+    } finally {
+      setDraftReady(true);
     }
   }, []);
 
+  useUnsavedPageGuard(() => unsavedDraft.current || ((draftStorageBlocked.current || draftError !== null) && (resultData !== null || streamedGeneralCard !== null || !!streamingMarkdown)));
+
+
   const handleClearDraft = () => {
-    if (typeof window !== 'undefined') {
-      window.localStorage.removeItem(LOCAL_STORAGE_KEY);
+    if (typeof window !== 'undefined' && !draftStorageBlocked.current) {
+      try { window.localStorage.removeItem(LOCAL_STORAGE_KEY); } catch { setDraftError('清空存档失败，当前提示词仍保留。'); return; }
     }
+    if (!draftStorageBlocked.current) { unsavedDraft.current = false; setDraftError(null); }
     setPrompt('');
     setError(null);
     clearAttachments();
@@ -750,52 +772,32 @@ export function FreePage() {
   return (
     <FreePageLayout
       controls={(
-        <div className="space-y-4">
-          <FreeSchemaFields
+        <FreeFormSections
+          schema={
+            <FreeSchemaFields
             schemaId={schemaId}
             options={schemaOptionsForMode}
             onChange={setSchemaId}
             showFieldGuide={showFieldGuide}
             onToggleFieldGuide={() => setShowFieldGuide(!showFieldGuide)}
             disabled={submitting}
-          />
-
-          <FreePromptField
+          />}
+          prompt={
+            <FreePromptField
             value={prompt}
             onChange={setPrompt}
             disabled={submitting}
-            actions={(
-              <>
-                <button
-                  type="button"
-                  className="text-blue-600 hover:underline"
-                  onClick={() => {
-                    navigator.clipboard.writeText(prompt).then(() => alert('已复制提示词到剪贴板')).catch(() => alert('复制失败'));
-                  }}
-                  disabled={!prompt.trim()}
-                >
-                  复制提示词
-                </button>
-                <button
-                  type="button"
-                  className="text-red-600 hover:underline"
-                  onClick={handleClearDraft}
-                  disabled={submitting}
-                >
-                  清空存档
-                </button>
-
-              </>
-            )}
-          />
-
-          <FreeAttachmentPanel
+            actions={<FreePromptActions canCopy={!!prompt.trim()} disabled={submitting} onCopy={() => {
+              void Promise.resolve().then(() => navigator.clipboard.writeText(prompt)).then(() => alert('已复制提示词到剪贴板')).catch(() => alert('复制失败'));
+            }} onClear={handleClearDraft} />}
+          />}
+          attachments={
+            <FreeAttachmentPanel
             state={attachmentState}
             disabled={submitting}
             errorContent={attachmentError ? <ErrorMessage message={attachmentError} /> : undefined}
-          />
-
-          <div className="my-2 bg-gray-100 rounded-lg p-3">
+          />}
+          mode={<>
             <GenerationModeSwitcher
               label="生成方式"
               value={generationMode}
@@ -807,29 +809,26 @@ export function FreePage() {
               {generationMode === 'stream'
                 ? '提示：流式生成只支持通用角色/通用情景卡（Markdown），会实时输出正文。'
                 : '提示：非流式生成会返回结构化 JSON，可生成任意 Schema。'}
-            </p>
-          </div>
-
-          <FreeLanguageField
+            </p></>}
+          language={
+            <FreeLanguageField
             value={selectedLanguage}
             languages={languages}
             expanded={showLanguageSection}
             onToggle={() => setShowLanguageSection(!showLanguageSection)}
             onChange={setSelectedLanguage}
             disabled={submitting}
-          />
-
-          <div className="my-2 bg-gray-50 rounded-lg p-3">
+          />}
+          provider={<>
             <AiProviderSelector onConfigChange={setUserProviderConfig} />
             <p className="mt-2 text-xs text-gray-500">使用自有 API Key 可缩短冷却至 3 秒，便于批量迭代生成。</p>
             <ProviderCooldownNotice
               currentMode={providerCooldownMode}
               currentIsCooldown={isCooldown}
               otherRemainingTime={otherRemainingTime}
-            />
-          </div>
-
-          <button
+            /></>}
+          actions={<>
+            <button
             onClick={handleGenerate}
             disabled={submitting || isCooldown || isReadingAttachments}
             className={generationSubmitClassName}
@@ -843,20 +842,17 @@ export function FreePage() {
                 label="停止生成"
               />
             </div>
-          ) : null}
-
-          <TokenIndicator
+          ) : null}</>}
+          tokens={
+            <TokenIndicator
             text={tokenEstimateText}
             warningText="⚠️ 预计上下文较长，可能更易超时/失败。可尝试精简提示词或减少/拆分附件。"
-          />
-
-          {error && <ErrorMessage message={error} className="mt-3" />}
-          {streamNotice ? <div className="mt-3 text-center text-sm text-amber-700">{streamNotice}</div> : null}
-
-          <div className="mt-6 text-center">
-            <Link href="/" className="footer-link">返回首页</Link>
-          </div>
-        </div>
+          />}
+          feedback={<>
+            {draftError && <p role="alert" className="text-sm text-red-600">{draftError}</p>}          {error && <ErrorMessage message={error} className="mt-3" />}
+          {streamNotice ? <div className="mt-3 text-center text-sm text-amber-700">{streamNotice}</div> : null}</>}
+          navigation={<div className="mt-6 text-center"><BackHomeLink renderLink={(props) => <Link {...props} />} /></div>}
+        />
       )}
       result={resultNode ? <div ref={resultSectionRef}>{resultNode}</div> : null}
       footer={<Footer className="footer" />}

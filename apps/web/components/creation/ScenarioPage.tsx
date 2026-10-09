@@ -1,9 +1,11 @@
 'use client';
 
 import { generationActionClassNames, generationSubmitClassName } from '@mahoshojo/ui-web/generation-actions';
-import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
+import { useGeneratedResultAutoScroll, TokenIndicator } from '@mahoshojo/ui-web/details-controls';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
+import { BackHomeLink } from '@mahoshojo/ui-web/shell';
+import { useUnsavedPageGuard } from '@mahoshojo/ui-web/client';
 import { useAppRouterAdapter } from '@/lib/app-router-adapter';
 import { getSensitiveWordRedirectTarget } from '@/lib/content-safety/client';
 import { useProviderModeCooldown } from '@/lib/cooldown';
@@ -29,7 +31,8 @@ import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
 import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import {
   clearScenarioPageDraft,
-  readScenarioPageDraft,
+  readScenarioPageDraftState,
+  buildScenarioPageDraftPayload,
   writeScenarioPageDraft,
 } from '@/lib/scenario-page-draft';
 import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
@@ -37,9 +40,12 @@ import type { AIReasoningEnvelope } from '@/types/ai-reasoning';
 // answers 以 label 为键直接进 prompt，双端口径必须一致。
 import {
   ScenarioPageLayout,
+  ScenarioFormSections,
+  ScenarioDraftNotice,
+  SCENARIO_CLEAR_DRAFT_CONFIRM,
+  GeneralScenarioEditor,
   ScenarioResultSurface,
   ScenarioResultContent,
-  ScenarioJsonDetails,
   ScenarioTitleField,
   ScenarioQuestionFields,
   ScenarioBlankFields,
@@ -74,6 +80,10 @@ export const ScenarioPage: React.FC = () => {
   const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
   const [autoSaveTimestamp, setAutoSaveTimestamp] = useState<number | null>(null);
   const [draftRestoreReady, setDraftRestoreReady] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const draftStorageBlocked = useRef(false);
+  const unsavedDraft = useRef(false);
+  const blockedDraftBaseline = useRef<string | null>(null);
 
   // 根据是否使用自定义 Key 动态调整冷却时间：官方 60s，自定义 3s
   const isUserCustomKey = userProviderConfig?.providerId !== 'system' && !!userProviderConfig?.apiKey?.trim();
@@ -130,7 +140,12 @@ export const ScenarioPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const restored = readScenarioPageDraft();
+    const result = readScenarioPageDraftState();
+    if (result.status === 'unreadable') {
+      draftStorageBlocked.current = true;
+      setDraftError('旧草稿无法读取，已保留原数据；可以继续填写和生成，当前新内容请先保存或复制。');
+    }
+    const restored = result.stored;
     if (!restored) {
       setDraftRestoreReady(true);
       return;
@@ -149,7 +164,7 @@ export const ScenarioPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === 'undefined' || !draftRestoreReady || draftStorageBlocked.current) return;
     try {
       const payload = {
         generationMode,
@@ -162,12 +177,12 @@ export const ScenarioPage: React.FC = () => {
     } catch {
       // localStorage 可能不可用，忽略
     }
-  }, [generationMode, scenarioTitleHint, selectedLanguage, isAdvancedVisible, fieldsToKeepEmpty]);
+  }, [draftRestoreReady, generationMode, scenarioTitleHint, selectedLanguage, isAdvancedVisible, fieldsToKeepEmpty]);
 
   useEffect(() => {
     if (!draftRestoreReady) return;
 
-    const stored = writeScenarioPageDraft({
+    const input = {
       answers,
       scenarioTitleHint,
       fieldsToKeepEmpty,
@@ -176,8 +191,14 @@ export const ScenarioPage: React.FC = () => {
       generationMode,
       generalScenarioDraft,
       generalScenarioDraftEdited,
-    });
-
+    };
+    const snapshot = JSON.stringify(buildScenarioPageDraftPayload(input));
+    if (draftStorageBlocked.current) { blockedDraftBaseline.current ??= snapshot; unsavedDraft.current = snapshot !== blockedDraftBaseline.current; return; }
+    const stored = writeScenarioPageDraft(input);
+    const hasContent = buildScenarioPageDraftPayload(input) !== null;
+    unsavedDraft.current = hasContent ? stored === null : !clearScenarioPageDraft();
+    if (!unsavedDraft.current) { setDraftError(null); }
+    else setDraftError('草稿写入失败，当前内容仅保留在此页面。请先保存或复制内容。');
     setAutoSaveTimestamp(stored?.updatedAt ?? null);
   }, [
     answers,
@@ -191,17 +212,24 @@ export const ScenarioPage: React.FC = () => {
     selectedLanguage,
   ]);
 
+  useUnsavedPageGuard(() => unsavedDraft.current || ((draftStorageBlocked.current || draftError !== null) && (resultData !== null || generalScenarioDraft !== null)));
+
+
   const handleAnswerChange = (id: string, value: string) => {
     setAnswers(prev => ({ ...prev, [id]: value }));
   };
 
   const handleClearScenarioDraft = useCallback(() => {
-    if (typeof window !== 'undefined' && !window.confirm('确定要清空当前页面的本地草稿吗？')) {
+    if (typeof window !== 'undefined' && !window.confirm(SCENARIO_CLEAR_DRAFT_CONFIRM)) {
       return;
     }
 
-    clearScenarioPageDraft();
-    if (typeof window !== 'undefined') {
+    if (!draftStorageBlocked.current) {
+      if (!clearScenarioPageDraft()) { setDraftError('清空草稿失败，当前内容仍保留。'); return; }
+      unsavedDraft.current = false;
+      setDraftError(null);
+    }
+    if (typeof window !== 'undefined' && !draftStorageBlocked.current) {
       try {
         window.localStorage.removeItem(SCENARIO_PREFERENCE_KEY);
       } catch {
@@ -499,30 +527,15 @@ export const ScenarioPage: React.FC = () => {
     <ScenarioPageLayout
       onNavigate={(href) => router.push(href)}
       controls={(
-        <>
-              <div className="space-y-6">
-                <div className="flex flex-col gap-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-900 sm:flex-row sm:items-center sm:justify-between">
-                  <span>
-                    {autoSaveTimestamp
-                      ? `已自动保存于 ${new Date(autoSaveTimestamp).toLocaleTimeString()}`
-                      : '当前输入会自动保存到浏览器，本页刷新后可恢复。'}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleClearScenarioDraft}
-                    className="text-left font-semibold text-amber-800 hover:text-amber-950 sm:text-right"
-                  >
-                    清空本地草稿
-                  </button>
-                </div>
-
-                <ScenarioTitleField value={scenarioTitleHint} onChange={setScenarioTitleHint} disabled={isGenerating} />
-                <ScenarioQuestionFields answers={answers} onChange={handleAnswerChange} />
-              </div>
-              <ScenarioBlankFields expanded={isAdvancedVisible} onToggle={() => setIsAdvancedVisible(!isAdvancedVisible)} fields={fieldsToKeepEmpty} onChange={handleOptionalFieldChange} />
-
-            <div className="input-group mt-6">
-              <AiProviderSelector onConfigChange={setUserProviderConfig} />
+        <ScenarioFormSections
+          inputs={<>
+            <ScenarioDraftNotice saveUnavailable={!!draftError} storageLabel="浏览器" updatedAt={autoSaveTimestamp} disabled={isGenerating} onClear={handleClearScenarioDraft} feedback={draftError && <p role="alert" className="mt-2 text-sm text-red-600">{draftError}</p>} />
+            <ScenarioTitleField value={scenarioTitleHint} onChange={setScenarioTitleHint} disabled={isGenerating} />
+            <ScenarioQuestionFields answers={answers} onChange={handleAnswerChange} />
+          </>}
+          advanced={<ScenarioBlankFields expanded={isAdvancedVisible} onToggle={() => setIsAdvancedVisible(!isAdvancedVisible)} fields={fieldsToKeepEmpty} onChange={handleOptionalFieldChange} />}
+          provider={<>
+            <AiProviderSelector onConfigChange={setUserProviderConfig} />
               <p className="text-xs text-gray-500 mt-1">
                 若需使用自备模型，请先选择供应商与模型并填写对应 API Key。
               </p>
@@ -530,20 +543,10 @@ export const ScenarioPage: React.FC = () => {
                 currentMode={providerCooldownMode}
                 currentIsCooldown={isCooldown}
                 otherRemainingTime={otherRemainingTime}
-              />
-            </div>
-
-            <ScenarioLanguageField value={selectedLanguage} languages={languages} onChange={setSelectedLanguage} disabled={isGenerating} />
-
-            {/* 成功提示信息 */}
-            {!isGenerating && generationMode === 'non-stream' && resultData && (
-              <div className="text-center text-sm text-green-600 my-2 font-semibold">
-                🎉 情景生成成功！结果已显示在下方。
-              </div>
-            )}
-
-            <div className="input-group mt-6">
-              <GenerationModeSwitcher
+              /></>}
+          language={<ScenarioLanguageField value={selectedLanguage} languages={languages} onChange={setSelectedLanguage} disabled={isGenerating} />}
+          mode={<>
+            <GenerationModeSwitcher
                 label="生成方式"
                 value={generationMode}
                 disabled={isGenerating}
@@ -554,11 +557,9 @@ export const ScenarioPage: React.FC = () => {
                 {generationMode === 'stream'
                   ? '提示：选择流式生成后，将实时输出 Markdown，并直接生成【通用情景卡】（templateId=通用情景）。标题会尝试从输出中解析，失败则回退到你填写的标题或“情景”。'
                   : '提示：非流式生成会返回结构化情景 JSON（含 elements 等字段），更适合与竞技场/进阶玩法联动。'}
-              </p>
-            </div>
-
-            <div className="mt-4 flex flex-col gap-3">
-              <button onClick={handleGenerate} disabled={isGenerating || isCooldown} className={generationSubmitClassName}>
+              </p></>}
+          actions={<>
+            <button onClick={handleGenerate} disabled={isGenerating || isCooldown} className={generationSubmitClassName}>
                 {isCooldown ? `冷却中 (${remainingTime}s)` : isGenerating ? '正在构建舞台...' : '生成情景'}
               </button>
               {isGenerating && generationMode === 'stream' ? (
@@ -568,11 +569,14 @@ export const ScenarioPage: React.FC = () => {
                     label="停止生成"
                   />
                 </div>
-              ) : null}
-            </div>
+              ) : null}</>}
+          tokens={<TokenIndicator text={[...Object.values(answers), scenarioTitleHint].filter((item) => item.trim()).join('\n\n')} />}
+          feedback={<>
+            {!isGenerating && generationMode === 'non-stream' && resultData && <div className="text-center text-sm text-green-600 my-2 font-semibold">🎉 情景生成成功！结果已显示在下方。</div>}
             {error && <ErrorMessage message={error} className="error-message mt-4" />}
             {streamNotice ? <div className="mt-3 text-center text-sm text-amber-700">{streamNotice}</div> : null}
-        </>
+          </>}
+        />
       )}
       results={(
         <div ref={resultSectionRef}>
@@ -610,94 +614,23 @@ export const ScenarioPage: React.FC = () => {
             </>
           )}
 
-          <ScenarioResultSurface label="通用情景卡编辑器">
-            <div className="flex flex-col gap-3">
-              <div className="flex flex-col md:flex-row justify-between gap-2">
-                <h2 className="text-xl font-bold">通用情景卡（Markdown）</h2>
-                <div className="flex gap-2">
-                  <button onClick={handleCreateBlankGeneralScenario} className="generate-button flex-1" style={{ backgroundColor: '#a855f7', backgroundImage: 'linear-gradient(to right, #a855f7, #7c3aed)' }}>
-                    创建空白通用情景卡
-                  </button>
-                  <button
-                    onClick={() => void handleConvertToGeneralScenario()}
-                    disabled={!resultData}
-                    className="generate-button flex-1"
-                    style={{ backgroundColor: '#10b981', backgroundImage: 'linear-gradient(to right, #10b981, #059669)' }}
-                  >
-                    将生成结果转为通用情景卡
-                  </button>
-                </div>
-              </div>
+          <GeneralScenarioEditor
+            draft={generalScenarioDraft}
+            onCreate={handleCreateBlankGeneralScenario}
+            onConvert={() => void handleConvertToGeneralScenario()}
+            canConvert={!!resultData}
+            disabled={isGenerating}
+            onChange={(patch) => { setGeneralScenarioDraftEdited(true); setGeneralScenarioDraft((prev: any) => ({ ...prev, ...patch })); }}
+            reasoning={generationMode === 'stream' && <AiReasoningPanel reasoning={streamingReasoning} status={streamingReasoning?.status ?? 'idle'} compact />}
+            actions={generalScenarioDraft && <>
+              <button onClick={() => downloadJson(generalScenarioDraft)} className={`${generationActionClassNames.secondary} flex-1`}>下载通用情景卡</button>
+              <SaveToCloudButton data={generalScenarioDraft} cardType="scenario" buttonText="保存到云端" className={`${generationActionClassNames.primary} flex-1`} />
+              <button onClick={() => copyToClipboard(generalScenarioDraft)} className={`${generationActionClassNames.secondary} flex-1`}>复制到剪贴板</button>
+            </>}
+            sizeIndicator={generalScenarioDraft && <JsonSizeIndicator data={generalScenarioDraft} warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。" />}
+          />
 
-              {generalScenarioDraft && (
-                <>
-                  <div className="space-y-4">
-                    <div className="input-group">
-                      <label className="input-label">情景名称</label>
-                      <input
-                        type="text"
-                        value={generalScenarioDraft.title || ''}
-                        onChange={(e) => {
-                          setGeneralScenarioDraftEdited(true);
-                          setGeneralScenarioDraft((prev: any) => ({ ...prev, title: e.target.value }));
-                        }}
-                        className="input-field"
-                        placeholder="请输入通用情景名称"
-                      />
-                    </div>
-
-                    <div className="input-group">
-                      <label className="input-label">情景内容（Markdown）</label>
-                      <textarea
-                        value={generalScenarioDraft.content || ''}
-                        onChange={(e) => {
-                          setGeneralScenarioDraftEdited(true);
-                          setGeneralScenarioDraft((prev: any) => ({ ...prev, content: e.target.value }));
-                        }}
-                        className="input-field resize-y"
-                        rows={12}
-                        placeholder="请在此处编写情景设定，建议使用 Markdown 小标题/列表。"
-                      />
-                    </div>
-                    {generationMode === 'stream' && (
-                      <AiReasoningPanel reasoning={streamingReasoning} status={streamingReasoning?.status ?? 'idle'} compact />
-                    )}
-                  </div>
-
-                  <ScenarioJsonDetails data={generalScenarioDraft} />
-
-                  <div className="flex flex-col md:flex-row justify-center gap-2 mt-2">
-                    <button onClick={() => downloadJson(generalScenarioDraft)} className={`${generationActionClassNames.secondary} flex-1`}>
-                      下载通用情景卡
-                    </button>
-                    <SaveToCloudButton
-                      data={generalScenarioDraft}
-                      cardType="scenario"
-                      buttonText="保存到云端"
-                      className={`${generationActionClassNames.primary} flex-1`}
-                    />
-                    <button onClick={() => copyToClipboard(generalScenarioDraft)} className={`${generationActionClassNames.secondary} flex-1`}>
-                      复制到剪贴板
-                    </button>
-                  </div>
-                  <JsonSizeIndicator
-                    data={generalScenarioDraft}
-                    warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
-                  />
-                </>
-              )}
-
-              {!generalScenarioDraft && (
-                <p className="text-xs text-gray-500">
-                  提示：通用情景卡只有 <code>title</code> 和 <code>content</code> 两个主要字段，适合用 Markdown 维护长线场景。
-                </p>
-              )}
-            </div>
-          </ScenarioResultSurface>
-
-          <div className="text-center" style={{ marginTop: '2rem' }}>
-            <Link href="/" className="footer-link">返回首页</Link>
-          </div>
+          <div className="mt-6 text-center"><BackHomeLink renderLink={(props) => <Link {...props} />} /></div>
         </div>
       )}
       footer={<Footer />}

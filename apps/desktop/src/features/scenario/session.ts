@@ -1,3 +1,6 @@
+import { parseDataCardByTemplate } from '@mahoshojo/domain/data-card-schemas';
+import { deriveLocalDataCardIdV1, digestLocalCardPayloadV1 } from '@mahoshojo/local-library/digest';
+import { LocalCardRecordV1Schema } from '@mahoshojo/local-library/record';
 import type { CardRepository } from '@mahoshojo/local-library/repository';
 import {
   DesktopGenerationSession,
@@ -31,6 +34,8 @@ export interface ScenarioDraft {
   generationMode: 'stream' | 'non-stream';
   selectedLanguage: string;
   isAdvancedVisible?: boolean;
+  /** 本机 Markdown 编辑稿独立于生成结果，旧 v1 缺省为空。 */
+  generalScenarioDraft?: Record<string, unknown> | null;
 }
 
 export type ScenarioDraftStorage = GenerationDraftStorage;
@@ -77,13 +82,17 @@ const SCENARIO_SESSION_FAMILY: GenerationSessionFamily<
       generationMode: value.generationMode,
       selectedLanguage: value.selectedLanguage,
     };
+    if (value.generalScenarioDraft === null) draft.generalScenarioDraft = null;
+    else if (value.generalScenarioDraft !== undefined) {
+      draft.generalScenarioDraft = parseDataCardByTemplate('general-scenario', value.generalScenarioDraft);
+    }
     if (value.isAdvancedVisible === true) draft.isAdvancedVisible = true;
     return draft;
   },
   normalizeStoredCardKind: (value) => (isCardKind(value) ? value : 'scenario'),
   isResidueDraft: (draft) => {
     if (Object.values(draft.answers).some((item) => item.trim() !== '')) return false;
-    if (draft.scenarioTitleHint.trim() !== '') return false;
+    if (draft.scenarioTitleHint.trim() !== '' || draft.generalScenarioDraft != null) return false;
     const output = draft.output;
     return output === undefined
       || (output.phase === 'idle' && output.card === null && output.rawText === '');
@@ -115,6 +124,7 @@ export class ScenarioSession extends DesktopGenerationSession<
   ScenarioGenerationIntent,
   ScenarioCardKind
 > {
+  private readonly editorRepository: CardRepository;
   constructor(dependencies: {
     storage: ScenarioDraftStorage;
     repository: CardRepository;
@@ -123,6 +133,20 @@ export class ScenarioSession extends DesktopGenerationSession<
     requestId?: () => string;
   }) {
     super(SCENARIO_SESSION_FAMILY, dependencies);
+    this.editorRepository = dependencies.repository;
+  }
+  /** 编辑产物与生成结果独立保存，始终未签名，不替换原始结果及其 provenance。 */
+  async saveGeneralScenarioDraft(input: Record<string, unknown>): Promise<boolean> {
+    const data = parseDataCardByTemplate('general-scenario', JSON.parse(JSON.stringify(input)));
+    SCENARIO_SESSION_FAMILY.stripSignature(data);
+    const digest = await digestLocalCardPayloadV1(data);
+    const now = new Date().toISOString();
+    const record = LocalCardRecordV1Schema.parse({
+      id: deriveLocalDataCardIdV1(digest), schemaVersion: 1, storageLocation: 'local', cardType: 'scenario',
+      title: trimmedOr(data.title, '未命名情景'), data, contentDigest: digest,
+      provenance: { kind: 'unsigned', execution: 'edited' }, createdAt: now, updatedAt: now,
+    });
+    return 'written' in await this.editorRepository.putIfAbsent(record);
   }
 }
 

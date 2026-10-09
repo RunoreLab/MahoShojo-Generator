@@ -173,3 +173,47 @@ describe('Desktop Scenario session', () => {
     expect(record.provenance).toMatchObject({ kind: 'signature-unverified', signature: 'sig-restored' });
   });
 });
+
+it('persists independent Markdown draft fields, keeps extensions, and saves unsigned without replacing output', async () => {
+  const s = storage(); const put = vi.fn(async () => ({ written: true }));
+  const session = new ScenarioSession({ storage: s, repository: repo(put), initialDraft });
+  session.applyLocalResult(scenarioCard, 'scenario');
+  const general = { templateId: '通用情景', title: '夜雨', content: '# 开场', custom: { preserved: 1 }, metadata: { signature: 'untrusted', author: '保留作者' } };
+  session.updateDraft({ ...initialDraft, generalScenarioDraft: general });
+  const restored = new ScenarioSession({ storage: s, repository: repo(put), initialDraft });
+  restored.restoreDraft(false);
+  expect(restored.getSnapshot().draft.generalScenarioDraft).toEqual(general);
+  expect(restored.getSnapshot().message).toBeNull();
+  expect(restored.getSnapshot().card?.title).toBe(scenarioCard.title);
+  await restored.saveGeneralScenarioDraft(general);
+  expect(put).toHaveBeenCalledWith(expect.objectContaining({ cardType: 'scenario', data: { ...general, metadata: { author: '保留作者' } }, provenance: { kind: 'unsigned', execution: 'edited' } }));
+  expect(restored.getSnapshot().card?.title).toBe(scenarioCard.title);
+  restored.discardDraft();
+  expect(restored.getSnapshot().draft.generalScenarioDraft).toBeUndefined();
+  expect(s.getItem(SCENARIO_DRAFT_KEY)).toBeNull();
+});
+
+it('preserves malformed Markdown source without blocking a new editing session', async () => {
+  const s = storage(); const invalid = JSON.stringify({ version: 1, ...initialDraft, generalScenarioDraft: { title: 'bad', content: 7 } });
+  s.setItem(SCENARIO_DRAFT_KEY, invalid);
+  const session = new ScenarioSession({ storage: s, repository: repo(), initialDraft });
+  expect(session.isDraftBlocked()).toBe(true);
+  expect(session.hasUnsavedDraft()).toBe(false);
+  session.updateDraft({ ...initialDraft, scenarioTitleHint: '新内容' });
+  expect(session.getSnapshot().draft.scenarioTitleHint).toBe('新内容');
+  expect(session.hasUnsavedDraft()).toBe(true);
+  expect(s.getItem(SCENARIO_DRAFT_KEY)).toBe(invalid);
+});
+
+it('keeps the Markdown editor draft after a failed save and retries without AI generation', async () => {
+  const s = storage(); const put = vi.fn().mockRejectedValueOnce(new Error('disk full')).mockResolvedValueOnce({ written: true });
+  const execute = vi.fn();
+  const session = new ScenarioSession({ storage: s, repository: repo(put), initialDraft, execute });
+  const general = { templateId: '通用情景', title: '草稿', content: '# 正文' };
+  session.updateDraft({ ...initialDraft, generalScenarioDraft: general });
+  await expect(session.saveGeneralScenarioDraft(general)).rejects.toThrow('disk full');
+  expect(session.getSnapshot().draft.generalScenarioDraft).toEqual(general);
+  expect(JSON.parse(s.getItem(SCENARIO_DRAFT_KEY)!).generalScenarioDraft).toEqual(general);
+  await expect(session.saveGeneralScenarioDraft(general)).resolves.toBe(true);
+  expect(execute).not.toHaveBeenCalled();
+});

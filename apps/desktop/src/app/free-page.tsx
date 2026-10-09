@@ -29,6 +29,8 @@ import {
 } from '@mahoshojo/ui-web/character-card';
 import {
   FreePageLayout,
+  FreeFormSections,
+  FreePromptActions,
   FreeResultActions,
   FreeResultPanel,
   FreeJsonResult,
@@ -43,7 +45,7 @@ import {
   useFreeAttachments,
 } from '@mahoshojo/ui-web/free';
 import { MarkdownBlock } from '@mahoshojo/ui-web/markdown';
-import { ProductFooter } from '@mahoshojo/ui-web/shell';
+import { BackHomeLink, ProductFooter } from '@mahoshojo/ui-web/shell';
 import type { HomeAssetSource } from '@mahoshojo/ui-web/home';
 import { FreeSession, FREE_DRAFT_DEFAULT_LANGUAGE, type FreeDraft } from '../features/free/session';
 import type { FreeExecutionMode } from '../features/free/generation';
@@ -109,7 +111,6 @@ function FreeForm({ session }: { session: FreeSession }) {
   const { items: attachments, isReading: isReadingAttachments, clear: clearAttachments } = attachmentState;
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionInfo, setActionInfo] = useState<string | null>(null);
-  const [confirmClear, setConfirmClear] = useState(false);
   const [confirmRegenerate, setConfirmRegenerate] = useState<false | ConfirmRegenerateKind>(false);
   const [deviceType, setDeviceType] = useState<DeviceType>('unknown');
   const regenerateDialog = useRef<HTMLDialogElement>(null);
@@ -121,15 +122,16 @@ function FreeForm({ session }: { session: FreeSession }) {
     else if (!confirmRegenerate && dialog?.open) dialog.close();
   }, [confirmRegenerate]);
   const guard = useLeaveGuard(
-    () => session.isBusy() || (!session.getSnapshot().draftSaved && !session.getSnapshot().pendingRestore && !session.isDraftBlocked()),
+    () => session.isBusy() || session.hasUnsavedDraft(),
     '生成或保存尚未完成，或当前草稿未能保存。请等待、取消生成，或重试保存草稿后再离开。也可以确认清除草稿以放弃当前内容。',
     '窗口关闭保护初始化失败，生成与保存暂不可用。请重新打开页面后重试。',
     () => {
       const current = session.getSnapshot();
-      if (current.saving || current.phase !== 'generating') return false;
-      if (!window.confirm('生成尚未完成。确认终止生成并离开？已收到的正文将保留在本机草稿中。')) return false;
+      if (current.saving || aiStore.isPreparingGeneration()) return false;
+      if (current.phase !== 'generating') return !session.hasUnsavedDraft() || window.confirm('当前新内容尚未保存到本机草稿。确认放弃这些未保存更改并离开？原有存档不会被删除。');
+      if (!window.confirm('生成尚未完成。确认终止生成并离开？未能保存到本机草稿的内容将丢失，可以先复制或保存。')) return false;
       session.cancel();
-      return session.getSnapshot().draftSaved;
+      return true;
     },
   );
   // 语言清单与 Web 同一来源（content/languages.json → public 同步副本）。
@@ -167,7 +169,7 @@ function FreeForm({ session }: { session: FreeSession }) {
   const mode = target.mode;
   const busy = state.phase === 'generating' || state.saving || aiState.generationActive;
   useEffect(() => () => aiStore.cancelPreparingGeneration(), [aiStore]);
-  const blockedDraft = state.pendingRestore || session.isDraftBlocked();
+  const blockedDraft = state.pendingRestore;
   // 「客户端｜服务器」与「流式｜非流式」两个维度共同决定执行模式（DESK-ONLINE-009）：
   // 流式/非流式只影响 hosted 路由选择，direct 通路始终为结构化生成。
   const hostedMode: FreeExecutionMode = draft.generationMode === 'stream' ? 'hosted-stream' : 'hosted-json';
@@ -223,60 +225,36 @@ function FreeForm({ session }: { session: FreeSession }) {
   return (
     <FreePageLayout
       controls={(
-        <div className="space-y-4">
-            <section aria-label="草稿" className="rounded-lg border border-(--app-border) p-4">
-              <p>提示词、schema、生成方式与结果自动保存在本机页面草稿中，恢复草稿不会自动重新生成。</p>
-              <p className="text-sm text-(--app-text-muted)">草稿不参与本地库整库备份或归档；保存到本地卡库的数据卡参与。附件不写入草稿。草稿上限为序列化后 4 Mi 字符，超出或写入失败时请保留当前页面。</p>
-              {state.pendingRestore && <div role="status" className="mt-2 flex flex-wrap items-center gap-2"><span>发现上次草稿，请选择恢复或清除。</span><button className={actionClass} onClick={() => session.restoreDraft()}>恢复草稿</button></div>}
-              {state.draftError && <p role="alert">{state.draftError}</p>}
-              {!state.pendingRestore && <p role="status">{state.draftSaved ? '当前内容已保存或无待保存变更。' : '当前内容尚未保存到草稿。'}</p>}
-              <div className="mt-2 flex flex-wrap gap-2">
-                {state.draftError && !session.isDraftBlocked() && <button className={actionClass} disabled={busy || state.pendingRestore} onClick={() => session.retryDraftSave()}>重试保存草稿</button>}
-                <button className={actionClass} disabled={busy} onClick={() => setConfirmClear(true)}>清除草稿</button>
-              </div>
-              {confirmClear && <div role="group" aria-label="确认清除草稿" className="mt-3 rounded border p-3">
-                <p>确认清除本页提示词、生成结果和中断正文？已保存的本地卡不受影响。此操作无法撤销。</p>
-                <button className={generationActionClassNames.destructive} disabled={busy} onClick={() => { session.discardDraft(); clearAttachments(); setConfirmClear(false); }}>确认清除</button>
-                <button className={actionClass} onClick={() => setConfirmClear(false)}>保留草稿</button>
-              </div>}
-            </section>
-            {!guard.ready && !guard.message && <p role="status">正在初始化窗口关闭保护…</p>}
-            {guard.message && <p role="alert">{guard.message}</p>}
-            {profilesLoading && target.location === 'client' && <p role="status">正在读取本地 Provider 配置…</p>}
-            {profilesError && <p role="alert">{target.location === 'server' ? '本地 Provider 配置加载失败，仅影响客户端执行。' : profilesError}</p>}
-            <fieldset disabled={busy || blockedDraft} className="flex min-w-0 flex-col gap-4">
-              <legend className="mb-2 font-semibold">生成设置</legend>
-              <FreeSchemaFields
+        <FreeFormSections
+          schema={
+            <FreeSchemaFields
+                disabled={busy || blockedDraft}
                 schemaId={draft.schemaId}
                 options={schemaOptionsForMode}
                 onChange={(schemaId) => updateDraft({ schemaId })}
                 showFieldGuide={draft.showFieldGuide === true}
                 onToggleFieldGuide={() => updateDraft({ showFieldGuide: !draft.showFieldGuide })}
-              />
-              <FreePromptField
+              />}
+          prompt={
+            <FreePromptField
+                disabled={busy || blockedDraft}
+                actions={<FreePromptActions canCopy={!!draft.prompt.trim()} disabled={busy} onCopy={() => {
+                  void Promise.resolve().then(() => navigator.clipboard.writeText(draft.prompt)).then(() => setActionInfo('已复制提示词到剪贴板')).catch(() => setActionError('复制失败'));
+                }} onClear={() => {
+                  session.updateDraft({ ...session.getSnapshot().draft, prompt: '' });
+                  clearAttachments();
+                  setActionError(null);
+                  setActionInfo(null);
+                }} />}
                 value={draft.prompt}
                 onChange={(prompt) => updateDraft({ prompt })}
                 hint={target.location === 'server'
                   ? `服务器通路请求体（提示词 + 附件 + JSON 包装）上限 ${formatBytes(hostedGenerationBodyMaxBytes(draft.generationMode === 'stream' ? 'generate-free-stream' : 'generate-free'))}，超出会在派发前拦截`
                   : '客户端执行的输入上限由所连模型服务自身决定'}
-              />
-              <FreeAttachmentPanel state={attachmentState} disabled={busy || blockedDraft} />
-              <DesktopAiProviderPanel
-                generationMode={draft.generationMode}
-                copy={{
-                  serverOutput: {
-                    stream: 'Markdown 流式输出（仅通用角色/通用情景卡，未签名）',
-                    nonStream: '结构化 JSON 输出（无签名）',
-                  },
-                  emptyProfilesHint: '提示词可以先填写，配置加载后再生成。',
-                  serverFootnote:
-                    '不使用客户端连接与凭据（由服务器侧系统默认配置解析）。切换执行位置不会丢失已填写的提示词。',
-                  payloadNoun: '提示词与附件',
-                }}
-                controlsSlot={
-                  <>
-                    <div>
-                      <GenerationModeSwitcher
+              />}
+          attachments={<FreeAttachmentPanel state={attachmentState} disabled={busy || blockedDraft} />}
+          mode={<fieldset disabled={busy || blockedDraft}>
+            <GenerationModeSwitcher
                         // 客户端 Direct 固定走结构化通路：展示生效的「非流式」，
                         // 服务器侧的流式偏好不改写、切回服务器后恢复（D5.1-AIP-r1）。
                         value={effectiveGenerationMode}
@@ -288,20 +266,32 @@ function FreeForm({ session }: { session: FreeSession }) {
                         <p className="mt-1 text-sm text-(--app-text-muted)">
                           客户端执行为结构化（非流式）直出；你的服务器生成方式偏好保留，切回服务器后恢复。
                         </p>
-                      )}
-                    </div>
-                    <FreeLanguageField
+                      )}</fieldset>}
+          language={
+            <FreeLanguageField
+                      disabled={busy || blockedDraft}
                       value={draft.selectedLanguage}
                       languages={languages.length ? languages : [{ code: draft.selectedLanguage, name: draft.selectedLanguage }]}
                       expanded={draft.showLanguageSection === true}
                       onToggle={() => updateDraft({ showLanguageSection: !draft.showLanguageSection })}
                       onChange={(selectedLanguage) => updateDraft({ selectedLanguage })}
-                    />
-                  </>
-                }
+                    />}
+          provider={<fieldset disabled={busy || blockedDraft} className="flex min-w-0 flex-col gap-4">
+            <DesktopAiProviderPanel
+                generationMode={draft.generationMode}
+                copy={{
+                  serverOutput: {
+                    stream: 'Markdown 流式输出（仅通用角色/通用情景卡，未签名）',
+                    nonStream: '结构化 JSON 输出（无签名）',
+                  },
+                  emptyProfilesHint: '提示词可以先填写，配置加载后再生成。',
+                  serverFootnote:
+                    '不使用客户端连接与凭据（由服务器侧系统默认配置解析）。切换执行位置不会丢失已填写的提示词。',
+                  payloadNoun: '提示词与附件',
+                }}
               />
-            </fieldset>
-            <TokenIndicator text={tokenEstimateText} />
+          </fieldset>}
+          actions={<>
             <div className="flex flex-wrap gap-2">
               <button className={generationSubmitClassName} disabled={!guard.ready || busy || !draft.prompt.trim() || !executionMode || isReadingAttachments || target.unavailableReason !== null || (target.location === 'client' && !target.providerTarget) || clientProfilesBlocked || blockedDraft} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '生成数据卡' : '重新生成'}</button>
               {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}
@@ -310,6 +300,14 @@ function FreeForm({ session }: { session: FreeSession }) {
                     setActionInfo('尚未派发的生成已取消；已保存的 API Key 将保留，系统凭据操作结束后可重试。');
                   }}>取消准备</button>}
             </div>
+          </>}
+          tokens={<TokenIndicator text={tokenEstimateText} warningText="⚠️ 预计上下文较长，可能更易超时/失败。可尝试精简提示词或减少/拆分附件。" />}
+          feedback={<>
+            {state.draftError && <div role="alert" className="text-sm text-red-600">{state.draftError}{!session.isDraftBlocked() && <button className={actionClass} disabled={busy} onClick={() => session.retryDraftSave()}>重试保存草稿</button>}</div>}
+            {!guard.ready && !guard.message && <p role="status">正在初始化窗口关闭保护…</p>}
+            {guard.message && <p role="alert">{guard.message}</p>}
+            {profilesLoading && target.location === 'client' && <p role="status">正在读取本地 Provider 配置…</p>}
+            {profilesError && <p role="alert">{target.location === 'server' ? '本地 Provider 配置加载失败，仅影响客户端执行。' : profilesError}</p>}
             <dialog ref={regenerateDialog} aria-labelledby="regenerate-title" aria-describedby="regenerate-description" className="m-auto max-w-lg rounded-lg border border-(--app-border) bg-(--app-surface) p-5 text-(--app-text) backdrop:bg-black/40" onCancel={(event) => { event.preventDefault(); if (!session.isBusy()) setConfirmRegenerate(false); }}>
               <h2 id="regenerate-title" className="text-xl font-semibold">{confirmCopy?.title ?? '重新生成？'}</h2>
               <p id="regenerate-description" className="my-3">{confirmCopy?.description}</p>
@@ -323,8 +321,9 @@ function FreeForm({ session }: { session: FreeSession }) {
             {actionError && <p role="alert">{actionError}</p>}
             {actionInfo && <p role="status">{actionInfo}</p>}
             {state.message && <p role={state.phase === 'uncertain' ? 'alert' : 'status'}>{state.message}</p>}
-
-        </div>
+          </>}
+          navigation={<div className="mt-6 text-center"><BackHomeLink href="#/" onNavigate={() => void router.navigate({ to: '/' })} /></div>}
+        />
       )}
       result={card || state.rawText || state.reasoning ? (
         <>
@@ -398,6 +397,7 @@ export function DesktopFree() {
       repository: new IpcLocalCardRepository(invoke),
       initialDraft: { schemaId: 'general', generationMode: 'non-stream', prompt: '', selectedLanguage: FREE_DRAFT_DEFAULT_LANGUAGE },
     });
+    owner.restoreDraft(false);
     setSession(owner);
     const onPageHide = () => owner.cancel();
     window.addEventListener('pagehide', onPageHide);

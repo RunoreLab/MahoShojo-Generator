@@ -13,9 +13,14 @@ import {
   SaveJsonButton,
   useResultAutoScroll,
 } from '@mahoshojo/ui-web/details-controls';
+import { convertDataCard, createBlankDataCard } from '@mahoshojo/domain/sublimation';
 import { MarkdownBlock } from '@mahoshojo/ui-web/markdown';
 import {
   ScenarioPageLayout,
+  ScenarioFormSections,
+  ScenarioDraftNotice,
+  SCENARIO_CLEAR_DRAFT_CONFIRM,
+  GeneralScenarioEditor,
   ScenarioResultSurface,
   ScenarioResultContent,
   ScenarioTitleField,
@@ -25,7 +30,7 @@ import {
   createInitialScenarioAnswers as createInitialAnswers,
   hasAnyScenarioAnswer as hasAnyAnswer,
 } from '@mahoshojo/ui-web/scenario';
-import { ProductFooter } from '@mahoshojo/ui-web/shell';
+import { BackHomeLink, ProductFooter } from '@mahoshojo/ui-web/shell';
 import type { HomeAssetSource } from '@mahoshojo/ui-web/home';
 import {
   ScenarioSession,
@@ -92,7 +97,9 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionInfo, setActionInfo] = useState<string | null>(null);
-  const [confirmClear, setConfirmClear] = useState(false);
+  const [editorSaving, setEditorSaving] = useState(false);
+  const [editorMessage, setEditorMessage] = useState<string | null>(null);
+  const editorSavingRef = useRef(false);
   const [confirmRegenerate, setConfirmRegenerate] = useState<false | ConfirmRegenerateKind>(false);
   const [deviceType, setDeviceType] = useState<DeviceType>('unknown');
   const regenerateDialog = useRef<HTMLDialogElement>(null);
@@ -104,15 +111,16 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
     else if (!confirmRegenerate && dialog?.open) dialog.close();
   }, [confirmRegenerate]);
   const guard = useLeaveGuard(
-    () => session.isBusy() || (!session.getSnapshot().draftSaved && !session.getSnapshot().pendingRestore && !session.isDraftBlocked()),
+    () => editorSavingRef.current || session.isBusy() || session.hasUnsavedDraft(),
     '生成或保存尚未完成，或当前草稿未能保存。请等待、取消生成，或重试保存草稿后再离开。也可以确认清除草稿以放弃当前内容。',
     '窗口关闭保护初始化失败，生成与保存暂不可用。请重新打开页面后重试。',
     () => {
       const current = session.getSnapshot();
-      if (current.saving || current.phase !== 'generating') return false;
-      if (!window.confirm('生成尚未完成。确认终止生成并离开？已收到的正文将保留在本机草稿中。')) return false;
+      if (current.saving || editorSavingRef.current || aiStore.isPreparingGeneration()) return false;
+      if (current.phase !== 'generating') return !session.hasUnsavedDraft() || window.confirm('当前新内容尚未保存到本机草稿。确认放弃这些未保存更改并离开？原有存档不会被删除。');
+      if (!window.confirm('生成尚未完成。确认终止生成并离开？未能保存到本机草稿的内容将丢失，可以先复制或保存。')) return false;
       session.cancel();
-      return session.getSnapshot().draftSaved;
+      return true;
     },
   );
   // 语言清单与 Web 同一来源（content/languages.json → public 同步副本）。
@@ -140,9 +148,9 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
   const effectiveGenerationMode =
     target.location === 'client' ? 'non-stream' : draft.generationMode;
   const mode = target.mode;
-  const busy = state.phase === 'generating' || state.saving || aiState.generationActive;
+  const busy = state.phase === 'generating' || state.saving || editorSaving || aiState.generationActive;
   useEffect(() => () => aiStore.cancelPreparingGeneration(), [aiStore]);
-  const blockedDraft = state.pendingRestore || session.isDraftBlocked();
+  const blockedDraft = state.pendingRestore;
   // 「客户端｜服务器」与「流式｜非流式」两个维度共同决定执行模式（DESK-ONLINE-009）：
   // 流式/非流式只影响 hosted 路由选择，direct 通路始终为结构化生成。
   const hostedMode: ScenarioExecutionMode = draft.generationMode === 'stream' ? 'hosted-stream' : 'hosted-json';
@@ -169,13 +177,14 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
   const generate = (discardUnsavedResult = false) => {
     // 悬空选择（含服务器侧被目录移除的系统模型）保留诊断值但禁止派发——
     // unavailableReason 与按钮 disabled 必须同口径（D5.1-AIP-r1-r1）。
-    if (!guard.ready || busy || !executionMode || blockedDraft || target.unavailableReason !== null) return;
+    if (!guard.ready || busy || editorSavingRef.current || !executionMode || blockedDraft || target.unavailableReason !== null) return;
     if (target.location === 'client' && !target.providerTarget) return;
     if (!discardUnsavedResult) {
       if (session.hasUnsavedResult()) { setConfirmRegenerate('unsaved'); return; }
       // hosted-json 结果不确定时再次生成 = 可能的第二次调用，必须显式确认（D5.1a-r1）。
       if (state.phase === 'uncertain') { setConfirmRegenerate('uncertain'); return; }
     }
+    if (effectiveGenerationMode === 'stream' && draft.generalScenarioDraft && !window.confirm('流式生成将替换当前通用情景卡编辑内容，确认继续？可先下载或保存当前内容。')) return;
     try {
       setActionError(null);
       setActionInfo(null);
@@ -191,6 +200,10 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
         { mode: prepared.location === 'server' ? hostedMode : prepared.mode!, modelId: prepared.modelId ?? undefined, overrides: prepared.generationOverrides },
         discardUnsavedResult,
       );
+        const latest = session.getSnapshot();
+        if (latest.phase === 'completed' && latest.cardKind === 'general-scenario' && latest.card) {
+          session.updateDraft({ ...latest.draft, generalScenarioDraft: latest.card });
+        }
       }).catch((cause: unknown) => setActionError(cause instanceof Error ? cause.message : 'AI 配置准备失败'));
     } catch (error) {
       setActionError(error instanceof Error ? error.message : '生成失败。');
@@ -209,43 +222,55 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
     : session.resultSignatureKind() === 'signature-unverified'
       ? '含签名字段（本机未验证）'
       : '未签名（非原生卡）';
+  const editorDraft = draft.generalScenarioDraft !== undefined ? draft.generalScenarioDraft : (cardKind === 'general-scenario' ? card : null);
+  const replaceEditor = (next: Record<string, unknown>) => {
+    if (busy || editorSavingRef.current || blockedDraft) return;
+    if (editorDraft && !window.confirm('替换当前通用情景卡编辑内容？当前内容可先下载或保存，替换后无法撤销。')) return;
+    updateDraft({ generalScenarioDraft: next });
+    setEditorMessage(null);
+  };
+  const saveEditor = async () => {
+    if (!editorDraft || busy || editorSavingRef.current || !guard.ready || blockedDraft) return;
+    editorSavingRef.current = true;
+    setEditorSaving(true);
+    setEditorMessage(null);
+    try {
+      const written = await session.saveGeneralScenarioDraft(editorDraft);
+      setEditorMessage(written ? '已保存到本地卡库。' : '本地卡库已存在相同内容，原记录保持不变。');
+    } catch {
+      setEditorMessage('保存到本地卡库失败，Markdown 编辑内容仍保留，可重试保存。');
+    } finally {
+      editorSavingRef.current = false;
+      setEditorSaving(false);
+    }
+  };
   return (
     <ScenarioPageLayout
       onNavigate={(href) => navigateByProductHref(router, href)}
       resolveInternalHref={resolveInternalHrefForHashHistory}
       controls={(
-        <div className="space-y-6">
-            <section aria-label="草稿" className="rounded-lg border border-(--app-border) p-4">
-              <p>回答、生成方式与结果自动保存在本机页面草稿中，恢复草稿不会自动重新生成。</p>
-              <p className="text-sm text-(--app-text-muted)">草稿不参与本地库整库备份或归档；保存到本地卡库的数据卡参与。草稿上限为序列化后 4 Mi 字符，超出或写入失败时请保留当前页面。</p>
-              {state.pendingRestore && <div role="status" className="mt-2 flex flex-wrap items-center gap-2"><span>发现上次草稿，请选择恢复或清除。</span><button className={actionClass} onClick={() => session.restoreDraft()}>恢复草稿</button></div>}
-              {state.draftError && <p role="alert">{state.draftError}</p>}
-              {!state.pendingRestore && <p role="status">{state.draftSaved ? '当前内容已保存或无待保存变更。' : '当前内容尚未保存到草稿。'}</p>}
-              <div className="mt-2 flex flex-wrap gap-2">
-                {state.draftError && !session.isDraftBlocked() && <button className={actionClass} disabled={busy || state.pendingRestore} onClick={() => session.retryDraftSave()}>重试保存草稿</button>}
-                <button className={actionClass} disabled={busy} onClick={() => setConfirmClear(true)}>清除草稿</button>
-              </div>
-              {confirmClear && <div role="group" aria-label="确认清除草稿" className="mt-3 rounded border p-3">
-                <p>确认清除本页回答、生成结果和中断正文？已保存的本地卡不受影响。此操作无法撤销。</p>
-                <button className={generationActionClassNames.destructive} disabled={busy} onClick={() => { session.discardDraft(); setConfirmClear(false); }}>确认清除</button>
-                <button className={actionClass} onClick={() => setConfirmClear(false)}>保留草稿</button>
-              </div>}
-            </section>
+        <ScenarioFormSections
+          inputs={<>
+            <ScenarioDraftNotice updatedAt={state.draftSavedAt} saveUnavailable={!!state.draftError} storageLabel="本机" disabled={busy} onClear={() => {
+              if (editorSavingRef.current) return;
+              if (window.confirm(SCENARIO_CLEAR_DRAFT_CONFIRM)) {
+                session.updateDraft({ answers: createInitialAnswers(), fieldsToKeepEmpty: [], scenarioTitleHint: '', generationMode: 'non-stream', selectedLanguage: SCENARIO_DRAFT_DEFAULT_LANGUAGE, isAdvancedVisible: false, generalScenarioDraft: null });
+                setEditorMessage(null);
+              }
+            }} feedback={state.draftError ? <div role="alert" className="mt-2 text-sm text-red-600">{state.draftError}{!session.isDraftBlocked() && <button className={actionClass} disabled={busy} onClick={() => session.retryDraftSave()}>重试保存草稿</button>}</div> : null} />
             {!guard.ready && !guard.message && <p role="status">正在初始化窗口关闭保护…</p>}
             {guard.message && <p role="alert">{guard.message}</p>}
             {profilesLoading && target.location === 'client' && <p role="status">正在读取本地 Provider 配置…</p>}
             {profilesError && <p role="alert">{target.location === 'server' ? '本地 Provider 配置加载失败，仅影响客户端执行。' : profilesError}</p>}
-            <fieldset disabled={busy || blockedDraft} className="min-w-0">
+            <fieldset disabled={busy || blockedDraft} className="min-w-0 space-y-6">
               <legend className="sr-only">情景要素</legend>
-              <div className="space-y-6">
-                <ScenarioTitleField value={draft.scenarioTitleHint} onChange={(scenarioTitleHint) => updateDraft({ scenarioTitleHint })} />
-                <ScenarioQuestionFields answers={draft.answers} onChange={(label, value) => updateDraft({ answers: { ...draft.answers, [label]: value } })} />
-              </div>
-              <ScenarioBlankFields expanded={draft.isAdvancedVisible === true} onToggle={() => updateDraft({ isAdvancedVisible: !draft.isAdvancedVisible })} fields={draft.fieldsToKeepEmpty} onChange={toggleKeepEmpty} />
+              <ScenarioTitleField value={draft.scenarioTitleHint} onChange={(scenarioTitleHint) => updateDraft({ scenarioTitleHint })} />
+              <ScenarioQuestionFields answers={draft.answers} onChange={(label, value) => updateDraft({ answers: { ...draft.answers, [label]: value } })} />
             </fieldset>
-            <fieldset disabled={busy || blockedDraft} className="flex min-w-0 flex-col gap-4">
-              <legend className="mb-2 font-semibold">生成设置</legend>
-              <DesktopAiProviderPanel
+          </>}
+          advanced={<fieldset disabled={busy || blockedDraft}><ScenarioBlankFields expanded={draft.isAdvancedVisible === true} onToggle={() => updateDraft({ isAdvancedVisible: !draft.isAdvancedVisible })} fields={draft.fieldsToKeepEmpty} onChange={toggleKeepEmpty} /></fieldset>}
+          provider={<fieldset disabled={busy || blockedDraft} className="flex min-w-0 flex-col gap-4">
+            <DesktopAiProviderPanel
                 generationMode={draft.generationMode}
                 copy={{
                   serverOutput: {
@@ -257,33 +282,24 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
                     '不使用客户端连接与凭据（由服务器侧系统默认配置解析）。切换执行位置不会丢失已填写的回答。',
                   payloadNoun: '情景回答',
                 }}
-                controlsSlot={
-                  <>
-                  <div>
-                    <GenerationModeSwitcher
-                      // 客户端 Direct 固定走结构化通路：展示生效的「非流式」，
-                      // 服务器侧的流式偏好不改写、切回服务器后恢复（D5.1-AIP-r1）。
-                      value={effectiveGenerationMode}
-                      disabled={target.location === 'client'}
-                      onChange={(next) => updateDraft({ generationMode: next })}
-                      helper={false}
-                    />
-                    {target.location === 'client' && (
-                      <p className="mt-1 text-sm text-(--app-text-muted)">
-                        客户端执行为结构化（非流式）直出；你的服务器生成方式偏好保留，切回服务器后恢复。
-                      </p>
-                    )}
-                  </div>
-                  <ScenarioLanguageField
-                    value={draft.selectedLanguage}
-                    languages={languages.length ? languages : [{ code: draft.selectedLanguage, name: draft.selectedLanguage }]}
-                    onChange={(selectedLanguage) => updateDraft({ selectedLanguage })}
-                  />
-                  </>
-                }
               />
-            </fieldset>
-            <TokenIndicator text={tokenEstimateText} />
+          </fieldset>}
+          language={<ScenarioLanguageField value={draft.selectedLanguage} languages={languages.length ? languages : [{ code: draft.selectedLanguage, name: draft.selectedLanguage }]} onChange={(selectedLanguage) => updateDraft({ selectedLanguage })} disabled={busy || blockedDraft} />}
+          mode={<fieldset disabled={busy || blockedDraft}>
+            <GenerationModeSwitcher
+                // 客户端 Direct 固定走结构化通路：展示生效的「非流式」，
+                // 服务器侧的流式偏好不改写、切回服务器后恢复（D5.1-AIP-r1）。
+                value={effectiveGenerationMode}
+                disabled={target.location === 'client'}
+                onChange={(next) => updateDraft({ generationMode: next })}
+                helper={false}
+              />
+              {target.location === 'client' && (
+                <p className="mt-1 text-sm text-(--app-text-muted)">
+                  客户端执行为结构化（非流式）直出；你的服务器生成方式偏好保留，切回服务器后恢复。
+                </p>
+              )}</fieldset>}
+          actions={<>
             <div className="flex flex-wrap gap-2">
               <button className={generationSubmitClassName} disabled={!guard.ready || busy || !hasAnyAnswer(draft.answers) || !executionMode || target.unavailableReason !== null || (target.location === 'client' && !target.providerTarget) || clientProfilesBlocked || blockedDraft} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '生成情景' : '重新生成'}</button>
               {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}
@@ -292,6 +308,9 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
                     setActionInfo('尚未派发的生成已取消；已保存的 API Key 将保留，系统凭据操作结束后可重试。');
                   }}>取消准备</button>}
             </div>
+          </>}
+          tokens={<TokenIndicator text={tokenEstimateText} />}
+          feedback={<>
             <dialog ref={regenerateDialog} aria-labelledby="regenerate-title" aria-describedby="regenerate-description" className="m-auto max-w-lg rounded-lg border border-(--app-border) bg-(--app-surface) p-5 text-(--app-text) backdrop:bg-black/40" onCancel={(event) => { event.preventDefault(); if (!session.isBusy()) setConfirmRegenerate(false); }}>
               <h2 id="regenerate-title" className="text-xl font-semibold">{confirmCopy?.title ?? '重新生成？'}</h2>
               <p id="regenerate-description" className="my-3">{confirmCopy?.description}</p>
@@ -305,10 +324,10 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
             {actionError && <p role="alert">{actionError}</p>}
             {actionInfo && <p role="status">{actionInfo}</p>}
             {state.message && <p role={state.phase === 'uncertain' ? 'alert' : 'status'}>{state.message}</p>}
-
-        </div>
+          </>}
+        />
       )}
-      results={card || state.rawText || state.reasoning ? (
+      results={(
         <div className="space-y-6">
             {state.reasoning && <AiReasoningPanel reasoning={state.reasoning} />}
             <div ref={resultSectionRef}>
@@ -355,8 +374,24 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
               </ScenarioResultSurface>}
             </div>
             {state.rawText && <details open={state.phase !== 'completed'}><summary>原始输出正文</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border p-3">{state.rawText}</pre></details>}
+            <GeneralScenarioEditor
+              draft={editorDraft}
+              disabled={busy || blockedDraft}
+              onCreate={() => replaceEditor(createBlankDataCard('general-scenario'))}
+              canConvert={card !== null && cardKind === 'scenario'}
+              onConvert={() => { if (card) replaceEditor(convertDataCard(card, 'general-scenario', 'scenario').data); }}
+              onChange={(patch) => { if (editorDraft) { const next: Record<string, unknown> = { ...editorDraft, ...patch }; delete next.signature; if (next.metadata && typeof next.metadata === 'object') { next.metadata = { ...next.metadata }; delete (next.metadata as Record<string, unknown>).signature; } updateDraft({ generalScenarioDraft: next }); setEditorMessage(null); } }}
+              actions={editorDraft && <>
+                <button className={`${actionClass} flex-1`} onClick={() => downloadTextFile(resolveResultJsonFileName(editorDraft), JSON.stringify(editorDraft, null, 2))}>下载通用情景卡</button>
+                <button className={`${generationActionClassNames.primary} flex-1`} disabled={busy || !guard.ready} onClick={() => void saveEditor()}>{editorSaving ? '正在保存…' : '保存到本地卡库'}</button>
+                <button className={`${actionClass} flex-1`} onClick={() => { void Promise.resolve().then(() => navigator.clipboard.writeText(JSON.stringify(editorDraft, null, 2))).then(() => setEditorMessage('已复制到剪贴板')).catch(() => setEditorMessage('复制失败，请手动选择 JSON 内容后复制。')); }}>复制到剪贴板</button>
+              </>}
+              sizeIndicator={editorDraft && <JsonSizeIndicator data={editorDraft} maxBytes={MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES} hintText="按 UTF-8 字节估算，对照本地卡单条记录上限" warningText="⚠️ 接近本地卡单条上限（4 MiB），保存到本地卡库可能失败，请先精简数据。" />}
+              feedback={editorMessage && <p role="status">{editorMessage}</p>}
+            />
+            <div className="mt-6 text-center"><BackHomeLink href="#/" onNavigate={() => void router.navigate({ to: '/' })} /></div>
         </div>
-      ) : null}
+      )}
       footer={(
           <ProductFooter
             assetSource={DESKTOP_ASSET_SOURCE}
@@ -383,6 +418,7 @@ export function DesktopScenario() {
         selectedLanguage: SCENARIO_DRAFT_DEFAULT_LANGUAGE,
       },
     });
+    owner.restoreDraft(false);
     setSession(owner);
     const onPageHide = () => owner.cancel();
     window.addEventListener('pagehide', onPageHide);

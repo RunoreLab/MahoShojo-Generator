@@ -64,14 +64,14 @@ const mount = async () => {
 };
 
 describe('Desktop Free route and session UI (native adapter mock)', () => {
-  it('restores prompt draft on explicit action, generates once and saves the card', async () => {
+  it('restores prompt draft automatically, generates once and saves the card', async () => {
     window.localStorage.setItem(FREE_DRAFT_KEY, JSON.stringify(storedDraft('怕水的火系少女')));
     await mount();
     expect(container.querySelector('[data-testid="page-free"]')).toBeTruthy();
     expect(mocks.execute).not.toHaveBeenCalled();
-    // 待恢复期间生成门禁关闭。
-    expect(button('生成数据卡').disabled).toBe(true);
-    await click('恢复草稿');
+    // 合法草稿静默恢复，不自动生成。
+    expect(button('生成数据卡').disabled).toBe(false);
+    expect(button('恢复草稿')).toBeUndefined();
     const textarea = container.querySelector('textarea')!;
     expect(textarea.value).toBe('怕水的火系少女');
     await click('生成数据卡');
@@ -98,7 +98,6 @@ describe('Desktop Free route and session UI (native adapter mock)', () => {
     });
     window.localStorage.setItem(FREE_DRAFT_KEY, JSON.stringify(storedDraft('怕水的火系少女')));
     await mount();
-    await click('恢复草稿');
     await click('生成数据卡');
     const exports = container.querySelector('[aria-label="保存原始数据"]')!;
     const text = exports.querySelector('textarea')!;
@@ -122,7 +121,6 @@ describe('Desktop Free route and session UI (native adapter mock)', () => {
   it('confirms replacement before regenerating an unsaved result', async () => {
     window.localStorage.setItem(FREE_DRAFT_KEY, JSON.stringify(storedDraft('x')));
     await mount();
-    await click('恢复草稿');
     await click('生成数据卡');
     await click('重新生成');
     expect(container.querySelector('dialog')?.open).toBe(true);
@@ -138,7 +136,6 @@ describe('Desktop Free route and session UI (native adapter mock)', () => {
       version: 1, schemaId: 'magical-girl', generationMode: 'stream', prompt: 'x', selectedLanguage: 'zh-CN',
     }));
     await mount();
-    await click('恢复草稿');
     // D5.1-AIP-r1：草稿的流式偏好保留、切回服务器即恢复；客户端按生效的
     // 「非流式」呈现，Schema 列表也按生效模式展开（流式归并只对服务器通路成立）。
     const stored = JSON.parse(window.localStorage.getItem(FREE_DRAFT_KEY)!);
@@ -161,7 +158,6 @@ describe('Desktop Free route and session UI (native adapter mock)', () => {
       version: 1, schemaId: 'magical-girl', generationMode: 'stream', prompt: 'x', selectedLanguage: 'zh-CN',
     }));
     await mount();
-    await click('恢复草稿');
     // 服务器通路的流式归并照旧：结构化 Schema 回写为 general。
     const stored = JSON.parse(window.localStorage.getItem(FREE_DRAFT_KEY)!);
     expect(stored.generationMode).toBe('stream');
@@ -182,7 +178,6 @@ describe('Desktop Free route and session UI (native adapter mock)', () => {
       .mockImplementationOnce(() => late);
     window.localStorage.setItem(FREE_DRAFT_KEY, JSON.stringify(storedDraft('x')));
     await mount();
-    await click('恢复草稿');
 
     const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
     const pick = async () => {
@@ -224,11 +219,64 @@ describe('Desktop Free route and session UI (native adapter mock)', () => {
     }));
     window.localStorage.setItem(FREE_DRAFT_KEY, JSON.stringify(storedDraft('怕水的火系少女')));
     await mount();
-    await click('恢复草稿');
     expect(container.textContent).toContain('已不在支持列表中');
     expect(button('生成数据卡').disabled).toBe(true);
+    expect(button('恢复草稿')).toBeUndefined();
     button('生成数据卡').click();
     await settle();
     expect(mocks.execute).not.toHaveBeenCalled();
   });
+});
+
+it('copies the prompt and clears only the prompt and attachments, preserving result and configuration', async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  window.localStorage.setItem(FREE_DRAFT_KEY, JSON.stringify({ ...storedDraft('原提示词'), selectedLanguage: 'en', showLanguageSection: true }));
+  await mount();
+  await click('生成数据卡');
+  await click('复制提示词');
+  expect(writeText).toHaveBeenCalledWith('原提示词');
+  mocks.readAttachments.mockResolvedValueOnce({ added: [{ id: 'ref', name: 'reference.txt', type: 'text/plain', size: 3, includedBytes: 3, content: 'abc' }], skipped: 0 });
+  const fileInput = container.querySelector('input[type="file"]')!;
+  await act(async () => { Object.defineProperty(fileInput, 'files', { configurable: true, value: [new File(['abc'], 'reference.txt')] }); fileInput.dispatchEvent(new Event('change', { bubbles: true })); });
+  expect(container.textContent).toContain('reference.txt');
+  await click('清空存档');
+  expect(container.textContent).not.toContain('reference.txt');
+  expect(container.querySelector<HTMLTextAreaElement>('textarea[aria-label="提示词"]')?.value).toBe('');
+  const stored = JSON.parse(window.localStorage.getItem(FREE_DRAFT_KEY)!);
+  expect(stored).toMatchObject({ schemaId: 'general', selectedLanguage: 'en', generationMode: 'non-stream', prompt: '', output: { card: generalCard } });
+  expect(container.querySelector('[aria-label="生成结果"]')).not.toBeNull();
+  expect(window.confirm).not.toHaveBeenCalled();
+});
+
+it('keeps corrupt Free source through fresh input, generation and clearing the prompt', async () => {
+  const corrupt = '{broken-free'; window.localStorage.setItem(FREE_DRAFT_KEY, corrupt);
+  await mount();
+  const input = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="提示词"]')!;
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, '新提示词'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+  expect(button('生成数据卡').disabled).toBe(false);
+  await click('生成数据卡');
+  expect(mocks.execute).toHaveBeenCalledTimes(1);
+  await click('清空存档');
+  expect(input.value).toBe('');
+  expect(container.querySelector('[aria-label="生成结果"]')).not.toBeNull();
+  expect(window.localStorage.getItem(FREE_DRAFT_KEY)).toBe(corrupt);
+});
+
+it.each(['route', 'close'] as const)('confirms leaving a memory-only Free draft via %s without deleting the protected source', async (kind) => {
+  const corrupt = '{protected-free'; window.localStorage.setItem(FREE_DRAFT_KEY, corrupt);
+  const router = await mount();
+  const input = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="提示词"]')!;
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, '新内容'); input.dispatchEvent(new Event('input', { bubbles: true })); });
+  const close = mocks.listen.mock.calls.at(-1)![0] as (event: { preventDefault: () => void }) => void;
+  const denied = vi.fn();
+  await act(async () => { if (kind === 'route') void router.navigate({ to: '/' }); else close({ preventDefault: denied }); }); await settle();
+  expect(container.querySelector('[data-testid="page-free"]')).not.toBeNull();
+  if (kind === 'close') expect(denied).toHaveBeenCalled();
+  vi.mocked(window.confirm).mockReturnValue(true);
+  const accepted = vi.fn();
+  await act(async () => { if (kind === 'route') void router.navigate({ to: '/' }); else close({ preventDefault: accepted }); }); await settle();
+  if (kind === 'route') expect(container.querySelector('[data-testid="page-free"]')).toBeNull();
+  else expect(accepted).not.toHaveBeenCalled();
+  expect(window.localStorage.getItem(FREE_DRAFT_KEY)).toBe(corrupt);
 });

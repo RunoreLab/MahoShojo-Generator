@@ -1,4 +1,5 @@
-import { clearPageDraft, readPageDraft, type StoredPageDraft, writePageDraft } from '@/lib/page-draft-storage';
+import { readPageDraftState } from '@mahoshojo/ui-web/client';
+import { clearPageDraft, type StoredPageDraft, writePageDraft } from '@/lib/page-draft-storage';
 
 export const SCENARIO_PAGE_DRAFT_KEY = 'mahoshojo.scenario.page-draft.v1';
 export const SCENARIO_PAGE_DRAFT_VERSION = 1;
@@ -102,29 +103,37 @@ export const buildScenarioPageDraftPayload = (input: ScenarioPageDraftInput): Sc
 export const restoreScenarioPageDraft = (input: unknown): ScenarioPageDraftPayload | null =>
   normalizeScenarioPageDraftPayload(input);
 
-export const clearScenarioPageDraft = () => {
-  clearPageDraft(SCENARIO_PAGE_DRAFT_KEY);
-};
+export const clearScenarioPageDraft = (): boolean => clearPageDraft(SCENARIO_PAGE_DRAFT_KEY);
 
-export const readScenarioPageDraft = (): StoredPageDraft<ScenarioPageDraftPayload> | null => {
-  const stored = readPageDraft<ScenarioPageDraftPayload>(SCENARIO_PAGE_DRAFT_KEY, {
-    version: SCENARIO_PAGE_DRAFT_VERSION,
-    ttlMs: SCENARIO_PAGE_DRAFT_TTL_MS,
-  });
+export type ScenarioPageDraftReadResult =
+  | { status: 'empty'; stored: null }
+  | { status: 'restored'; stored: StoredPageDraft<ScenarioPageDraftPayload> }
+  | { status: 'unreadable'; stored: null };
 
-  if (!stored) return null;
-
-  const payload = restoreScenarioPageDraft(stored.payload);
-  if (!payload) {
-    clearScenarioPageDraft();
-    return null;
+/** 本页保留旧草稿原文，损坏、未来版本及过期记录均不静默删除或覆盖。 */
+export const readScenarioPageDraftState = (): ScenarioPageDraftReadResult => {
+  const result = readPageDraftState<unknown>(SCENARIO_PAGE_DRAFT_KEY, { version: SCENARIO_PAGE_DRAFT_VERSION, ttlMs: SCENARIO_PAGE_DRAFT_TTL_MS });
+  if (result.kind === 'missing') return { status: 'empty', stored: null };
+  if (result.kind === 'blocked') return { status: 'unreadable', stored: null };
+  try {
+    const parsed = result.stored;
+    if (!isPlainObject(parsed.payload)) return { status: 'unreadable', stored: null };
+    const source = parsed.payload;
+    if (!isPlainObject(source.answers) || !Object.values(source.answers).every((value) => typeof value === 'string') ||
+      typeof source.scenarioTitleHint !== 'string' || !Array.isArray(source.fieldsToKeepEmpty) || !source.fieldsToKeepEmpty.every((value) => typeof value === 'string') ||
+      typeof source.selectedLanguage !== 'string' || !['stream', 'non-stream'].includes(String(source.generationMode)) ||
+      (source.isAdvancedVisible !== undefined && typeof source.isAdvancedVisible !== 'boolean') ||
+      (source.generalScenarioDraftEdited !== undefined && typeof source.generalScenarioDraftEdited !== 'boolean') ||
+      (source.generalScenarioDraft != null && (!isPlainObject(source.generalScenarioDraft) || typeof source.generalScenarioDraft.title !== 'string' || typeof source.generalScenarioDraft.content !== 'string'))) return { status: 'unreadable', stored: null };
+    const payload = restoreScenarioPageDraft(source);
+    if (!payload) return { status: 'empty', stored: null };
+    return { status: 'restored', stored: { version: SCENARIO_PAGE_DRAFT_VERSION, updatedAt: parsed.updatedAt, payload } };
+  } catch {
+    return { status: 'unreadable', stored: null };
   }
-
-  return {
-    ...stored,
-    payload,
-  };
 };
+
+export const readScenarioPageDraft = (): StoredPageDraft<ScenarioPageDraftPayload> | null => readScenarioPageDraftState().stored;
 
 export const writeScenarioPageDraft = (input: ScenarioPageDraftInput): StoredPageDraft<ScenarioPageDraftPayload> | null => {
   const payload = buildScenarioPageDraftPayload(input);
