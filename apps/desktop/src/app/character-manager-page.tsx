@@ -142,6 +142,13 @@ export function DesktopCharacterManager() {
   const cardLibraryHost = useDesktopCardLibraryHost();
   const { state: cloudSession, store: cloudSessionStore } = useDesktopCloudSession();
   const [draft, setDraft] = useState<CardDraft | null>(null);
+  const draftRef = useRef<CardDraft | null>(null);
+  draftRef.current = draft;
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
   // 「一键换名」的对比基线：打开时的正文快照（编辑既有记录/导入内容各自记一份）。
   const [originalData, setOriginalData] = useState<Record<string, unknown> | null>(null);
   const [baseline, setBaseline] = useState<string | null>(null);
@@ -175,7 +182,7 @@ export function DesktopCharacterManager() {
   const hasUnsavedChanges = draft !== null && baseline !== snapshotOf(draft);
   const hasUnsavedLocalRecord = draft !== null && draft.original === null;
   // 自动保存暂停时，尚未载入编辑器的粘贴内容也只在内存里；旧保留草稿本身不阻止离开。
-  const hasUnpersistedPaste = draftBlocked !== null && draft === null && pasted.trim() !== '';
+  const hasUnpersistedPaste = (draftBlocked !== null || autoSaveFailed) && draft === null && pasted.trim() !== '';
   const needsLeaveGuard = hasUnsavedChanges || hasUnsavedLocalRecord || hasUnpersistedPaste;
   const unsavedGuardRef = useRef(false);
   unsavedGuardRef.current = needsLeaveGuard;
@@ -484,6 +491,7 @@ export function DesktopCharacterManager() {
   const selectedTemplate = draft === null ? 'unknown' : inferDataCardTemplate(draft.data);
 
   const handleTemplateSelect = useCallback((target: DataCardTemplate) => {
+    if (savingRef.current) return;
     try {
       if (draft === null) {
         const data = createBlankEditableCardData(target);
@@ -534,7 +542,7 @@ export function DesktopCharacterManager() {
   // 已验证的线上引用，提示语如实区分快照与云端身份（DESK-CACHE-007）。
   const handleSelectLibraryCard = useCallback((payload: BattleSelectionPayload, context: CardLibrarySelectionContext) => {
     // 仲裁在途时入口本应不可达；此处兜底，避免迟到恢复覆盖刚选入的内容。
-    if (!draftRestoreReady) return;
+    if (!draftRestoreReady || loading || savingRef.current) return;
     if (context.storageLocation === 'local') {
       const id = context.selectionId.startsWith('local:') ? context.selectionId.slice('local:'.length) : null;
       if (id !== null) openRecord(id);
@@ -556,7 +564,7 @@ export function DesktopCharacterManager() {
         ? '已从本机缓存快照载入数据卡副本，尚未保存到本地库；快照可能与线上最新版本不同，副本不携带云端身份。'
         : '已从云端载入数据卡副本，尚未保存到本地库；副本不携带云端身份。',
     });
-  }, [open, openRecord, draftRestoreReady]);
+  }, [open, openRecord, draftRestoreReady, loading]);
 
   const save = async () => {
     if (draft === null || savingRef.current || !guard.ready) return;
@@ -566,14 +574,22 @@ export function DesktopCharacterManager() {
     let savedId: string | null = null;
     try {
       const result = await saveCardDraft(repository, draft);
+      if (!mountedRef.current || draftRef.current === null) return;
       setOutcome(result);
       if (result.kind === 'updated' || result.kind === 'created') {
         const saved = { ...draft, original: result.record, title: result.record.title };
+        // 保存确认只推进这次提交的基线；IPC 等待期间的字段编辑仍属于未提交工作。
+        // 模板/来源切换在保存期间暂停，所以当前内容仍属于同一个编辑会话。
+        const current = draftRef.current;
+        const next = {
+          ...current,
+          original: result.record,
+          title: current.title === draft.title ? result.record.title : current.title,
+        };
         if (result.kind === 'created' && draft.original !== null) setReplacedOriginalId(draft.original.id);
         loadedIdRef.current = result.record.id;
-        // 同步清掉未保存标记：随后的 URL 替换不该被离开保护当成“放弃修改”。
-        unsavedGuardRef.current = false;
-        setDraft(saved);
+        unsavedGuardRef.current = snapshotOf(next) !== snapshotOf(saved);
+        setDraft(next);
         setBaseline(snapshotOf(saved));
         // 名称替换基线跟随保存后的记录：「原始」即本地库当前内容。
         setOriginalData(deepCopyData(saved.data));
@@ -584,11 +600,11 @@ export function DesktopCharacterManager() {
       setNotice({ tone: 'alert', text: describeLocalCardError(cause) });
     } finally {
       savingRef.current = false;
-      setSaving(false);
+      if (mountedRef.current) setSaving(false);
     }
-    // 保存结束后才替换 URL：保存在途时离开保护会（正确地）拦下任何导航。
-    if (savedId !== null && cardParam !== savedId) {
-      void router.navigate({ to: '/character-manager', search: { card: savedId }, replace: true });
+    // 只替换本页已保存记录的身份，不重载工作区；绕过本次导航的守卫，后续离开仍保护新编辑。
+    if (mountedRef.current && savedId !== null && cardParam !== savedId) {
+      void router.navigate({ to: '/character-manager', search: { card: savedId }, replace: true, ignoreBlocker: true });
     }
   };
 
@@ -667,7 +683,7 @@ export function DesktopCharacterManager() {
                   退出登录
                 </button>
               )}
-              myDataCards={draftRestoreReady ? {
+              myDataCards={draftRestoreReady && !loading && !saving ? {
                 // 主动使用 = 探测时机（DESK-ONLINE-013，与 /details 同一模式）：
                 // 冷启动 `idle` 下机器上可能已有有效凭据，先 refresh 再开选择器，
                 // 确认 active 后「我的数据卡」默认落到 `my` 页签而不是本地库。
@@ -710,13 +726,14 @@ export function DesktopCharacterManager() {
             )}
           />
 
-          {!draftRestoreReady ? (
+          {!draftRestoreReady || loading ? (
             // 草稿仲裁在途（旧草稿/目标记录的异步读取未落定）：不挂载任何会改变
             // 工作区的入口——模板选择、导入区、本地卡列表与「我的数据卡」一律暂不
             // 提供，避免迟到的恢复覆盖用户在此期间的新操作（D5.1-P2-r5-r3）。
             <p role="status" className="mb-4 text-sm">正在恢复页面草稿或读取目标数据卡…</p>
           ) : (
             <>
+          <fieldset disabled={saving} className="min-w-0">
           <CharacterManagerTemplateSelect
             value={selectedTemplate}
             hasContent={draft !== null}
@@ -725,6 +742,7 @@ export function DesktopCharacterManager() {
               ? '未加载内容时，选择模板将创建对应的空白数据卡；确认保存后才写入本地库。'
               : '切换模板会尝试根据规则转换当前内容；转换结果保存后写入本地库。'}
           />
+          </fieldset>
 
           <CharacterManagerDraftBar
             savedAt={autoSaveTimestamp}
@@ -797,7 +815,8 @@ export function DesktopCharacterManager() {
                           <select
                             id={typeId}
                             value={draft.cardType}
-                            onChange={(event) => setDraft({ ...draft, cardType: event.target.value as LocalCardType })}
+                            disabled={saving}
+                            onChange={(event) => { if (!savingRef.current) setDraft({ ...draft, cardType: event.target.value as LocalCardType }); }}
                             className={inputClass}
                           >
                             {EDITABLE_CARD_TYPES.map((type) => <option key={type} value={type}>{LOCAL_CARD_TYPE_LABELS[type]}</option>)}

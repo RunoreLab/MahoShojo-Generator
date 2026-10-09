@@ -681,3 +681,161 @@ it.each([{ summary: 1 }, { summary: '摘要', fields: [null] }])('keeps malforme
   expect(JSON.stringify(rows.get(record.id)?.data)).toBe(snapshot);
   expect(bridge.invoke.mock.calls.filter(([command]) => command === SAVE_LOCAL_CARD_COMMAND)).toHaveLength(0);
 });
+
+it('保存成功不覆盖在途期间的新正文', async () => {
+  window.location.hash = `#/character-manager?card=${original.id}`;
+  const router = await mount();
+  await waitFor(() => container.querySelector('#editor-field-appearance__outfit') !== null);
+  const getsBeforeSave = bridge.invoke.mock.calls.filter(([command]) => command === GET_LOCAL_CARD_COMMAND).length;
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  await type(container.querySelector<HTMLInputElement>('#editor-field-appearance__outfit')!, '黑裙');
+  const fallback = bridge.invoke.getMockImplementation()!;
+  let release: (() => void) | undefined;
+  bridge.invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+    if (command === SAVE_LOCAL_CARD_COMMAND) await new Promise<void>((resolve) => { release = resolve; });
+    return fallback(command, args);
+  });
+  await click(button('保存到本地库'));
+  await waitFor(() => release !== undefined);
+  const field = container.querySelector<HTMLInputElement>('#editor-field-appearance__outfit')!;
+  expect(field.disabled).toBe(false);
+  await type(field, '保存期间新输入的红裙');
+  expect(field.value).toBe('保存期间新输入的红裙');
+  await act(async () => { release!(); });
+  await waitFor(() => button('保存到本地库') !== undefined);
+  expect(container.querySelector<HTMLInputElement>('#editor-field-appearance__outfit')!.value).toBe('保存期间新输入的红裙');
+  expect(button('保存到本地库')!.disabled).toBe(false);
+  expect(confirm).not.toHaveBeenCalled();
+  expect(router.state.location.search.card).not.toBe(original.id);
+  expect(bridge.invoke.mock.calls.filter(([command]) => command === GET_LOCAL_CARD_COMMAND)).toHaveLength(getsBeforeSave);
+  expect(JSON.parse(window.localStorage.getItem(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY)!).payload.draft.data.appearance.outfit).toBe('保存期间新输入的红裙');
+});
+
+it('没有旧草稿的初始 URL 读取落定前不开放编辑入口', async () => {
+  const release = deferCardGet();
+  window.location.hash = `#/character-manager?card=${original.id}`;
+  await mount();
+  await waitFor(() => bridge.invoke.mock.calls.some(([command]) => command === GET_LOCAL_CARD_COMMAND));
+  expect(container.querySelector('textarea')).toBeNull();
+  expect(container.textContent).not.toContain('内容模板');
+  expect(button('我的数据卡')).toBeUndefined();
+  await release();
+  await waitFor(() => container.querySelector('#editor-field-appearance__outfit') !== null);
+});
+
+it('初始 URL 迟到读取不覆盖新导入', async () => {
+  const release = deferCardGet();
+  window.location.hash = `#/character-manager?card=${original.id}`;
+  await mount();
+  await waitFor(() => bridge.invoke.mock.calls.some(([command]) => command === GET_LOCAL_CARD_COMMAND));
+  const exposed = button('▶ 展开文本粘贴区域 (手机端推荐)') !== undefined;
+  if (exposed) {
+    await expandPasteArea();
+    await type(container.querySelector<HTMLTextAreaElement>('textarea')!, JSON.stringify({ codename: '刚导入的新角色' }));
+    await click(button('从文本加载数据'));
+    expect(container.textContent).toContain('编辑角色: 刚导入的新角色');
+  }
+  await release();
+  await settle();
+  expect(container.textContent).toContain(exposed ? '编辑角色: 刚导入的新角色' : '编辑角色: 星光');
+});
+
+it('尚未载入的粘贴内容在 quota 写失败后仍受离开保护', async () => {
+  window.location.hash = '#/character-manager';
+  await mount();
+  await expandPasteArea();
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
+  await type(container.querySelector<HTMLTextAreaElement>('textarea')!, '{"codename":"仅在内存"}');
+  await waitFor(() => container.textContent?.includes('页面草稿自动保存失败') === true);
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  const prevented = vi.fn();
+  await act(async () => { close({ preventDefault: prevented }); });
+  expect(confirm).toHaveBeenCalledOnce();
+  expect(prevented).toHaveBeenCalledOnce();
+});
+
+it.each(['success', 'failure'] as const)('保存%s后保留在途期间的新标题，并保持离开保护', async (ending) => {
+  window.location.hash = `#/character-manager?card=${original.id}`;
+  const router = await mount();
+  await waitFor(() => container.querySelector('#editor-field-appearance__outfit') !== null);
+  await type(fieldByLabel('记录标题'), '提交时标题');
+  const fallback = bridge.invoke.getMockImplementation()!;
+  let release!: () => void;
+  bridge.invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+    if (command === SAVE_LOCAL_CARD_COMMAND) {
+      await new Promise<void>((resolve, reject) => { release = () => ending === 'success' ? resolve() : reject(new Error('disk')); });
+    }
+    return fallback(command, args);
+  });
+  await click(button('保存到本地库'));
+  await waitFor(() => release !== undefined);
+  expect(container.querySelector('fieldset select')!.matches(':disabled')).toBe(true);
+  expect(button('我的数据卡')).toBeUndefined();
+  await type(fieldByLabel('记录标题'), '保存期间的新标题');
+  await act(async () => release());
+  await waitFor(() => button('保存到本地库') !== undefined);
+  expect(fieldByLabel('记录标题').value).toBe('保存期间的新标题');
+  expect(rows.get(original.id)!.title).toBe(ending === 'success' ? '提交时标题' : '星光');
+  expect(button('保存到本地库')!.disabled).toBe(false);
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+  await act(async () => { void router.navigate({ to: '/' }); });
+  await settle();
+  expect(confirm).toHaveBeenCalledOnce();
+  expect(router.state.location.pathname).toBe('/character-manager');
+});
+
+it('取消在途 URL 读取后新导入不被迟到响应覆盖', async () => {
+  const release = deferCardGet();
+  window.location.hash = `#/character-manager?card=${original.id}`;
+  const router = await mount();
+  await waitFor(() => bridge.invoke.mock.calls.some(([command]) => command === GET_LOCAL_CARD_COMMAND));
+  await act(async () => { await router.navigate({ to: '/character-manager', search: {} }); });
+  await waitFor(() => button('▶ 展开文本粘贴区域 (手机端推荐)') !== undefined);
+  await expandPasteArea();
+  await type(container.querySelector<HTMLTextAreaElement>('textarea')!, '{"codename":"新导入"}');
+  await click(button('从文本加载数据'));
+  await release();
+  await settle();
+  expect(container.textContent).toContain('编辑角色: 新导入');
+  expect(JSON.parse(localStorage.getItem(DESKTOP_CHARACTER_MANAGER_DRAFT_KEY)!).payload.draft.data.codename).toBe('新导入');
+});
+
+it('没有旧草稿的目标卡读取失败后重新开放导入入口', async () => {
+  window.location.hash = '#/character-manager?card=missing';
+  await mountStrict();
+  await waitFor(() => container.textContent?.includes('本地库中没有这张数据卡') === true);
+  expect(button('我的数据卡')).toBeDefined();
+  await expandPasteArea();
+  await type(container.querySelector<HTMLTextAreaElement>('textarea')!, '{"codename":"失败后新输入"}');
+  await click(button('从文本加载数据'));
+  expect(container.textContent).toContain('编辑角色: 失败后新输入');
+});
+
+it('保存期间拒绝确认离开，强制卸载后的保存回调不导航回编辑页', async () => {
+  window.location.hash = `#/character-manager?card=${original.id}`;
+  const router = await mount();
+  await waitFor(() => container.querySelector('#editor-field-appearance__outfit') !== null);
+  await type(container.querySelector<HTMLInputElement>('#editor-field-appearance__outfit')!, '黑裙');
+  const fallback = bridge.invoke.getMockImplementation()!;
+  let release!: () => void;
+  bridge.invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+    if (command === SAVE_LOCAL_CARD_COMMAND) await new Promise<void>((resolve) => { release = resolve; });
+    return fallback(command, args);
+  });
+  await click(button('保存到本地库'));
+  await waitFor(() => release !== undefined);
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  await act(async () => { void router.navigate({ to: '/' }); });
+  await settle();
+  expect(router.state.location.pathname).toBe('/character-manager');
+  const prevented = vi.fn();
+  await act(async () => close({ preventDefault: prevented }));
+  expect(prevented).toHaveBeenCalledOnce();
+  expect(confirm).not.toHaveBeenCalled();
+  const navigate = vi.spyOn(router, 'navigate');
+  await act(async () => root.unmount());
+  root = createRoot(container);
+  await act(async () => release());
+  await settle();
+  expect(navigate).not.toHaveBeenCalled();
+});
