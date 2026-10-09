@@ -100,12 +100,15 @@ const flushAsyncWork = async (): Promise<void> => {
   }
 };
 
-const importZip = async (file: File): Promise<void> => {
+const dispatchImport = async (file: File): Promise<void> => {
   const input = importInput();
   await act(async () => {
     Object.defineProperty(input, 'files', { value: [file], configurable: true });
     input.dispatchEvent(new Event('change', { bubbles: true }));
   });
+};
+
+const waitForImportCompletion = async (): Promise<void> => {
   // Wait for the controller's completion signal, not a guessed number of event-loop ticks.
   // The remaining assertions still verify the actual stored record and visible selection.
   await vi.waitFor(async () => {
@@ -113,6 +116,11 @@ const importZip = async (file: File): Promise<void> => {
     expect(importInput()?.disabled).toBe(false);
     expect(document.querySelector('[data-testid="web-package-import-feedback"]')).not.toBeNull();
   }, { timeout: 5_000 });
+};
+
+const importZip = async (file: File): Promise<void> => {
+  await dispatchImport(file);
+  await waitForImportCompletion();
 };
 
 const showLibraryTab = async (): Promise<void> => {
@@ -214,15 +222,21 @@ it('导入断言等待真实异步写入完成，不把固定宏任务次数当�
   const pkg = await makePackage('local.delayed-save');
   await act(async () => root.render(<SoloArenaWebPackageSection reportFormat="web" />));
   await openPicker();
+  // Finish dispatch's act before starting the completion observer. While that observer
+  // owns act, this test must not start another act/flushAsyncWork in parallel.
+  await dispatchImport(await zipFile(await packWebPackageZip(pkg)));
   let settled = false;
-  const pending = importZip(await zipFile(await packWebPackageZip(pkg))).then(() => { settled = true; });
-  await vi.waitFor(() => expect(injected.saveStarted).toBe(true));
-  await flushAsyncWork();
-  expect(settled).toBe(false);
-  expect(importInput().disabled).toBe(true);
-  expect((await getLocalWebPackageRepository().list({ limit: 10 })).items).toHaveLength(0);
-  release();
-  await pending;
+  const pending = waitForImportCompletion().then(() => { settled = true; });
+  try {
+    await vi.waitFor(() => expect(injected.saveStarted).toBe(true));
+    expect(settled).toBe(false);
+    expect(importInput().disabled).toBe(true);
+    expect((await getLocalWebPackageRepository().list({ limit: 10 })).items).toHaveLength(0);
+  } finally {
+    // An assertion failure must not leave the controller or an act callback suspended.
+    release();
+    await pending;
+  }
   expect((await getLocalWebPackageRepository().list({ limit: 10 })).items.map((item) => item.ref.digest)).toContain(pkg.ref.digest);
 });
 
