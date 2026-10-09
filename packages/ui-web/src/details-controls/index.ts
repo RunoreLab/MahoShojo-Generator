@@ -52,7 +52,7 @@ export {
   type AnswerReviewListProps,
   type AnswerReviewListVariant,
 } from './AnswerReviewList';
-export { useResultAutoScroll } from './use-result-auto-scroll';
+export { useResultAutoScroll, useGeneratedResultAutoScroll } from './use-result-auto-scroll';
 export {
   CANSHOU_LORE_PANEL_APP_THEME,
   CANSHOU_LORE_PANEL_WEB_THEME,

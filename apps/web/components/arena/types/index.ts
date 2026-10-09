@@ -183,6 +183,8 @@ export interface BattleAiImpact {
 }
 
 export interface BattleStoreState {
+  /** 本次请求首次可预览通知：仅内存，不持久化、不由历史恢复填充。 */
+  resultNavigation?: { request: object; signal?: AbortSignal } | null;
   combatants: Combatant[];
   teams: BattleTeam[];
   scenario: ScenarioState;

@@ -1,9 +1,15 @@
-import { useEffect, useRef, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 
 import {
   isReducedMotionActive,
   readStoredResultAutoScrollEnabled,
 } from '../device-preferences/index';
+
+const scrollResultIfBelowViewport = (element: HTMLElement | null): void => {
+  if (!element || !readStoredResultAutoScrollEnabled()) return;
+  if (element.getBoundingClientRect().top <= window.innerHeight) return;
+  element.scrollIntoView({ behavior: isReducedMotionActive() ? 'auto' : 'smooth', block: 'start' });
+};
 
 /**
  * 结果出现时的单次自动滚动（/details 问卷页）。
@@ -23,6 +29,7 @@ import {
 export const useResultAutoScroll = (
   targetRef: RefObject<HTMLElement | null>,
   hasResult: boolean,
+  options: { restored?: boolean } = {},
 ): void => {
   const scrolledForSession = useRef(false);
   useEffect(() => {
@@ -30,6 +37,7 @@ export const useResultAutoScroll = (
       scrolledForSession.current = false;
       return;
     }
+    if (options.restored) return;
     if (!readStoredResultAutoScrollEnabled()) {
       // 用户显式关闭则不滚动，也不占用会话闩锁——重新开启后对下一次
       // 新结果会话正常生效（当前已出现的结果不回溯滚动）。
@@ -37,12 +45,37 @@ export const useResultAutoScroll = (
     }
     if (scrolledForSession.current) return;
     scrolledForSession.current = true;
-    const element = targetRef.current;
-    if (!element) return;
-    if (element.getBoundingClientRect().top <= window.innerHeight) return;
-    element.scrollIntoView({
-      behavior: isReducedMotionActive() ? 'auto' : 'smooth',
-      block: 'start',
-    });
-  }, [targetRef, hasResult]);
+    scrollResultIfBelowViewport(targetRef.current);
+  }, [targetRef, hasResult, options.restored]);
+};
+
+/**
+ * 请求绑定的结果通知契约。begin 在已有生成意图获准后调用，返回的通知函数
+ * 只在该请求首次产生可预览正文/卡片时调用；不在恢复、加载历史或仅有占位时调用。
+ * 这是滚动的一次性闩锁，不管理请求生命周期。宿主仍负责请求取消和结果归属。
+ * 使用同一个请求对象贯穿流式/最终结果；新请求使旧回调失效，AbortSignal
+ * 使取消后迟到的结果失效。notify.cancel()只撤销定位，供失败时预览被移除的宿主使用。
+ * 通知后的 DOM commit 才测量结果位置。
+ */
+export const useGeneratedResultAutoScroll = (targetRef: RefObject<HTMLElement | null>) => {
+  const active = useRef<{ request: object; signal?: AbortSignal; notified: boolean; cancelled: boolean } | null>(null);
+  const [preview, setPreview] = useState<object | null>(null);
+  const begin = useCallback((request: object, signal?: AbortSignal) => {
+    const session = active.current?.request === request
+      ? active.current
+      : { request, signal, notified: false, cancelled: false };
+    active.current = session;
+    const notify = () => {
+      if (active.current !== session || session.signal?.aborted || session.cancelled || session.notified) return;
+      session.notified = true;
+      setPreview(session);
+    };
+    return Object.assign(notify, { cancel: () => { session.cancelled = true; } });
+  }, []);
+  useEffect(() => {
+    if (!preview || active.current !== preview || active.current.signal?.aborted || active.current.cancelled) return;
+    scrollResultIfBelowViewport(targetRef.current);
+  }, [preview, targetRef]);
+  useEffect(() => () => { active.current = null; }, []);
+  return begin;
 };

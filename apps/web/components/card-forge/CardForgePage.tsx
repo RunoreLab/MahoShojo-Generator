@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
 import { useSearchParams } from 'next/navigation';
 import {
   type GameCardFaceData,
@@ -194,6 +195,8 @@ export function CardForgePage() {
   const [isExportingJson, setIsExportingJson] = useState(false);
   const [cardForgeFileError, setCardForgeFileError] = useState<string | null>(null);
   const [imageSizeWarning, setImageSizeWarning] = useState<string | null>(null);
+  const resultRef = useRef<HTMLElement>(null);
+  const beginResultNavigation = useGeneratedResultAutoScroll(resultRef);
   const genAbortRef = useRef<AbortController | null>(null);
   const tachieAbortRef = useRef<AbortController | null>(null);
 
@@ -272,6 +275,7 @@ export function CardForgePage() {
     genAbortRef.current?.abort();
     genAbortRef.current = abortController;
 
+    let revealGeneratedResult: ReturnType<typeof beginResultNavigation> | null = null;
     let errorStatus: number | null = null;
     try {
       const authHeader = await authStorage.getAuthHeader();
@@ -290,6 +294,7 @@ export function CardForgePage() {
 
       const generationIntent = generationApiIntentLatch.tryAcquire();
       if (!generationIntent) return;
+      revealGeneratedResult = beginResultNavigation(generationIntent, abortController.signal);
       const resp = await generationIntent.dispatch('/api/generate-game-card', {
         method: 'POST',
         headers,
@@ -313,7 +318,9 @@ export function CardForgePage() {
       setSourceCardKind(json.sourceCardKind ?? null);
       setThemeColorOverride(null);
       setGenStatus('success');
+      revealGeneratedResult();
     } catch (err) {
+      revealGeneratedResult?.cancel();
       if (isAbortErrorLike(err) || abortController.signal.aborted) {
         setGenStatus('idle');
         return;
@@ -322,7 +329,7 @@ export function CardForgePage() {
       setGenErrorStatus(errorStatus);
       setGenStatus('error');
     }
-  }, [generationApiIntentLatch, sourceCardJson, customInstructions, userProviderConfig]);
+  }, [beginResultNavigation, generationApiIntentLatch, sourceCardJson, customInstructions, userProviderConfig]);
 
   const handleStopGeneration = useCallback(() => {
     genAbortRef.current?.abort(STREAM_ABORT_REASON_USER);
@@ -914,7 +921,7 @@ export function CardForgePage() {
 
           {/* 右侧：预览区 */}
           <div className="lg:sticky lg:top-4 lg:self-start">
-            <section className="card-forge-panel rounded-2xl p-5">
+            <section ref={resultRef} className="card-forge-panel rounded-2xl p-5">
               <h2 className="text-lg font-semibold text-[var(--app-text)] mb-4 text-center">卡面预览</h2>
               {effectiveFaceData ? (
                 <div className="flex flex-col items-center">

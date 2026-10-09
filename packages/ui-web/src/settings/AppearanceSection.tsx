@@ -59,7 +59,7 @@ export const AppearanceSettingsSection = () => {
         <div className="divide-y divide-(--app-border)">
           <SettingsFieldRow
             label="结果自动定位"
-            description="生成完成且结果在视口下方时自动滚动过去；同一结果只定位一次。"
+            description="新生成的数据卡或战报首次可预览且位于视口下方时自动定位；同一结果只定位一次，恢复与历史查看不触发。"
             control={
               <SettingsToggle
                 ariaLabel="结果自动定位"

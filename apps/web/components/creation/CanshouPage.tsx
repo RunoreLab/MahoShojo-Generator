@@ -1,5 +1,6 @@
 'use client';
 
+import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useProviderModeCooldown } from '@/lib/cooldown';
 import Link from 'next/link';
@@ -126,6 +127,8 @@ const CANSHOU_PREFERENCE_KEY = CANSHOU_PREFERENCES_STORAGE_KEY;
 
 export const CanshouPage: React.FC = () => {
   const generationApiIntentLatch = useGenerationApiIntentLatch();
+  const resultSectionRef = useRef<HTMLDivElement | null>(null);
+  const beginResultNavigation = useGeneratedResultAutoScroll(resultSectionRef);
   const router = useAppRouterAdapter();
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [selectedQuestionnaires, setSelectedQuestionnaires] = useState<QuestionnaireSelection[]>([]);
@@ -1059,6 +1062,7 @@ export const CanshouPage: React.FC = () => {
       }
       const generationIntent = generationApiIntentLatch.tryAcquire();
       if (!generationIntent) return;
+      const revealGeneratedResult = beginResultNavigation(generationIntent, streamController?.signal);
       const response = await generationIntent.dispatch(endpoint, {
         method: 'POST',
         headers: requestHeaders,
@@ -1106,7 +1110,10 @@ export const CanshouPage: React.FC = () => {
         const { text: markdown, outputSafetyStatus, wasAborted, abortReason } = await readSafeTextAndReasoningStreamFromResponse(response, {
           abortController: controller,
           label: '残兽档案（流式）',
-          onText: (text) => setStreamingMarkdown(text),
+          onText: (text) => {
+            setStreamingMarkdown(text);
+            if (text.trim()) revealGeneratedResult();
+          },
           onReasoning: (reasoning) => setStreamingReasoning(reasoning),
           safetyReason: '使用危险符文',
         });
@@ -1159,6 +1166,7 @@ export const CanshouPage: React.FC = () => {
 
       const { data: result, aiMeta } = await readJsonWithAiMeta<CanshouResultPayload>(response);
       setCanshouDetails(result);
+      revealGeneratedResult();
       setNonStreamReasoning(aiMeta?.aiReasoning ?? null);
       shouldStartCooldown = true;
     } catch (err) {
@@ -1363,6 +1371,7 @@ export const CanshouPage: React.FC = () => {
                   try {
                     const data = generateRandomCanshou();
                     setCanshouDetails(data);
+                    beginResultNavigation(data)();
                     setShowIntroduction(false);
                   } catch (err) {
                     console.error('随机生成失败: ', err);
@@ -1486,7 +1495,7 @@ export const CanshouPage: React.FC = () => {
                 />
 
                 {generationMode === 'stream' && streamedGeneralCardForDisplay && (
-                  <div className="my-6">
+                  <div ref={resultSectionRef} className="my-6">
                     <GeneralCharacterCard
                       general={streamedGeneralCardForDisplay}
                       isStreaming={submitting}
@@ -1590,7 +1599,7 @@ export const CanshouPage: React.FC = () => {
                 </div>
               </>
             ) : (
-              <>
+              <div ref={resultSectionRef}>
                 {generationMode === 'stream' && streamedGeneralCard ? (
                   <>
                     <GeneralCharacterCard
@@ -1728,7 +1737,7 @@ export const CanshouPage: React.FC = () => {
                 <div className="mt-8 text-center">
                   <Link href="/" className="footer-link">返回首页</Link>
                 </div>
-              </>
+              </div>
             )}
           </QuestionnairePageCard>
 

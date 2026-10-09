@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
+import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
 import { snapdom } from '@zumer/snapdom';
 import type {
   MagicalGirlGenerationResult as AIGeneratedMagicalGirl,
@@ -168,6 +169,7 @@ export function NamePage() {
   const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const resultRef = useRef<HTMLDivElement>(null);
+  const beginResultNavigation = useGeneratedResultAutoScroll(resultRef);
   const { isCooldown, startCooldown, remainingTime } = useCooldown('generateMagicalGirlCooldown', 60000);
   const router = useAppRouterAdapter();
   // 多语言支持
@@ -225,6 +227,7 @@ export function NamePage() {
     if (!generationIntent) return;
     setIsGenerating(true);
     setError(null);
+    const revealGeneratedResult = beginResultNavigation(generationIntent);
     let nextCooldownMs = 60000;
 
     try {
@@ -234,8 +237,10 @@ export function NamePage() {
         selectedLanguage,
       );
       setMagicalGirl(result);
+      revealGeneratedResult();
       setError(null); // 成功时清除错误
     } catch (error) {
+      revealGeneratedResult.cancel();
       if (error instanceof Error) {
         const errorMessage = error.message;
         // 检查是否是 rate limit 错误

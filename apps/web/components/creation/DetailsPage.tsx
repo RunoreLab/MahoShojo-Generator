@@ -74,7 +74,7 @@ import { getAnswerLimitInfo, isAnswerOverLimit, QUESTIONNAIRE_NATIVE_MAX_ANSWER_
 import { exceedsUtf8ByteLimit } from '@/lib/data-card-size';
 import { authStorage } from '@/lib/auth';
 import { useGenerationApiIntentLatch } from '@/lib/use-generation-api-intent-latch';
-import { useResultAutoScroll } from '@/lib/use-result-auto-scroll';
+import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
 import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import { mapDataCardSourceMeta } from '@/lib/data-card-read-mappers';
 import {
@@ -642,7 +642,7 @@ export const DetailsPage: React.FC = () => {
 
   // 生成完成（含快速随机）：仅当结果整体仍在视口下方时自动滚动定位一次；
   // 已可见/已滚过/正边看边生成的位置不打断（语义见 useResultAutoScroll）。
-  useResultAutoScroll(resultSectionRef, Boolean(magicalGirlDetails || streamedGeneralCard));
+  const beginResultNavigation = useGeneratedResultAutoScroll(resultSectionRef);
 
   const applySelection = (selection: QuestionnaireSelection) => {
     setSelectedQuestionnaires((prev) =>
@@ -1244,6 +1244,7 @@ export const DetailsPage: React.FC = () => {
       }
       const generationIntent = generationApiIntentLatch.tryAcquire();
       if (!generationIntent) return;
+      const revealGeneratedResult = beginResultNavigation(generationIntent, streamController?.signal);
       const response = await generationIntent.dispatch(endpoint, {
         method: 'POST',
         headers: requestHeaders,
@@ -1303,7 +1304,10 @@ export const DetailsPage: React.FC = () => {
         const { text: markdown, outputSafetyStatus, wasAborted, abortReason } = await readSafeTextAndReasoningStreamFromResponse(response, {
           abortController: controller,
           label: '魔法少女角色卡（流式）',
-          onText: (text) => setStreamingMarkdown(text),
+          onText: (text) => {
+            setStreamingMarkdown(text);
+            if (text.trim()) revealGeneratedResult();
+          },
           onReasoning: (reasoning) => setStreamingReasoning(reasoning),
           safetyReason: '使用危险符文',
         });
@@ -1364,6 +1368,7 @@ export const DetailsPage: React.FC = () => {
       })) return;
 
       setMagicalGirlDetails(result);
+      revealGeneratedResult();
       setNonStreamReasoning(aiMeta?.aiReasoning ?? null);
       setError(null); // 成功时清除错误
     } catch (error) {
@@ -1559,6 +1564,7 @@ export const DetailsPage: React.FC = () => {
                     // 直接同步调用，移除 await
                     const data = generateRandomMagicalGirl();
                     setMagicalGirlDetails(data);
+                    beginResultNavigation(data)();
                     setCharacterPortraitAsset(null);
                     setShowIntroduction(false);
                   } catch (err) {

@@ -1,11 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type ReactNode, type RefObject } from 'react';
 
 import { ChevronDown } from 'lucide-react';
 
 import { MAX_ROOM_MEMBERS, type RoomDirectoryVisibility } from '@mahoshojo/contracts/arena-room';
+import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
 import { useEscapeLayer } from '@mahoshojo/ui-web/modal';
 
 import type { ArenaRoomControllerState } from '@/lib/arena-room/controller';
@@ -394,8 +395,9 @@ const ArenaRoomLobbyDialog = ({
   );
 };
 
-export const ArenaRoomGenerationResult = ({ state, onSaveImage, onRetryRecovery }: {
+export const ArenaRoomGenerationResult = ({ state, onSaveImage, onRetryRecovery, resultRef }: {
   readonly state: ArenaRoomControllerState;
+  readonly resultRef?: RefObject<HTMLElement | null>;
   readonly onSaveImage?: (imageUrl: string) => void;
   readonly onRetryRecovery?: () => void | Promise<void>;
 }) => {
@@ -417,6 +419,7 @@ export const ArenaRoomGenerationResult = ({ state, onSaveImage, onRetryRecovery 
 
   return (
     <section
+      ref={resultRef}
       aria-labelledby="arena-room-generation-heading"
       className="rounded-xl border border-fuchsia-200 bg-white/80 p-4 dark:border-fuchsia-900 dark:bg-gray-900/70"
       data-arena-room-generation-report="v1"
@@ -1227,12 +1230,55 @@ export function ArenaMultiplayerContextPanel(props: ArenaMultiplayerPanelProps) 
 /** Production result adapter: keeps the room report in the existing Arena result region. */
 export function ArenaMultiplayerContextResult({ onSaveImage }: ArenaMultiplayerResultProps) {
   const runtime = useArenaRoomContext();
+  const resultRef = useRef<HTMLElement | null>(null);
+  const beginResultNavigation = useGeneratedResultAutoScroll(resultRef);
+  const room = runtime?.state.session;
+  const roomKey = room ? `${room.roomId}:${room.roomEpoch}` : null;
+  const currentGeneration = runtime?.state.generation;
+  const mirror = currentGeneration?.mirror;
+  const authority = room?.snapshot.activeGeneration;
+  const generationKey = authority ? `${authority.generationId}:${authority.attempt}` : null;
+  const previewKey = mirror ? `${mirror.generationId}:${mirror.attempt}` : null;
+  const observed = useRef<{ roomKey: string | null; generationKey: string | null; format: 'markdown' | 'web' | null }>({ roomKey, generationKey, format: null });
+  const notifyPreview = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    const previous = observed.current;
+    // running safe-read/delta 尚不提供 result。只在配置revision与本次
+    // generation的冻结revision一致时取格式；之后编辑下一次配置不改变它。
+    const capturedFormat = previous.roomKey === roomKey && previous.generationKey === generationKey
+      ? previous.format
+      : authority && room?.snapshot.revision === authority.configRevision
+        ? room.snapshot.sharedConfig.reportFormat
+        : null;
+    observed.current = { roomKey, generationKey, format: capturedFormat };
+    if (previous.roomKey !== roomKey) {
+      // 加入/重新恢复房间时已有战报不是本次新生成。
+      notifyPreview.current = null;
+      return;
+    }
+    if (generationKey && generationKey !== previous.generationKey) {
+      notifyPreview.current = beginResultNavigation({ roomKey, generationKey });
+    }
+    if (!currentGeneration || ['cancelled', 'failed', 'unknown', 'unavailable'].includes(currentGeneration.phase)) {
+      notifyPreview.current = null;
+      return;
+    }
+    const format = currentGeneration.result?.format === 'stream-web' ? 'web'
+      : currentGeneration.result?.format === 'stream-markdown' ? 'markdown'
+      : capturedFormat;
+    const ready = format === 'web'
+      ? currentGeneration.finalAuthoritative && currentGeneration.phase === 'completed'
+      : format === 'markdown' && Boolean(currentGeneration.markdown.trim());
+    if (ready && previewKey === generationKey) notifyPreview.current?.();
+  }, [beginResultNavigation, roomKey, generationKey, previewKey, currentGeneration, authority, room]);
+
   if (!runtime?.state.session) return null;
   const generation = runtime.state.generation;
   if (generation.phase !== 'idle' || generation.markdown) {
     return (
       <ArenaRoomGenerationResult
         state={runtime.state}
+        resultRef={resultRef}
         onSaveImage={onSaveImage}
         onRetryRecovery={() => runtime.controller.retryGenerationRecovery()}
       />

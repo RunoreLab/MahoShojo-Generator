@@ -383,7 +383,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   }, [allQuestionTargets, questionAnswerLookup, questionTargetSignature, session]);
   // 生成完成（含快速随机）：仅当结果整体仍在视口下方时自动滚动定位一次
   //（语义见共享 useResultAutoScroll）。
-  useResultAutoScroll(resultSectionRef, Boolean(state.card));
+  useResultAutoScroll(resultSectionRef, Boolean(state.card), { restored: state.resultRestored });
   const applyImportedAnswers = (next: Record<string, string>) => {
     updateDraft({ answers: next });
     setActionError(null);

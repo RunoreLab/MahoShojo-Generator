@@ -1,5 +1,6 @@
 'use client';
 
+import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import GeneralCharacterCard from '@/components/GeneralCharacterCard';
 import { useProviderModeCooldown } from '@/lib/cooldown';
@@ -239,6 +240,8 @@ const DETAILS_PREFERENCE_KEY = DETAILS_PREFERENCES_STORAGE_KEY;
 
 export const CreatorPage: React.FC = () => {
   const generationApiIntentLatch = useGenerationApiIntentLatch();
+  const resultSectionRef = useRef<HTMLDivElement | null>(null);
+  const beginResultNavigation = useGeneratedResultAutoScroll(resultSectionRef);
   const router = useAppRouterAdapter();
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [selectedQuestionnaires, setSelectedQuestionnaires] = useState<QuestionnaireSelection[]>([]);
@@ -1727,6 +1730,7 @@ export const CreatorPage: React.FC = () => {
       }
       const generationIntent = generationApiIntentLatch.tryAcquire();
       if (!generationIntent) return;
+      const revealGeneratedResult = beginResultNavigation(generationIntent, streamController?.signal);
       const response = await generationIntent.dispatch(endpoint, {
         method: 'POST',
         headers: requestHeaders,
@@ -1786,7 +1790,10 @@ export const CreatorPage: React.FC = () => {
         const { text: markdown, outputSafetyStatus, wasAborted, abortReason } = await readSafeTextAndReasoningStreamFromResponse(response, {
           abortController: controller,
           label: creatorTemplate === 'general-scenario' ? '通用情景卡（流式）' : '通用角色卡（流式）',
-          onText: (text) => setStreamingMarkdown(text),
+          onText: (text) => {
+            setStreamingMarkdown(text);
+            if (text.trim()) revealGeneratedResult();
+          },
           onReasoning: (reasoning) => setStreamingReasoning(reasoning),
           safetyReason: '使用危险符文',
         });
@@ -1845,6 +1852,7 @@ export const CreatorPage: React.FC = () => {
       })) return;
 
       setMagicalGirlDetails(result);
+      revealGeneratedResult();
       setNonStreamReasoning(aiMeta?.aiReasoning ?? null);
       setError(null); // 成功时清除错误
     } catch (error) {
@@ -2964,7 +2972,7 @@ export const CreatorPage: React.FC = () => {
   const creatorResultMainContent = (
     <CreatorResultStageContent
       questionnaireEditor={mergedQuestions.length > 0 ? questionnaireEditorMainContent : undefined}
-      resultContent={creatorResultPanels}
+      resultContent={<div ref={resultSectionRef}>{creatorResultPanels}</div>}
     />
   );
 

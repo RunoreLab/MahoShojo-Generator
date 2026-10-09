@@ -1,5 +1,7 @@
 'use client';
 
+import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
@@ -344,6 +346,8 @@ export function useBattleStorySession() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatingAction, setGeneratingAction] = useState<BattleStorySessionAction | null>(null);
   const [streamingMarkdown, setStreamingMarkdown] = useState('');
+  const resultSectionRef = useRef<HTMLDivElement | null>(null);
+  const beginResultNavigation = useGeneratedResultAutoScroll(resultSectionRef);
   const [streamSoftTimeoutWarning, setStreamSoftTimeoutWarning] = useState<string | null>(null);
   const [streamCardSnapshot, setStreamCardSnapshot] = useState<BattleStoryChapterCardSnapshot | null>(null);
   const [streamChapterIndex, setStreamChapterIndex] = useState<number | null>(null);
@@ -895,10 +899,12 @@ export function useBattleStorySession() {
       let responseStatus: number | null = null;
       let requestAccepted = false;
       let cooldownHandled = false;
+      let revealGeneratedResult: ReturnType<typeof beginResultNavigation> | null = null;
 
       try {
         const generationIntent = generationApiIntentLatch.tryAcquire();
         if (!generationIntent) throw new Error('已有生成请求正在处理中，请勿重复提交。');
+        revealGeneratedResult = beginResultNavigation(generationIntent, generationController.signal);
         const response = await generationIntent.dispatch('/api/arena/session/generate-next', {
           method: 'POST',
           headers: withArenaGenerationActorToken(await buildRequestHeaders(true)),
@@ -1009,7 +1015,10 @@ export function useBattleStorySession() {
           onSoftTimeout: (event) => {
             setStreamSoftTimeoutWarning(buildStreamSoftTimeoutMessage(event));
           },
-          onText: (text) => setStreamingMarkdown(text),
+          onText: (text) => {
+            setStreamingMarkdown(text);
+            if (text.trim()) revealGeneratedResult?.();
+          },
           onReasoning: (reasoning) => {
             patchStreamCardSnapshot({ aiReasoning: reasoning });
           },
@@ -1157,6 +1166,9 @@ export function useBattleStorySession() {
           ...(updateResult.warning ? { warning: updateResult.warning } : {}),
         };
       } catch (error) {
+        // 同批次终态失败会在定位 effect 提交前移除实时卡片。
+        // 只撤销定位通知，避免滚向旧章节；不改变生成请求的取消语义。
+        revealGeneratedResult?.cancel();
         if (generationController.signal.aborted) {
           startCooldown();
           cooldownHandled = true;
@@ -1190,6 +1202,7 @@ export function useBattleStorySession() {
     },
     [
       generationApiIntentLatch,
+      beginResultNavigation,
       applyWorkingCombatantUpdates,
       buildRequestHeaders,
       cooldownMs,
@@ -1908,6 +1921,7 @@ export function useBattleStorySession() {
     isGenerating,
     generatingAction,
     streamingMarkdown,
+    resultSectionRef,
     streamSoftTimeoutWarning,
     streamCardSnapshot,
     streamChapterIndex,

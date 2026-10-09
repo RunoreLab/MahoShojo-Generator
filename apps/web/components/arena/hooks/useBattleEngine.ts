@@ -114,6 +114,7 @@ export type ArenaRoomGenerationPreflightPrompt = Readonly<{
 }>;
 
 let sharedGenerationAbortController: AbortController | null = null;
+let latestResultNavigationRequest: string | null = null;
 
 const isStreamInterruptedError = (error: unknown): boolean => {
   if (error instanceof StreamReadTimeoutError) return true;
@@ -573,6 +574,8 @@ export const useBattleEngine = () => {
       return;
     }
 
+    latestResultNavigationRequest = null;
+    useBattleStore.setState({ resultNavigation: null });
     setIsGenerating(true);
     setArenaGenerationConnectionState(null);
     setIsStreaming(false);
@@ -952,6 +955,22 @@ export const useBattleEngine = () => {
         return;
       }
       if (!requestBody) throw new Error('无法构造单人生成请求。');
+      const resultNavigationRequest = { generationRequestId };
+      latestResultNavigationRequest = generationRequestId;
+      let resultNavigationSignal: AbortSignal | undefined;
+      let resultNavigationPublished = false;
+      const revealGeneratedResult = () => {
+        if (generationRequestId !== latestResultNavigationRequest
+          || resultNavigationSignal?.aborted || resultNavigationPublished) return;
+        resultNavigationPublished = true;
+        useBattleStore.setState({ resultNavigation: { request: resultNavigationRequest, signal: resultNavigationSignal } });
+      };
+      const publishStreamingPreview = (text: string | null) => {
+        setStreamingMarkdown(text);
+        // HTML/网页包必须等安全的可预览合同就绪；占位与元数据不算正文。
+        if (useBattleStore.getState().resultReportFormat !== 'web' && text?.trim()) revealGeneratedResult();
+      };
+
 
       const authHeader = await authStorage.getAuthHeader();
       const baseRequestHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -1015,6 +1034,7 @@ export const useBattleEngine = () => {
         setResultWebPackage(result.report.webPackage ?? null);
         setResultWebReady(result.report.reportFormat === 'web' && (Boolean(result.report.webPackage) || typeof result.report.webHtml === 'string'));
         setNewsReport(reportWithScenario);
+        revealGeneratedResult();
         const normalizedImpacts = normalizeBattleAiImpacts(result.impacts);
         setLatestAiImpacts(normalizedImpacts.length > 0 ? normalizedImpacts : null);
         setUpdatedCombatants(result.updatedCombatants);
@@ -1045,6 +1065,12 @@ export const useBattleEngine = () => {
 	        const abortController = new AbortController();
 	        sharedGenerationAbortController?.abort(STREAM_ABORT_REASON_USER);
 	        sharedGenerationAbortController = abortController;
+          // 传输 finally 会 abort 做资源清理，不能把成功结果误判为取消。
+          // 仅将真正发生在请求期间的取消投影给延后的 DOM 定位。
+          const navigationCancellation = new AbortController();
+          const cancelNavigation = () => navigationCancellation.abort(abortController.signal.reason);
+          abortController.signal.addEventListener('abort', cancelNavigation, { once: true });
+          resultNavigationSignal = navigationCancellation.signal;
 	        let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
 		        try {
@@ -1293,7 +1319,7 @@ export const useBattleEngine = () => {
           );
           let lastCheckedLength = 0;
 
-          setStreamingMarkdown(accumulatedText);
+          publishStreamingPreview(accumulatedText);
           setIsStreaming(true);
 
           const getIncrementalCheckSlice = (fullText: string): { slice: string; startIndex: number } => {
@@ -1396,7 +1422,7 @@ export const useBattleEngine = () => {
               accumulatedText = accumulatedText.slice(0, cutIndex);
               accumulatedText += buildStreamSensitiveArrestWarrantMarkdown('使用危险符文');
 
-              setStreamingMarkdown(presentGeneratedContent(accumulatedText));
+              publishStreamingPreview(presentGeneratedContent(accumulatedText));
 
               shouldAbort = true;
               abortController.abort(STREAM_ABORT_REASON_CONTENT_POLICY);
@@ -1481,7 +1507,7 @@ export const useBattleEngine = () => {
                 if (chunk) {
                   accumulatedText += chunk;
                   if (await handleSensitiveIfNeeded()) return;
-                  setStreamingMarkdown(presentGeneratedContent(accumulatedText));
+                  publishStreamingPreview(presentGeneratedContent(accumulatedText));
                 }
                 return;
               }
@@ -1497,7 +1523,7 @@ export const useBattleEngine = () => {
                   accumulatedText = mergedMarkdown;
                   lastCheckedLength = 0;
                   if (await handleSensitiveIfNeeded()) return;
-                  setStreamingMarkdown(presentGeneratedContent(mergedMarkdown));
+                  publishStreamingPreview(presentGeneratedContent(mergedMarkdown));
                 }
                 setStreamReasoning(reasoning
                   ? appendReasoningDelta(null, sanitizeTextByShieldWords(reasoning), {
@@ -1749,14 +1775,14 @@ export const useBattleEngine = () => {
                 accumulatedText = accumulatedText.slice(0, cutIndex);
                 accumulatedText += buildStreamSensitiveArrestWarrantMarkdown('使用危险符文');
 
-                setStreamingMarkdown(presentGeneratedContent(accumulatedText));
+                publishStreamingPreview(presentGeneratedContent(accumulatedText));
 
                 shouldAbort = true;
                 abortController.abort(STREAM_ABORT_REASON_CONTENT_POLICY);
                 break;
               }
 
-              setStreamingMarkdown(presentGeneratedContent(accumulatedText));
+              publishStreamingPreview(presentGeneratedContent(accumulatedText));
 
                 if (shouldTerminateByTelemetry(accumulatedText)) {
                   try {
@@ -1798,7 +1824,7 @@ export const useBattleEngine = () => {
           if (!isSseResponse) {
             // flush TextDecoder：避免最后一个 chunk 以多字节字符结尾时丢字
             accumulatedText += decoder.decode();
-            setStreamingMarkdown(presentGeneratedContent(accumulatedText));
+            publishStreamingPreview(presentGeneratedContent(accumulatedText));
 
             // 流式正文末尾可能包含 HTML 注释 JSON 元数据（用于角色更新的 impacts/currentStateSummary）。
             // 此处尽量提取并修复解析；失败时回退到仅基于 Markdown 的更新逻辑。
@@ -1888,7 +1914,7 @@ export const useBattleEngine = () => {
             }
           }
 
-          setStreamingMarkdown(presentGeneratedContent(markdownForUi));
+          publishStreamingPreview(presentGeneratedContent(markdownForUi));
 
           const trimmedForValidation = markdownForUi.trim();
           const allowStreamMeta = settings.writeArenaHistory || settings.writeCurrentState;
@@ -1909,6 +1935,7 @@ export const useBattleEngine = () => {
           }
 
           setResultWebReady(authoritativeWebContract && authoritativeStreamDone);
+          if (authoritativeWebContract && authoritativeStreamDone) revealGeneratedResult();
 
           if (hasMetaImpacts && !trimmedForValidation) {
             setError('⚠️ 战报正文为空，但检测到角色更新元数据，已尝试继续更新角色数据。');
@@ -1956,6 +1983,7 @@ export const useBattleEngine = () => {
               // ignore
             }
           }
+          abortController.signal.removeEventListener('abort', cancelNavigation);
           abortController.abort();
         }
       }

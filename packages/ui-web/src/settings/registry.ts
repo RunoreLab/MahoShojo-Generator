@@ -83,7 +83,7 @@ export const SETTINGS_FIELD_REGISTRY: readonly SettingsFieldRecord[] = [
     owner: { kind: 'device-storage', storageKey: 'mahoshojo.result-auto-scroll' },
     defaultValue: 'on',
     status: 'wired',
-    notes: '控制共享 useResultAutoScroll；其余语义见 DESK-PARITY-004。',
+    notes: '控制共享结果定位 hook；首次可预览触发，恢复与历史不触发；其余语义见 DESK-PARITY-004。',
   },
   {
     id: 'generation.detailsPreferences',

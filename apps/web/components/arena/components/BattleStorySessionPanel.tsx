@@ -175,6 +175,7 @@ export function BattleStorySessionPanel(props: {
     isGenerating,
     generatingAction,
     streamingMarkdown,
+    resultSectionRef,
     streamSoftTimeoutWarning,
     streamCardSnapshot,
     streamChapterIndex,
@@ -673,7 +674,7 @@ export function BattleStorySessionPanel(props: {
               </div>
             </div>
 
-            <div className="min-w-0 space-y-4">
+            <div ref={resultSectionRef} className="min-w-0 space-y-4">
               {isGenerating ? (
                 <div className="space-y-4">
                   <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">

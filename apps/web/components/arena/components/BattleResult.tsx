@@ -1,9 +1,11 @@
 'use client';
 
+import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
+
 import SaveToCloudButton from '@/components/SaveToCloudButton';
 import { NewsReport, type BattleReportIllustrationAsset } from '@/components/BattleReportCard';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useBattleStore } from '../stores/useBattleStore';
 import { useBattleEngine } from '../hooks/useBattleEngine';
 import { useCombatantRepair } from '../hooks/useCombatantRepair';
@@ -33,6 +35,16 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
   } = useBattleEngine();
   const combatantRepair = useCombatantRepair();
   const useBattleSelector = <T,>(selector: (state: BattleStoreState) => T) => useBattleStore(selector);
+  const resultSectionRef = useRef<HTMLDivElement | null>(null);
+  const beginResultNavigation = useGeneratedResultAutoScroll(resultSectionRef);
+  const resultNavigation = useBattleSelector((state) => state.resultNavigation);
+  // 再次进入页面时已有结果仅展示；只有挂载后新发出的请求结果通知才定位。
+  const observedNavigation = useRef(resultNavigation);
+  useEffect(() => {
+    if (observedNavigation.current === resultNavigation) return;
+    observedNavigation.current = resultNavigation;
+    if (resultNavigation) beginResultNavigation(resultNavigation.request, resultNavigation.signal)();
+  }, [beginResultNavigation, resultNavigation]);
   const adjudicationResults = useBattleSelector((state) => state.adjudicationResults);
   const newsReport = useBattleSelector((state) => state.newsReport);
   const resultReportFormat = useBattleSelector((state) => state.resultReportFormat);
@@ -153,6 +165,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
 
   return (
     <>
+      <div ref={resultSectionRef}>
       <BattleResultPresentation
         report={generationMode === 'stream'
           ? isGenerating || streamingMarkdown !== null
@@ -215,6 +228,7 @@ export function BattleResult({ onSaveImage }: BattleResultProps) {
         onSaveImage={onSaveImage}
         adjudicationResults={adjudicationResults}
       />
+      </div>
 
       {shouldShowIllustrationPanel && (
         <BattleIllustrationPanel

@@ -535,7 +535,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
     currentQuestionKeyRef.current = flow[nextIndex]?.key ?? null;
   }, [flow, flowIndexByKey, questionIndex]);
 
-  useResultAutoScroll(resultSectionRef, Boolean(state.card));
+  useResultAutoScroll(resultSectionRef, Boolean(state.card), { restored: state.resultRestored });
 
   const selected = target.profile;
   const mode = target.mode;

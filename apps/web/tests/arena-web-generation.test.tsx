@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import React, { act } from 'react';
+import React, { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -33,7 +33,11 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 let current: ReturnType<typeof useBattleEngine>;
 let root: Root;
 let container: HTMLDivElement;
-const Harness = () => { current = useBattleEngine(); return null; };
+const Harness = () => {
+  const engine = useBattleEngine();
+  useEffect(() => { current = engine; });
+  return null;
+};
 const source = '<!doctype html><html><body><svg></svg><script>const SHIELD = "原始HTML";</script></body></html>';
 const sse = (event: string, payload: unknown) => `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`;
 const streamHeaders = {
@@ -398,5 +402,70 @@ describe('telemetry restore across snapshot bootstrap and telemetry events', () 
 
     expect(useBattleStore.getState().streamAiModel).toBe('被替换-model');
     expect(mocks.shield).toHaveBeenCalledWith('SHIELD-model');
+  });
+});
+
+describe('战报首次可预览通知', () => {
+  it('Markdown首段发出一次通知，后续分片与完成保持同一请求身份', async () => {
+    let producer!: ReadableStreamDefaultController<Uint8Array>;
+    mocks.openStream.mockResolvedValue(new Response(new ReadableStream<Uint8Array>({
+      start(controller) { producer = controller; },
+    }), { headers: { 'Content-Type': 'text/event-stream' } }));
+    await act(async () => useBattleStore.setState({ reportFormat: 'markdown' }));
+    let generation!: Promise<void>;
+    await act(async () => {
+      generation = current.handleGenerate();
+      await vi.waitFor(() => expect(mocks.openStream).toHaveBeenCalled());
+    });
+    expect(useBattleStore.getState().resultNavigation).toBeNull();
+    await act(async () => {
+      producer.enqueue(new TextEncoder().encode(sse('markdown', { chunk: '首段可预览正文' })));
+      await vi.waitFor(() => expect(useBattleStore.getState().resultNavigation).toBeTruthy());
+    });
+    const first = useBattleStore.getState().resultNavigation;
+    expect(first?.request).toEqual({ generationRequestId: mocks.openStream.mock.calls[0][0].generationRequestId });
+    await act(async () => {
+      producer.enqueue(new TextEncoder().encode(sse('markdown', { chunk: '后续正文'.repeat(40) }) + sse('done', { status: 'completed', ok: true })));
+      producer.close(); await generation;
+    });
+    expect(useBattleStore.getState().resultNavigation).toBe(first);
+    expect(first?.signal?.aborted).toBe(false);
+  });
+
+  it('HTML原始源码不触发，只有权威完成可预览时发出通知', async () => {
+    let producer!: ReadableStreamDefaultController<Uint8Array>;
+    mocks.openStream.mockResolvedValue(new Response(new ReadableStream<Uint8Array>({
+      start(controller) { producer = controller; },
+    }), { headers: streamHeaders }));
+    let generation!: Promise<void>;
+    await act(async () => {
+      generation = current.handleGenerate();
+      await vi.waitFor(() => expect(mocks.openStream).toHaveBeenCalled());
+      producer.enqueue(new TextEncoder().encode(sse('markdown', { chunk: source })));
+      await vi.waitFor(() => expect(useBattleStore.getState().streamingMarkdown).toBe(source));
+    });
+    expect(useBattleStore.getState().resultNavigation).toBeNull();
+    await act(async () => {
+      producer.enqueue(new TextEncoder().encode(sse('done', { status: 'completed', ok: true })));
+      producer.close(); await generation;
+    });
+    expect(useBattleStore.getState().resultWebReady).toBe(true);
+    expect(useBattleStore.getState().resultNavigation).toBeTruthy();
+    expect(useBattleStore.getState().resultNavigation?.signal?.aborted).toBe(false);
+  });
+
+  it('取消保留的HTML残文不生成导航通知', async () => {
+    mocks.openStream.mockImplementation(async ({ signal }: { signal: AbortSignal }) => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(sse('markdown', { chunk: source })));
+        signal.addEventListener('abort', () => controller.error(new DOMException('Aborted', 'AbortError')), { once: true });
+      },
+    }), { headers: streamHeaders }));
+    await act(async () => {
+      const generation = current.handleGenerate();
+      await vi.waitFor(() => expect(useBattleStore.getState().streamingMarkdown).toBe(source));
+      current.stopGeneration(); await generation;
+    });
+    expect(useBattleStore.getState().resultNavigation).toBeNull();
   });
 });

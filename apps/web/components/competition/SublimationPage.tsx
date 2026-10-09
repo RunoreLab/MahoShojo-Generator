@@ -2,6 +2,7 @@
 
 import React, { useState, ChangeEvent, useEffect, useMemo, useCallback, useRef } from 'react';
 import Link from 'next/link';
+import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
 import MagicalGirlCard from '@/components/MagicalGirlCard';
 import CanshouCard from '@/components/CanshouCard';
 import GeneralCharacterCard from '@/components/GeneralCharacterCard';
@@ -228,6 +229,8 @@ const SUBLIMATION_USER_GUIDANCE_MAX_CHARS = 200;
 
 export const SublimationPage: React.FC = () => {
     const generationApiIntentLatch = useGenerationApiIntentLatch();
+    const resultSectionRef = useRef<HTMLDivElement | null>(null);
+    const beginResultNavigation = useGeneratedResultAutoScroll(resultSectionRef);
     const router = useClientRouteAdapter();
     const { isAuthenticated } = useAuth();
     const [characterData, setCharacterData] = useState<any>(null);
@@ -957,6 +960,7 @@ export const SublimationPage: React.FC = () => {
             }
             const generationIntent = generationApiIntentLatch.tryAcquire();
             if (!generationIntent) return;
+            const revealGeneratedResult = beginResultNavigation(generationIntent, streamController?.signal);
             const response = await generationIntent.dispatch(endpoint, {
                 method: 'POST',
                 headers: requestHeaders,
@@ -1001,7 +1005,10 @@ export const SublimationPage: React.FC = () => {
                 const { text: markdown, outputSafetyStatus, wasAborted, abortReason } = await readSafeTextAndReasoningStreamFromResponse(response, {
                     abortController: controller,
                     label: '升华（流式）',
-                    onText: (text) => setStreamingMarkdown(text),
+                    onText: (text) => {
+                        setStreamingMarkdown(text);
+                        if (text.trim()) revealGeneratedResult();
+                    },
                     onReasoning: (reasoning) => setStreamingReasoning(reasoning),
                     safetyReason: '使用危险符文',
                 });
@@ -1077,6 +1084,7 @@ export const SublimationPage: React.FC = () => {
                 setTargetTemplate(result.targetTemplate);
             }
             setResultData(result);
+            if (result.sublimatedData) revealGeneratedResult();
             setNonStreamReasoning(aiMeta?.aiReasoning ?? null);
             shouldStartCooldown = true;
 
@@ -1814,7 +1822,7 @@ export const SublimationPage: React.FC = () => {
                     {generationMode === 'stream' && (streamingMarkdown !== null || streamedGeneralCard) && (
                         <>
                             {streamedGeneralCardForDisplay && (
-                                <div className="card mt-6">
+                                <div ref={resultSectionRef} className="card mt-6">
                                     {streamResultNativenessStatus && (
                                         <div className="flex items-center justify-between mb-3">
                                             <h3 className="text-sm font-semibold text-gray-700">升华结果原生性</h3>
@@ -1889,7 +1897,7 @@ export const SublimationPage: React.FC = () => {
                                     <NativenessBadge status={nonStreamResultNativenessStatus} />
                                 </div>
                             )}
-                            {renderResultCard()}
+                            <div ref={resultSectionRef}>{renderResultCard()}</div>
                             <div className="card mt-6 text-center">
                                 <h3 className="text-lg font-bold text-gray-800 mb-3">操作</h3>
                                 <div className="flex flex-col md:flex-row justify-center">

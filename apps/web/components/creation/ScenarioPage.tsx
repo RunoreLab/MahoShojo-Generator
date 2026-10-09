@@ -1,5 +1,6 @@
 'use client';
 
+import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { useAppRouterAdapter } from '@/lib/app-router-adapter';
@@ -51,6 +52,8 @@ type RateLimitError = Error & {
 
 export const ScenarioPage: React.FC = () => {
   const generationApiIntentLatch = useGenerationApiIntentLatch();
+  const resultSectionRef = useRef<HTMLDivElement | null>(null);
+  const beginResultNavigation = useGeneratedResultAutoScroll(resultSectionRef);
   const router = useAppRouterAdapter();
   const [answers, setAnswers] = useState<Record<string, string>>(createInitialScenarioAnswers);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -327,6 +330,7 @@ export const ScenarioPage: React.FC = () => {
       }
       const generationIntent = generationApiIntentLatch.tryAcquire();
       if (!generationIntent) return;
+      const revealGeneratedResult = beginResultNavigation(generationIntent, streamController?.signal);
       const response = await generationIntent.dispatch(endpoint, {
         method: 'POST',
         headers: requestHeaders,
@@ -375,6 +379,7 @@ export const ScenarioPage: React.FC = () => {
           label: '情景卡（流式）',
           onText: (text) => {
             setGeneralScenarioDraft((prev: any) => (prev ? { ...prev, content: text } : prev));
+            if (text.trim()) revealGeneratedResult();
           },
           onReasoning: (reasoning) => setStreamingReasoning(reasoning),
           safetyReason: '使用危险符文',
@@ -414,6 +419,7 @@ export const ScenarioPage: React.FC = () => {
 
       const { data: result, aiMeta } = await readJsonWithAiMeta<any>(response);
       setResultData(result);
+      revealGeneratedResult();
       setNonStreamReasoning(aiMeta?.aiReasoning ?? null);
       shouldStartCooldown = true;
 
@@ -565,7 +571,7 @@ export const ScenarioPage: React.FC = () => {
         </>
       )}
       results={(
-        <>
+        <div ref={resultSectionRef}>
           {generationMode === 'non-stream' && resultData && (
             <>
               {nonStreamReasoning && (
@@ -694,7 +700,7 @@ export const ScenarioPage: React.FC = () => {
           <div className="text-center" style={{ marginTop: '2rem' }}>
             <Link href="/" className="footer-link">返回首页</Link>
           </div>
-        </>
+        </div>
       )}
       footer={<Footer />}
     />

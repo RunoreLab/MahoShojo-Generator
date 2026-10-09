@@ -1,5 +1,6 @@
 'use client';
 
+import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useAppRouterAdapter } from '@/lib/app-router-adapter';
@@ -172,6 +173,8 @@ const buildCanshouPortraitPrompt = (input: Record<string, unknown>): string => {
 
 export function FreePage() {
   const generationApiIntentLatch = useGenerationApiIntentLatch();
+  const resultSectionRef = useRef<HTMLDivElement | null>(null);
+  const beginResultNavigation = useGeneratedResultAutoScroll(resultSectionRef);
   const router = useAppRouterAdapter();
   // 附件会话共源（ui-web/free）：读取代际失效、合并前预算复核、maxCount
   // 上限与 Desktop 同一实现；附件不写入草稿。
@@ -378,6 +381,7 @@ export function FreePage() {
       }
       const generationIntent = generationApiIntentLatch.tryAcquire();
       if (!generationIntent) return;
+      const revealGeneratedResult = beginResultNavigation(generationIntent, streamController?.signal);
       const response = await generationIntent.dispatch(endpoint, {
         method: 'POST',
         headers: requestHeaders,
@@ -422,7 +426,10 @@ export function FreePage() {
         const { text: markdown, outputSafetyStatus, wasAborted, abortReason } = await readSafeTextAndReasoningStreamFromResponse(response, {
           abortController: controller,
           label: '自由生成（流式）',
-          onText: (text) => setStreamingMarkdown(text),
+          onText: (text) => {
+            setStreamingMarkdown(text);
+            if (text.trim()) revealGeneratedResult();
+          },
           onReasoning: (reasoning) => setStreamingReasoning(reasoning),
           safetyReason: '使用危险符文',
         });
@@ -457,6 +464,7 @@ export function FreePage() {
 
       const { data, aiMeta } = await readJsonWithAiMeta<any>(response);
       setResultData(data);
+      revealGeneratedResult();
       setNonStreamReasoning(aiMeta?.aiReasoning ?? null);
       shouldStartCooldown = true;
     } catch (err) {
@@ -851,7 +859,7 @@ export function FreePage() {
           </div>
         </div>
       )}
-      result={resultNode}
+      result={resultNode ? <div ref={resultSectionRef}>{resultNode}</div> : null}
       footer={<Footer className="footer" />}
     />
   );

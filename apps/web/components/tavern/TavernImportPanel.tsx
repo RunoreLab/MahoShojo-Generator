@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 
+import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
+
 import AiProviderSelector, { type UserAIProviderConfig } from '@/components/AiProviderSelector';
 import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
 import CanshouCard from '@/components/CanshouCard';
@@ -385,6 +387,9 @@ export function TavernImportPanel() {
   const [streamingReasoning, setStreamingReasoning] = useState<AIReasoningEnvelope | null>(null);
   const [nonStreamReasoning, setNonStreamReasoning] = useState<AIReasoningEnvelope | null>(null);
   const [streamNotice, setStreamNotice] = useState<string | null>(null);
+  const resultRef = useRef<HTMLDivElement>(null);
+  const beginResultNavigation = useGeneratedResultAutoScroll(resultRef);
+  const resultNavigationRef = useRef<ReturnType<typeof beginResultNavigation> | null>(null);
   const streamAbortControllerRef = useRef<AbortController | null>(null);
   const isUserCustomKey = isUsingUserProvidedKey(userProviderConfig);
   const tavernAiCooldownMs = isUserCustomKey ? USER_PROVIDED_KEY_COOLDOWN_MS : OFFICIAL_KEY_MAX_AI_COOLDOWN_MS;
@@ -532,6 +537,7 @@ export function TavernImportPanel() {
   const imageSaveButtonLabel = imageSaveMode === 'download' ? '💾 一键保存长图' : '📱 打开长按保存弹窗';
 
   const resetGeneratedPreview = () => {
+    resultNavigationRef.current?.cancel();
     setStreamingMarkdown(null);
     setStreamedGeneralCard(null);
     setStreamingReasoning(null);
@@ -539,6 +545,7 @@ export function TavernImportPanel() {
   };
 
   const handleAiProviderConfigChange = useCallback((config: UserAIProviderConfig | null) => {
+    resultNavigationRef.current?.cancel();
     setUserProviderConfig(config);
     setStreamingMarkdown(null);
     setStreamedGeneralCard(null);
@@ -577,6 +584,7 @@ export function TavernImportPanel() {
 
   const onFileSelected = async (file: File | null) => {
     if (!file) return;
+    resultNavigationRef.current?.cancel();
     dispatch({ type: 'parsing' });
     setStreamingMarkdown(null);
     setStreamedGeneralCard(null);
@@ -625,7 +633,10 @@ export function TavernImportPanel() {
     return parts.join('|');
   };
 
-  const convertToDataCard = async (): Promise<unknown> => {
+  const convertToDataCard = async (
+    requestController?: AbortController,
+    revealGeneratedResult?: ReturnType<typeof beginResultNavigation>,
+  ): Promise<unknown> => {
     if (!state.parseResult || !selectedCandidate || !selectedNormalized || !normalizedForConvert) {
       throw new Error('尚未解析到可用的 SillyTavern 候选块');
     }
@@ -667,7 +678,7 @@ export function TavernImportPanel() {
         setNonStreamReasoning(null);
         setStreamNotice(null);
         setCopyStatus('idle');
-        const streamController = new AbortController();
+        const streamController = requestController ?? new AbortController();
         streamAbortControllerRef.current?.abort(STREAM_ABORT_REASON_USER);
         streamAbortControllerRef.current = streamController;
 
@@ -704,7 +715,10 @@ export function TavernImportPanel() {
           const { text: markdown, outputSafetyStatus, wasAborted, abortReason } = await readSafeTextAndReasoningStreamFromResponse(response, {
             abortController: streamController,
             label: '酒馆导入（流式）',
-            onText: (text) => setStreamingMarkdown(text),
+            onText: (text) => {
+              setStreamingMarkdown(text);
+              if (text.trim()) revealGeneratedResult?.();
+            },
             onReasoning: (reasoning) => setStreamingReasoning(reasoning),
             safetyReason: '使用危险符文',
           });
@@ -719,6 +733,7 @@ export function TavernImportPanel() {
             );
           }
 
+          if (markdown.trim()) revealGeneratedResult?.();
           const isScenarioTarget = state.targetTemplate === 'scenario' || state.targetTemplate === 'general-scenario';
           if (isScenarioTarget) {
             const { card } = buildGeneralScenarioCardFromMarkdown({
@@ -742,6 +757,9 @@ export function TavernImportPanel() {
           setStreamedGeneralCard(card);
           startCooldown(tavernAiCooldownMs);
           return { ...card, _tavern: tavernPayload };
+        } catch (error) {
+          revealGeneratedResult?.cancel();
+          throw error;
         } finally {
           streamAbortControllerRef.current = null;
         }
@@ -750,6 +768,7 @@ export function TavernImportPanel() {
       setNonStreamReasoning(null);
       const response = await fetch('/api/tavern/convert', {
         method: 'POST',
+        signal: requestController?.signal,
         headers: {
           'Content-Type': 'application/json',
           [AI_META_REQUEST_HEADER]: AI_META_REQUEST_VALUE,
@@ -867,10 +886,21 @@ export function TavernImportPanel() {
       return null;
     }
 
+    const requestController = state.convertMode === 'ai' ? new AbortController() : undefined;
+    const revealGeneratedResult = requestController
+      ? beginResultNavigation(requestController, requestController.signal)
+      : undefined;
+    resultNavigationRef.current = revealGeneratedResult ?? null;
     dispatch({ type: 'converting' });
-    const output = await convertToDataCard();
-    dispatch({ type: 'done', output, outputKey });
-    return { output, outputKey };
+    try {
+      const output = await convertToDataCard(requestController, revealGeneratedResult);
+      dispatch({ type: 'done', output, outputKey });
+      if (generationMode === 'non-stream') revealGeneratedResult?.();
+      return { output, outputKey };
+    } catch (error) {
+      revealGeneratedResult?.cancel();
+      throw error;
+    }
   };
 
   const onGenerate = async () => {
@@ -1358,7 +1388,7 @@ export function TavernImportPanel() {
             <TavernCardPreview normalized={selectedNormalized} warnings={combinedWarnings} />
 
             {previewDataCard ? (
-              <div>
+              <div ref={resultRef}>
                 <div className="rounded-xl border border-pink-200 bg-white/70 p-4">
                   <div className="text-sm font-semibold text-pink-700">{targetLabel}卡预览</div>
                   <div className="mt-3">

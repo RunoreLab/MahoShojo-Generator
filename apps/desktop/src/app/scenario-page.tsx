@@ -93,7 +93,7 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
   const [deviceType, setDeviceType] = useState<DeviceType>('unknown');
   const regenerateDialog = useRef<HTMLDialogElement>(null);
   const resultSectionRef = useRef<HTMLDivElement | null>(null);
-  useResultAutoScroll(resultSectionRef, state.card !== null);
+  useResultAutoScroll(resultSectionRef, state.card !== null, { restored: state.resultRestored });
   useEffect(() => {
     const dialog = regenerateDialog.current;
     if (confirmRegenerate && !dialog?.open) dialog?.showModal();
