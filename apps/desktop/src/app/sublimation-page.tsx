@@ -1,5 +1,6 @@
+import { PrivateResultSave } from '../features/cloud-save/private-result-save';
 import { DesktopSublimationLoreSelector } from '../features/sublimation/lore-selector';
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from '@tanstack/react-router';
 import { MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES } from '@mahoshojo/contracts/desktop-ipc';
@@ -40,6 +41,10 @@ const sourceName = (card: Record<string, unknown> | null): string => {
 /** 宿主只装配端口；输入视图取自 Web，执行/草稿/签名/另存沿用 generation session。 */
 function SublimationForm({ session, repository }: { session: SublimationSession; repository: IpcLocalCardRepository }) {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
+  const cloudSavingRef = useRef(false);
+  const [cloudSaving, setCloudSaving] = useState(false);
+  const onCloudSavingChange = useCallback((saving: boolean) => { cloudSavingRef.current = saving; setCloudSaving(saving); }, []);
+
   const router = useRouter();
   const { openFixed } = useExternalLinks();
   const cardLibraryHost = useDesktopCardLibraryHost();
@@ -65,15 +70,15 @@ function SublimationForm({ session, repository }: { session: SublimationSession;
   const [historySort, setHistorySort] = useState<NarrativeHistorySort>('created_desc');
   const [selectedHistoryIds, setSelectedHistoryIds] = useState<string[]>([]);
   const draft = state.draft;
-  const busy = state.phase === 'generating' || state.saving || aiState.generationActive || importing || loreLoading;
+  const busy = cloudSaving || state.phase === 'generating' || state.saving || aiState.generationActive || importing || loreLoading;
   const blocked = state.pendingRestore;
-  const updateDraft = (patch: Partial<SublimationDraft>) => session.updateDraft({ ...session.getSnapshot().draft, ...patch });
+  const updateDraft = (patch: Partial<SublimationDraft>) => { if (!cloudSavingRef.current) session.updateDraft({ ...session.getSnapshot().draft, ...patch }); };
   const guard = useLeaveGuard(
-    () => loreLoadingRef.current || importingRef.current || aiStore.isPreparingGeneration() || session.isBusy() || session.hasUnsavedDraft(),
+    () => cloudSavingRef.current || loreLoadingRef.current || importingRef.current || aiStore.isPreparingGeneration() || session.isBusy() || session.hasUnsavedDraft(),
     '生成、导入或保存尚未完成，或当前草稿未能保存。请等待、取消生成或重试保存草稿后再离开。',
     '窗口关闭保护初始化失败，生成与保存暂不可用。请重新打开页面后重试。',
     () => {
-      if (loreLoadingRef.current || importingRef.current || aiStore.isPreparingGeneration() || session.getSnapshot().saving) return false;
+      if (cloudSavingRef.current || loreLoadingRef.current || importingRef.current || aiStore.isPreparingGeneration() || session.getSnapshot().saving) return false;
       if (session.getSnapshot().phase !== 'generating') return !session.hasUnsavedDraft() || window.confirm('当前新内容尚未保存到本机草稿。确认放弃这些未保存更改并离开？原有存档不会被删除。');
       if (!window.confirm('生成尚未完成。确认终止生成并离开？未能保存到本机草稿的内容将丢失，可以先复制或保存。')) return false;
       session.cancel(); return true;
@@ -109,6 +114,7 @@ function SublimationForm({ session, repository }: { session: SublimationSession;
     catch (cause) { return { warnings: [], error: cause instanceof Error ? cause.message : '当前素材无法转换为目标模板。' }; }
   }, [draft]);
   const loadSource = (text: string) => {
+    if (cloudSavingRef.current) return;
     const parsed = parseImportedCard(text);
     if (!parsed.ok) { setActionError(parsed.error); return; }
     const data = parsed.draft.data;
@@ -118,7 +124,7 @@ function SublimationForm({ session, repository }: { session: SublimationSession;
     setActionError(null); setActionInfo('已载入设定副本，升华结果将另存为新卡。');
   };
   const importFile = async (file: File | undefined, history = false) => {
-    if (!file || busy || blocked || importingRef.current) return;
+    if (cloudSavingRef.current || !file || busy || blocked || importingRef.current) return;
     if (file.size > MAX_IMPORT_FILE_BYTES) { setActionError('文件超过大小上限（4 MiB）。'); return; }
     const epoch = ++importEpoch.current;
     importingRef.current = true; setImporting(true); setActionError(null);
@@ -130,13 +136,13 @@ function SublimationForm({ session, repository }: { session: SublimationSession;
     finally { if (epoch === importEpoch.current) { importingRef.current = false; setImporting(false); } }
   };
   const chooseCard = (_payload: BattleSelectionPayload, context: CardLibrarySelectionContext) => {
-    if (busy || blocked) return;
+    if (cloudSavingRef.current || busy || blocked) return;
     if (!context.rawSourceData) { setActionError('卡库未提供完整原文，请重新选择或导入 JSON。'); return; }
     loadSource(JSON.stringify(context.rawSourceData));
     setLibraryOpen(false);
   };
   const generate = (discardUnsavedResult = false) => {
-    if (!guard.ready || busy || loreLoadingRef.current || importingRef.current || blocked || !draft.originalData || preparation.error || target.unavailableReason || (target.location === 'client' && !target.providerTarget)) return;
+    if (cloudSavingRef.current || !guard.ready || busy || loreLoadingRef.current || importingRef.current || blocked || !draft.originalData || preparation.error || target.unavailableReason || (target.location === 'client' && !target.providerTarget)) return;
     if (!discardUnsavedResult) {
       if (session.hasUnsavedResult()) { setConfirmation('unsaved'); return; }
       if (state.phase === 'uncertain') { setConfirmation('uncertain'); return; }
@@ -155,6 +161,7 @@ function SublimationForm({ session, repository }: { session: SublimationSession;
     }).catch((cause: unknown) => setActionError(cause instanceof Error ? cause.message : 'AI 配置准备失败'));
   };
   const card = state.card;
+  const resultCardType = session.resultCardType();
   const preview = card ? asCharacterCardPreview({ original: null, cardType: 'character', title: sourceName(card), data: card }) : null;
   const signatureLabel = session.resultSignatureKind() === 'official-signed' ? '官方签名（服务器生成）' : session.resultSignatureKind() === 'signature-unverified' ? '含签名字段（本机未验证）' : '未签名（非原生卡）';
   const showStream = state.phase === 'generating' && state.activeGenerationMode === 'stream';
@@ -169,7 +176,7 @@ function SublimationForm({ session, repository }: { session: SublimationSession;
       <SublimationPageHeader onNavigate={(href) => navigateByProductHref(router, href)} resolveInternalHref={resolveInternalHrefForHashHistory} loreEnabled={true} />
       <div className="mb-4 flex flex-wrap items-center gap-3 text-sm">
         <span>{state.draftError ? '草稿保存不可用，当前输入仍保留' : state.draftSavedAt ? '已自动保存到本机草稿' : '填写后自动保存到本机草稿'}</span>
-        <button className={actionClass} disabled={busy} onClick={() => { if (window.confirm('清除本机升华草稿及当前生成结果？已保存的本地卡和源卡不会删除。')) { session.discardDraft(); setPaste(''); setSelectedHistoryIds([]); } }}>清除草稿</button>
+        <button className={actionClass} disabled={busy} onClick={() => { if (cloudSavingRef.current) return; if (window.confirm('清除本机升华草稿及当前生成结果？已保存的本地卡和源卡不会删除。')) { session.discardDraft(); setPaste(''); setSelectedHistoryIds([]); } }}>清除草稿</button>
       </div>
       <QuestionnaireDraftPanel draftError={state.draftError} draftBlocked={session.isDraftBlocked()} busy={busy} actionClass={actionClass} onRetrySave={() => session.retryDraftSave()} />
       {!guard.ready && !guard.message && <p role="status">正在初始化窗口关闭保护…</p>}
@@ -226,7 +233,8 @@ function SublimationForm({ session, repository }: { session: SublimationSession;
         {preview?.kind === 'canshou' && <CanshouCard canshou={preview.data} />}
         {preview?.kind === 'general' && <GeneralCharacterCard general={preview.data} />}
         <div className="card"><h3 className="text-lg font-semibold">保存升华结果</h3><p className="mb-3 text-xs text-gray-500">另存新卡，原始角色与本地历史不会被覆盖。</p>
-          <button className={generationActionClassNames.primary} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => void session.saveResult()}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>
+          {resultCardType && <PrivateResultSave data={card} cardType={resultCardType} onBusyChange={onCloudSavingChange} isBlocked={() => session.isBusy() || aiStore.isPreparingGeneration() || importingRef.current || loreLoadingRef.current} disabled={!guard.ready || busy} className={generationActionClassNames.primary} />}
+                  <button className={generationActionClassNames.primary} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => void session.saveResult()}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>
           {state.saveStatus === 'saved' && <p role="status">已保存到本地卡库。</p>}{state.saveStatus === 'already-present' && <p role="status">本地卡库已存在相同内容，原记录保持不变。</p>}{state.saveError && <p role="alert">{state.saveError}</p>}
           <div className="mt-3 flex flex-col gap-3"><SaveJsonButton data={card} mode="download" recommendedMode="download" resolveFileName={() => buildSafeFileName(`升华_${sourceName(card)}`, 'json', '升华结果')} downloadJson={downloadTextFile} /><button className={actionClass} onClick={() => { void Promise.resolve().then(() => navigator.clipboard.writeText(JSON.stringify(card, null, 2))).then(() => setActionInfo('数据卡 JSON 已复制到剪贴板')).catch(() => setActionError('复制失败，请手动选择 JSON 内容后复制。')); }}>复制到剪贴板</button></div>
           <JsonSizeIndicator data={card} maxBytes={MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES} hintText="按 UTF-8 字节估算，对照本地卡单条记录上限" warningText="接近本地卡单条上限（4 MiB），保存可能失败，请先精简数据。" />

@@ -426,6 +426,7 @@ function CanshouForm({ session, restored }: { session: CanshouSession; restored:
     updateDraft({ answers: { ...session.getSnapshot().draft.answers, [flowItem.key]: value } });
   };
   const applySelection = (selection: QuestionnaireSelection) => {
+    if (cloudSavingRef.current) return;
     updateSelections(applyQuestionnaireSelection(selections, selection, {
       allowMultiple,
       createSuffix: createSelectionSuffix,
