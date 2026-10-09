@@ -283,10 +283,15 @@ describe('Details local card save', () => {
     finish({ written: true }); await pending;
     expect(session.getSnapshot()).toMatchObject({ saving: false, saveStatus: 'saved' });
   });
-  it('retries persistence only; uses atomic existing-wins for active records and tombstones', async () => {
+  it('retries persistence only; uses atomic existing-wins for verified active records', async () => {
     const execute = vi.fn<typeof executeDetailsGeneration>(async () => completed);
     const { session, repository } = harness(null, execute);
     vi.mocked(repository.putIfAbsent).mockRejectedValueOnce(new Error('busy')).mockResolvedValueOnce({ alreadyPresent: true });
+    repository.get = vi.fn(async (id) => {
+      const existing = vi.mocked(repository.putIfAbsent).mock.calls.at(-1)![0];
+      expect(id).toBe(existing.id);
+      return existing;
+    });
     await session.generate(options, input, intent);
     await session.saveResult();
     expect(session.getSnapshot()).toMatchObject({ saveStatus: 'failed', card });
@@ -415,4 +420,24 @@ describe('Details hosted execution outcomes', () => {
       provenance: { kind: 'official-signed', signature: 'server-issued-signature', execution: 'hosted' },
     }));
   });
+});
+
+it.each(['tombstone', 'missing', 'read-error'] as const)('共享保存结果不把 %s 当作可用的已保存副本', async (caseKind) => {
+  const execute = vi.fn<typeof executeDetailsGeneration>(async () => completed);
+  const { session, repository } = harness(null, execute);
+  vi.mocked(repository.putIfAbsent).mockResolvedValue({ alreadyPresent: true });
+  repository.get = vi.fn(async (id) => {
+    if (caseKind === 'read-error') throw new Error('disk');
+    if (caseKind === 'missing') return null;
+    const written = vi.mocked(repository.putIfAbsent).mock.calls.at(-1)![0];
+    expect(id).toBe(written.id);
+    return { ...written, deletedAt: written.updatedAt };
+  });
+  await session.generate(options, input, intent);
+  expect(await session.saveResult()).toBe(false);
+  expect(session.getSnapshot()).toMatchObject({ saveStatus: 'failed', card });
+  if (caseKind === 'tombstone') expect(session.getSnapshot().saveError).toContain('回收站');
+  expect(session.hasUnsavedResult()).toBe(true);
+  await session.generate(options, input, intent);
+  expect(execute).toHaveBeenCalledTimes(1);
 });

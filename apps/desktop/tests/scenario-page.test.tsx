@@ -9,13 +9,13 @@ import { resetDesktopAiConfigStoreForTests } from '../src/features/ai-config/use
 import { DESKTOP_AI_CONFIG_STORAGE_KEY } from '../src/features/ai-config/desktop-ai-config-store';
 import { createDesktopRouter } from '../src/app/router';
 
-const mocks = vi.hoisted(() => ({ execute: vi.fn(), download: vi.fn(), save: vi.fn(), listen: vi.fn(), profiles: vi.fn(), scrollResult: vi.fn() }));
+const mocks = vi.hoisted(() => ({ execute: vi.fn(), download: vi.fn(), save: vi.fn(), get: vi.fn(), listen: vi.fn(), profiles: vi.fn(), scrollResult: vi.fn() }));
 vi.mock('../src/platform/download-text-file', () => ({ downloadTextFile: mocks.download }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), isTauri: () => true }));
 vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ onCloseRequested: mocks.listen }) }));
 vi.mock('../src/features/scenario/generation', async (original) => ({ ...await original<object>(), executeScenarioGeneration: mocks.execute }));
 vi.mock('../src/platform/provider-profile-bridge', () => ({ listProviderProfileIds: async () => ['local'], getProviderProfile: mocks.profiles }));
-vi.mock('../src/platform/local-card-bridge', () => ({ IpcLocalCardRepository: class { putIfAbsent = mocks.save; } }));
+vi.mock('../src/platform/local-card-bridge', () => ({ IpcLocalCardRepository: class { putIfAbsent = mocks.save; get = mocks.get; } }));
 
 const scenarioCard = {
   title: '雨后采访',
@@ -497,4 +497,47 @@ it('reports a failed Scenario clear persistence without losing the generated res
   expect(container.textContent).toContain('含签名字段（本机未验证）');
   expect(container.querySelector('[aria-label="通用情景卡编辑器"] textarea')).toBeNull();
   expect(window.localStorage.getItem(SCENARIO_DRAFT_KEY)).toBe(raw);
+});
+
+it('通用情景保存命中回收站时提示先恢复且不谎报活动卡已存在', async () => {
+  const general = { templateId: '通用情景', title: '回收站情景', content: '唯一副本正文' };
+  window.localStorage.setItem(SCENARIO_DRAFT_KEY, JSON.stringify({ ...storedDraft({}), generalScenarioDraft: general }));
+  mocks.save.mockResolvedValue({ alreadyPresent: true });
+  mocks.get.mockImplementation(async (id) => {
+    const existing = mocks.save.mock.calls.at(-1)![0];
+    expect(id).toBe(existing.id);
+    return { ...existing, deletedAt: existing.updatedAt };
+  });
+  await mount();
+  await click('保存到本地卡库');
+  expect(container.textContent).toContain('内容相同的情景卡在回收站中');
+  expect(container.textContent).not.toContain('本地卡库已存在相同内容，原记录保持不变。');
+  expect(container.querySelector<HTMLTextAreaElement>('#general-scenario-content')?.value).toBe('唯一副本正文');
+  // 模拟用户在本地库显式恢复；这里只重试保存，不自动调用恢复命令。
+  mocks.get.mockImplementation(async () => mocks.save.mock.calls.at(-1)![0]);
+  await click('保存到本地卡库');
+  expect(container.textContent).toContain('本地卡库已存在相同内容，原记录保持不变。');
+  expect(mocks.execute).not.toHaveBeenCalled();
+});
+
+it('生成结果保存命中回收站后仍可重试，保存后重新生成不会丢弃未保存结果', async () => {
+  window.localStorage.setItem(SCENARIO_DRAFT_KEY, JSON.stringify({
+    ...storedDraft({ '故事发生的场景是怎样的？': '雨后的天台' }),
+    output: { mode: 'direct-local', cardKind: 'scenario', card: scenarioCard, rawText: JSON.stringify(scenarioCard), phase: 'completed' },
+  }));
+  mocks.save.mockResolvedValue({ alreadyPresent: true });
+  mocks.get.mockImplementation(async (id) => {
+    const existing = mocks.save.mock.calls.at(-1)![0];
+    expect(id).toBe(existing.id);
+    return { ...existing, deletedAt: existing.updatedAt };
+  });
+  await mount();
+  await click('保存到本地卡库');
+  expect(container.textContent).toContain('内容相同的数据卡在回收站中');
+  expect(button('保存到本地卡库').disabled).toBe(false);
+  await click('重新生成');
+  await click('保存后重新生成');
+  expect(mocks.execute).not.toHaveBeenCalled();
+  expect(container.querySelector<HTMLDialogElement>('dialog')?.open).toBe(true);
+  expect(container.querySelector('[aria-label="生成结果"] h2')?.textContent).toBe(scenarioCard.title);
 });

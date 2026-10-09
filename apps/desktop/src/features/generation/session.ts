@@ -363,6 +363,15 @@ export class DesktopGenerationSession<
       const title = this.family.titleOf(cardKind, data);
       const record = LocalCardRecordV1Schema.parse({ id: deriveLocalDataCardIdV1(digest), schemaVersion: 1, storageLocation: 'local', cardType: this.family.cardTypeOf(cardKind), title, data, contentDigest: digest, provenance: disposition.signature !== undefined ? { kind: disposition.kind, signature: disposition.signature, execution } : { kind: 'unsigned', execution }, createdAt: now, updatedAt: now });
       const result = await this.dependencies.repository.putIfAbsent(record);
+      if ('alreadyPresent' in result) {
+        // existing-wins 保留墓碑；已去重不等于用户已有一份活动副本。
+        const existing = await this.dependencies.repository.get(record.id);
+        if (existing === null) throw new Error('已有记录不可用');
+        if (existing.deletedAt !== undefined) {
+          this.publish({ saveStatus: 'failed', saveError: '内容相同的数据卡在回收站中，请先到本地库恢复后再保存。生成结果仍保留。' });
+          return false;
+        }
+      }
       this.publish({ saveStatus: 'written' in result ? 'saved' : 'already-present' });
       return !this.disposed;
     } catch { this.publish({ saveStatus: 'failed', saveError: '保存到本地卡库失败，生成结果仍保留。可以重试保存，无需重新生成。' }); return false; }

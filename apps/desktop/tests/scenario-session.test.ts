@@ -214,6 +214,34 @@ it('keeps the Markdown editor draft after a failed save and retries without AI g
   await expect(session.saveGeneralScenarioDraft(general)).rejects.toThrow('disk full');
   expect(session.getSnapshot().draft.generalScenarioDraft).toEqual(general);
   expect(JSON.parse(s.getItem(SCENARIO_DRAFT_KEY)!).generalScenarioDraft).toEqual(general);
-  await expect(session.saveGeneralScenarioDraft(general)).resolves.toBe(true);
+  await expect(session.saveGeneralScenarioDraft(general)).resolves.toBe('saved');
   expect(execute).not.toHaveBeenCalled();
+});
+
+it.each([
+  { deleted: true, expected: 'in-recycle-bin' },
+  { deleted: false, expected: 'already-present' },
+])('通用情景去重须读回记录并区分 $expected', async ({ deleted, expected }) => {
+  const putIfAbsent = vi.fn().mockResolvedValue({ alreadyPresent: true });
+  const get = vi.fn(async () => {
+    const existing = putIfAbsent.mock.calls.at(-1)![0];
+    return deleted ? { ...existing, deletedAt: existing.updatedAt } : existing;
+  });
+  const restore = vi.fn();
+  const session = new ScenarioSession({ storage: storage(), repository: { putIfAbsent, get, restore } as unknown as CardRepository, initialDraft });
+  const general = { templateId: '通用情景', title: '唯一副本', content: '正文' };
+  await expect(session.saveGeneralScenarioDraft(general)).resolves.toBe(expected);
+  expect(get).toHaveBeenCalledWith(putIfAbsent.mock.calls[0][0].id);
+  expect(restore).not.toHaveBeenCalled();
+});
+
+it.each(['missing', 'read-error'] as const)('去重后记录%s时不报告保存成功，编辑稿仍可重试', async (mode) => {
+  const s = storage();
+  const get = mode === 'missing' ? vi.fn().mockResolvedValue(null) : vi.fn().mockRejectedValue(new Error('read failed'));
+  const session = new ScenarioSession({ storage: s, repository: { putIfAbsent: vi.fn().mockResolvedValue({ alreadyPresent: true }), get } as unknown as CardRepository, initialDraft });
+  const general = { templateId: '通用情景', title: '唯一副本', content: '正文' };
+  session.updateDraft({ ...initialDraft, generalScenarioDraft: general });
+  await expect(session.saveGeneralScenarioDraft(general)).rejects.toThrow();
+  expect(session.getSnapshot().draft.generalScenarioDraft).toEqual(general);
+  expect(JSON.parse(s.getItem(SCENARIO_DRAFT_KEY)!).generalScenarioDraft).toEqual(general);
 });

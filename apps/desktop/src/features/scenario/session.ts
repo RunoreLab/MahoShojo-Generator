@@ -136,7 +136,7 @@ export class ScenarioSession extends DesktopGenerationSession<
     this.editorRepository = dependencies.repository;
   }
   /** 编辑产物与生成结果独立保存，始终未签名，不替换原始结果及其 provenance。 */
-  async saveGeneralScenarioDraft(input: Record<string, unknown>): Promise<boolean> {
+  async saveGeneralScenarioDraft(input: Record<string, unknown>): Promise<'saved' | 'already-present' | 'in-recycle-bin'> {
     const data = parseDataCardByTemplate('general-scenario', JSON.parse(JSON.stringify(input)));
     SCENARIO_SESSION_FAMILY.stripSignature(data);
     const digest = await digestLocalCardPayloadV1(data);
@@ -146,7 +146,11 @@ export class ScenarioSession extends DesktopGenerationSession<
       title: trimmedOr(data.title, '未命名情景'), data, contentDigest: digest,
       provenance: { kind: 'unsigned', execution: 'edited' }, createdAt: now, updatedAt: now,
     });
-    return 'written' in await this.editorRepository.putIfAbsent(record);
+    if ('written' in await this.editorRepository.putIfAbsent(record)) return 'saved';
+    // 去重包含回收站墓碑，只有读回活动记录后才可告诉用户已有可用副本。
+    const existing = await this.editorRepository.get(record.id);
+    if (existing === null) throw new Error('已有记录在保存后不可用，请重试。');
+    return existing.deletedAt === undefined ? 'already-present' : 'in-recycle-bin';
   }
 }
 

@@ -230,8 +230,12 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
     setEditorSaving(true);
     setEditorMessage(null);
     try {
-      const written = await session.saveGeneralScenarioDraft(editorDraft);
-      setEditorMessage(written ? '已保存到本地卡库。' : '本地卡库已存在相同内容，原记录保持不变。');
+      const outcome = await session.saveGeneralScenarioDraft(editorDraft);
+      setEditorMessage(outcome === 'saved'
+        ? '已保存到本地卡库。'
+        : outcome === 'in-recycle-bin'
+          ? '内容相同的情景卡在回收站中，请先到本地库恢复后再保存。当前编辑内容仍保留。'
+          : '本地卡库已存在相同内容，原记录保持不变。');
     } catch {
       setEditorMessage('保存到本地卡库失败，Markdown 编辑内容仍保留，可重试保存。');
     } finally {
