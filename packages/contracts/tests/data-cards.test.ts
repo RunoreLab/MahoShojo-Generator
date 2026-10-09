@@ -1,5 +1,7 @@
 import {
   DATA_CARD_REVIEW_STATUSES,
+  DataCardExpectedOwnerSchema,
+  OwnedDataCardCreateAcknowledgementSchema,
   ONLINE_DATA_CARD_TYPES,
   ONLINE_DATA_CARD_VISIBILITIES,
   DataCardReviewStatusSchema,
@@ -66,5 +68,20 @@ describe('online data-card metadata contract', () => {
     expect(RepairQuestionnaireDataCardTypeRequestSchema.parse({ id: 'card-1' })).toEqual({ id: 'card-1' });
     expect(RepairQuestionnaireDataCardTypeRequestSchema.safeParse({ id: '   ' }).success).toBe(false);
     expect(RepairQuestionnaireDataCardTypeRequestSchema.safeParse({ id: 'card-1', type: 'questionnaire' }).success).toBe(false);
+  });
+});
+
+
+describe('owned data-card create acknowledgement', () => {
+  it.each([undefined, null, '7', 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])('rejects invalid expected owner %j', (value) => {
+    expect(DataCardExpectedOwnerSchema.safeParse(value).success).toBe(false);
+  });
+  it('accepts safe integer boundary and only the versioned acknowledgement', () => {
+    expect(DataCardExpectedOwnerSchema.parse(Number.MAX_SAFE_INTEGER)).toBe(Number.MAX_SAFE_INTEGER);
+    const valid = { success: true, id: 'created', ownerUserId: 7, accountFenceVersion: 1 };
+    expect(OwnedDataCardCreateAcknowledgementSchema.parse(valid)).toEqual(valid);
+    for (const patch of [{ success: false }, { id: '' }, { id: ' ' }, { id: 'x'.repeat(201) }, { accountFenceVersion: undefined }, { accountFenceVersion: 2 }, { ownerUserId: '7' }]) {
+      expect(OwnedDataCardCreateAcknowledgementSchema.safeParse({ ...valid, ...patch }).success).toBe(false);
+    }
   });
 });

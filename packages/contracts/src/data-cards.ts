@@ -74,3 +74,12 @@ export const DataCardSummaryPageSchema = z.object({
   stats: z.object({ private: z.number(), public: z.number(), pending: z.number() }).optional(),
 });
 export type DataCardSummaryPage = z.infer<typeof DataCardSummaryPageSchema>;
+
+// 新建的账号围栏是独立端点协议；旧 POST 不因兼容字段获得此保证。
+export const DataCardExpectedOwnerSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+export const OwnedDataCardCreateAcknowledgementSchema = z.object({
+  success: z.literal(true),
+  id: z.string().trim().min(1).max(200),
+  accountFenceVersion: z.literal(1),
+  ownerUserId: DataCardExpectedOwnerSchema,
+});
