@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 
 import { isTopmostFocusTrapLayer, popEscapeLayer, pushEscapeLayer } from './escape-stack';
+import { acquireBodyScrollLock } from './body-scroll-lock';
 
 type Props = {
   isOpen: boolean;
@@ -78,8 +79,7 @@ export const useBaseModalAccessibility = ({
       ? document.activeElement
       : null;
     const fallbackFocus = fallbackFocusRef?.current ?? null;
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    const releaseBodyScroll = acquireBodyScrollLock();
     const initialFocus = initialFocusRef.current;
     if (initialFocus && !initialFocus.disabled) {
       initialFocus.focus();
@@ -112,9 +112,12 @@ export const useBaseModalAccessibility = ({
 
     document.addEventListener('keydown', onKeyDown);
     return () => {
+      const wasTopmost = isTopmostFocusTrapLayer(layerId);
       popEscapeLayer(layerId);
-      document.body.style.overflow = prevOverflow;
+      releaseBodyScroll();
       document.removeEventListener('keydown', onKeyDown);
+      // 下层关闭不能把焦点从仍在交互的上层弹窗拉回页面。
+      if (!wasTopmost) return;
       if (previouslyFocused && document.contains(previouslyFocused)) {
         previouslyFocused.focus();
       } else {

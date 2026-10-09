@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type { LocalCardRecordV1 } from '@mahoshojo/local-library/record';
 import type { CardRepository } from '@mahoshojo/local-library/repository';
+import { AnnouncementCenter } from '../src/announcement/AnnouncementCenter';
 
 import {
   CardLibraryModal,
@@ -1059,5 +1060,59 @@ test('缓存正文读取：unavailable/unsupported-schema 如实报错而非「�
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
+  }
+});
+
+
+test('公告与卡库同时卸载后恢复宿主滚动，不留下隐藏快照', async () => {
+  const { host } = createHost([]);
+  const announcements = [{ id: 'over-library', title: '测试公告', content: '正文', date: '2026-10-09' }];
+  const dismissal = { isDismissed: () => false, markDismissed: vi.fn() };
+  const originalOverflow = document.body.style.overflow;
+  document.body.style.overflow = 'auto';
+  try {
+    await act(async () => root.render(
+      <>
+        <CardLibraryModal host={host} isOpen onClose={vi.fn()} selectedType="character" initialTab="local" visibleTabs={['local']} />
+        <AnnouncementCenter announcements={announcements} dismissal={dismissal} />
+      </>,
+    ));
+    await click(document.querySelector<HTMLButtonElement>('.announcement-trigger')!);
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(2);
+    expect(document.body.style.overflow).toBe('hidden');
+    await act(async () => root.render(null));
+    expect(document.body.style.overflow).toBe('auto');
+  } finally {
+    document.body.style.overflow = originalOverflow;
+  }
+});
+
+test('先关闭卡库不解除其上公告的滚动锁或抢走焦点，公告关闭后恢复宿主', async () => {
+  const { host } = createHost([]);
+  const announcements = [{ id: 'over-library', title: '测试公告', content: '正文', date: '2026-10-09' }];
+  const dismissal = { isDismissed: () => false, markDismissed: vi.fn() };
+  const originalOverflow = document.body.style.overflow;
+  const mount = (libraryOpen: boolean) => (
+    <>
+      <button data-library-opener>打开卡库</button>
+      <CardLibraryModal host={host} isOpen={libraryOpen} onClose={vi.fn()} selectedType="character" initialTab="local" visibleTabs={['local']} />
+      <AnnouncementCenter announcements={announcements} dismissal={dismissal} />
+    </>
+  );
+  document.body.style.overflow = 'auto';
+  try {
+    await act(async () => root.render(mount(false)));
+    document.querySelector<HTMLButtonElement>('[data-library-opener]')!.focus();
+    await act(async () => root.render(mount(true)));
+    await click(document.querySelector<HTMLButtonElement>('.announcement-trigger')!);
+    const announcementFocus = document.activeElement;
+    await act(async () => root.render(mount(false)));
+    expect(document.body.style.overflow).toBe('hidden');
+    expect(document.activeElement).toBe(announcementFocus);
+    await click(document.querySelector<HTMLButtonElement>('[aria-label="关闭详情"]')!);
+    expect(document.body.style.overflow).toBe('auto');
+  } finally {
+    await act(async () => root.render(null));
+    document.body.style.overflow = originalOverflow;
   }
 });
