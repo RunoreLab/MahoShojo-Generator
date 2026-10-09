@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { BackHomeLink } from '@mahoshojo/ui-web/shell';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import {
@@ -47,9 +48,7 @@ export const useWebEncyclopediaNavigate = (): EncyclopediaNavigate => {
 export function WebEncyclopediaHeaderLinks() {
   return (
     <>
-      <Link href="/" className="text-blue-600 hover:underline">
-        返回首页
-      </Link>
+      <BackHomeLink renderLink={(props) => <Link {...props} />} />
       <Link href="/arena" className="text-blue-600 hover:underline">
         竞技场
       </Link>

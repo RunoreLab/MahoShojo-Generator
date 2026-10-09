@@ -1,4 +1,6 @@
 export { AppShell } from './AppShell';
+export { BackHomeLink } from './BackHomeLink';
+export type { BackHomeLinkProps } from './BackHomeLink';
 export type { AppShellProps } from './AppShell';
 export { ShellEscapeMenu } from './EscapeMenu';
 export type { ShellEscapeMenuEntry, ShellEscapeMenuProps } from './EscapeMenu';

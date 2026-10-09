@@ -1,3 +1,4 @@
+import { BackHomeLink } from '@mahoshojo/ui-web/shell';
 import { useParams, useRouter, useSearch } from '@tanstack/react-router';
 import {
   encyclopediaEntries,
@@ -28,16 +29,7 @@ const createDesktopNavigate = (router: ReturnType<typeof useRouter>) =>
   (href: string, options?: ProductHrefNavigateOptions) => navigateByProductHref(router, href, options);
 
 const homeLink = (router: ReturnType<typeof useRouter>) => (
-  <a
-    href="#/"
-    onClick={(event) => {
-      event.preventDefault();
-      void router.navigate({ to: '/' });
-    }}
-    className="text-blue-600 hover:underline"
-  >
-    返回首页
-  </a>
+  <BackHomeLink href="#/" onNavigate={() => { void router.navigate({ to: '/' }); }} />
 );
 
 /**
