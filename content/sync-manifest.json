@@ -4,8 +4,9 @@
     "shared": [
       "afdian-white.svg",
       "afdian.svg",
-      "beast-logo.svg",
+      "arena-card-white.webp",
       "beast-logo-white.svg",
+      "beast-logo.svg",
       "beast-title.svg",
       "character-manager-white.svg",
       "character-manager.svg",
@@ -13,23 +14,22 @@
       "favicon.svg",
       "free-generator-white.svg",
       "globe.svg",
-      "logo-white.svg",
       "logo-white-qrcode.svg",
+      "logo-white.svg",
       "logo.svg",
       "questionnaire-logo.svg",
       "questionnaire-title.svg",
       "scenario-shadow.webp",
       "scenario.webp",
+      "sublimation-white.svg",
       "sublimation.svg",
-      "sublimation-white.svg"
+      "tavern-white.svg"
     ],
     "web": [
-      "arena-card-white.webp",
       "arena-white.svg",
       "card-forge-white.svg",
       "magic-tea-party-white.svg",
-      "party-white.svg",
-      "tavern-white.svg"
+      "party-white.svg"
     ]
   }
 }

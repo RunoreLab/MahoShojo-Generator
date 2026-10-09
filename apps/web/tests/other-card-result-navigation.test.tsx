@@ -4,6 +4,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
 const api = vi.hoisted(() => ({ dispatch: vi.fn(), stream: vi.fn() }));
+const library = vi.hoisted(() => ({ list: vi.fn(), get: vi.fn() }));
+vi.mock('@/lib/local-library/card-repository', () => ({ getLocalCardRepository: () => ({ list: library.list, get: library.get }) }));
 vi.mock('@/lib/use-generation-api-intent-latch', () => ({ useGenerationApiIntentLatch: () => ({ tryAcquire: () => ({ dispatch: api.dispatch }) }) }));
 vi.mock('@/lib/auth', () => ({ authStorage: { getActivityHeaders: async () => ({}), getAuthHeader: async () => null } }));
 vi.mock('@/lib/useAuth', () => ({ useAuth: () => ({ user: null }) }));
@@ -32,11 +34,7 @@ vi.mock('@/components/MagicalGirlCard', () => ({ default: () => null }));
 vi.mock('@/components/CanshouCard', () => ({ default: () => null }));
 vi.mock('@/components/tavern/TavernCardPreview', () => ({ TavernCardPreview: () => null }));
 vi.mock('@/lib/stream/read-safe-text-and-reasoning-stream', () => ({ readSafeTextAndReasoningStreamFromResponse: (...args: unknown[]) => api.stream(...args) }));
-vi.mock('@/lib/tavern-card', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@/lib/tavern-card')>();
-  const candidate = { keyword: 'chara', parsed: { name: 'Test', description: 'Description', personality: 'Kind', scenario: '', first_mes: '', mes_example: '' } };
-  return { ...original, parseTavernCardFromPngFile: async () => ({ candidates: [candidate], selected: candidate, normalized: { name: 'Test', description: 'Description' }, meta: { extractedAt: 'now', warnings: [] } }) };
-});
+import { getPlaceholderPngBytes, writeTavernCardToPngBytes } from '@mahoshojo/domain/tavern-card';
 
 import { NamePage } from '@/components/creation/NamePage';
 import { CardForgePage } from '@/components/card-forge/CardForgePage';
@@ -74,8 +72,11 @@ async function nameSetup() { await render(<NamePage />); await change(host.query
 async function forgeSetup() { await render(<CardForgePage />); await change(host.querySelector('textarea')!, '{"name":"Test"}'); }
 async function tavernSetup(ai = true) {
   await render(<TavernImportPanel />);
-  const file = host.querySelector('#tavern-import-file')!;
-  Object.defineProperty(file, 'files', { value: [new File(['png'], 'card.png', { type: 'image/png' })] });
+  const file = host.querySelector('input[type="file"]')!;
+  const bytes = writeTavernCardToPngBytes(getPlaceholderPngBytes(), { name: 'Test', description: 'Description', personality: 'Kind' });
+  const source = new File([new Uint8Array(bytes)], 'card.png', { type: 'image/png' });
+  Object.defineProperty(source, 'arrayBuffer', { value: async () => bytes.buffer });
+  Object.defineProperty(file, 'files', { value: [source] });
   await act(async () => file.dispatchEvent(new Event('change', { bubbles: true })));
   if (ai) {
     await act(async () => (host.querySelectorAll<HTMLInputElement>('input[name="tavern-convert-mode"]')[1]).click());
@@ -115,6 +116,21 @@ describe('real card generation pages use request-bound result navigation', () =>
   it('tavern local mapping and imports do not navigate', async () => {
     await tavernSetup(false); expect(scroll).not.toHaveBeenCalled();
     await click('生成角色卡'); expect(scroll).not.toHaveBeenCalled();
+  });
+  it('a pending earlier library selection cannot replace the source when Web AI conversion starts', async () => {
+    await tavernSetup();
+    const item = { id: 'library-a', title: 'Library A', data: { templateId: '通用角色', name: 'Library A', content: 'A', _tavern: { raw: { name: 'Late A', description: 'Should not replace Test' } } } };
+    library.list.mockResolvedValue({ items: [item] });
+    let finishLibrary!: (value: unknown) => void;
+    library.get.mockImplementation(() => new Promise((done) => { finishLibrary = done; }));
+    await click('从本地卡库读取酒馆原件'); await click('Library A');
+    let finishAi!: (value: Response) => void;
+    vi.mocked(fetch).mockImplementation(() => new Promise((done) => { finishAi = done; }));
+    await click('生成角色卡');
+    await act(async () => finishLibrary(item));
+    expect(host.textContent).not.toContain('name：Late A'); expect(host.textContent).toContain('name：Test');
+    await act(async () => finishAi(Response.json({ name: 'Test', content: 'AI result for Test' })));
+    expect(host.textContent).toContain('AI result for Test'); expect(scroll).toHaveBeenCalledTimes(1);
   });
   it('tavern AI result navigates once while cached reuse does not', async () => {
     await tavernSetup();

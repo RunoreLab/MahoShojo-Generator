@@ -53,7 +53,8 @@
       "types": "./src/web-package-record.ts",
       "import": "./src/web-package-record.ts",
       "default": "./src/web-package-record.ts"
-    }
+    },
+    "./imported-unsigned-card": "./src/imported-unsigned-card.ts"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",

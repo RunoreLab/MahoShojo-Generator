@@ -1,3 +1,7 @@
+import { saveImportedUnsignedCharacter } from '@mahoshojo/local-library/imported-unsigned-card';
+import { getLocalCardRepository } from '@/lib/local-library/card-repository';
+import { TavernFileInput, TavernCandidateSelector, TavernOriginalExport, TavernLocalProjection, TavernLocalSources, useTavernSourceSelection, readTavernFile, type TavernInputFile, type TavernGeneralProjection } from '@mahoshojo/ui-web/tavern';
+import { buildGeneralMarkdown } from '@mahoshojo/domain/tavern-card';
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 
 import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
@@ -34,7 +38,6 @@ import {
   buildTavernCloudSavePayload,
   buildTavernAiAttachment,
   normalizeTavernCard,
-  parseTavernCardFromPngFile,
   type TavernCardCandidate,
   type TavernCardNormalized,
   type TavernCloudSavePreset,
@@ -179,42 +182,6 @@ const guessTemplate = (result: TavernParseResult): DataCardTemplate => {
   if (/(残兽|怪物|monster|beast|abomination)/i.test(text)) return 'canshou';
   if (/(魔法少女|mahou|magical girl)/i.test(text)) return 'magical-girl';
   return 'general';
-};
-
-const buildGeneralMarkdown = (normalized: TavernParseResult['normalized']): string => {
-  const lines: string[] = [];
-  lines.push(`# 角色：${normalized.name}`);
-  if (normalized.description?.trim()) {
-    lines.push('');
-    lines.push('## 描述');
-    lines.push(normalized.description.trim());
-  }
-  if (normalized.personality?.trim()) {
-    lines.push('');
-    lines.push('## 性格');
-    lines.push(normalized.personality.trim());
-  }
-  if (normalized.scenario?.trim()) {
-    lines.push('');
-    lines.push('## 场景');
-    lines.push(normalized.scenario.trim());
-  }
-  if (normalized.firstMes?.trim()) {
-    lines.push('');
-    lines.push('## 开场白');
-    lines.push(normalized.firstMes.trim());
-  }
-  if (normalized.mesExample?.trim()) {
-    lines.push('');
-    lines.push('## 对话样例');
-    lines.push(normalized.mesExample.trim());
-  }
-  if (normalized.tags && normalized.tags.length > 0) {
-    lines.push('');
-    lines.push('## 标签');
-    lines.push(normalized.tags.join('、'));
-  }
-  return lines.join('\n');
 };
 
 const PLACEHOLDER_PREFERENCE_KEY = 'mahoshojo.tavern.import.placeholder.v1';
@@ -582,8 +549,13 @@ export function TavernImportPanel() {
     return card;
   }, [state.convertMode, generationMode, streamingMarkdown, streamedGeneralCard, selectedNormalized?.name, state.targetTemplate]);
 
-  const onFileSelected = async (file: File | null) => {
+  const sourceSelection = useTavernSourceSelection();
+  const [originalPng, setOriginalPng] = useState<Uint8Array | undefined>();
+
+  const onFileSelected = async (file: TavernInputFile | null) => {
     if (!file) return;
+    const epoch = sourceSelection.begin();
+    setOriginalPng(undefined);
     resultNavigationRef.current?.cancel();
     dispatch({ type: 'parsing' });
     setStreamingMarkdown(null);
@@ -594,15 +566,15 @@ export function TavernImportPanel() {
     setSavedImageUrl(null);
 
     try {
-      const parsed = await parseTavernCardFromPngFile(file);
-      if ('code' in parsed) {
-        dispatch({ type: 'parseError', message: `${parsed.message}（${parsed.code}）` });
-        return;
-      }
+      const { parsed, basePngBytes } = await readTavernFile(file);
+      if (!sourceSelection.isCurrent(epoch)) return;
+      setOriginalPng(basePngBytes);
+
 
       dispatch({ type: 'parsed', result: parsed });
       dispatch({ type: 'setTemplate', template: guessTemplate(parsed) });
     } catch (error) {
+      if (!sourceSelection.isCurrent(epoch)) return;
       dispatch({ type: 'parseError', message: error instanceof Error ? error.message : '解析失败' });
     }
   };
@@ -641,6 +613,8 @@ export function TavernImportPanel() {
       throw new Error('尚未解析到可用的 SillyTavern 候选块');
     }
 
+    // Starting conversion commits to this source; an older pending library read cannot replace it.
+    sourceSelection.begin();
     const meta = buildTavernMeta(state.parseResult, selectedCandidate);
     const tavernPayload: TavernAttachment = state.keepRaw ? { meta, raw: selectedCandidate.parsed } : { meta };
 
@@ -1057,19 +1031,8 @@ export function TavernImportPanel() {
         </div>
       </div>
 
-      <div className="input-group mt-4">
-        <label className="input-label" htmlFor="tavern-import-file">
-          上传 SillyTavern 角色卡 PNG
-        </label>
-        <input
-          id="tavern-import-file"
-          type="file"
-          accept="image/png"
-          className="cursor-pointer input-field file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-pink-50 file:text-pink-700 hover:file:bg-pink-100 disabled:opacity-50 disabled:cursor-not-allowed"
-          disabled={state.step === 'parsing' || state.step === 'converting'}
-          onChange={(event) => onFileSelected(event.target.files?.[0] ?? null)}
-        />
-      </div>
+      <TavernLocalSources selection={sourceSelection} repository={getLocalCardRepository()} disabled={state.step === 'parsing' || state.step === 'converting'} onSource={onFileSelected} />
+      <TavernFileInput disabled={state.step === 'parsing' || state.step === 'converting'} onFileSelected={onFileSelected} />
 
       {state.error ? <ErrorMessage message={state.error} className="error-message mt-3" /> : null}
 
@@ -1078,42 +1041,8 @@ export function TavernImportPanel() {
       {state.parseResult && selectedCandidate && selectedNormalized ? (
         <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <div className="space-y-4">
-            <div className="rounded-xl border border-pink-200 bg-white/70 p-4">
-              <div className="text-sm font-semibold text-pink-700">候选来源块</div>
-              <div className="mt-2 grid grid-cols-1 gap-2">
-                {state.parseResult.candidates.map((candidate, index) => {
-                  const info = normalizeTavernCard(candidate).normalized;
-                  return (
-                    <label
-                      key={`${candidate.keyword}-${candidate.chunkType}-${index}`}
-                      className="flex cursor-pointer items-start gap-2 rounded-lg border border-pink-100 bg-white/70 p-2 hover:bg-pink-50"
-                    >
-                      <input
-                        type="radio"
-                        name="tavern-candidate"
-                        checked={state.selectedCandidateIndex === index}
-                        onChange={() => {
-                          dispatch({ type: 'selectCandidate', index });
-                          resetGeneratedPreview();
-                        }}
-                        className="mt-1"
-                      />
-                      <div className="min-w-0">
-                        <div className="text-sm text-gray-900">
-                          <span className="font-semibold">{candidate.keyword}</span>
-                          <span className="ml-2 text-xs text-gray-600">
-                            {candidate.chunkType} · {candidate.parseMethod}
-                            {info.spec ? ` · ${info.spec}` : ''}
-                            {info.specVersion ? `@${info.specVersion}` : ''}
-                          </span>
-                        </div>
-                        <div className="text-xs text-gray-700">name：{info.name}</div>
-                      </div>
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
+            <TavernCandidateSelector candidates={state.parseResult.candidates} selectedIndex={state.selectedCandidateIndex}
+              disabled={state.step === 'converting'} onSelect={(index) => { sourceSelection.begin(); dispatch({ type: 'selectCandidate', index }); resetGeneratedPreview(); }} />
 
             <div className="rounded-xl border border-pink-200 bg-white/70 p-4">
               <div className="grid gap-4">
@@ -1386,6 +1315,10 @@ export function TavernImportPanel() {
 
           <div className="space-y-4">
             <TavernCardPreview normalized={selectedNormalized} warnings={combinedWarnings} />
+            <TavernOriginalExport candidate={selectedCandidate} basePngBytes={originalPng} disabled={state.step === 'converting'}
+              exportFile={({ name, bytes, mimeType }) => { downloadBlob(new Blob([new Uint8Array(bytes)], { type: mimeType }), name); }} />
+
+
 
             {previewDataCard ? (
               <div ref={resultRef}>
@@ -1437,6 +1370,12 @@ export function TavernImportPanel() {
                     compact
                   />
                 )}
+
+                {outputDataCard && state.convertMode === 'rules' && state.targetTemplate === 'general' ? (
+                  <TavernLocalProjection data={outputDataCard as TavernGeneralProjection} hideExport
+                    exportFile={({ name, bytes, mimeType }) => { downloadBlob(new Blob([new Uint8Array(bytes)], { type: mimeType }), name); }}
+                    saveCard={(data) => saveImportedUnsignedCharacter(getLocalCardRepository(), data, data.name)} />
+                ) : null}
 
                 {outputDataCard ? (
                   <div className="mt-4 rounded-xl border border-pink-200 bg-white/70 p-4">

@@ -196,7 +196,8 @@
       "types": "./src/sublimation/index.ts",
       "import": "./src/sublimation/index.ts",
       "default": "./src/sublimation/index.ts"
-    }
+    },
+    "./tavern": "./src/tavern/index.ts"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",

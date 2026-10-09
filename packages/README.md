@@ -55,3 +55,8 @@ D5.1-T 首片：`domain/tavern-card` 提供 Tavern PNG 编解码、候选选择�
 构造、世界书/情景片段与推荐字段纯规则，Web 原出口直接回用。`File` 读取与默认
 Logo 的 fetch/canvas 栅格化仍是 Web adapter；cloud/AI 上传与服务端权限不进入纯核。
 原始 Tavern JSON 与规范化显示分离，编解码保留未知字段，不提供签名验证或来源提权。
+
+D5.1-T 本地往返：`ui-web/tavern` 从 Web 原导入区抽出文件、候选、品牌与预览，
+双端原路径共用原件导出、本地来源和保存反馈；`local-library/imported-unsigned-card`
+使用既有 `putIfAbsent` 与摘要契约保存未签名导入副本，墓碑不复活、不提升嵌套签名权威。
+Desktop `/tavern` 本片只交付 PNG/JSON 原件与通用角色规则旅程，其他模板与普通卡新建酒馆导出仍另片。
