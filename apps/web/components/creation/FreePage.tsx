@@ -186,6 +186,7 @@ export function FreePage() {
   const attachmentState = useFreeAttachments();
   const { items: attachments, isReading: isReadingAttachments, error: attachmentError, clear: clearAttachments } = attachmentState;
 
+  const storedDraftDocument = useRef<Record<string, unknown>>({});
   const [schemaId, setSchemaId] = useState<FreeSchemaId>('general');
   const [generationMode, setGenerationMode] = useState<GenerationMode>('non-stream');
   const [prompt, setPrompt] = useState<string>('');
@@ -246,6 +247,7 @@ export function FreePage() {
     if (typeof window === 'undefined' || !draftReady) return;
     try {
       const payload = {
+        ...storedDraftDocument.current,
         schemaId,
         generationMode,
         prompt,
@@ -271,6 +273,7 @@ export function FreePage() {
       if (saved === null) return;
       const parsed = JSON.parse(saved) as any;
       if (!parsed || typeof parsed !== 'object' || !FREE_SCHEMA_OPTIONS.some((option) => option.id === parsed.schemaId) || !['stream', 'non-stream'].includes(parsed.generationMode) || typeof parsed.prompt !== 'string' || (parsed.selectedLanguage !== undefined && typeof parsed.selectedLanguage !== 'string') || (parsed.showFieldGuide !== undefined && typeof parsed.showFieldGuide !== 'boolean') || (parsed.showLanguageSection !== undefined && typeof parsed.showLanguageSection !== 'boolean')) throw new Error('invalid draft');
+      storedDraftDocument.current = parsed;
       if (parsed?.schemaId) setSchemaId(parsed.schemaId);
       if (parsed?.generationMode) setGenerationMode(parsed.generationMode);
       if (typeof parsed?.prompt === 'string') setPrompt(parsed.prompt);
@@ -290,7 +293,7 @@ export function FreePage() {
 
   const handleClearDraft = () => {
     if (typeof window !== 'undefined' && !draftStorageBlocked.current) {
-      try { window.localStorage.removeItem(LOCAL_STORAGE_KEY); } catch { setDraftError('清空存档失败，当前提示词仍保留。'); return; }
+      try { window.localStorage.removeItem(LOCAL_STORAGE_KEY); storedDraftDocument.current = {}; } catch { setDraftError('清空存档失败，当前提示词仍保留。'); return; }
     }
     if (!draftStorageBlocked.current) { unsavedDraft.current = false; setDraftError(null); }
     setPrompt('');

@@ -64,3 +64,14 @@ it('keeps unreadable stored bytes and permits editing, generation and clear with
   expect(container.textContent).toContain('保留的生成正文');
   const leaveWithResult = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(leaveWithResult); expect(leaveWithResult.defaultPrevented).toBe(true);
 });
+
+it('preserves unknown stored fields while current inputs remain authoritative, and clears extensions with the draft', async () => {
+  const extended = { ...draft, version: 42, extension: { note: '保留扩展' }, output: { text: '扩展结果' } };
+  localStorage.setItem(KEY, JSON.stringify(extended));
+  await mount();
+  expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual(extended);
+  await edit('修改后的提示词');
+  expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ ...extended, prompt: '修改后的提示词' });
+  await act(async () => byText('清空存档').click());
+  expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ ...draft, prompt: '' });
+});
