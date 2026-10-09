@@ -6,10 +6,10 @@
 //   策略展示项，永不进入客户端连接候选。
 // - Direct 支持度一律经由 `describeAiPreset*DirectSupport(preset, DESKTOP_DIRECT_ADAPTERS)`
 //   判定：显式核验的 wire ∩ native 已实现的 adapter。不从 `provider.type` 或端点外观推断。
-// - Profile 文档仍是唯一持久化连接载体（native 侧存 opaque 文档，执行时按 profileId
-//   解析）；「预设」只作为复制模板，复制出的 Profile 从那一刻起是普通自定义连接，
-//   不存在「预设绑定」这种第二种身份（见 ai-core/ai-connections 的不认领约定）。
+// - 预设由稳定 providerId 绑定安全存储；只有用户主动新建/复制才产生 Profile。
+//   两种身份按执行位置独立选择，native 从受检目录或既有 Profile 解析真实目标。
 
+import { ProviderModelIdSchema, type ProviderTarget } from '@mahoshojo/contracts/provider-target';
 import {
   AI_PROVIDER_PRESETS,
   SYSTEM_PROVIDER_OPTION,
@@ -61,7 +61,10 @@ export interface DesktopAiSelection {
   /** 执行位置偏好；'server' 走 hosted System Default（不要求登录，DESK-094 在 dispatch 时校验）。 */
   executionPreference: 'client' | 'server';
   /** 客户端连接选择；null = 尚未选择。 */
+  /** 旧调用方的派生投影；v5 不再持久化或以此作为预设身份。 */
   clientConnectionId: string | null;
+  clientTarget?: Exclude<ProviderTarget, { kind: 'system' }> | null;
+  serverTarget?: Exclude<ProviderTarget, { kind: 'custom' }>;
   /**
    * 「使用系统默认配置」通道的模型选择（overlay v4 起）。
    * 取值为 `SYSTEM_PROVIDER_OPTION.models` 中的模型 ID（`'default'` 表示服务器
@@ -83,6 +86,8 @@ export interface DesktopProfileModelSelection {
    * 不做静默回落。
    */
   selectedModelId?: string;
+  /** 当前手填模型，直接执行；输入中间值不登记进模型列表。 */
+  inlineModelId?: string;
   /** 该连接附加的可选模型 ID（去重、保持添加顺序）。 */
   customModelIds: readonly string[];
 }
@@ -126,13 +131,27 @@ export interface DesktopAiConfigOverlay {
   generationOverrides: Record<string, Record<string, UserGenerationOverrides>>;
   /** profileId → 该连接的模型选择/自定义模型清单（overlay v3 起持久化）。 */
   modelsByProfileId: Record<string, DesktopProfileModelSelection>;
+  presetsByProviderId?: Record<string, DesktopPresetSelection>;
 }
 
+export interface DesktopPresetSelection {
+  selectedModelId?: string;
+  generationOverrides: Record<string, UserGenerationOverrides>;
+}
+
+export const selectedProviderTarget = (selection: DesktopAiSelection): ProviderTarget | null =>
+  selection.executionPreference === 'server'
+    ? (selection.serverTarget ?? { kind: 'system' })
+    : selection.clientTarget !== undefined
+      ? selection.clientTarget
+      : selection.clientConnectionId ? { kind: 'custom', profileId: selection.clientConnectionId } : null;
+
 export const DESKTOP_AI_CONFIG_DEFAULT_OVERLAY: DesktopAiConfigOverlay = {
-  selection: { executionPreference: 'client', clientConnectionId: null },
+  selection: { executionPreference: 'client', clientConnectionId: null, clientTarget: null, serverTarget: { kind: 'system' } },
   hiddenPresetIds: [],
   generationOverrides: {},
   modelsByProfileId: {},
+  presetsByProviderId: {},
 };
 
 /**
@@ -150,13 +169,15 @@ const DESKTOP_SELECTION_KEYS = new Set([
   'executionPreference',
   'clientConnectionId',
   'systemModelId',
+  'clientTarget',
+  'serverTarget',
 ]);
 
 const isValidSelection = (value: unknown): value is DesktopAiSelection =>
   isObject(value) &&
   Object.keys(value).every((key) => DESKTOP_SELECTION_KEYS.has(key)) &&
   (value.executionPreference === 'client' || value.executionPreference === 'server') &&
-  (value.clientConnectionId === null ||
+  (value.clientConnectionId === undefined || value.clientConnectionId === null ||
     (typeof value.clientConnectionId === 'string' && value.clientConnectionId.trim().length > 0)) &&
   (value.systemModelId === undefined || isValidDesktopModelId(value.systemModelId));
 
@@ -170,10 +191,12 @@ export const parseDesktopAiConfigOverlay = (raw: string): DesktopAiConfigOverlay
   // v2 → v4 迁移：v2 缺省 `modelsByProfileId`，v3 缺省 `selection.systemModelId`；
   // 解析后各自初始化为空，下一次落盘即以 v4 写回（受检、幂等——只在整体解析
   // 成功后写）。未知版本继续 fail-closed。
-  if (!isObject(value) || (value.version !== 2 && value.version !== 3 && value.version !== 4)) {
+  if (!isObject(value) || (value.version !== 2 && value.version !== 3 && value.version !== 4 && value.version !== 5)) {
     throw new Error('AI 配置版本不受支持');
   }
-  if (!isValidSelection(value.selection)) {
+  if (!isValidSelection(value.selection) ||
+      (value.version !== 5 && value.selection.clientConnectionId === undefined) ||
+      (value.version === 5 && (value.selection.clientTarget === undefined || value.selection.serverTarget === undefined))) {
     throw new Error('AI 配置的连接选择损坏');
   }
   if (
@@ -217,8 +240,9 @@ export const parseDesktopAiConfigOverlay = (raw: string): DesktopAiConfigOverlay
       if (
         profileId.trim().length === 0 ||
         !isObject(entry) ||
-        !keys.every((key) => key === 'selectedModelId' || key === 'customModelIds') ||
+        !keys.every((key) => key === 'selectedModelId' || key === 'customModelIds' || key === 'inlineModelId') ||
         (entry.selectedModelId !== undefined && !isValidDesktopModelId(entry.selectedModelId)) ||
+        (entry.inlineModelId !== undefined && !ProviderModelIdSchema.safeParse(entry.inlineModelId).success) ||
         !Array.isArray(entry.customModelIds) ||
         !entry.customModelIds.every((id) => isValidDesktopModelId(id))
       ) {
@@ -227,6 +251,7 @@ export const parseDesktopAiConfigOverlay = (raw: string): DesktopAiConfigOverlay
       // trim 归一：与 schema 的 `.trim()` 语义一致，保证 selectedModelId 与
       // customModelIds 之间的相等性不受持久化空白影响。
       modelsByProfileId[profileId] = {
+        ...(entry.inlineModelId === undefined ? {} : { inlineModelId: (entry.inlineModelId as string).trim() }),
         ...(entry.selectedModelId === undefined
           ? {}
           : { selectedModelId: (entry.selectedModelId as string).trim() }),
@@ -234,8 +259,34 @@ export const parseDesktopAiConfigOverlay = (raw: string): DesktopAiConfigOverlay
       };
     }
   }
+  const selection = value.selection;
+  const clientTarget = selection.clientTarget !== undefined ? selection.clientTarget : (selection.clientConnectionId ? { kind: 'custom' as const, profileId: selection.clientConnectionId } : null);
+  const serverTarget = selection.serverTarget ?? { kind: 'system' as const };
+  const validTarget = (target: unknown, location: 'client' | 'server'): boolean => {
+    if (target === null) return location === 'client';
+    if (!isObject(target)) return false;
+    const id = target.kind === 'preset' ? target.providerId : target.profileId;
+    return target.kind === 'system'
+      ? location === 'server' && Object.keys(target).length === 1
+      : (target.kind === 'preset' || (location === 'client' && target.kind === 'custom')) &&
+        typeof id === 'string' && id.trim().length > 0 && Object.keys(target).length === 2;
+  };
+  if (!validTarget(clientTarget, 'client') || !validTarget(serverTarget, 'server')) throw new Error('AI 配置目标损坏');
+  const presetsByProviderId = Object.create(null) as Record<string, DesktopPresetSelection>;
+  if (value.presetsByProviderId !== undefined) {
+    if (!isObject(value.presetsByProviderId)) throw new Error('AI 预设配置损坏');
+    for (const [id, entry] of Object.entries(value.presetsByProviderId)) {
+      if (!id.trim() || !isObject(entry) || !isObject(entry.generationOverrides) ||
+          Object.keys(entry).some((key) => key !== 'selectedModelId' && key !== 'generationOverrides') ||
+          (entry.selectedModelId !== undefined && !ProviderModelIdSchema.safeParse(entry.selectedModelId).success)) throw new Error('AI 预设配置损坏');
+      const overrides = Object.create(null) as Record<string, UserGenerationOverrides>;
+      for (const [model, override] of Object.entries(entry.generationOverrides)) overrides[model] = UserGenerationOverridesSchema.parse(override);
+      presetsByProviderId[id] = { ...(entry.selectedModelId === undefined ? {} : { selectedModelId: (entry.selectedModelId as string).trim() }), generationOverrides: overrides };
+    }
+  }
   return {
-    selection: value.selection,
+    selection: { ...selection, clientTarget, serverTarget, clientConnectionId: clientTarget?.kind === 'custom' ? clientTarget.profileId : null },
+    presetsByProviderId,
     hiddenPresetIds: value.hiddenPresetIds,
     generationOverrides: overrides,
     modelsByProfileId,
@@ -243,7 +294,7 @@ export const parseDesktopAiConfigOverlay = (raw: string): DesktopAiConfigOverlay
 };
 
 export const serializeDesktopAiConfigOverlay = (overlay: DesktopAiConfigOverlay): string =>
-  JSON.stringify({ version: 4, ...overlay });
+  JSON.stringify({ version: 5, ...overlay, selection: { ...overlay.selection, clientConnectionId: undefined, clientTarget: overlay.selection.clientTarget !== undefined ? overlay.selection.clientTarget : overlay.selection.clientConnectionId ? { kind: 'custom', profileId: overlay.selection.clientConnectionId } : null, serverTarget: overlay.selection.serverTarget ?? { kind: 'system' } } });
 
 /** 预设展示行：整条支持度 + 该宿主上已核验可直连的模型清单。 */
 export interface DesktopPresetEntry {
@@ -279,6 +330,8 @@ export const describeDesktopPresetModelSupport = (
 export interface ResolvedDesktopAiTarget {
   /** 'server' = 服务器策略；'client' = 某个已保存连接。 */
   location: 'client' | 'server';
+  providerTarget?: ProviderTarget;
+  preset?: AiProviderPreset;
   profile: DirectProviderProfileV1 | null;
   /** 客户端连接的执行模式；server/不可用时为 null。 */
   mode: 'direct-local' | 'direct-remote' | null;
@@ -291,12 +344,31 @@ export interface ResolvedDesktopAiTarget {
   unavailableReason: string | null;
 }
 
+const ownEntry = <T,>(record: Readonly<Record<string, T>> | undefined, key: string): T | undefined =>
+  record && Object.hasOwn(record, key) ? record[key] : undefined;
+
 export const resolveDesktopAiTarget = (
   selection: DesktopAiSelection,
   profiles: readonly DirectProviderProfileV1[],
   generationOverrides: Readonly<Record<string, Readonly<Record<string, UserGenerationOverrides>>>>,
   modelsByProfileId: Readonly<Record<string, DesktopProfileModelSelection>>,
+  presetsByProviderId: Readonly<Record<string, DesktopPresetSelection>> = {},
 ): ResolvedDesktopAiTarget => {
+  const providerTarget = selectedProviderTarget(selection);
+  if (providerTarget?.kind === 'preset') {
+    const preset = AI_PROVIDER_PRESETS.find((entry) => entry.id === providerTarget.providerId);
+    const preference = ownEntry(presetsByProviderId, providerTarget.providerId);
+    const models = preset ? (selection.executionPreference === 'client' ? listDirectCapableAiPresetModels(preset, DESKTOP_DIRECT_ADAPTERS) : preset.models) : [];
+    const modelId = preference?.selectedModelId ?? models[0]?.value ?? null;
+    const support = preset && modelId ? describeDesktopPresetModelSupport(preset, modelId) : null;
+    return {
+      location: selection.executionPreference, providerTarget, preset, profile: null,
+      mode: selection.executionPreference === 'client' && support?.supported ? 'direct-remote' : null,
+      modelId, availableModelIds: [...new Set([...models.map((model) => model.value), ...(modelId ? [modelId] : [])])],
+      generationOverrides: modelId ? ownEntry(preference?.generationOverrides, modelId) : undefined,
+      unavailableReason: !preset ? '供应商已不在项目目录中，请重新选择' : !modelId ? '请选择模型' : selection.executionPreference === 'client' && !support?.supported ? '该模型的直连协议尚未核验，请选择受支持的模型或切换服务器执行' : null,
+    };
+  }
   if (selection.executionPreference === 'server') {
     // 「使用系统默认配置」通道：模型清单来自 SYSTEM_PROVIDER_OPTION（与 Web
     // 同一目录事实源）；未选择时生效模型为 'default'（服务器默认顺序）。
@@ -309,12 +381,13 @@ export const resolveDesktopAiTarget = (
     const effectiveSystemModelId = storedSystemModelId ?? 'default';
     return {
       location: 'server',
+      providerTarget: { kind: 'system' },
       profile: null,
       mode: null,
       modelId: effectiveSystemModelId,
       availableModelIds: systemModelIds,
       generationOverrides:
-        generationOverrides[DESKTOP_SYSTEM_OVERRIDES_SCOPE]?.[effectiveSystemModelId],
+        ownEntry(ownEntry(generationOverrides, DESKTOP_SYSTEM_OVERRIDES_SCOPE), effectiveSystemModelId),
       // hosted 通路已接入：可执行性由 dispatch 时 DESK-094 兼容/可达性门禁裁决，
       // 登录与否只影响会话 cookie 是否附带，不是前置条件。
       unavailableReason: systemModelDangling
@@ -323,7 +396,8 @@ export const resolveDesktopAiTarget = (
     };
   }
 
-  if (selection.clientConnectionId === null) {
+  const profileId = providerTarget?.kind === 'custom' ? providerTarget.profileId : null;
+  if (profileId === null) {
     return {
       location: 'client',
       profile: null,
@@ -332,11 +406,11 @@ export const resolveDesktopAiTarget = (
       availableModelIds: [],
       generationOverrides: undefined,
       // 新安装默认客户端但未选连接：引导配置，而不是静默切服务器。
-      unavailableReason: '尚未选择客户端连接：请新增、复制预设或选择一条已有连接',
+      unavailableReason: '请选择内置供应商或自定义连接',
     };
   }
 
-  const profile = profiles.find((item) => item.id === selection.clientConnectionId) ?? null;
+  const profile = profiles.find((item) => item.id === profileId) ?? null;
   if (!profile) {
     return {
       location: 'client',
@@ -351,11 +425,11 @@ export const resolveDesktopAiTarget = (
 
   // 生效模型（DESK-AIP-005/006）：清单 = 默认模型 + 自定义模型去重；
   // 显式 selectedModelId 优先，缺省时跟随 profile.modelId。
-  const modelSelection = modelsByProfileId[profile.id];
+  const modelSelection = ownEntry(modelsByProfileId, profile.id);
   const availableModelIds = [
-    ...new Set([profile.modelId, ...(modelSelection?.customModelIds ?? [])]),
+    ...new Set([profile.modelId, ...(modelSelection?.customModelIds ?? []), ...(modelSelection?.inlineModelId ? [modelSelection.inlineModelId] : [])]),
   ];
-  const effectiveModelId = modelSelection?.selectedModelId ?? profile.modelId;
+  const effectiveModelId = modelSelection?.inlineModelId ?? modelSelection?.selectedModelId ?? profile.modelId;
 
   if (!DESKTOP_DIRECT_ADAPTERS.has(profile.adapter)) {
     return {
@@ -378,7 +452,7 @@ export const resolveDesktopAiTarget = (
       mode: null,
       modelId: effectiveModelId,
       availableModelIds,
-      generationOverrides: generationOverrides[profile.id]?.[effectiveModelId],
+      generationOverrides: ownEntry(ownEntry(generationOverrides, profile.id), effectiveModelId),
       unavailableReason: '所选模型已不在连接模型列表中，请重新选择模型',
     };
   }
@@ -392,11 +466,12 @@ export const resolveDesktopAiTarget = (
 
   return {
     location: 'client',
+    providerTarget: { kind: 'custom', profileId: profile.id },
     profile,
     mode,
     modelId: effectiveModelId,
     availableModelIds,
-    generationOverrides: generationOverrides[profile.id]?.[effectiveModelId],
+    generationOverrides: ownEntry(ownEntry(generationOverrides, profile.id), effectiveModelId),
     unavailableReason: null,
   };
 };

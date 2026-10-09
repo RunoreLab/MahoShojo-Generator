@@ -1,3 +1,4 @@
+import { ProviderModelIdSchema } from '@mahoshojo/contracts/provider-target';
 import { invoke } from '@tauri-apps/api/core';
 
 import {
@@ -93,7 +94,12 @@ export const deriveApiKeyRef = (profileId: string): string => `provider:${profil
 export const buildProfile = (
   draft: ProfileDraft,
   now: () => string = () => new Date().toISOString(),
+  existing?: DirectProviderProfileV1,
 ): DirectProviderProfileV1 => {
+  const modelId = draft.modelId.trim();
+  if (modelId !== existing?.modelId && !ProviderModelIdSchema.safeParse(modelId).success) {
+    throw new ProfileDraftError('modelId', '模型 ID 需非空、不超过 200 字符且不含控制字符');
+  }
   if (!profileIdPattern.test(draft.id)) {
     throw new ProfileDraftError(
       'id',

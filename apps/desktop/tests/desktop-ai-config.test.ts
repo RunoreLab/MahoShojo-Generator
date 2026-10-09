@@ -177,7 +177,7 @@ describe('parseDesktopAiConfigOverlay', () => {
   });
 
   it('defaults to client execution with no connection selected', () => {
-    expect(DESKTOP_AI_CONFIG_DEFAULT_OVERLAY.selection).toEqual({
+    expect(DESKTOP_AI_CONFIG_DEFAULT_OVERLAY.selection).toMatchObject({
       executionPreference: 'client',
       clientConnectionId: null,
     });
@@ -185,8 +185,8 @@ describe('parseDesktopAiConfigOverlay', () => {
 
   it('fails closed on unsupported version, corrupt selection and non-schema overrides', () => {
     expect(() => parseDesktopAiConfigOverlay('{"version":1}')).toThrow('版本');
-    expect(() => parseDesktopAiConfigOverlay('{"version":5}')).toThrow('版本');
-    expect(() => parseDesktopAiConfigOverlay('{"version":4}')).toThrow('选择');
+    expect(() => parseDesktopAiConfigOverlay('{"version":6}')).toThrow('版本');
+    expect(() => parseDesktopAiConfigOverlay('{"version":5}')).toThrow('选择');
     expect(() =>
       parseDesktopAiConfigOverlay(
         JSON.stringify({
@@ -227,7 +227,7 @@ describe('parseDesktopAiConfigOverlay', () => {
     ).toThrow('隐藏');
   });
 
-  it('migrates v2 without modelsByProfileId and writes back as v4', () => {
+  it('migrates v2 without modelsByProfileId and writes back as v5', () => {
     const parsed = parseDesktopAiConfigOverlay(
       JSON.stringify({
         version: 2,
@@ -239,7 +239,7 @@ describe('parseDesktopAiConfigOverlay', () => {
     expect(parsed.modelsByProfileId).toEqual({});
     expect(parsed.generationOverrides).toEqual({ p1: { m1: { temperature: 0.4 } } });
     // 下一次落盘即以 v4 写回（受检、幂等）。
-    expect(serializeDesktopAiConfigOverlay(parsed)).toContain('"version":4');
+    expect(serializeDesktopAiConfigOverlay(parsed)).toContain('"version":5');
     expect(JSON.parse(serializeDesktopAiConfigOverlay(parsed)).modelsByProfileId).toEqual({});
   });
 
@@ -311,7 +311,7 @@ describe('resolveDesktopAiTarget', () => {
     const target = resolveDesktopAiTarget(clientSelection(null), [profile], {}, {});
     expect(target.location).toBe('client');
     expect(target.profile).toBeNull();
-    expect(target.unavailableReason).toContain('尚未选择客户端连接');
+    expect(target.unavailableReason).toContain('请选择内置供应商或自定义连接');
   });
 
   it('reports a dangling selection instead of crashing or switching providers', () => {
@@ -459,7 +459,7 @@ describe('DesktopAiConfigStore', () => {
     await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
 
     // 没有「找到一个就自动选中」：执行位置保持客户端偏好，连接等用户显式选择。
-    expect(store.getSnapshot().selection).toEqual(clientSelection(null));
+    expect(store.getSnapshot().selection).toMatchObject(clientSelection(null));
     expect(
       resolveDesktopAiTarget(
         store.getSnapshot().selection,
@@ -467,7 +467,7 @@ describe('DesktopAiConfigStore', () => {
         store.getSnapshot().generationOverrides,
         store.getSnapshot().modelsByProfileId,
       ).unavailableReason,
-    ).toContain('尚未选择客户端连接');
+    ).toContain('请选择内置供应商或自定义连接');
   });
 
   it('keeps a dangling selection for diagnosis instead of silently falling back', async () => {
@@ -489,7 +489,7 @@ describe('DesktopAiConfigStore', () => {
     await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
 
     // 悬空引用保留原 ID（诊断见 resolveDesktopAiTarget），不自动改选其他连接。
-    expect(store.getSnapshot().selection).toEqual(clientSelection('deleted'));
+    expect(store.getSnapshot().selection).toMatchObject(clientSelection('deleted'));
     expect(store.getSnapshot().hiddenPresetIds.has('deepseek')).toBe(true);
     // 孤儿 overrides 清掉，存活连接的覆盖保留。
     expect(store.getSnapshot().generationOverrides).toEqual({
@@ -504,16 +504,16 @@ describe('DesktopAiConfigStore', () => {
     store.init();
     await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
     store.selectClientConnection('p_local');
-    expect(store.getSnapshot().selection).toEqual(clientSelection('p_local'));
+    expect(store.getSnapshot().selection).toMatchObject(clientSelection('p_local'));
 
     store.selectExecutionLocation('server');
-    expect(store.getSnapshot().selection).toEqual({
+    expect(store.getSnapshot().selection).toMatchObject({
       executionPreference: 'server',
       clientConnectionId: 'p_local',
     });
 
     store.selectExecutionLocation('client');
-    expect(store.getSnapshot().selection).toEqual(clientSelection('p_local'));
+    expect(store.getSnapshot().selection).toMatchObject(clientSelection('p_local'));
   });
 
   it('selectClientConnection does not flip an explicit server preference', () => {
@@ -523,7 +523,7 @@ describe('DesktopAiConfigStore', () => {
     store.selectExecutionLocation('server');
     store.selectClientConnection('p_local');
     // 选择客户端连接与执行位置正交：服务器偏好不被偷改（D5.0c 开放后有现实意义）。
-    expect(store.getSnapshot().selection).toEqual({
+    expect(store.getSnapshot().selection).toMatchObject({
       executionPreference: 'server',
       clientConnectionId: 'p_local',
     });
@@ -540,14 +540,14 @@ describe('DesktopAiConfigStore', () => {
     store.selectClientConnection('p_local');
     store.selectExecutionLocation('server');
     store.hidePreset('deepseek');
-    expect(store.getSnapshot().selection).toEqual(clientSelection(null));
+    expect(store.getSnapshot().selection).toMatchObject(clientSelection(null));
     // 原数据不被覆盖。
     expect(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)).toBe('{broken');
 
     store.resetBlockedOverlay();
     await vi.waitFor(() => expect(store.getSnapshot().profilesState).toBe('ready'));
     expect(store.getSnapshot().overlayState).toBe('ready');
-    expect(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)).toContain('"version":4');
+    expect(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)).toContain('"version":5');
   });
 
   it('persists hide/restore of presets', async () => {
@@ -583,9 +583,9 @@ describe('DesktopAiConfigStore', () => {
       customModelIds: ['qwen3:14b'],
     });
     // 执行位置与连接选择不因模型切换被改写。
-    expect(store.getSnapshot().selection).toEqual(clientSelection('p_local'));
+    expect(store.getSnapshot().selection).toMatchObject(clientSelection('p_local'));
     const persisted = JSON.parse(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)!);
-    expect(persisted.version).toBe(4);
+    expect(persisted.version).toBe(5);
     expect(persisted.modelsByProfileId.p_local).toEqual({
       selectedModelId: 'qwen3:14b',
       customModelIds: ['qwen3:14b'],
@@ -691,7 +691,7 @@ describe('DesktopAiConfigStore', () => {
     store.activateConnection('p_local');
     // DESK-AIP-003.3：执行位置+连接+模型是同一次受检 overlay 更新。
     expect(setSpy).toHaveBeenCalledTimes(1);
-    expect(store.getSnapshot().selection).toEqual({
+    expect(store.getSnapshot().selection).toMatchObject({
       executionPreference: 'client',
       clientConnectionId: 'p_local',
     });
@@ -707,9 +707,9 @@ describe('DesktopAiConfigStore', () => {
     expect(store.getSnapshot().selection.clientConnectionId).toBe('p_local');
 
     const persisted = JSON.parse(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)!);
-    expect(persisted.selection).toEqual({
+    expect(persisted.selection).toMatchObject({
       executionPreference: 'client',
-      clientConnectionId: 'p_local',
+      clientTarget: { kind: 'custom', profileId: 'p_local' },
     });
     expect(persisted.modelsByProfileId.p_local.selectedModelId).toBe('qwen3:8b');
   });
@@ -758,7 +758,7 @@ describe('DesktopAiConfigStore', () => {
     expect(JSON.stringify(native.profiles.get('p_new'))).not.toContain('sk-secret');
     expect(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)!).not.toContain('sk-secret');
     // r1-B：保存不再隐式选中——「保存」与「激活为当前连接」是两个显式操作。
-    expect(store.getSnapshot().selection).toEqual(clientSelection(null));
+    expect(store.getSnapshot().selection).toMatchObject(clientSelection(null));
     expect(store.getSnapshot().secretStatus['p_new']).toBe('present');
   });
 
@@ -940,7 +940,7 @@ describe('DesktopAiConfigStore', () => {
     ).resolves.toBeUndefined();
     expect(native.profiles.get('p_local')?.name).toBe('改名');
     // 编辑既有连接不做激活——选择保持原样。
-    expect(store.getSnapshot().selection).toEqual(clientSelection(null));
+    expect(store.getSnapshot().selection).toMatchObject(clientSelection(null));
   });
 
   it('保存成功但激活写盘失败：如实报告「已保存但未启用」', async () => {
@@ -953,7 +953,7 @@ describe('DesktopAiConfigStore', () => {
     // 只在激活写盘（含 p_new 的选择更新）时失败；Profile/凭据落盘不受影响。
     const original = storage.setItem.bind(storage);
     vi.spyOn(storage, 'setItem').mockImplementation((key, value) => {
-      if (value.includes('"clientConnectionId":"p_new"')) throw new Error('quota exceeded');
+      if (value.includes('"clientTarget":{"kind":"custom","profileId":"p_new"}')) throw new Error('quota exceeded');
       original(key, value);
     });
 
@@ -975,7 +975,7 @@ describe('DesktopAiConfigStore', () => {
     expect((failure as Error).message).toContain('连接已保存，但启用为当前连接失败');
     // Profile 与 staged 凭据确实已落盘——部分成功被如实区分。
     expect(native.profiles.has('p_new')).toBe(true);
-    expect(store.getSnapshot().selection).toEqual(clientSelection(null));
+    expect(store.getSnapshot().selection).toMatchObject(clientSelection(null));
   });
 
   it('new-connection save failure leaves no orphan credential behind', async () => {
@@ -1139,7 +1139,7 @@ describe('DesktopAiConfigStore', () => {
     expect(native.profiles.size).toBe(0);
     expect(native.secrets.size).toBe(0);
     // 显式解除当前连接引用：不自动换供应商。
-    expect(store.getSnapshot().selection).toEqual(clientSelection(null));
+    expect(store.getSnapshot().selection).toMatchObject(clientSelection(null));
   });
 
   it('deletes the credential by the profile\'s actual apiKeyRef, not a derived one', async () => {
@@ -1242,15 +1242,16 @@ describe('DesktopAiConfigStore', () => {
       throw new Error('quota exceeded');
     });
     expect(() => store.selectClientConnection('p_local')).toThrow('quota');
-    expect(store.getSnapshot().selection).toEqual(clientSelection(null));
+    expect(store.getSnapshot().selection).toMatchObject(clientSelection(null));
     expect(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)).toBe(diskBefore);
 
     // 恢复可写后，下一次成功写入只包含新操作，不带回失败的修改。
     store.selectExecutionLocation('server');
     const persisted = JSON.parse(storage.data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)!);
-    expect(persisted.selection).toEqual({
+    expect(persisted.selection).toMatchObject({
       executionPreference: 'server',
-      clientConnectionId: null,
+      clientTarget: null,
+      serverTarget: { kind: 'system' },
     });
   });
 

@@ -514,7 +514,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     mocks.profiles.mockResolvedValue({ id: 'local', name: '外部模型', adapter: 'openai-compatible', baseUrl: 'https://model.example/v1', modelId: 'model' });
     window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify({ ...draft(), output: { mode: 'direct-remote', phase: 'cancelled', card: null, rawText: '上次中断' } }));
     await mount(); await click('恢复草稿');
-    expect(container.textContent).toContain('客户端 · 远端');
+    expect(container.textContent).toContain('接收方：https://model.example/v1');
     expect(container.textContent).toContain('https://model.example/v1');
     expect(container.querySelector('pre')?.textContent).toBe('上次中断');
     expect(mocks.execute).not.toHaveBeenCalled();
@@ -549,7 +549,8 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     // 服务器模式下如实标注影响范围而不是无条件告警原文（D5.1-P2-r4）。
     expect(container.textContent).toContain('本地 Provider 配置加载失败，仅影响客户端执行');
     expect(container.textContent).not.toContain('可以稍后重试');
-    expect(container.textContent).toContain('服务器 · 云端');
+    expect(container.textContent).toContain('使用系统默认配置');
+    expect(container.textContent).not.toContain('服务器 · 云端');
     expect(button('发送问卷并生成').disabled).toBe(false);
     await click('发送问卷并生成');
     expect(mocks.execute).toHaveBeenCalledTimes(1);
@@ -604,7 +605,8 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     }));
     window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify(draft()));
     await mount(); await click('恢复草稿');
-    expect(container.textContent).toContain('服务器 · 云端');
+    expect(container.textContent).toContain('使用系统默认配置');
+    expect(container.textContent).not.toContain('服务器 · 云端');
     // D5.1-AIP-r1：服务器模式呈现系统模型行与按系统模型保存的高级参数
     // （经 hosted systemConfig 非秘密偏好下发，与 Web 同语义）。
     expect(container.textContent).toContain('使用系统默认配置');

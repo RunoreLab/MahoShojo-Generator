@@ -173,12 +173,13 @@ function CreatorForm({ session }: { session: CreatorSession }) {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const router = useRouter();
   const { openFixed } = useExternalLinks();
-  const { state: aiState } = useDesktopAiConfig();
+  const { state: aiState, store: aiStore } = useDesktopAiConfig();
   const target = resolveDesktopAiTarget(
     aiState.selection,
     aiState.profiles,
     aiState.generationOverrides,
     aiState.modelsByProfileId,
+    aiState.presetsByProviderId,
   );
   const profilesLoading = aiState.profilesState === 'idle' || aiState.profilesState === 'loading';
   const profilesError = aiState.profilesState === 'failed' ? aiState.profilesError : null;
@@ -537,14 +538,14 @@ function CreatorForm({ session }: { session: CreatorSession }) {
 
   useResultAutoScroll(resultSectionRef, Boolean(state.card), { restored: state.resultRestored });
 
-  const selected = target.profile;
   const mode = target.mode;
-  const busy = state.phase === 'generating' || state.saving;
+  const busy = state.phase === 'generating' || state.saving || aiState.generationActive;
+  useEffect(() => () => aiStore.cancelPreparingGeneration(), [aiStore]);
   const blockedDraft = state.pendingRestore || session.isDraftBlocked();
   const hostedMode: CreatorExecutionMode = generationMode === 'stream' ? 'hosted-stream' : 'hosted-json';
   const executionMode: CreatorExecutionMode | null = target.location === 'server' ? hostedMode : mode;
   // 本地 Provider 配置只门禁客户端执行：server 偏好由 hosted System Default 解析。
-  const clientProfilesBlocked = target.location === 'client' && (profilesLoading || profilesError !== null);
+  const clientProfilesBlocked = target.profile !== null && (profilesLoading || profilesError !== null);
   const recommendedImageMode = recommendedSaveModes(deviceType === 'mobile').imageSaveMode;
   const recommendedJsonMode = recommendedSaveModes(deviceType === 'mobile').jsonSaveMode;
   const imageSaveMode = draft.imageSaveMode ?? recommendedImageMode;
@@ -780,7 +781,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
     // 悬空选择（含服务器侧被目录移除的系统模型）保留诊断值但禁止派发（D5.1-AIP-r1-r1）。
     && target.unavailableReason === null
     && !clientProfilesBlocked
-    && !(target.location === 'client' && !selected);
+    && !(target.location === 'client' && !target.providerTarget);
 
   const generate = (discardUnsavedResult = false) => {
     if (!canGenerateNow) return;
@@ -824,8 +825,8 @@ function CreatorForm({ session }: { session: CreatorSession }) {
           ? freeformBrief.trim() || answers[0]?.answer || ''
           : answers[0]?.answer || freeformBrief.trim(),
       };
-      void session.generate(
-        { invoke, profileId: selected?.id ?? '' },
+      void aiStore.withPreparedGeneration(async (prepared) => { await session.generate(
+        { invoke, profileId: prepared.profile?.id ?? '', providerTarget: prepared.providerTarget },
         {
           template,
           freeformBrief: freeformBrief.trim(),
@@ -850,9 +851,10 @@ function CreatorForm({ session }: { session: CreatorSession }) {
             ),
           },
         },
-        { mode: executionMode, modelId: target.modelId ?? undefined, flowers: getRandomFlowers(), overrides: target.generationOverrides },
+        { mode: prepared.location === 'server' ? hostedMode : prepared.mode!, modelId: prepared.modelId ?? undefined, flowers: getRandomFlowers(), overrides: prepared.generationOverrides },
         discardUnsavedResult,
       );
+      }).catch((cause: unknown) => setActionError(cause instanceof Error ? cause.message : 'AI 配置准备失败'));
     } catch (error) { setActionError(error instanceof Error ? error.message : '创作请求无法生成。'); }
   };
 
@@ -1147,6 +1149,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
           {state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '生成数据卡' : '重新生成'}
         </button>
         {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}
+
       </div>
       {isNativeSignatureEligible && hasOverLimitAnswer && (
         <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700">
@@ -1322,6 +1325,10 @@ function CreatorForm({ session }: { session: CreatorSession }) {
           {profilesLoading && target.location === 'client' && <p role="status">正在读取本地 Provider 配置…</p>}
           {profilesError && <p role="alert">{target.location === 'server' ? '本地 Provider 配置加载失败，仅影响客户端执行。' : profilesError}</p>}
           {actionError && <p role="alert">{actionError}</p>}
+                  {aiState.generationActive && aiStore.isPreparingGeneration() && <button className={actionClass} onClick={() => {
+                    aiStore.cancelPreparingGeneration();
+                    setActionInfo('尚未派发的生成已取消；已保存的 API Key 将保留，系统凭据操作结束后可重试。');
+                  }}>取消准备</button>}
           {actionInfo && <p role="status">{actionInfo}</p>}
           {state.message && <p role={state.phase === 'uncertain' ? 'alert' : 'status'}>{state.message}</p>}
           {state.reasoning && <AiReasoningPanel reasoning={state.reasoning} />}
@@ -1449,6 +1456,7 @@ function CreatorForm({ session }: { session: CreatorSession }) {
               {state.phase === 'generating' ? '正在生成…' : '直接生成'}
             </button>
             {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}
+
           </div>
         </div>
       ),

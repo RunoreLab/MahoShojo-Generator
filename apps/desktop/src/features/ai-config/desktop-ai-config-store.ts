@@ -10,6 +10,8 @@
 // 模块级单例），两处消费的就是同一份 `resolveDesktopAiTarget` 结果——不允许
 // 再长出一套平行的「详情页自己选 Profile」状态。
 
+import { ProviderModelIdSchema, presetApiKeyRef, type ProviderTarget } from '@mahoshojo/contracts/provider-target';
+import { AI_PROVIDER_PRESETS } from '@mahoshojo/ai-core/provider-catalog';
 import type { DirectProviderProfileV1 } from '@mahoshojo/contracts/provider-profile';
 import type { UserGenerationOverrides } from '@mahoshojo/ai-core/generation-settings';
 
@@ -36,9 +38,12 @@ import {
   DESKTOP_EDITABLE_PROFILE_ADAPTERS,
   DESKTOP_SYSTEM_OVERRIDES_SCOPE,
   isDesktopSystemModelId,
-  isValidDesktopModelId,
   parseDesktopAiConfigOverlay,
   serializeDesktopAiConfigOverlay,
+  resolveDesktopAiTarget,
+  selectedProviderTarget,
+  type DesktopPresetSelection,
+  type ResolvedDesktopAiTarget,
   type DesktopAiConfigOverlay,
   type DesktopAiSelection,
   type DesktopProfileModelSelection,
@@ -84,6 +89,12 @@ export interface DesktopAiConfigState {
   /** profileId → 凭据存在性；只回答存在性，永不读回明文。 */
   secretStatus: Readonly<Record<string, DesktopSecretPresence>>;
   savingConnection: boolean;
+  presetsByProviderId: Readonly<Record<string, DesktopPresetSelection>>;
+  presetSecretStatus: Readonly<Record<string, DesktopSecretPresence>>;
+  credentialDraftRevision: number;
+  generationActive: boolean;
+  savingCredential: boolean;
+  modelInputError: string | null;
 }
 
 /**
@@ -154,6 +165,7 @@ const INITIAL_STATE: DesktopAiConfigState = {
   profilesError: null,
   secretStatus: {},
   savingConnection: false,
+  presetsByProviderId: {}, presetSecretStatus: {}, credentialDraftRevision: 0, generationActive: false, savingCredential: false, modelInputError: null,
 };
 
 export class DesktopAiConfigStore {
@@ -161,6 +173,10 @@ export class DesktopAiConfigStore {
   private readonly listeners = new Set<() => void>();
   private overlay: DesktopAiConfigOverlay = DESKTOP_AI_CONFIG_DEFAULT_OVERLAY;
   private initialized = false;
+  private readonly presetProbeEpoch = new Map<string, number>();
+  private readonly presetKeyDrafts = new Map<string, string>();
+  private generationEpoch = 0;
+  private preparing = false;
   private profilesPromise: Promise<void> | null = null;
 
   constructor(private readonly deps: DesktopAiConfigDeps) {}
@@ -179,7 +195,8 @@ export class DesktopAiConfigStore {
 
   private publishOverlay(): void {
     this.publish({
-      selection: this.overlay.selection,
+      selection: { ...this.overlay.selection, clientConnectionId: this.overlay.selection.clientTarget?.kind === 'custom' ? this.overlay.selection.clientTarget.profileId : this.overlay.selection.clientTarget === undefined ? this.overlay.selection.clientConnectionId : null },
+      presetsByProviderId: this.overlay.presetsByProviderId ?? {},
       hiddenPresetIds: new Set(this.overlay.hiddenPresetIds),
       // 字典保持 null-prototype：profileId/modelId 可能是 "__proto__" 这类合法
       // 标识符，普通对象消费它们时会碰到原型语义。
@@ -209,6 +226,7 @@ export class DesktopAiConfigStore {
     mutate: (overlay: DesktopAiConfigOverlay) => DesktopAiConfigOverlay,
   ): void {
     if (!this.overlayWritable) return;
+    if (this.state.generationActive || this.state.savingCredential) throw new Error('生成期间请勿修改 AI 配置');
     const candidate = mutate(this.overlay);
     const raw = serializeDesktopAiConfigOverlay(candidate);
     if (raw.length > MAX_OVERLAY_CHARACTERS) {
@@ -334,6 +352,7 @@ export class DesktopAiConfigStore {
       ...overlay,
       selection: { ...overlay.selection, executionPreference: location },
     }));
+    this.publish({ modelInputError: null });
   };
 
   /**
@@ -346,7 +365,7 @@ export class DesktopAiConfigStore {
   selectClientConnection = (profileId: string): void => {
     this.commitOverlay((overlay) => ({
       ...overlay,
-      selection: { ...overlay.selection, clientConnectionId: profileId },
+      selection: { ...overlay.selection, clientTarget: { kind: 'custom', profileId } },
     }));
   };
 
@@ -362,6 +381,7 @@ export class DesktopAiConfigStore {
       ...overlay,
       selection: { ...overlay.selection, systemModelId: trimmed },
     }));
+    this.publish({ modelInputError: null });
   };
 
   /**
@@ -382,10 +402,10 @@ export class DesktopAiConfigStore {
     const profile = this.state.profiles.find((item) => item.id === profileId);
     if (!profile) return;
     const entry = this.overlay.modelsByProfileId[profileId];
-    const available = new Set([profile.modelId, ...(entry?.customModelIds ?? [])]);
+    const available = new Set([profile.modelId, ...(entry?.customModelIds ?? []), ...(entry?.inlineModelId ? [entry.inlineModelId] : [])]);
     if (modelId !== undefined && !available.has(modelId)) return;
     const selectedModelId =
-      modelId ??
+      modelId ?? entry?.inlineModelId ??
       (entry?.selectedModelId !== undefined && available.has(entry.selectedModelId)
         ? entry.selectedModelId
         : profile.modelId);
@@ -393,7 +413,9 @@ export class DesktopAiConfigStore {
       ...overlay,
       selection: {
         executionPreference: 'client',
-        clientConnectionId: profileId,
+        clientConnectionId: null,
+        clientTarget: { kind: 'custom', profileId },
+        serverTarget: overlay.selection.serverTarget,
         systemModelId: overlay.selection.systemModelId,
       },
       modelsByProfileId: Object.assign(
@@ -401,12 +423,157 @@ export class DesktopAiConfigStore {
         overlay.modelsByProfileId,
         {
           [profileId]: {
+            ...(entry?.inlineModelId === selectedModelId ? { inlineModelId: selectedModelId } : {}),
             customModelIds: entry?.customModelIds ?? [],
             selectedModelId,
           },
         },
       ),
     }));
+  };
+
+  selectProviderTarget = (target: ProviderTarget): void => {
+    const location = this.state.selection.executionPreference;
+    if ((location === 'client' && target.kind === 'system') || (location === 'server' && target.kind === 'custom')) throw new Error('该供应商目标不支持当前执行位置');
+    this.commitOverlay((overlay) => ({ ...overlay, selection: { ...overlay.selection, ...(location === 'client' ? { clientTarget: target as Exclude<ProviderTarget, { kind: 'system' }> } : { serverTarget: target as Exclude<ProviderTarget, { kind: 'custom' }> }) } }));
+    this.publish({ modelInputError: null });
+    if (target.kind === 'preset') void this.refreshPresetSecret(target.providerId);
+  };
+
+  selectPresetModel = (providerId: string, modelId: string): void => {
+    const parsed = ProviderModelIdSchema.safeParse(modelId);
+    if (!parsed.success) throw new Error('模型 ID 无效：需非空、不超过 200 字符且不含控制字符');
+    this.commitOverlay((overlay) => ({ ...overlay, presetsByProviderId: { ...overlay.presetsByProviderId, [providerId]: { ...overlay.presetsByProviderId?.[providerId], generationOverrides: overlay.presetsByProviderId?.[providerId]?.generationOverrides ?? Object.create(null) as Record<string, UserGenerationOverrides>, selectedModelId: parsed.data } } }));
+    this.publish({ modelInputError: null });
+  };
+
+  useInlineModel = (modelId: string): void => {
+    const target = selectedProviderTarget(this.state.selection);
+    const parsed = ProviderModelIdSchema.safeParse(modelId);
+    if (!parsed.success) {
+      this.publish({ modelInputError: '模型 ID 无效：需非空、不超过 200 字符且不含控制字符' });
+      return;
+    }
+    try {
+      if (target?.kind === 'preset') this.selectPresetModel(target.providerId, parsed.data);
+      if (target?.kind === 'custom') {
+        const entry = this.overlay.modelsByProfileId[target.profileId];
+        this.writeModelSelection(target.profileId, {
+          ...entry,
+          inlineModelId: parsed.data,
+          customModelIds: entry?.customModelIds ?? [],
+        });
+      }
+      this.publish({ modelInputError: null });
+    } catch (cause) {
+      // 输入框保留用户所填值时，不能因写盘失败静默使用上一次的模型发请求。
+      this.publish({ modelInputError: '模型选择未保存，请重试或重新选择模型' });
+      throw cause;
+    }
+  };
+
+  setPresetGenerationOverrides = (providerId: string, modelId: string, overrides: UserGenerationOverrides | undefined): void => {
+    this.commitOverlay((overlay) => {
+      const entry = overlay.presetsByProviderId?.[providerId];
+      const next = Object.assign(Object.create(null) as Record<string, UserGenerationOverrides>, entry?.generationOverrides);
+      if (overrides === undefined) delete next[modelId]; else next[modelId] = overrides;
+      return { ...overlay, presetsByProviderId: { ...overlay.presetsByProviderId, [providerId]: { ...entry, generationOverrides: next } } };
+    });
+  };
+
+  getPresetKeyDraft = (providerId: string): string => this.presetKeyDrafts.get(providerId) ?? '';
+  setPresetKeyDraft = (providerId: string, value: string): void => {
+    if (this.state.generationActive || this.state.savingCredential) throw new Error('生成期间请勿更换凭据');
+    this.presetKeyDrafts.set(providerId, value);
+    this.publish({ credentialDraftRevision: this.state.credentialDraftRevision + 1 });
+  };
+  private setPresetStatus(providerId: string, status: DesktopSecretPresence): void {
+    this.invalidatePresetProbe(providerId);
+    this.publish({ presetSecretStatus: { ...this.state.presetSecretStatus, [providerId]: status } });
+  }
+  private invalidatePresetProbe(providerId: string): number {
+    const epoch = (this.presetProbeEpoch.get(providerId) ?? 0) + 1;
+    this.presetProbeEpoch.set(providerId, epoch);
+    return epoch;
+  }
+  refreshPresetSecret = async (providerId: string): Promise<void> => {
+    const epoch = this.invalidatePresetProbe(providerId);
+    try {
+      const present = await hasProviderSecret(this.deps.invoke, presetApiKeyRef(providerId));
+      if (this.presetProbeEpoch.get(providerId) === epoch) this.setPresetStatus(providerId, present ? 'present' : 'absent');
+    } catch {
+      if (this.presetProbeEpoch.get(providerId) === epoch) this.setPresetStatus(providerId, 'error');
+    }
+  };
+  savePresetKey = async (providerId: string): Promise<void> => {
+    if (this.state.generationActive || this.state.savingCredential) throw new Error('生成期间请勿更换凭据');
+    this.publish({ savingCredential: true });
+    try { await this.persistPresetKey(providerId); } finally { this.publish({ savingCredential: false }); }
+  };
+  private async persistPresetKey(providerId: string): Promise<void> {
+    if (!AI_PROVIDER_PRESETS.some((entry) => entry.id === providerId)) throw new Error('供应商已不在项目目录中');
+    this.invalidatePresetProbe(providerId);
+    const key = this.getPresetKeyDraft(providerId).trim();
+    let present: boolean;
+    try {
+      if (key) await setProviderSecret(this.deps.invoke, presetApiKeyRef(providerId), key);
+      present = await hasProviderSecret(this.deps.invoke, presetApiKeyRef(providerId));
+    } catch (cause) {
+      this.setPresetStatus(providerId, 'error');
+      throw cause;
+    }
+    if (!present) {
+      this.setPresetStatus(providerId, 'absent');
+      throw new Error(key ? '凭据保存后无法确认，请重试' : '请填写 API Key');
+    }
+    if (key) {
+      this.presetKeyDrafts.delete(providerId);
+      this.publish({ credentialDraftRevision: this.state.credentialDraftRevision + 1 });
+    }
+    this.setPresetStatus(providerId, 'present');
+  }
+  clearPresetKey = async (providerId: string): Promise<void> => {
+    if (this.state.generationActive || this.state.savingCredential) throw new Error('生成期间请勿清除凭据');
+    this.publish({ savingCredential: true });
+    try {
+      this.invalidatePresetProbe(providerId);
+      await deleteProviderSecret(this.deps.invoke, presetApiKeyRef(providerId));
+      if (await hasProviderSecret(this.deps.invoke, presetApiKeyRef(providerId))) throw new Error('凭据清除后无法确认，请重试');
+      this.presetKeyDrafts.delete(providerId);
+      this.setPresetStatus(providerId, 'absent');
+      this.publish({ credentialDraftRevision: this.state.credentialDraftRevision + 1 });
+    } catch (cause) { this.setPresetStatus(providerId, 'error'); throw cause; }
+    finally { this.publish({ savingCredential: false }); }
+  };
+
+  isPreparingGeneration = (): boolean => this.preparing;
+  cancelPreparingGeneration = (): void => {
+    if (!this.preparing) return;
+    this.generationEpoch += 1;
+    this.preparing = false;
+    // 取消派发不等于撤销 native 凭据写入。写入返回前仍持有互斥锁，避免重试混用 Key。
+    this.publish({ generationActive: this.state.generationActive });
+  };
+  withPreparedGeneration = async (run: (target: ResolvedDesktopAiTarget) => Promise<unknown>): Promise<void> => {
+    if (this.state.generationActive) return;
+    if (!this.overlayWritable) throw new Error('AI 配置尚未就绪');
+    if (this.state.savingCredential) throw new Error('凭据正在保存，请稍后生成');
+    if (this.saveConnectionInFlight) throw new Error('连接正在保存，请稍后生成');
+    if (this.state.modelInputError) throw new Error(this.state.modelInputError);
+    const target = resolveDesktopAiTarget(this.state.selection, this.state.profiles, this.state.generationOverrides, this.state.modelsByProfileId, this.state.presetsByProviderId);
+    if (target.unavailableReason || !target.providerTarget) throw new Error(target.unavailableReason ?? '请选择供应商');
+    const epoch = ++this.generationEpoch;
+    this.preparing = true;
+    this.publish({ generationActive: true });
+    try {
+      if (target.providerTarget.kind === 'preset') await this.persistPresetKey(target.providerTarget.providerId);
+      if (epoch !== this.generationEpoch) return;
+      this.preparing = false;
+      await run(target);
+    } finally {
+      this.preparing = false;
+      this.publish({ generationActive: false });
+    }
   };
 
   hidePreset = (presetId: string): void => {
@@ -496,12 +663,14 @@ export class DesktopAiConfigStore {
     const profile = this.state.profiles.find((item) => item.id === profileId);
     if (!profile) return;
     const entry = this.overlay.modelsByProfileId[profileId];
-    const available = new Set([profile.modelId, ...(entry?.customModelIds ?? [])]);
+    const available = new Set([profile.modelId, ...(entry?.customModelIds ?? []), ...(entry?.inlineModelId ? [entry.inlineModelId] : [])]);
     if (!available.has(modelId)) return;
     this.writeModelSelection(profileId, {
+      ...(modelId === entry?.inlineModelId ? { inlineModelId: modelId } : {}),
       customModelIds: entry?.customModelIds ?? [],
       selectedModelId: modelId,
     });
+    this.publish({ modelInputError: null });
   };
 
   /**
@@ -514,8 +683,8 @@ export class DesktopAiConfigStore {
       throw new Error('AI 配置当前不可写入');
     }
     const trimmed = modelId.trim();
-    if (!isValidDesktopModelId(trimmed)) {
-      throw new Error('模型 ID 无效：需非空、不超过 256 字符且不含控制字符');
+    if (!ProviderModelIdSchema.safeParse(trimmed).success) {
+      throw new Error('模型 ID 无效：需非空、不超过 200 字符且不含控制字符');
     }
     const profile = this.state.profiles.find((item) => item.id === profileId);
     const entry = this.overlay.modelsByProfileId[profileId];
@@ -523,6 +692,7 @@ export class DesktopAiConfigStore {
       throw new Error('该模型已在当前连接的模型列表中');
     }
     this.writeModelSelection(profileId, {
+      ...(entry?.inlineModelId === undefined ? {} : { inlineModelId: entry.inlineModelId }),
       ...(entry?.selectedModelId === undefined
         ? {}
         : { selectedModelId: entry.selectedModelId }),
@@ -540,13 +710,18 @@ export class DesktopAiConfigStore {
   removeCustomModel = (profileId: string, modelId: string): void => {
     if (!this.overlayWritable) return;
     const entry = this.overlay.modelsByProfileId[profileId];
+    if (entry?.inlineModelId === modelId) {
+      this.writeModelSelection(profileId, { selectedModelId: modelId, customModelIds: entry.customModelIds });
+      return;
+    }
     if (entry === undefined || !entry.customModelIds.includes(modelId)) return;
     const customModelIds = entry.customModelIds.filter((id) => id !== modelId);
     this.writeModelSelection(
       profileId,
-      customModelIds.length === 0 && entry.selectedModelId === undefined
+      customModelIds.length === 0 && entry.selectedModelId === undefined && entry.inlineModelId === undefined
         ? undefined
         : {
+            ...(entry.inlineModelId === undefined ? {} : { inlineModelId: entry.inlineModelId }),
             ...(entry.selectedModelId === undefined
               ? {}
               : { selectedModelId: entry.selectedModelId }),
@@ -606,6 +781,7 @@ export class DesktopAiConfigStore {
   } | null = null;
 
   saveConnection = (draft: ProfileDraft): Promise<DesktopSaveConnectionResult> => {
+    if (this.state.generationActive || this.state.savingCredential) return Promise.reject(new Error('生成期间请勿更换连接或凭据'));
     const inFlight = this.saveConnectionInFlight;
     if (inFlight !== null) {
       if (inFlight.profileId === draft.id) {
@@ -646,7 +822,7 @@ export class DesktopAiConfigStore {
         );
       }
 
-      const built = buildProfile(draft, this.deps.now);
+      const built = buildProfile(draft, this.deps.now, existing);
       const plaintextApiKey = draft.apiKey !== undefined && draft.apiKey.length > 0
         ? draft.apiKey
         : undefined;
@@ -744,6 +920,7 @@ export class DesktopAiConfigStore {
    *   （DESK-ONLINE-002）。Profile 是索引、凭据是内容；孤儿凭据比悬空 Profile 安全。
    */
   deleteConnection = async (profileId: string): Promise<void> => {
+    if (this.state.generationActive || this.state.savingCredential) throw new Error('生成期间请勿删除连接');
     const existing =
       this.state.profiles.find((item) => item.id === profileId) ??
       (await getProviderProfile(this.deps.invoke, profileId).catch(() => null));
@@ -753,10 +930,10 @@ export class DesktopAiConfigStore {
       await deleteProviderSecret(this.deps.invoke, existing.apiKeyRef).catch(() => undefined);
     }
 
-    if (this.overlay.selection.clientConnectionId === profileId) {
+    if (selectedProviderTarget({ ...this.overlay.selection, executionPreference: 'client' })?.kind === 'custom' && this.state.selection.clientConnectionId === profileId) {
       this.commitOverlay((overlay) => ({
         ...overlay,
-        selection: { ...overlay.selection, clientConnectionId: null },
+        selection: { ...overlay.selection, clientConnectionId: null, clientTarget: null },
       }));
     }
     await this.refreshProfiles();

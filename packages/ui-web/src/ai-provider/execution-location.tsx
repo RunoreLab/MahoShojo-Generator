@@ -100,8 +100,7 @@ export const AiExecutionLocationField = ({
       value: 'client',
       label: '客户端',
       icon: <Laptop />,
-      description:
-        '由本机直接连接你已配置的模型服务（客户端 Direct），请求不经过项目服务器。',
+      description: '由本机直接连接你已配置的模型服务，请求不经过项目服务器。',
       disabled: !client.enabled,
       ...(client.reason !== undefined ? { reason: client.reason } : {}),
     },
@@ -109,8 +108,7 @@ export const AiExecutionLocationField = ({
       value: 'server',
       label: '服务器',
       icon: <Cloud />,
-      description:
-        '由项目服务器代为生成（使用系统默认配置 / 云端通路），不使用客户端连接与本地凭据。',
+      description: '由项目服务器代为生成，可使用系统默认配置或内置供应商。',
       disabled: !server.enabled,
       ...(server.reason !== undefined ? { reason: server.reason } : {}),
     },

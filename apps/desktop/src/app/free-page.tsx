@@ -91,12 +91,13 @@ function FreeForm({ session }: { session: FreeSession }) {
   const router = useRouter();
   const { openFixed } = useExternalLinks();
   // AI 连接与执行位置与设置页共用同一份 overlay/profiles 状态（D5.0b）。
-  const { state: aiState } = useDesktopAiConfig();
+  const { state: aiState, store: aiStore } = useDesktopAiConfig();
   const target = resolveDesktopAiTarget(
     aiState.selection,
     aiState.profiles,
     aiState.generationOverrides,
     aiState.modelsByProfileId,
+    aiState.presetsByProviderId,
   );
   const profilesLoading = aiState.profilesState === 'idle' || aiState.profilesState === 'loading';
   const profilesError = aiState.profilesState === 'failed' ? aiState.profilesError : null;
@@ -162,9 +163,9 @@ function FreeForm({ session }: { session: FreeSession }) {
     session.updateDraft({ ...session.getSnapshot().draft, schemaId: 'general' });
   }, [session, target.location, draft.generationMode, draft.schemaId]);
   const schemaOptionsForMode = freeSchemaOptionsForMode(effectiveGenerationMode);
-  const selected = target.profile;
   const mode = target.mode;
-  const busy = state.phase === 'generating' || state.saving;
+  const busy = state.phase === 'generating' || state.saving || aiState.generationActive;
+  useEffect(() => () => aiStore.cancelPreparingGeneration(), [aiStore]);
   const blockedDraft = state.pendingRestore || session.isDraftBlocked();
   // 「客户端｜服务器」与「流式｜非流式」两个维度共同决定执行模式（DESK-ONLINE-009）：
   // 流式/非流式只影响 hosted 路由选择，direct 通路始终为结构化生成。
@@ -173,7 +174,7 @@ function FreeForm({ session }: { session: FreeSession }) {
   // 本地 Provider 配置只门禁客户端执行：server 偏好由 hosted System Default 解析、
   // 不消费本地 profile（两个执行位置正交，DESK-ONLINE-001/009）。
   const clientProfilesBlocked =
-    target.location === 'client' && (profilesLoading || profilesError !== null);
+    target.profile !== null && (profilesLoading || profilesError !== null);
   const recommended = recommendedSaveModes(deviceType === 'mobile');
   const jsonSaveMode = recommended.jsonSaveMode;
   const tokenEstimateText = useMemo(() => {
@@ -188,7 +189,7 @@ function FreeForm({ session }: { session: FreeSession }) {
     // 悬空选择（含服务器侧被目录移除的系统模型）保留诊断值但禁止派发——
     // unavailableReason 与按钮 disabled 必须同口径（D5.1-AIP-r1-r1）。
     if (!guard.ready || busy || !executionMode || isReadingAttachments || blockedDraft || target.unavailableReason !== null) return;
-    if (target.location === 'client' && !selected) return;
+    if (target.location === 'client' && !target.providerTarget) return;
     if (!discardUnsavedResult) {
       if (session.hasUnsavedResult()) { setConfirmRegenerate('unsaved'); return; }
       // hosted-json 结果不确定时再次生成 = 可能的第二次调用，必须显式确认（D5.1a-r1）。
@@ -197,17 +198,18 @@ function FreeForm({ session }: { session: FreeSession }) {
     try {
       setActionError(null);
       setActionInfo(null);
-      void session.generate(
-        { invoke, profileId: selected?.id ?? '' },
+      void aiStore.withPreparedGeneration(async (prepared) => { await session.generate(
+        { invoke, profileId: prepared.profile?.id ?? '', providerTarget: prepared.providerTarget },
         {
           prompt: draft.prompt,
           schema: draft.schemaId,
           language: draft.selectedLanguage,
           attachments: toPromptAttachments(attachments),
         },
-        { mode: executionMode, modelId: target.modelId ?? undefined, overrides: target.generationOverrides },
+        { mode: prepared.location === 'server' ? hostedMode : prepared.mode!, modelId: prepared.modelId ?? undefined, overrides: prepared.generationOverrides },
         discardUnsavedResult,
       );
+      }).catch((cause: unknown) => setActionError(cause instanceof Error ? cause.message : 'AI 配置准备失败'));
     } catch (error) {
       setActionError(error instanceof Error ? error.message : '生成失败。');
     }
@@ -300,8 +302,12 @@ function FreeForm({ session }: { session: FreeSession }) {
             </fieldset>
             <TokenIndicator text={tokenEstimateText} />
             <div className="flex flex-wrap gap-2">
-              <button className="generate-button" disabled={!guard.ready || busy || !draft.prompt.trim() || !executionMode || isReadingAttachments || target.unavailableReason !== null || (target.location === 'client' && !selected) || clientProfilesBlocked || blockedDraft} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '生成数据卡' : '重新生成'}</button>
+              <button className="generate-button" disabled={!guard.ready || busy || !draft.prompt.trim() || !executionMode || isReadingAttachments || target.unavailableReason !== null || (target.location === 'client' && !target.providerTarget) || clientProfilesBlocked || blockedDraft} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '生成数据卡' : '重新生成'}</button>
               {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}
+                  {aiState.generationActive && aiStore.isPreparingGeneration() && <button className={actionClass} onClick={() => {
+                    aiStore.cancelPreparingGeneration();
+                    setActionInfo('尚未派发的生成已取消；已保存的 API Key 将保留，系统凭据操作结束后可重试。');
+                  }}>取消准备</button>}
             </div>
             <dialog ref={regenerateDialog} aria-labelledby="regenerate-title" aria-describedby="regenerate-description" className="m-auto max-w-lg rounded-lg border border-(--app-border) bg-(--app-surface) p-5 text-(--app-text) backdrop:bg-black/40" onCancel={(event) => { event.preventDefault(); if (!session.isBusy()) setConfirmRegenerate(false); }}>
               <h2 id="regenerate-title" className="text-xl font-semibold">{confirmCopy?.title ?? '重新生成？'}</h2>

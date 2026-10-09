@@ -1,3 +1,4 @@
+import { ProviderTargetSchema, type ProviderTarget } from '@mahoshojo/contracts/provider-target';
 import { Channel } from '@tauri-apps/api/core';
 import { AiExecutionRequestSchema, type AiExecutionRequest } from '@mahoshojo/contracts/ai-execution';
 
@@ -13,6 +14,7 @@ import { DesktopBridgeError } from './desktop-bridge';
  * `collectAiStreamResult` 已经把这些不变式编码好了。
  */
 
+export const STREAM_TARGET_AI_COMMAND = 'stream_target_ai' as const;
 export const STREAM_DIRECT_AI_COMMAND = 'stream_direct_ai' as const;
 export const CANCEL_DIRECT_AI_COMMAND = 'cancel_direct_ai' as const;
 
@@ -40,6 +42,7 @@ export interface DirectAiChannel {
 export interface DesktopAiExecutionOptions {
   invoke: InvokeFn;
   profileId: string;
+  providerTarget?: ProviderTarget;
   /**
    * Channel 工厂，默认使用 Tauri 的 `Channel`。
    *
@@ -79,15 +82,17 @@ export const openDirectAiStream = (
   const channel = (options.createChannel ?? (() => new Channel<AiStreamEvent>()))();
   channel.onmessage = onEvent;
 
+  const command = options.providerTarget ? STREAM_TARGET_AI_COMMAND : STREAM_DIRECT_AI_COMMAND;
+  const selection = options.providerTarget ? { target: ProviderTargetSchema.parse(options.providerTarget) } : { profileId: options.profileId };
   return options
-    .invoke(STREAM_DIRECT_AI_COMMAND, {
-      profileId: options.profileId,
+    .invoke(command, {
+      ...selection,
       request: parsedRequest,
       onEvent: channel,
     })
     .then(() => undefined)
     .catch((cause: unknown) => {
-      throw toAiError(STREAM_DIRECT_AI_COMMAND, cause);
+      throw toAiError(command, cause);
     });
 };
 

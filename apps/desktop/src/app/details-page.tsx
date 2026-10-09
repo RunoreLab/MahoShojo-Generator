@@ -155,6 +155,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
     aiState.profiles,
     aiState.generationOverrides,
     aiState.modelsByProfileId,
+    aiState.presetsByProviderId,
   );
   const profilesLoading = aiState.profilesState === 'idle' || aiState.profilesState === 'loading';
   const profilesError = aiState.profilesState === 'failed' ? aiState.profilesError : null;
@@ -318,9 +319,9 @@ function DetailsForm({ session }: { session: DetailsSession }) {
     () => (draftSelections?.length ? draftSelections : (provisionalBuiltin ? [provisionalBuiltin] : [])),
     [draftSelections, provisionalBuiltin],
   );
-  const selected = target.profile;
   const mode = target.mode;
-  const busy = state.phase === 'generating' || state.saving;
+  const busy = state.phase === 'generating' || state.saving || aiState.generationActive;
+  useEffect(() => () => aiStore.cancelPreparingGeneration(), [aiStore]);
   const blockedDraft = state.pendingRestore || session.isDraftBlocked();
   // 问卷流程与 Web 同一套领域语义：多问卷经 `buildQuestionnaireContextItems`
   // 展平（key 按选中实例 selectionId 隔离），optionsFrom/suggestionsFrom 先解析，
@@ -447,7 +448,7 @@ function DetailsForm({ session }: { session: DetailsSession }) {
   // 不消费本地 profile——Profile bridge 故障不得把服务器生成一起封死
   //（两个执行位置正交，DESK-ONLINE-001/009，D5.1-P2-r2）。
   const clientProfilesBlocked =
-    target.location === 'client' && (profilesLoading || profilesError !== null);
+    target.profile !== null && (profilesLoading || profilesError !== null);
   const generate = (discardUnsavedResult = false) => {
     const current = session.getSnapshot();
     const submissionSelections = current.draft.questionnaireSelections?.length
@@ -460,8 +461,8 @@ function DetailsForm({ session }: { session: DetailsSession }) {
     // 用户自备的选择集——选择集存在且流程非空就足以生成（与 Web 同口径，P2-r1）。
     // 悬空选择（含服务器侧被目录移除的系统模型）保留诊断值但禁止派发——
     // unavailableReason 与按钮 disabled 必须同口径（D5.1-AIP-r1-r1）。
-    if (!guard.ready || session.isBusy() || !executionMode || submissionSelections.length === 0 || submissionFlow.length === 0 || questionnaireLoading || clientProfilesBlocked || current.pendingRestore || session.isDraftBlocked() || target.unavailableReason !== null) return;
-    if (target.location === 'client' && !selected) return;
+    if (!guard.ready || session.isBusy() || aiState.generationActive || !executionMode || submissionSelections.length === 0 || submissionFlow.length === 0 || questionnaireLoading || clientProfilesBlocked || current.pendingRestore || session.isDraftBlocked() || target.unavailableReason !== null) return;
+    if (target.location === 'client' && !target.providerTarget) return;
     if (!discardUnsavedResult) {
       if (session.hasUnsavedResult()) { pendingActionRef.current = 'generate'; setConfirmRegenerate('unsaved'); return; }
       // hosted-json 结果不确定时再次生成 = 可能的第二次调用，必须显式确认（D5.1a-r1）。
@@ -471,8 +472,8 @@ function DetailsForm({ session }: { session: DetailsSession }) {
       const answers = buildDetailsAnswers(submissionFlow, current.draft.answers);
       setActionError(null);
       setActionInfo(null);
-      void session.generate(
-        { invoke, profileId: selected?.id ?? '' },
+      void aiStore.withPreparedGeneration(async (prepared) => { await session.generate(
+        { invoke, profileId: prepared.profile?.id ?? '', providerTarget: prepared.providerTarget },
         {
           answers,
           language: current.draft.language,
@@ -485,9 +486,10 @@ function DetailsForm({ session }: { session: DetailsSession }) {
             ),
           },
         },
-        { mode: executionMode, modelId: target.modelId ?? undefined, flowers: getRandomFlowers(), overrides: target.generationOverrides },
+        { mode: prepared.location === 'server' ? hostedMode : prepared.mode!, modelId: prepared.modelId ?? undefined, flowers: getRandomFlowers(), overrides: prepared.generationOverrides },
         discardUnsavedResult,
       );
+      }).catch((cause: unknown) => setActionError(cause instanceof Error ? cause.message : 'AI 配置准备失败'));
     } catch (error) { setActionError(error instanceof Error ? error.message : '问卷无法生成。'); }
   };
 
@@ -884,8 +886,12 @@ function DetailsForm({ session }: { session: DetailsSession }) {
                   disabled={busy}
                 />
                 <div className="flex flex-wrap gap-2">
-                  <button className={actionClass} disabled={!guard.ready || busy || questionnaireLoading || clientProfilesBlocked || effectiveSelections.length === 0 || flow.length === 0 || !executionMode || target.unavailableReason !== null || (target.location === 'client' && !selected) || blockedDraft} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '发送问卷并生成' : '重新生成'}</button>
+                  <button className={actionClass} disabled={!guard.ready || busy || questionnaireLoading || clientProfilesBlocked || effectiveSelections.length === 0 || flow.length === 0 || !executionMode || target.unavailableReason !== null || (target.location === 'client' && !target.providerTarget) || blockedDraft} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '发送问卷并生成' : '重新生成'}</button>
                   {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}
+                  {aiState.generationActive && aiStore.isPreparingGeneration() && <button className={actionClass} onClick={() => {
+                    aiStore.cancelPreparingGeneration();
+                    setActionInfo('尚未派发的生成已取消；已保存的 API Key 将保留，系统凭据操作结束后可重试。');
+                  }}>取消准备</button>}
                 </div>
               </>
             )}

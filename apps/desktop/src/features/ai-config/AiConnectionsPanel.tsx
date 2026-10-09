@@ -1,3 +1,4 @@
+import { DesktopAiProviderPanel } from './desktop-ai-provider-panel';
 // 产品化 AI 连接面板（D5.0b，取代 D1 的 ProviderProfilesPanel 调试面板）。
 //
 // 布局分四块：执行位置（客户端｜服务器）、当前连接与高级生成设置、项目预设
@@ -6,14 +7,8 @@
 
 import { useMemo, useState } from 'react';
 
-import { getModelGenerationCapabilities } from '@mahoshojo/ai-core/generation-settings';
-import { SYSTEM_PROVIDER_OPTION } from '@mahoshojo/ai-core/provider-catalog';
 import {
-  AiExecutionLocationField,
-  AiProviderCustomSelect,
-  AdvancedGenerationSettings,
   describeAiDirectUnsupportedReason,
-  type AiProviderSelectOption,
 } from '@mahoshojo/ui-web/ai-provider';
 import { type DirectProviderProfileV1 } from '@mahoshojo/contracts/provider-profile';
 
@@ -21,10 +16,8 @@ import { PROVIDER_PRESETS, type ProfileDraft } from '../providers/profile-draft'
 
 import {
   DESKTOP_EDITABLE_PROFILE_ADAPTERS,
-  DESKTOP_SYSTEM_OVERRIDES_SCOPE,
   describeDesktopPresetModelSupport,
   listDesktopPresetEntries,
-  resolveDesktopAiTarget,
   type DesktopPresetEntry,
   type DesktopSecretPresence,
 } from './desktop-ai-config';
@@ -36,13 +29,6 @@ import {
   saveConnectionDraft,
   type EditingState,
 } from './connection-editor';
-import { ConnectionTestSection } from './connection-test';
-
-const modeLabel = (mode: 'direct-local' | 'direct-remote'): string =>
-  mode === 'direct-local'
-    ? '客户端 · 本机模型服务'
-    : '客户端 · 远端供应商（需要联网）';
-
 
 /** DESK-ONLINE-004：区分未配置、缺失、已配置与存储失败；未知不猜成「未配置」。 */
 export const secretStatusLabel = (
@@ -242,28 +228,12 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
     setEditing(next);
   };
 
-  const target = resolveDesktopAiTarget(
-    state.selection,
-    state.profiles,
-    state.generationOverrides,
-    state.modelsByProfileId,
-  );
   const presetEntries = useMemo(
     () => listDesktopPresetEntries(state.hiddenPresetIds),
     [state.hiddenPresetIds],
   );
   const visiblePresets = presetEntries.filter((entry) => !entry.hidden);
   const hiddenPresets = presetEntries.filter((entry) => entry.hidden);
-
-  const targetCapabilities =
-    target.location === 'server'
-      ? getModelGenerationCapabilities(
-          DESKTOP_SYSTEM_OVERRIDES_SCOPE,
-          target.modelId ?? 'default',
-        )
-      : target.profile
-        ? getModelGenerationCapabilities(target.profile.id, target.modelId ?? '')
-        : undefined;
 
   const startCopyPreset = (entry: DesktopPresetEntry, modelId: string) => {
     const draft = newDraftFromPreset(entry, modelId);
@@ -287,10 +257,11 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
     setEditing(null);
   };
 
-  const blockedOverlay = state.overlayState === 'blocked';
+  const blockedOverlay = state.overlayState === 'blocked' || state.generationActive || state.savingCredential;
 
   return (
     <section className="flex flex-col gap-4 rounded-lg border border-(--app-border) bg-(--app-surface) p-4">
+      <fieldset disabled={state.generationActive || state.savingCredential || state.savingConnection} className="contents">
       <header className="flex flex-col gap-1">
         <h2 className="battle-lite-strong-text text-sm font-medium">AI 连接</h2>
         <p className="battle-lite-muted-text text-xs">
@@ -298,7 +269,7 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
         </p>
       </header>
 
-      {blockedOverlay && (
+      {state.overlayState === 'blocked' && (
         <div role="alert" className="rounded-lg border border-(--app-accent-strong) p-3 text-sm">
           <p>已保存的 AI 配置无法解析，已阻止写入以保护原数据：{state.overlayError}</p>
           <button
@@ -311,157 +282,7 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
         </div>
       )}
 
-      <AiExecutionLocationField
-        value={target.location}
-        // 执行位置偏好不依赖能力：客户端被偏好但没有连接时，由不可用说明引导配置；
-        // 服务器执行走 hosted System Default，匿名可选、DESK-094 在 dispatch 时校验。
-        client={{ enabled: true }}
-        server={{ enabled: true }}
-        onChange={(location) => store.selectExecutionLocation(location)}
-      />
-
-      <div className="flex flex-col gap-2">
-        {target.location === 'server' ? (
-          <label className="flex flex-col gap-1 text-xs">
-            {/* 服务器位置 = 「使用系统默认配置」通道：系统模型与高级参数
-                按系统作用域保存，与生成页面板同一份 overlay/目录事实源
-                （D5.1-AIP-r1，与 Web system+modelId 语义一致）。 */}
-            <span className="battle-lite-muted-text">使用系统默认配置 · 系统模型</span>
-            <AiProviderCustomSelect
-              options={(() => {
-                const options: AiProviderSelectOption[] = SYSTEM_PROVIDER_OPTION.models.map(
-                  (model) => ({
-                    value: model.value,
-                    label: model.label,
-                    description: model.description,
-                    kind: 'model' as const,
-                  }),
-                );
-                // 系统模型悬空（曾选、后被目录移除）：保留原值作 disabled
-                // 诊断项，不静默回落——本下拉即重新选择入口。
-                const selected = state.selection.systemModelId;
-                if (
-                  selected !== undefined &&
-                  !SYSTEM_PROVIDER_OPTION.models.some((model) => model.value === selected)
-                ) {
-                  options.unshift({
-                    value: selected,
-                    label: selected,
-                    disabled: true,
-                    disabledReason: '该系统模型已不在支持列表中，请重新选择',
-                  });
-                }
-                return options;
-              })()}
-              value={state.selection.systemModelId ?? 'default'}
-              onChange={(id) => store.selectSystemModel(id)}
-              placeholder="选择系统模型"
-              disabled={blockedOverlay}
-            />
-          </label>
-        ) : (
-          <label className="flex flex-col gap-1 text-xs">
-            <span className="battle-lite-muted-text">当前连接</span>
-            <select
-              aria-label="当前 AI 连接"
-              className="input-field"
-              disabled={blockedOverlay}
-              value={state.selection.clientConnectionId ?? ''}
-              onChange={(event) => {
-                // 「当前连接」下拉=立即用它执行：连接、执行位置与模型作为
-                // 同一次受检 overlay 更新原子落盘（DESK-AIP-003.3）。
-                if (event.target.value) {
-                  store.activateConnection(event.target.value);
-                }
-              }}
-            >
-              {state.selection.clientConnectionId === null && (
-                <option value="">未选择连接</option>
-              )}
-              {state.profiles.map((profile) => (
-                <option key={profile.id} value={profile.id}>
-                  {profile.name} · {profile.modelId}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        {state.profilesState === 'loading' && (
-          <p className="battle-lite-subtle-text text-xs">正在读取连接列表…</p>
-        )}
-        {state.profilesState === 'failed' && (
-          <p className="battle-lite-subtle-text text-xs">连接列表读取失败：{state.profilesError}</p>
-        )}
-        {target.unavailableReason && (
-          <p className="battle-lite-subtle-text text-xs" role="status">
-            {target.unavailableReason}
-          </p>
-        )}
-        {target.profile && target.mode && (
-          <div className="battle-lite-info-box rounded-lg p-3 text-xs">
-            <p>{modeLabel(target.mode)}</p>
-            <p className="break-all font-mono">接收方：{target.profile.baseUrl}</p>
-            <p>模型：{target.modelId ?? target.profile.modelId}</p>
-            {target.mode === 'direct-remote' && (
-              <p className="battle-lite-subtle-text">远端生成需要联网；本功能不构成离线路径。</p>
-            )}
-          </div>
-        )}
-        {target.profile && target.mode && <ConnectionTestSection target={target} />}
-      </div>
-
-      {/* 未实现 adapter 的连接不展示高级参数——不显示无实际发送效果的控件
-          （DESK-ONLINE-004）。服务器位置则展示「使用系统默认配置」作用域的
-          高级参数，经 hosted systemConfig 非秘密偏好下发（D5.1-AIP-r1）。 */}
-      {target.location === 'server' ? (
-        <AdvancedGenerationSettings
-          value={target.generationOverrides}
-          onChange={(next) =>
-            store.setGenerationOverrides(
-              DESKTOP_SYSTEM_OVERRIDES_SCOPE,
-              target.modelId ?? 'default',
-              next,
-            )
-          }
-          temperatureSupported={
-            targetCapabilities ? targetCapabilities.temperature.support !== 'unsupported' : true
-          }
-          temperatureMax={targetCapabilities?.temperature.max}
-          maxOutputTokensMax={targetCapabilities?.maxOutputTokens.max}
-          thinkingSupport={targetCapabilities?.thinking.support ?? 'unknown'}
-          thinkingEfforts={targetCapabilities?.thinking.efforts}
-          canDisableThinking={
-            targetCapabilities
-              ? targetCapabilities.thinking.support === 'supported' &&
-                targetCapabilities.thinking.canDisable !== false
-              : true
-          }
-        />
-      ) : (
-        target.profile &&
-        target.mode && (
-          <AdvancedGenerationSettings
-            value={target.generationOverrides}
-            onChange={(next) =>
-              target.profile &&
-              store.setGenerationOverrides(target.profile.id, target.modelId ?? target.profile.modelId, next)
-            }
-            temperatureSupported={
-              targetCapabilities ? targetCapabilities.temperature.support !== 'unsupported' : true
-            }
-            temperatureMax={targetCapabilities?.temperature.max}
-            maxOutputTokensMax={targetCapabilities?.maxOutputTokens.max}
-            thinkingSupport={targetCapabilities?.thinking.support ?? 'unknown'}
-            thinkingEfforts={targetCapabilities?.thinking.efforts}
-            canDisableThinking={
-              targetCapabilities
-                ? targetCapabilities.thinking.support === 'supported' &&
-                  targetCapabilities.thinking.canDisable !== false
-                : true
-            }
-          />
-        )
-      )}
+      <DesktopAiProviderPanel management generationMode="non-stream" copy={{ serverOutput: { stream: '', nonStream: '' }, emptyProfilesHint: '', serverFootnote: '', payloadNoun: '' }} />
 
       <div className="flex flex-col gap-2 border-t border-(--app-border) pt-3">
         <h3 className="battle-lite-muted-text text-xs font-semibold">预设供应商</h3>
@@ -583,6 +404,7 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
           onSave={saveEditing}
         />
       )}
+      </fieldset>
     </section>
   );
 };

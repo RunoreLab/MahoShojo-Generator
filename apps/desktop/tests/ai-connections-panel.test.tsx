@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AiExecutionResult } from '@mahoshojo/ai-core/stream-events';
 import type { DirectProviderProfileV1 } from '@mahoshojo/contracts/provider-profile';
 import { DESKTOP_AI_CONFIG_STORAGE_KEY } from '../src/features/ai-config/desktop-ai-config-store';
-import { resetDesktopAiConfigStoreForTests } from '../src/features/ai-config/use-desktop-ai-config';
+import { getDesktopAiConfigStore, resetDesktopAiConfigStoreForTests } from '../src/features/ai-config/use-desktop-ai-config';
 import { AiConnectionsPanel } from '../src/features/ai-config/AiConnectionsPanel';
 
 const mocks = vi.hoisted(() => ({ execute: vi.fn() }));
@@ -69,12 +69,13 @@ const cancelledResult: AiExecutionResult = {
 };
 
 const selectConnection = async (profileId: string) => {
-  const select = container.querySelector<HTMLSelectElement>('select[aria-label="当前 AI 连接"]')!;
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!
-      .set!.call(select, profileId);
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  });
+  const trigger = container.querySelector<HTMLButtonElement>('button[aria-haspopup="listbox"]')!;
+  await act(async () => trigger.click());
+  await settle();
+  const profiles = getDesktopAiConfigStore().getSnapshot().profiles;
+  const profile = profiles.find((item) => item.id === profileId)!;
+  const option = [...container.querySelectorAll<HTMLElement>('[role="option"]')].find((item) => item.textContent?.includes(profile.name))!;
+  await act(async () => option.click());
   await settle();
 };
 

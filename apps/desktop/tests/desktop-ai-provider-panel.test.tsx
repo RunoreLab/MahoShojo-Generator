@@ -121,6 +121,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   act(() => root.unmount());
   container.remove();
 });
@@ -156,7 +157,7 @@ describe('DesktopAiProviderPanel', () => {
     expect(container.textContent).toContain('一号');
     expect(container.textContent).toContain('接收方：http://127.0.0.1:11434/v1');
     expect(container.textContent).toContain('模型：m1');
-    expect(container.textContent).toContain('点击生成会发送情景回答');
+    expect(container.textContent).not.toContain('服务器 · 云端');
     expect(button('测试当前连接')).toBeTruthy();
     // 高级参数区块（折叠标题由 AdvancedGenerationSettings 渲染）。
     expect(container.textContent).toContain('高级生成设置');
@@ -165,9 +166,10 @@ describe('DesktopAiProviderPanel', () => {
   it('switches to server via the shared system option and back to a connection', async () => {
     await mount();
     // 与 Web 同一目录事实源：hosted 项标签为「使用系统默认配置」。
-    await pickConnectionOption('使用系统默认配置');
+    await act(async () => buttons().find((item) => item.textContent?.trim() === '服务器')!.click());
+    await settle();
     expect(getDesktopAiConfigStore().getSnapshot().selection.executionPreference).toBe('server');
-    expect(container.textContent).toContain('结构化 JSON 输出（服务器签名）');
+    expect(container.textContent).toContain('使用系统默认配置');
     expect(container.textContent).not.toContain('接收方：');
     // 服务器位置生效时系统模型行与高级参数照常呈现（systemConfig 下发）。
     const modelTrigger = triggers()[1]!;
@@ -188,9 +190,11 @@ describe('DesktopAiProviderPanel', () => {
       'glm-5.3-flash',
     );
 
+    await act(async () => buttons().find((item) => item.textContent?.trim() === '客户端')!.click());
+    await settle();
     await pickConnectionOption('二号');
     const selection = getDesktopAiConfigStore().getSnapshot().selection;
-    expect(selection).toEqual({
+    expect(selection).toMatchObject({
       executionPreference: 'client',
       clientConnectionId: 'p2',
       systemModelId: 'glm-5.3-flash',
@@ -199,7 +203,7 @@ describe('DesktopAiProviderPanel', () => {
     expect(container.textContent).toContain('模型：m2');
   });
 
-  it('opens the preset-seeded connection editor from the provider dropdown', async () => {
+  it('selects a preset directly without creating a connection', async () => {
     await mount();
     const trigger = triggers()[0]!;
     await act(async () => trigger.click());
@@ -218,11 +222,12 @@ describe('DesktopAiProviderPanel', () => {
     await act(async () => (presetOption as HTMLElement).click());
     await settle();
 
-    expect(container.textContent).toContain('新建连接');
-    expect(button('保存并使用')).toBeTruthy();
+    expect(button('保存并使用')).toBeUndefined();
+    expect(container.querySelector('input[aria-label="API Key"]')).toBeTruthy();
+    expect(triggers()[1]?.textContent).toContain(firstCapable.directCapableModels[0]!.label);
     // 打开编辑器即预填 Endpoint 与可直连模型；未保存前激活状态不变。
     const selection = getDesktopAiConfigStore().getSnapshot().selection;
-    expect(selection).toEqual({ executionPreference: 'client', clientConnectionId: 'p1' });
+    expect(selection).toMatchObject({ executionPreference: 'client', clientConnectionId: null, clientTarget: { kind: 'preset', providerId: firstCapable.preset.id } });
   });
 
   it('shows the unavailable reason for an unimplemented adapter without hiding the connection', async () => {
@@ -302,22 +307,91 @@ describe('DesktopAiProviderPanel', () => {
     confirmSpy.mockRestore();
   });
 
+  const openDirtyEditor = async () => {
+    await act(async () => triggers()[0]!.click()); await settle();
+    await act(async () => button('新建自定义连接')!.click()); await settle();
+    const editor = [...container.querySelectorAll('h3')].find((item) => item.textContent === '新建连接')!.closest('div')!;
+    const input = editor.querySelector<HTMLInputElement>('input.input-field')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '保留到成功切换');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await settle();
+    return editor;
+  };
+
+  it.each(['location', 'provider'] as const)('actually discards a confirmed editor only after a successful %s switch', async (kind) => {
+    await mount();
+    const editor = await openDirtyEditor();
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const change = async () => {
+      if (kind === 'provider') await pickConnectionOption('二号');
+      else { await act(async () => buttons().find((item) => item.textContent?.trim() === '服务器')!.click()); await settle(); }
+    };
+    await change();
+    expect(editor.isConnected).toBe(true);
+    expect(getDesktopAiConfigStore().getSnapshot().selection).toMatchObject({ executionPreference: 'client', clientConnectionId: 'p1' });
+    confirm.mockReturnValue(true);
+    await change();
+    expect(editor.isConnected).toBe(false);
+    expect(button('保存并使用')).toBeUndefined();
+    expect(getDesktopAiConfigStore().getSnapshot().selection).toMatchObject(kind === 'provider' ? { clientConnectionId: 'p2' } : { executionPreference: 'server' });
+    const before = confirm.mock.calls.length;
+    if (kind === 'provider') await pickConnectionOption('一号');
+    else { await act(async () => buttons().find((item) => item.textContent?.trim() === '客户端')!.click()); await settle(); }
+    expect(confirm).toHaveBeenCalledTimes(before);
+  });
+
+  it('retains the confirmed editor when switching cannot be persisted', async () => {
+    await mount();
+    const editor = await openDirtyEditor();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota exceeded'); });
+    await pickConnectionOption('二号');
+    expect(editor.isConnected).toBe(true);
+    expect(editor.querySelector<HTMLInputElement>('input.input-field')!.value).toBe('保留到成功切换');
+    expect(container.textContent).toContain('quota exceeded');
+    expect(getDesktopAiConfigStore().getSnapshot().selection.clientConnectionId).toBe('p1');
+  });
+
+  it('closes the manual model field when another model is selected', async () => {
+    await mount();
+    await act(async () => triggers()[1]!.click()); await settle();
+    await act(async () => button('自定义模型 ID')!.click()); await settle();
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="自定义模型 ID"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'typed-model');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => triggers()[1]!.click()); await settle();
+    const option = [...container.querySelectorAll<HTMLElement>('[role="option"]')].find((item) => item.textContent?.includes('m1'))!;
+    await act(async () => option.click()); await settle();
+    expect(container.querySelector('input[aria-label="自定义模型 ID"]')).toBeNull();
+    const run = vi.fn(async (prepared: { modelId: string | null }) => { expect(prepared.modelId).toBe('m1'); });
+    await act(async () => getDesktopAiConfigStore().withPreparedGeneration(run));
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
   it('selects, adds and removes custom models on the effective-model row', async () => {
     await mount();
     // 生效模型 = 连接默认 m1（第二个自定义下拉）。
     const modelTrigger = triggers()[1]!;
     expect(modelTrigger.textContent).toContain('m1');
 
+    await act(async () => triggers()[1]!.click());
+    await settle();
+    await act(async () => button('自定义模型 ID')!.click());
+    await settle();
     const input = container.querySelector<HTMLInputElement>('input[aria-label="自定义模型 ID"]')!;
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!
         .set!.call(input, 'glm-4.6');
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    await act(async () => button('添加')!.click());
     await settle();
     const selection = getDesktopAiConfigStore().getSnapshot().modelsByProfileId['p1'];
-    expect(selection?.customModelIds).toEqual(['glm-4.6']);
+    expect(selection?.customModelIds).toEqual([]);
+    expect(selection?.inlineModelId).toBe('glm-4.6');
     // 添加只入列，不自动切换当前模型。
     expect(selection?.selectedModelId).toBeUndefined();
 
@@ -344,13 +418,16 @@ describe('DesktopAiProviderPanel', () => {
 
   it('rejects invalid custom model ids without writing overlay', async () => {
     await mount();
+    await act(async () => triggers()[1]!.click());
+    await settle();
+    await act(async () => button('自定义模型 ID')!.click());
+    await settle();
     const input = container.querySelector<HTMLInputElement>('input[aria-label="自定义模型 ID"]')!;
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!
         .set!.call(input, '   ');
       input.dispatchEvent(new Event('input', { bubbles: true }));
     });
-    await act(async () => button('添加')!.click());
     await settle();
     expect(container.textContent).toContain('模型 ID 无效');
     expect(
@@ -393,7 +470,7 @@ describe('DesktopAiProviderPanel', () => {
       await mount();
       await pickConnectionOption('撞名连接');
       // 命中的是真实连接：原子激活为当前连接，不打开预设直配编辑器。
-      expect(getDesktopAiConfigStore().getSnapshot().selection).toEqual({
+      expect(getDesktopAiConfigStore().getSnapshot().selection).toMatchObject({
         executionPreference: 'client',
         clientConnectionId: 'preset:deepseek',
       });
