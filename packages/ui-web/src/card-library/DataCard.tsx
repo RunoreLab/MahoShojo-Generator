@@ -720,6 +720,7 @@ export default function DataCard({
       {/* 操作按钮 */}
       {!browseOnly && isOwner && (
         <div className="flex flex-wrap gap-2 mt-2">
+          {onDownload && (
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -729,6 +730,8 @@ export default function DataCard({
           >
             下载
           </button>
+          )}
+          {onEditInfo && (
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -738,6 +741,8 @@ export default function DataCard({
           >
             修改信息
           </button>
+          )}
+          {onDelete && (
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -747,6 +752,7 @@ export default function DataCard({
           >
             删除
           </button>
+          )}
           {onEditData && (
             <button
               onClick={(e) => {

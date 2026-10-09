@@ -7,11 +7,15 @@ import { useCardLibrarySummaryPage } from '../card-library/use-card-library-summ
 import { normalizePublicVisibilityValue } from '../card-library/read-mappers';
 import { getDataCardStatus } from '../card-library/status';
 import type { DataCardsModalHost } from './host';
+import { useBaseModalAccessibility } from '../modal/BaseModal';
 import { ChevronDown, Filter } from 'lucide-react';
 import { ONLINE_DATA_CARD_TYPES, type OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
 
 export interface DataCardsModalProps {
   host: DataCardsModalHost;
+  /** 同账号凭据代际也隔离列表、详情与未完成的动作。 */
+  scopeKey?: string | number;
+  busy?: boolean;
   isOpen: boolean;
   onClose: () => void;
   dataCards: any[];
@@ -20,18 +24,19 @@ export interface DataCardsModalProps {
   loading?: boolean;
   error?: string | null;
   onReload?: () => void;
-  editingCard: any | null;
+  editingCard?: any | null;
   currentPage: number;
   cardsPerPage: number;
   onPageChange: (page: number) => void;
-  onEditCard: (card: any) => void;
-  onUpdateCard: (id: string, name: string, description: string, isPublic: number) => void;
-  onDeleteCard: (id: string) => void;
-  onLoadCard: (card: any) => void;
-  onCancelEdit: () => void;
+  onEditCard?: (card: any) => void;
+  onUpdateCard?: (id: string, name: string, description: string, isPublic: number) => void;
+  onDeleteCard?: (id: string) => void;
+  onLoadCard?: (card: any) => void | Promise<void>;
+  onCancelEdit?: () => void;
   onShareCard?: (card: any) => void;
-  onReplaceCard?: (card: any) => void;
+  onReplaceCard?: (card: any) => void | Promise<void>;
   userCapacity?: number;
+  capacityKnown?: boolean;
   userUsedSlots?: number;
   onOpenRecycleBin?: () => void;
   recycleCount?: number;
@@ -192,8 +197,13 @@ const resolveQuestionnaireNativeAllowed = (card: any): boolean => {
   return false;
 };
 
-export function DataCardsModal({
+export function DataCardsModal(props: DataCardsModalProps) {
+  return <DataCardsModalScope key={`${props.summaryOwnerId ?? 'supplied'}:${props.scopeKey ?? ''}`} {...props} />;
+}
+
+function DataCardsModalScope({
   host,
+  busy = false,
   isOpen,
   onClose,
   dataCards: suppliedCards,
@@ -214,6 +224,7 @@ export function DataCardsModal({
   onShareCard,
   onReplaceCard,
   userCapacity = host.defaultCapacity,
+  capacityKnown = true,
   userUsedSlots = 0,
   onOpenRecycleBin,
   recycleCount = 0,
@@ -227,6 +238,8 @@ export function DataCardsModal({
   hideEditData = false,
   allowHistoryReplace = false,
 }: DataCardsModalProps) {
+  const close = () => { if (!busy) onClose(); };
+  const { dialogRef, initialFocusRef, titleId } = useBaseModalAccessibility({ isOpen, onClose: close });
   const [selectedCard, setSelectedCard] = useState<any | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const metaFetchAbortControllerRef = useRef<AbortController | null>(null);
@@ -271,9 +284,13 @@ export function DataCardsModal({
   const actionController = useRef<AbortController | null>(null);
   const { reload: reloadSummary } = page;
   useEffect(() => { if (refreshKey) reloadSummary(); }, [refreshKey, reloadSummary]);
-  useEffect(() => () => { actionController.current?.abort(); }, [isOpen]);
+  useEffect(() => {
+    if (!isOpen) { setSelectedCard(null); setShowDetailsModal(false); setActionError(null); }
+    return () => { actionController.current?.abort(); actionController.current = null; };
+  }, [isOpen]);
   const withFullCard = async (card: any, action: (full: any) => void | Promise<void>) => {
-    actionController.current?.abort();
+    // 重复点击不派生第二个同源读取/动作；关闭或账号代际变化会中止认领。
+    if (busy || actionController.current !== null) return;
     const controller = new AbortController();
     actionController.current = controller;
     setActionError(null);
@@ -282,6 +299,8 @@ export function DataCardsModal({
       if (!controller.signal.aborted) await action(full);
     } catch (cause) {
       if (!controller.signal.aborted) setActionError(cause instanceof Error ? cause.message : '读取数据卡失败');
+    } finally {
+      if (actionController.current === controller) actionController.current = null;
     }
   };
 
@@ -523,9 +542,11 @@ export function DataCardsModal({
 
   const modal = (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg p-6 max-w-7xl w-full max-h-[90vh] overflow-hidden flex flex-col relative">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className="bg-white rounded-lg p-6 max-w-7xl w-full max-h-[90vh] overflow-hidden flex flex-col relative">
         <button
-          onClick={onClose}
+          ref={initialFocusRef}
+          onClick={close}
+          disabled={busy}
           className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-2xl leading-none z-10"
           aria-label="关闭"
         >
@@ -533,9 +554,9 @@ export function DataCardsModal({
         </button>
         <div className="flex justify-between items-center mb-4 pr-8 gap-4 flex-wrap">
           <div className="flex items-center gap-3">
-            <h2 className="text-xl font-bold">{title}</h2>
+            <h2 id={titleId} className="text-xl font-bold">{title}</h2>
             <div className="text-sm text-gray-600">
-              {userUsedSlots}/{userCapacity} 槽（{serverPaged ? page.hasLoaded ? page.total : '—' : dataCards.length} 张）
+              {capacityKnown ? `${userUsedSlots}/${userCapacity} 槽` : '云端容量未知'}（{serverPaged ? page.hasLoaded ? page.total : '—' : dataCards.length} 张）
               {!serverPaged && filteredAndSortedCards.length !== dataCards.length && (
                 <span className="ml-2 text-gray-500">筛选后 {filteredAndSortedCards.length}</span>
               )}
@@ -547,7 +568,7 @@ export function DataCardsModal({
             )}
           </div>
           {onReload && (
-            <button type="button" onClick={onReload} disabled={loading}
+            <button type="button" onClick={onReload} disabled={loading || busy}
               className="px-3 py-2 text-sm rounded-lg bg-gray-100 hover:bg-gray-200 disabled:opacity-50">
               {loading ? '加载中…' : error ? '重试' : '刷新'}
             </button>
@@ -555,6 +576,7 @@ export function DataCardsModal({
           {onOpenRecycleBin && (
             <button
               onClick={onOpenRecycleBin}
+              disabled={busy}
               className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 rounded-lg border border-gray-200 hover:bg-gray-200 transition-colors"
             >
               回收站 {recycleCount}/{recycleLimit}
@@ -562,7 +584,7 @@ export function DataCardsModal({
           )}
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto">
+        <fieldset disabled={busy} className="flex-1 min-h-0 min-w-0 overflow-y-auto">
           {(error || actionError) && <p role="alert" className="text-red-600 text-center py-3">{error && dataCards.length > 0 ? `刷新失败，当前显示上次成功结果：${error}` : error || actionError}</p>}
           <>
               {/* 搜索 / 排序 / 筛选 */}
@@ -696,7 +718,7 @@ export function DataCardsModal({
                       const hasPendingUpdate = Boolean(card.has_pending_update || card.pending_data);
                       const questionnaireNativeAllowed = resolveQuestionnaireNativeAllowed(card);
 
-                      return editingCard?.id === card.id ? (
+                      return editingCard?.id === card.id && onUpdateCard && onCancelEdit ? (
                         <EditCardForm
                           key={card.id}
                           card={editingCard}
@@ -729,16 +751,16 @@ export function DataCardsModal({
                           pending={hasPendingUpdate}
                           author={author}
                           isOwner={true}
-                          onViewDetails={() => void withFullCard(card, handleViewDetails)}
+                          onViewDetails={DataCardDetailsModal ? () => void withFullCard(card, handleViewDetails) : undefined}
                           onDownload={() => void withFullCard(card, (card) => {
                             // 下载功能
                             const dataToDownload = JSON.parse(card.data);
                             return host.downloadJson(`${card.name}.json`, JSON.stringify(dataToDownload, null, 2));
                           })}
-                          onEditInfo={() => void withFullCard(card, onEditCard)}
-                          onEditData={hideEditData ? undefined : () => void withFullCard(card, onLoadCard)}
-                          onDelete={() => onDeleteCard(card.id)}
-                          onShare={() => void withFullCard(card, (full) => onShareCard?.(full))}
+                          onEditInfo={onEditCard ? () => void withFullCard(card, onEditCard) : undefined}
+                          onEditData={!hideEditData && onLoadCard ? () => void withFullCard(card, onLoadCard) : undefined}
+                          onDelete={onDeleteCard ? () => onDeleteCard(card.id) : undefined}
+                          onShare={onShareCard ? () => void withFullCard(card, onShareCard) : undefined}
                           onReplace={
                             onReplaceCard && (card.type !== 'history' || allowHistoryReplace)
                               ? () => void withFullCard(card, onReplaceCard)
@@ -774,11 +796,11 @@ export function DataCardsModal({
                 </div>
               )}
           </>
-        </div>
+        </fieldset>
       </div>
 
       {/* 详情模态框 */}
-      {selectedCard && (
+      {selectedCard && DataCardDetailsModal && (
         <DataCardDetailsModal
           isOpen={showDetailsModal}
           onClose={() => {

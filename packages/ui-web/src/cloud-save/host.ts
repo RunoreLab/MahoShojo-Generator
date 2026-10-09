@@ -12,5 +12,5 @@ export interface DataCardsModalHost {
   downloadJson(fileName: string, jsonText: string): void | Promise<void>;
   tilePlatform: CardLibraryTilePlatform;
   isHotCard(record: { favorite_count?: number; usage_count?: number }): boolean;
-  DetailsModal: ComponentType<CardLibraryDetailsModalProps & { isOwner?: boolean; pendingNotice?: string }>;
+  DetailsModal?: ComponentType<CardLibraryDetailsModalProps & { isOwner?: boolean; pendingNotice?: string }>;
 }
