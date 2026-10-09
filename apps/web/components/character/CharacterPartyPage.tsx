@@ -1,6 +1,7 @@
 'use client';
 
-import { TeamMembersPanel, TeamMergeSettings, TeamResultJson, TeamResultPreview } from '@mahoshojo/ui-web/team';
+import { TeamMembersPanel, TeamMergeSettings, TeamResultJson, TeamResultPreview, TeamDraftNotice } from '@mahoshojo/ui-web/team';
+import { useUnsavedPageGuard } from '@mahoshojo/ui-web/client';
 import React, { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -136,6 +137,9 @@ export function CharacterPartyPage() {
   const [isDatabaseMatching, setIsDatabaseMatching] = useState<'character' | 'scenario' | null>(null);
 
   const [pasteText, setPasteText] = useState('');
+  const [exportedSnapshot, setExportedSnapshot] = useState<string | null>(null);
+  const teamSnapshot = useMemo(() => JSON.stringify({ members: members.map(({ label, data }) => ({ label, data })), outputTemplate }), [members, outputTemplate]);
+  useUnsavedPageGuard(() => !!pasteText.trim() || (members.length > 0 && teamSnapshot !== exportedSnapshot), '队伍编排或粘贴内容尚未导出；云端卡片保存不会保存本页编排草稿。确认放弃并离开？');
 
   const [showImageModal, setShowImageModal] = useState(false);
   const [savedImageUrl, setSavedImageUrl] = useState<string | null>(null);
@@ -282,6 +286,7 @@ export function CharacterPartyPage() {
       const exportData = await prepareMergedDataForExport();
       if (!exportData) return;
       downloadJson(exportData, mergedFileName);
+      setExportedSnapshot(teamSnapshot);
     } catch (error) {
       setNotice({ type: 'error', text: `下载失败：${error instanceof Error ? error.message : '未知错误'}` });
     }
@@ -488,6 +493,8 @@ export function CharacterPartyPage() {
             <p className="subtitle text-center">
               把多个角色卡拼接成一张“队伍角色卡”。字符串与数组会自动加上 <code>【角色名/代号】</code> 前缀，缺失字段会被自动忽略。
             </p>
+
+            <TeamDraftNotice />
 
             {notice && (
               <div

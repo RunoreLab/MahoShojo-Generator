@@ -144,3 +144,7 @@ export function TeamResultJson({ data }: { data: Record<string, unknown> }) { re
         </details>); }
 
 export function TeamResultPreview({ children }: { children: ReactNode }) { return <div><h2 className="text-center text-xl font-bold text-gray-800 mb-4">合并结果预览</h2>{children}</div>; }
+
+export function TeamDraftNotice() {
+  return <p className="mt-3 text-xs text-amber-800">队伍编排和未使用的粘贴内容仅保留在本页。离开前请保存或导出；系统下载可能仍需确认落盘。</p>;
+}

@@ -10,6 +10,7 @@ let container: HTMLDivElement;
 let root: Root;
 const saveCard = vi.fn<(data: Record<string, unknown>, name: string) => Promise<'saved' | 'already-present'>>(async () => 'saved');
 const downloadJson = vi.fn();
+const dirty = vi.fn();
 const repository = { list: vi.fn(async () => ({ items: [], nextCursor: undefined })), get: vi.fn() } as unknown as CardRepository;
 function button(text: string) { const result = [...container.querySelectorAll('button')].find((node) => node.textContent === text); if (!result) throw new Error(text); return result; }
 async function click(text: string) { await act(async () => button(text).click()); }
@@ -20,7 +21,7 @@ function edit(label: string, value: string) {
 }
 function data() { return JSON.parse(container.querySelector('pre')!.textContent!); }
 async function add(value: unknown) { edit('粘贴队员 JSON', JSON.stringify(value)); await click('解析并添加'); }
-beforeEach(() => { vi.clearAllMocks(); (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true; container = document.createElement('div'); document.body.append(container); root = createRoot(container); act(() => root.render(<LocalTeamPanel repository={repository} saveCard={saveCard} downloadJson={downloadJson} renderPreview={() => <p>卡片预览</p>} />)); });
+beforeEach(() => { vi.clearAllMocks(); (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true; container = document.createElement('div'); document.body.append(container); root = createRoot(container); act(() => root.render(<LocalTeamPanel repository={repository} saveCard={saveCard} downloadJson={downloadJson} renderPreview={() => <p>卡片预览</p>} onDirtyChange={dirty} />)); });
 afterEach(() => { act(() => root.unmount()); container.remove(); });
 
 describe('local party composition', () => {
@@ -30,11 +31,19 @@ describe('local party composition', () => {
     edit('队员 1 标识', '甲'); await click('下移');
     expect(data().codename).toBe('B & 甲'); expect(data().appearance.outfit).toBe('【B】衣B\n\n【甲】衣A');
     expect(data()).not.toHaveProperty('signature'); expect(data()).not.toHaveProperty('_native'); expect(data()._extra.keep).toBe('【甲】内容');
-    await click('保存到本地卡库'); expect(saveCard).toHaveBeenCalledTimes(1); expect(saveCard.mock.calls[0][0]).toEqual(data());
+    expect(dirty).toHaveBeenLastCalledWith(true);
+    await click('保存到本地卡库'); expect(dirty).toHaveBeenLastCalledWith(false); expect(saveCard).toHaveBeenCalledTimes(1); expect(saveCard.mock.calls[0][0]).toEqual(data());
     await click('下载 JSON'); expect(downloadJson.mock.calls[0][0]).toEqual(data());
     await click('另存队员源 JSON'); expect(downloadJson.mock.calls[1][0]).toEqual([originals[1], originals[0]]);
-    edit('输出模板', 'general'); expect(data().templateId).toBe('通用角色');
+    edit('输出模板', 'general'); expect(dirty).toHaveBeenLastCalledWith(true); expect(data().templateId).toBe('通用角色');
     await click('移除'); expect(data().name).toBe('甲'); await click('清空队伍'); expect(button('保存到本地卡库').disabled).toBe(true);
+  });
+  it('does not leave the host dirty for whitespace, unchanged labels or clearing a saved team', async () => {
+    expect(dirty).toHaveBeenLastCalledWith(false);
+    edit('粘贴队员 JSON', ' '); expect(dirty).toHaveBeenLastCalledWith(false);
+    await add({ codename: 'A' }); await click('保存到本地卡库'); expect(dirty).toHaveBeenLastCalledWith(false);
+    edit('队员 1 标识', 'A'); expect(dirty).toHaveBeenLastCalledWith(false);
+    await click('清空队伍'); expect(dirty).toHaveBeenLastCalledWith(false);
   });
   it('keeps input and team on bad batches and prefix-budget failure, allowing correction', async () => {
     await add({ codename: 'A' }); await add([{ codename: 'B' }, null]);
@@ -52,6 +61,7 @@ describe('local party composition', () => {
     await add({ codename: 'A' }); await click('保存到本地卡库'); await click('保存到本地卡库');
     expect(saveCard).toHaveBeenCalledTimes(1); expect(button('清空队伍').disabled).toBe(true);
     await act(async () => reject(new Error('磁盘不可用')));
+    expect(dirty).toHaveBeenLastCalledWith(true);
     expect(container.textContent).toContain('磁盘不可用'); expect(data().codename).toBe('A');
     await click('保存到本地卡库'); expect(saveCard).toHaveBeenCalledTimes(2);
   });
