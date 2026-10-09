@@ -1,23 +1,6 @@
 import Link from 'next/link';
+import { CreatorEntryLink as SharedCreatorEntryLink, type CreatorEntryLinkProps } from '@mahoshojo/ui-web/details-controls';
 
-type CreatorEntryLinkProps = {
-  className?: string;
-  linkClassName?: string;
-  prefixText?: string;
-};
-
-export function CreatorEntryLink({
-  className = 'text-sm text-gray-600',
-  linkClassName = 'font-semibold text-indigo-600 hover:underline',
-  prefixText = '想直接创作？',
-}: CreatorEntryLinkProps) {
-  return (
-    <p className={className}>
-      {prefixText}
-      {' '}
-      <Link href="/creator" className={linkClassName}>
-        前往创作工坊
-      </Link>
-    </p>
-  );
+export function CreatorEntryLink(props: Pick<CreatorEntryLinkProps, 'className' | 'linkClassName' | 'prefixText'>) {
+  return <SharedCreatorEntryLink {...props} renderLink={(link) => <Link {...link} />} />;
 }

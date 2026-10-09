@@ -1,4 +1,4 @@
-import { generationActionClassNames, generationSubmitClassName } from '@mahoshojo/ui-web/generation-actions';
+import { generationActionClassNames } from '@mahoshojo/ui-web/generation-actions';
 import { QuestionnaireDraftPanel } from './questionnaire-draft-panel';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
@@ -7,7 +7,7 @@ import { MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES } from '@mahoshojo/contracts/desk
 import { generateRandomCanshou } from '@mahoshojo/domain/random-character';
 import {
   buildQuestionnaireAnswerLookup,
-  getAnswerLimitInfo,
+  formatQuestionnaireAnswers,
   hasOverLimitQuestionnaireAnswers,
   isAnswerOverLimit,
   QUESTIONNAIRE_NATIVE_MAX_ANSWER_CHARS,
@@ -41,17 +41,19 @@ import {
 import {
   AiReasoningPanel,
   AnswerReviewList,
-  APP_SAVE_PREFERENCES_THEME,
-  CANSHOU_LORE_PANEL_APP_THEME,
+  CANSHOU_SAVE_PREFERENCES_THEME,
   BulkAnswerTools,
   CanshouLorePanel,
   DetailsIntroSection,
   DetailsSavePreferencesPanel,
   GenerationModeSwitcher,
   JsonSizeIndicator,
+  TokenIndicator,
   QuestionnaireAnswerExportPanel,
   QuestionnaireLanguageSection,
   QuestionnairePageCard,
+  CreatorEntryLink,
+  QuestionnaireResultActions,
   QuestionNavigator,
   isMobileFormFactor,
   recommendedSaveModes,
@@ -63,13 +65,14 @@ import {
   CANSHOU_QUESTIONNAIRE_THEME,
   CANSHOU_SELECTION_THEME,
   QuestionnaireQuestionPanel,
+  getQuestionnaireQuestionPresentation,
   QuestionnaireSelectionPanel,
 } from '@mahoshojo/ui-web/questionnaire';
 import { CanshouCard, GeneralCharacterCard, type CanshouDetails, type GeneralCharacterCardData } from '@mahoshojo/ui-web/character-card';
 import { revokeBlobUrl } from '@mahoshojo/ui-web/client';
 import { CardLibraryModal, type BattleSelectionPayload, type CardLibrarySelectionContext } from '@mahoshojo/ui-web/card-library';
 import { useEscapeLayer } from '@mahoshojo/ui-web/modal';
-import { ProductFooter } from '@mahoshojo/ui-web/shell';
+import { BackHomeLink, ProductFooter } from '@mahoshojo/ui-web/shell';
 import type { HomeAssetSource } from '@mahoshojo/ui-web/home';
 import { CanshouSession } from '../features/canshou/session';
 import { QUESTIONNAIRE_DRAFT_DEFAULT_LANGUAGE } from '../features/questionnaire/session';
@@ -140,7 +143,7 @@ export const describeRegenerateConfirm = (
       : '无法确认上次请求是否在服务器执行——它可能已经完成并计费。再次生成会发起新的请求，可能产生重复调用与费用。',
 });
 
-function CanshouForm({ session }: { session: CanshouSession }) {
+function CanshouForm({ session, restored }: { session: CanshouSession; restored: boolean }) {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const router = useRouter();
   const { openFixed } = useExternalLinks();
@@ -164,18 +167,16 @@ function CanshouForm({ session }: { session: CanshouSession }) {
   const [presetError, setPresetError] = useState<string | null>(null);
   const [questionnaireError, setQuestionnaireError] = useState<string | null>(null);
   const [questionnaireLoading, setQuestionnaireLoading] = useState(true);
-  const [selectionReady, setSelectionReady] = useState(false);
+  const [selectionReady, setSelectionReady] = useState(() => Boolean(state.draft.questionnaireSelections?.length));
   const [provisionalBuiltin, setProvisionalBuiltin] = useState<QuestionnaireSelection | null>(null);
-  const [reload, setReload] = useState(0);
   const [questionIndex, setQuestionIndex] = useState(0);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerError, setPickerError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionInfo, setActionInfo] = useState<string | null>(null);
-  const [confirmClear, setConfirmClear] = useState(false);
   const [confirmRegenerate, setConfirmRegenerate] = useState<false | ConfirmRegenerateKind>(false);
   const pendingActionRef = useRef<PendingRegenerateAction>('generate');
-  const [showIntroduction, setShowIntroduction] = useState(true);
+  const [showIntroduction, setShowIntroduction] = useState(!restored);
   // 只切换展示：编辑回答时保留旧结果与保存状态，替换仍须经过原有重生确认。
   const [editingAnswers, setEditingAnswers] = useState(false);
   // 只描述结果与答案的关联，不改草稿协议、结果对象或保存状态。
@@ -235,15 +236,18 @@ function CanshouForm({ session }: { session: CanshouSession }) {
     },
   });
   const guard = useLeaveGuard(
-    () => session.isBusy() || (!session.getSnapshot().draftSaved && !session.getSnapshot().pendingRestore && !session.isDraftBlocked()),
-    '生成或保存尚未完成，或当前草稿未能保存。请等待、取消生成，或重试保存草稿后再离开。也可以确认清除草稿以放弃当前内容。',
+    () => session.isBusy() || session.hasUnsavedDraft() || aiStore.isPreparingGeneration(),
+    '生成或保存尚未完成，或当前草稿未能保存。请等待、取消生成，或重试保存草稿后再离开。',
     '窗口关闭保护初始化失败，生成与保存暂不可用。请重新打开页面后重试。',
     () => {
       const current = session.getSnapshot();
-      if (current.saving || current.phase !== 'generating') return false;
-      if (!window.confirm('生成尚未完成。确认终止生成并离开？已收到的正文将保留在本机草稿中。')) return false;
+      if (current.saving || aiStore.isPreparingGeneration()) return false;
+      const confirmDiscardUnpersisted = () => window.confirm('当前内容尚未写入草稿。确认放弃本页未持久化内容并离开？原有存档和已保存的本地卡不会删除。');
+      if (current.phase !== 'generating') return !session.hasUnsavedDraft() || confirmDiscardUnpersisted();
+      const memoryOnly = session.isDraftBlocked();
+      if (!window.confirm(memoryOnly ? '生成尚未完成且草稿无法保存。确认终止生成、放弃本页未持久化内容并离开？原有存档仍保留。' : '生成尚未完成。确认终止生成并离开？已收到的正文将保留在本机草稿中。')) return false;
       session.cancel();
-      return session.getSnapshot().draftSaved;
+      return session.getSnapshot().draftSaved || memoryOnly || confirmDiscardUnpersisted();
     },
   );
   // 语言清单与 Web 同一来源（content/languages.json → public 同步副本）。
@@ -278,7 +282,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
         }
       });
     return () => controller.abort();
-  }, [reload]);
+  }, []);
   // 草稿里的问卷选择集：随 answers/language 一起持久化与恢复（D5.1-P2，
   // 与 Web `questionnaireSelections`/`allowMultipleQuestionnaires` 草稿口径一致）。
   const draftSelections = state.draft.questionnaireSelections;
@@ -290,8 +294,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
   const updateSelections = useCallback((next: QuestionnaireSelection[]) => {
     session.updateDraft({ ...session.getSnapshot().draft, questionnaireSelections: next });
   }, [session]);
-  // 默认内置问卷：进入页面就加载（含待恢复期间——预览用，不写草稿）；
-  // 待恢复期间严禁把默认选择写进草稿，否则会在用户点「恢复/清除」前覆盖 pending 数据。
+  // 合法草稿已在首次渲染前恢复；没有持久化选择集时才加载默认内置问卷。
   useEffect(() => {
     // 选择集一旦落定（草稿恢复/用户挑选/自动注入），内置问卷的加载结果就不再是
     // 决策依据：清掉此前遗留的加载错误，否则它会一直把生成按钮挡在门外（P2-r1）。
@@ -310,14 +313,14 @@ function CanshouForm({ session }: { session: CanshouSession }) {
       if (!controller.signal.aborted) setQuestionnaireError('内置问卷加载失败，请重试。');
     }).finally(() => { if (!controller.signal.aborted) setQuestionnaireLoading(false); });
     return () => controller.abort();
-  }, [reload, selectionReady]);
-  // 落盘条件：无待恢复草稿 + 尚无选择集——此时默认内置选择才写进草稿。
+  }, [selectionReady]);
+  // 无选择集时注入默认问卷；损坏草稿只提供预览，不将默认装配计为用户修改。
   // 用户主动清空选择集后不自动回填（`selectionReady` 闩锁与 Web 一致）。
   useEffect(() => {
     if (selectionReady || state.pendingRestore || selections.length > 0 || !provisionalBuiltin) return;
-    updateSelections([provisionalBuiltin]);
+    if (!session.isDraftBlocked()) updateSelections([provisionalBuiltin]);
     setSelectionReady(true);
-  }, [selectionReady, state.pendingRestore, selections.length, provisionalBuiltin, updateSelections]);
+  }, [selectionReady, state.pendingRestore, selections.length, provisionalBuiltin, updateSelections, session]);
   // 展示口径：草稿选择集优先，加载中/待恢复期间以默认内置预览。
   const effectiveSelections = useMemo<readonly QuestionnaireSelection[]>(
     () => (draftSelections?.length ? draftSelections : (provisionalBuiltin ? [provisionalBuiltin] : [])),
@@ -328,7 +331,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
   const mode = target.mode;
   const busy = state.phase === 'generating' || state.saving || aiState.generationActive;
   useEffect(() => () => aiStore.cancelPreparingGeneration(), [aiStore]);
-  const blockedDraft = state.pendingRestore || session.isDraftBlocked();
+  const blockedDraft = state.pendingRestore;
   // 问卷流程与 Web 同一套领域语义：多问卷经 `buildQuestionnaireContextItems`
   // 展平（key 按选中实例 selectionId 隔离），optionsFrom/suggestionsFrom 先解析，
   // displayIf/jump 随当前回答求值——与 Web `/canshou` 同一实现路径（D5.1-G1）。
@@ -380,7 +383,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
     const previousSignature = previousSignatureRef.current;
     previousTargetsRef.current = allQuestionTargets;
     previousSignatureRef.current = questionTargetSignature;
-    if (!previousTargets || previousSignature === null || previousSignature === questionTargetSignature) return;
+    if (!previousTargets?.length || previousSignature === null || previousSignature === questionTargetSignature) return;
     const remapped = remapAnswersToQuestionnaireChange({
       previousTargets,
       answersByKey: session.getSnapshot().draft.answers,
@@ -467,7 +470,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
     // 用户自备的选择集——选择集存在且流程非空就足以生成（与 Web 同口径，P2-r1）。
     // 悬空选择（含服务器侧被目录移除的系统模型）保留诊断值但禁止派发——
     // unavailableReason 与按钮 disabled 必须同口径（D5.1-AIP-r1-r1）。
-    if (!guard.ready || session.isBusy() || aiState.generationActive || !executionMode || submissionSelections.length === 0 || submissionFlow.length === 0 || questionnaireLoading || clientProfilesBlocked || current.pendingRestore || session.isDraftBlocked() || target.unavailableReason !== null) return;
+    if (!guard.ready || session.isBusy() || aiState.generationActive || !executionMode || submissionSelections.length === 0 || submissionFlow.length === 0 || questionnaireLoading || clientProfilesBlocked || current.pendingRestore || target.unavailableReason !== null) return;
     if (target.location === 'client' && !target.providerTarget) return;
     if (!discardUnsavedResult) {
       if (session.hasUnsavedResult()) { pendingActionRef.current = 'generate'; setConfirmRegenerate('unsaved'); return; }
@@ -516,13 +519,13 @@ function CanshouForm({ session }: { session: CanshouSession }) {
     else generate();
   };
   const handleOptionSelect = (value: string) => {
-    if (!flowItem || !guard.ready || session.isBusy() || session.getSnapshot().pendingRestore || session.isDraftBlocked()) return;
+    if (!flowItem || !guard.ready || session.isBusy() || session.getSnapshot().pendingRestore) return;
     const nextAnswers = { ...session.getSnapshot().draft.answers, [flowItem.key]: value };
     updateDraft({ answers: nextAnswers });
     proceedToNextQuestion(nextAnswers);
   };
   const handleNext = () => {
-    if (!flowItem || !guard.ready || session.isBusy() || session.getSnapshot().pendingRestore || session.isDraftBlocked()) return;
+    if (!flowItem || !guard.ready || session.isBusy() || session.getSnapshot().pendingRestore) return;
     const nextAnswers = session.getSnapshot().draft.answers;
     if (question?.required === true && !nextAnswers[flowItem.key]?.trim()) {
       setActionError('本题为必答，请填写后再继续。');
@@ -530,9 +533,19 @@ function CanshouForm({ session }: { session: CanshouSession }) {
     }
     proceedToNextQuestion(nextAnswers);
   };
-  const nextButtonLabel = currentIndex === flow.length - 1
-    ? (question?.required || answer.trim() ? '生成' : '跳过并生成')
-    : (!question?.required && !answer.trim() ? '跳过并继续' : '下一题');
+  const questionPresentation = getQuestionnaireQuestionPresentation({
+    variant: 'canshou', question, answer, index: currentIndex, total: flow.length, busy,
+  });
+  const tokenEstimateText = [
+    buildQuestionnaireSelectionLoreText(effectiveSelections),
+    formatQuestionnaireAnswers(collectQuestionnaireAnswerExportItems(visibleQuestionTargets, answersByKey)),
+  ].filter(Boolean).join('\n\n');
+  const handleClearAnswers = () => {
+    if (busy || !window.confirm('确定要清空所有已保存的问卷答案吗？此操作不可撤销。')) return;
+    updateDraft({ answers: {} });
+    setQuestionIndex(0);
+    setActionInfo(session.getSnapshot().draftSaved ? '存档已清空！' : '当前答案已清空，原存档仍保留；本次更改尚未保存。');
+  };
 
   /** 快速随机：纯本机产出（不经模型），结果走与生成完成相同的相位与保存通路。 */
   const runQuickRandom = useCallback(() => {
@@ -551,7 +564,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
   }, [session]);
 
   const handleQuickRandom = () => {
-    if (!guard.ready || busy || state.pendingRestore || session.isDraftBlocked()) return;
+    if (!guard.ready || busy || state.pendingRestore) return;
     if (session.hasUnsavedResult()) {
       pendingActionRef.current = 'quick-random';
       setConfirmRegenerate('unsaved');
@@ -723,35 +736,12 @@ function CanshouForm({ session }: { session: CanshouSession }) {
       <section data-testid="page-canshou" className="magic-background-dark">
         <div className="container">
           <QuestionnairePageCard variant="canshou" description={primaryQuestionnaire?.description}>
-            <p className="mb-4 text-xs leading-relaxed text-(--app-text-muted)">填写问卷后，可选择客户端连接或项目服务器生成残兽档案；签名状态以实际生成结果为准。问卷可以是内置预设，也可以从本地库或云端数据卡选择。</p>
             <QuestionnaireDraftPanel
-              pendingRestore={state.pendingRestore}
-              draftSaved={state.draftSaved}
               draftError={state.draftError}
               draftBlocked={session.isDraftBlocked()}
               busy={busy}
               actionClass={actionClass}
-              onRestore={() => {
-                // 恢复的选择集取代待恢复期的内置预览：重置答案重映射基线，让恢复后的
-                // 题目集成为首个观测基线——否则 effect 会拿预览的 targets 去「映射掉」
-                // 刚恢复的回答并立即落盘为空（不可逆丢失，P2-r1）。
-                previousTargetsRef.current = null;
-                previousSignatureRef.current = null;
-                session.restoreDraft(); setShowIntroduction(false); setEditingAnswers(false); setSelectionReady(true);
-              }}
               onRetrySave={() => session.retryDraftSave()}
-              onRequestClear={() => setConfirmClear(true)}
-              onReload={() => { setReload((value) => value + 1); void aiStore.refreshProfiles(); }}
-              confirmation={confirmClear && <div role="group" aria-label="确认清除草稿" className="mt-3 rounded border p-3">
-                <p>确认清除本页回答、生成结果和中断正文？已保存的本地卡不受影响。此操作无法撤销。</p>
-                <button className={generationActionClassNames.destructive} disabled={busy} onClick={() => {
-                  // 同「恢复草稿」：清空后重新注入的默认选择不应拿旧基线做重映射。
-                  previousTargetsRef.current = null;
-                  previousSignatureRef.current = null;
-                  session.discardDraft(); setConfirmClear(false); setQuestionIndex(0); setShowIntroduction(true); setEditingAnswers(false); setSelectionReady(false);
-                }}>确认清除</button>
-                <button className={actionClass} onClick={() => setConfirmClear(false)}>保留草稿</button>
-              </div>}
             />
             {(!guard.ready || guard.message || questionnaireLoading || questionnaireError || (profilesLoading && target.location === 'client') || profilesError) && (
               <div className="my-4 space-y-2">
@@ -784,13 +774,17 @@ function CanshouForm({ session }: { session: CanshouSession }) {
                   quickRandomStyle={{ background: 'linear-gradient(to right, #7e22ce, #a855f7)' }}
                   encyclopediaItems={[{ slug: 'character-generator', text: '百科：角色生成（/name、/details、/canshou）' }]}
                   onNavigateEntry={(href) => { void router.navigate({ to: href }); }}
-                  encyclopediaLinkClassName="text-(--app-accent-strong) hover:underline"
-                  encyclopediaLabelClassName="text-(--app-text-muted)"
+                  encyclopediaLinkClassName="text-blue-200 hover:underline"
+                  encyclopediaLabelClassName="text-slate-300"
                   resolveInternalHref={resolveInternalHrefForHashHistory}
+                  extraLink={<CreatorEntryLink
+                    onNavigate={(href) => navigateByProductHref(router, href)}
+                    resolveInternalHref={resolveInternalHrefForHashHistory}
+                    className="text-sm text-slate-300"
+                    linkClassName="font-semibold text-emerald-300 hover:underline"
+                  />}
                   backHome={(
-                    <button type="button" className="footer-link" onClick={() => void router.navigate({ to: '/' })}>
-                      返回首页
-                    </button>
+                    <BackHomeLink href="#/" onNavigate={() => void router.navigate({ to: '/' })} />
                   )}
                 />
               </section>
@@ -798,8 +792,8 @@ function CanshouForm({ session }: { session: CanshouSession }) {
               <>
                 <fieldset disabled={busy || blockedDraft || questionnaireLoading || !guard.ready} className="min-w-0">
                   {flow.length > 0 && <QuestionNavigator
-                    theme="app"
-                    items={flow.map((item) => ({ id: item.key, label: item.question.question }))}
+                    theme="dark"
+                    items={flow.map((item) => ({ id: item.key, label: item.questionnaireTitle ? `${item.question.question} · ${item.questionnaireTitle}` : item.question.question }))}
                     currentIndex={currentIndex}
                     onNavigate={setQuestionIndex}
                     isAnswered={(index) => Boolean(answersByKey[flow[index]!.key]?.trim())}
@@ -850,15 +844,18 @@ function CanshouForm({ session }: { session: CanshouSession }) {
                 </section>
                 <fieldset disabled={busy || blockedDraft || questionnaireLoading || !guard.ready} className="min-w-0">
                   {flowItem && question && <QuestionnaireQuestionPanel
-                    theme={CANSHOU_QUESTIONNAIRE_THEME} progressLabel={`第 ${currentIndex + 1} / ${flow.length} 题`} progressPercent={Math.round((currentIndex + 1) / flow.length * 100)}
+                    theme={CANSHOU_QUESTIONNAIRE_THEME} progressLabel={questionPresentation.progressLabel} progressPercent={Math.round((currentIndex + 1) / flow.length * 100)}
                     questionText={question.question} questionnaireTitle={flowItem.questionnaireTitle} noticeText="请基于您构想的虚拟档案回答，并确保内容符合公序良俗，请勿使用任何真实信息。" helperText={question.helperText}
-                    isRequired={question.required === true} skipText="本题可跳过，不作答将不会记录" options={question.options} optionsHintText="推荐选项（点击后自动前进，末题生成）" onOptionSelect={handleOptionSelect} suggestions={showTextInput ? question.suggestions : undefined} onSuggestionSelect={updateAnswer}
-                    showTextInput={showTextInput} answer={answer} onAnswerChange={updateAnswer} placeholder={question.placeholder} answerLength={answer.trim().length} maxLength={getAnswerLimitInfo(question.maxLength).limit}
-                    showLimitLabel limitLabel={`建议不超过 ${getAnswerLimitInfo(question.maxLength).limit ?? 500} 字，不限制生成`} isOverLimit={isAnswerOverLimit(answer, question.maxLength)} overLimitText="回答超过建议长度，仍可生成未签名残兽档案。"
-                    prevLabel="上一题" nextButtonContent={nextButtonLabel} onPrev={() => setQuestionIndex((index) => Math.max(0, index - 1))}
+                    quickOptions={questionPresentation.quickOptions} onQuickOption={handleOptionSelect} quickOptionDisabled={busy}
+                    progressExtra={state.draftSaved && state.draftSavedAt ? <span className="text-xs text-slate-500">已自动保存于 {new Date(state.draftSavedAt).toLocaleTimeString()}</span> : null}
+                    isRequired={question.required === true} skipText="本题可跳过，不作答将不会记录" options={question.options} optionsHintText={questionPresentation.optionsHintText} onOptionSelect={handleOptionSelect} suggestions={questionPresentation.suggestions} onSuggestionSelect={updateAnswer}
+                    showTextInput={showTextInput} answer={answer} onAnswerChange={updateAnswer} placeholder={questionPresentation.placeholder} answerLength={answer.trim().length} maxLength={questionPresentation.maxLength}
+                    showLimitLabel={questionPresentation.showLimitLabel} limitLabel={questionPresentation.limitLabel} isOverLimit={isAnswerOverLimit(answer, question.maxLength)} overLimitText="回答超过建议长度，仍可生成未签名残兽档案。"
+                    prevLabel={questionPresentation.prevLabel} nextButtonContent={questionPresentation.nextButtonLabel} onPrev={() => setQuestionIndex((index) => Math.max(0, index - 1))}
                     onNext={handleNext}
-                    disablePrev={currentIndex === 0} disableNext={busy || (question.required === true && !answer.trim())}
+                    disablePrev={currentIndex === 0} disableNext={!guard.ready || busy || questionnaireLoading || blockedDraft || (currentIndex === flow.length - 1 && generationDisabled) || (question.required === true && !answer.trim())}
                   />}
+                  <TokenIndicator text={tokenEstimateText} warningText="⚠️ 预计问卷回答较长，可能更易超时/失败。可尝试精简答案或减少问卷数量。" />
                   <QuestionnaireLanguageSection
                     variant="canshou"
                     expanded={showLanguageSection}
@@ -904,7 +901,8 @@ function CanshouForm({ session }: { session: CanshouSession }) {
                 </fieldset>
                 {/* 批量填充/卡导入/答案概览/备份导出——与 Web `/canshou` 同一套共享区段。 */}
                 {!blockedDraft && <BulkAnswerTools
-                  variant="app"
+                  variant="contrast"
+                  onClearDraft={handleClearAnswers}
                   targets={allQuestionTargets}
                   indexFallbackTargets={visibleQuestionTargets}
                   answersByKey={answersByKey}
@@ -914,7 +912,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
                   disabled={busy}
                 />}
                 {!blockedDraft && <AnswerReviewList
-                  variant="app"
+                  variant="dark"
                   items={visibleQuestionTargets.map((item) => ({
                     key: item.key,
                     index: item.index,
@@ -925,7 +923,7 @@ function CanshouForm({ session }: { session: CanshouSession }) {
                   onEdit={setQuestionIndex}
                 />}
                 <QuestionnaireAnswerExportPanel
-                  variant="app"
+                  variant="dark"
                   title="生成前备份问卷答案"
                   filenameBase="残兽问卷_答案备份"
                   hasContent={visibleQuestionTargets.some((item) => Boolean(answersByKey[item.key]?.trim()))}
@@ -933,10 +931,10 @@ function CanshouForm({ session }: { session: CanshouSession }) {
                   disabled={busy}
                 />
                 <div className="flex flex-wrap gap-2">
-                  <button className={generationSubmitClassName} disabled={generationDisabled} onClick={() => generate()}>{state.phase === 'generating' ? '正在生成…' : state.phase === 'idle' ? '发送问卷并生成' : '重新生成'}</button>
                   {state.phase === 'generating' && <button className={actionClass} onClick={() => session.cancel()}>取消生成</button>}
 
                 </div>
+                <div className="mt-4 text-center"><BackHomeLink href="#/" onNavigate={() => void router.navigate({ to: '/' })} /></div>
               </>
             ))}
             <dialog ref={regenerateDialog} aria-labelledby="regenerate-title" aria-describedby="regenerate-description" className="m-auto max-w-lg rounded-lg border border-(--app-border) bg-(--app-surface) p-5 text-(--app-text) backdrop:bg-black/40" onCancel={(event) => { event.preventDefault(); if (!session.isBusy()) setConfirmRegenerate(false); }}>
@@ -1000,32 +998,38 @@ function CanshouForm({ session }: { session: CanshouSession }) {
                       imageSaveMode={imageSaveMode}
                       saveButtonLabel={imageSaveButtonLabel}
                     />}
-                <button className={generationActionClassNames.primary} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => { if (guard.ready) void session.saveResult(); }}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>
-                {state.saveStatus === 'saved' && <p role="status">已保存到本地卡库。</p>}
-                {state.saveStatus === 'already-present' && <p role="status">本地卡库已存在相同内容，原记录保持不变。</p>}
-                {state.saveError && <p role="alert">{state.saveError}</p>}
-                <DetailsSavePreferencesPanel
-                  theme={APP_SAVE_PREFERENCES_THEME}
+                  <DetailsSavePreferencesPanel
+                  theme={CANSHOU_SAVE_PREFERENCES_THEME}
                   imageSaveMode={imageSaveMode}
                   onImageSaveModeChange={(next) => updateDraft({ imageSaveMode: next })}
                   recommendedImageMode={recommendedImageMode}
                   jsonSaveMode={jsonSaveMode}
                   onJsonSaveModeChange={(next) => updateDraft({ jsonSaveMode: next })}
                   recommendedJsonMode={recommendedJsonMode}
-                  imageGroupTitle="残兽档案图保存方式"
-                  jsonGroupTitle="残兽档案文件保存方式"
-                  footerNote="提示：偏好设置已保存在本机草稿中，下次打开仍会保留；切换不会丢失生成结果。"
-                />
-                <CanshouLorePanel
-                  theme={CANSHOU_LORE_PANEL_APP_THEME}
-                  open={showDetails}
-                  onOpenChange={(open) => updateDraft({ showDetails: open })}
+                  imageHint="如果当前浏览器阻止下载，可切换为弹窗模式再手动保存。"
+                  jsonHint="两种方式都可跨终端使用，可随时切换体验。"
+                  jsonGroupTitle="JSON 保存方式"
+                  jsonRecommendLabels={{ download: '直接下载', text: '复制 JSON' }}
+                  footerNote={state.draftSaved ? "提示：偏好设置已保存在本机草稿中，下次打开仍会保留；切换不会丢失生成结果。" : "提示：当前偏好尚未写入本机草稿；切换不会丢失本页生成结果，请及时导出备份。"}
                 />
                 {/* 保存原始数据——与 Web `/canshou` 同一共享控件（下载 JSON / 复制文本）。 */}
-                {resolvedResultPayload && <section aria-label="保存原始数据" className="rounded-lg border border-(--app-border) p-4">
-                  <h3 className="text-lg font-medium">保存残兽档案</h3>
-                  <div className="mt-3 flex flex-col gap-3">
-                    {state.cardKind === 'general' ? (
+                {resolvedResultPayload && <QuestionnaireResultActions
+                  variant="canshou"
+                  resolveInternalHref={resolveInternalHrefForHashHistory}
+                  onNavigate={(href) => navigateByProductHref(router, href)}
+                  status={<>
+                    {state.saveStatus === 'saved' && <p role="status">已保存到本地卡库。</p>}
+                    {state.saveStatus === 'already-present' && <p role="status">本地卡库已存在相同内容，原记录保持不变。</p>}
+                    {state.saveError && <p role="alert">{state.saveError}</p>}
+                  </>}
+                  sizeIndicator={<JsonSizeIndicator
+                    data={resolvedResultPayload}
+                    maxBytes={MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES}
+                    hintText="按 UTF-8 字节估算，对照本地卡单条记录上限"
+                    warningText="⚠️ 接近本地卡单条上限（4 MiB），保存到本地卡库可能失败，请先精简数据。"
+                  />}
+                >
+                  {state.cardKind === 'general' ? (
                       <>
                         <button className={actionClass} onClick={() => downloadTextFile(resolveResultJsonFileName(resolvedResultPayload as Record<string, unknown>, 'general'), JSON.stringify(resolvedResultPayload, null, 2))}>下载通用角色卡</button>
                         <button className={actionClass} onClick={() => { void navigator.clipboard?.writeText(JSON.stringify(resolvedResultPayload, null, 2)).then(() => setActionInfo('✅ 通用角色卡 JSON 已复制到剪贴板')).catch(() => setActionError('复制失败，请手动选择 JSON 内容后复制。')); }}>复制到剪贴板</button>
@@ -1036,17 +1040,15 @@ function CanshouForm({ session }: { session: CanshouSession }) {
                         mode={jsonSaveMode}
                         recommendedMode={recommendedJsonMode}
                         resolveFileName={(data) => resolveResultJsonFileName(data as Record<string, unknown>, 'canshou')}
+                        downloadLabel="💾 下载残兽档案"
                         downloadJson={downloadTextFile}
                       />
                     )}
-                  </div>
-                  <JsonSizeIndicator
-                    data={resolvedResultPayload}
-                    maxBytes={MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES}
-                    hintText="按 UTF-8 字节估算，对照本地卡单条记录上限"
-                    warningText="⚠️ 接近本地卡单条上限（4 MiB），保存到本地卡库可能失败，请先精简数据。"
-                  />
-                </section>}
+
+                  <button className={`${generationActionClassNames.primary} flex-1`} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => { if (guard.ready) void session.saveResult(); }}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>
+                </QuestionnaireResultActions>}
+                <CanshouLorePanel open={showDetails} onOpenChange={(open) => updateDraft({ showDetails: open })} />
+                <div className="mt-8 text-center"><BackHomeLink href="#/" onNavigate={() => void router.navigate({ to: '/' })} /></div>
               </section>}
             </div>
             {state.rawText && <details className="mt-4" open={state.phase !== 'completed'}><summary>原始输出正文</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded border p-3">{state.rawText}</pre></details>}
@@ -1108,15 +1110,20 @@ function CanshouForm({ session }: { session: CanshouSession }) {
 
 export function DesktopCanshou() {
   const [session, setSession] = useState<CanshouSession | null>(null);
+  const [restored, setRestored] = useState(false);
   useEffect(() => {
     const owner = new CanshouSession({
       storage: { getItem: (key) => window.localStorage.getItem(key), setItem: (key, value) => window.localStorage.setItem(key, value), removeItem: (key) => window.localStorage.removeItem(key) },
       repository: new IpcLocalCardRepository(invoke), initialDraft: { answers: {}, language: QUESTIONNAIRE_DRAFT_DEFAULT_LANGUAGE },
     });
+    // 在首次渲染及默认问卷注入前应用合法草稿，避免把预览题目当成恢复答案的重映射基线。
+    // 沿用会话校验、签名降级、uncertain 保护；restoreDraft 不会派发生成或重写原数据。
+    setRestored(owner.getSnapshot().pendingRestore);
+    owner.restoreDraft(false);
     setSession(owner);
     const onPageHide = () => owner.cancel();
     window.addEventListener('pagehide', onPageHide);
     return () => { window.removeEventListener('pagehide', onPageHide); owner.dispose(); };
   }, []);
-  return session ? <CanshouForm session={session} /> : <p role="status">正在准备问卷草稿…</p>;
+  return session ? <CanshouForm session={session} restored={restored} /> : <p role="status">正在准备问卷草稿…</p>;
 }

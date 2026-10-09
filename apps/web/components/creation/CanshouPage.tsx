@@ -1,5 +1,9 @@
 'use client';
 
+import { BackHomeLink } from '@mahoshojo/ui-web/shell';
+import { getQuestionnaireQuestionPresentation } from '@mahoshojo/ui-web/questionnaire';
+import { QuestionnaireResultActions } from '@mahoshojo/ui-web/details-controls';
+
 import { generationActionClassNames, generationSubmitClassName } from '@mahoshojo/ui-web/generation-actions';
 import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -1323,7 +1327,6 @@ export const CanshouPage: React.FC = () => {
   const currentQuestion = currentQuestionItem?.question;
   const currentQuestionnaireTitle = currentQuestionItem?.questionnaireTitle ?? '';
   const primaryQuestionnaire = selectedQuestionnaires[0]?.questionnaire;
-  const isLastQuestion = currentQuestionIndex === mergedQuestions.length - 1;
   const progressPercent = Math.round(((currentQuestionIndex + 1) / mergedQuestions.length) * 100);
   const navigatorItems = mergedQuestions.map((item) => ({
     id: item.key,
@@ -1334,27 +1337,17 @@ export const CanshouPage: React.FC = () => {
   const currentMaxLength = currentLimitInfo.limit;
   const currentAnswerLength = currentAnswer.trim().length;
   const isCurrentOverLimit = Boolean(currentMaxLength && currentAnswerLength > currentMaxLength);
-  const currentLimitLabel = currentLimitInfo.source === 'question'
-    ? `题目上限 ${currentMaxLength} 字`
-    : currentLimitInfo.source === 'global'
-      ? `原生统一上限 ${currentMaxLength} 字`
-      : '不限';
+
   const isCurrentRequired = currentQuestion?.required === true;
   const hasOptions = (currentQuestion?.options?.length ?? 0) > 0;
   const showTextInput = allowCustomInput || !hasOptions;
-  const fallbackQuickOptions = allowCustomInput ? ['记录未知', '稍后补充'] : [];
-  const suggestionPool = showTextInput ? (currentQuestion?.suggestions ?? []).filter(Boolean) : [];
-  const nextButtonLabel = isCooldown
-    ? `冷却中 (${remainingTime}s)`
-    : submitting
-      ? '生成中...'
-      : isLastQuestion
-        ? (isCurrentRequired || currentAnswer.trim() ? '生成档案' : '跳过并生成')
-        : (!isCurrentRequired && !currentAnswer.trim() ? '跳过并继续' : '下一题');
-  const optionsHintText = allowCustomInput
-    ? '推荐选项（点击后将自动进入下一题，可在下方补充）'
-    : '推荐选项（点击后将自动进入下一题，本题仅可从选项中选择）';
-  const overLimitText = `⚠️ 已超过${currentLimitLabel}，继续提交将导致生成内容丧失原生性。`;
+  const questionPresentation = getQuestionnaireQuestionPresentation({
+    variant: 'canshou', question: currentQuestion, answer: currentAnswer,
+    index: currentQuestionIndex, total: mergedQuestions.length,
+    busy: submitting, cooldownSeconds: isCooldown ? remainingTime : 0,
+  });
+  const { quickOptions: fallbackQuickOptions, nextButtonLabel, optionsHintText, overLimitText, limitLabel: currentLimitLabel, suggestions: suggestionPool } = questionPresentation;
+
 
   return (
     <>
@@ -1393,7 +1386,7 @@ export const CanshouPage: React.FC = () => {
                     linkClassName="font-semibold text-emerald-300 hover:underline"
                   />
                 )}
-                backHome={<Link href="/" className="footer-link">返回首页</Link>}
+                backHome={<BackHomeLink renderLink={(props) => <Link {...props} />} />}
               />
             ) : (!canshouDetails && !streamedGeneralCard) ? (
               <>
@@ -1452,7 +1445,7 @@ export const CanshouPage: React.FC = () => {
 
                 <QuestionnaireQuestionPanel
                   theme={CANSHOU_QUESTIONNAIRE_THEME}
-                  progressLabel={`问题 ${currentQuestionIndex + 1} / ${mergedQuestions.length}`}
+                  progressLabel={questionPresentation.progressLabel}
                   progressPercent={progressPercent}
                   progressExtra={autoSaveTimestamp ? (
                     <span className="text-xs text-slate-500">已自动保存于 {new Date(autoSaveTimestamp).toLocaleTimeString()}</span>
@@ -1474,7 +1467,7 @@ export const CanshouPage: React.FC = () => {
                   showTextInput={showTextInput}
                   answer={currentAnswer}
                   onAnswerChange={handleCurrentAnswerChange}
-                  placeholder={currentQuestion?.placeholder || '请在此输入你的想法...'}
+                  placeholder={questionPresentation.placeholder}
                   answerLength={currentAnswerLength}
                   maxLength={currentMaxLength}
                   limitLabel={currentLimitLabel}
@@ -1482,7 +1475,7 @@ export const CanshouPage: React.FC = () => {
                   isOverLimit={isCurrentOverLimit}
                   overLimitText={overLimitText}
                   isTransitioning={isTransitioning}
-                  prevLabel="返回上题"
+                  prevLabel={questionPresentation.prevLabel}
                   nextButtonContent={nextButtonLabel}
                   onPrev={handlePreviousQuestion}
                   onNext={handleNext}
@@ -1596,7 +1589,7 @@ export const CanshouPage: React.FC = () => {
                 />
 
                 <div className="mt-8 text-center">
-                  <Link href="/" className="footer-link">返回首页</Link>
+                  <BackHomeLink renderLink={(props) => <Link {...props} />} />
                 </div>
               </>
             ) : (
@@ -1614,46 +1607,23 @@ export const CanshouPage: React.FC = () => {
                     <AiReasoningPanel reasoning={streamingReasoning} status={streamingReasoning?.status ?? 'idle'} compact />
                     {streamNotice ? <div className="mt-3 text-center text-sm text-amber-700">{streamNotice}</div> : null}
 
-                    <div className="card" style={{ marginTop: '1rem' }}>
-                      <div className="text-center">
-                        <h3 className="text-lg font-medium text-gray-800" style={{ marginBottom: '1rem' }}>后续操作</h3>
-                        <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                          <button onClick={() => downloadStreamedGeneralCard(streamedGeneralCard)} className={`${generationActionClassNames.secondary} flex-1`}>
-                            下载通用角色卡
-                          </button>
-                          <SaveToCloudButton
-                            data={streamedGeneralCard}
-                            cardType="character"
-                            buttonText="保存到云端"
-                            className={`${generationActionClassNames.primary} flex-1`}
-                          />
-                          <button
-                            onClick={() => void copyStreamedGeneralCard(streamedGeneralCard)}
-                            className={`${generationActionClassNames.secondary} flex-1`}
-                          >
-                            复制到剪贴板
-                          </button>
-                        </div>
-                        <JsonSizeIndicator
-                          data={streamedGeneralCard}
-                          warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
-                        />
-                        <button
-                          onClick={handleRegenerate}
-                          disabled={submitting || isCooldown}
-                          className={generationSubmitClassName}
-                          style={{ marginTop: '0.5rem', backgroundColor: '#a855f7', backgroundImage: 'linear-gradient(to right, #a855f7, #d946ef)' }}
-                        >
-                          {isCooldown ? `冷却中 (${remainingTime}s)` : submitting ? '重新生成中...' : '不满意？再来一次'}
-                        </button>
-                        <div className="mt-2 pt-6 border-t border-gray-200">
-                          <p className="text-sm text-gray-600 mb-2">保存好你的档案了吗？</p>
-                          <Link href="/battle" className="footer-link text-lg text-purple-600">
-                            前往竞技场，让它大闹一场！→
-                          </Link>
-                        </div>
-                      </div>
-                    </div>
+                    <QuestionnaireResultActions
+                      variant="canshou"
+                      renderLink={(props) => <Link {...props} />}
+                      sizeIndicator={streamedGeneralCard && <JsonSizeIndicator data={streamedGeneralCard} warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。" />}
+                      regenerateAction={<button
+                        onClick={handleRegenerate}
+                        disabled={submitting || isCooldown}
+                        className={generationSubmitClassName}
+                        style={{ marginTop: '0.5rem', backgroundColor: '#a855f7', backgroundImage: 'linear-gradient(to right, #a855f7, #d946ef)' }}
+                      >
+                        {isCooldown ? `冷却中 (${remainingTime}s)` : submitting ? '重新生成中...' : '不满意？再来一次'}
+                      </button>}
+                    >
+                      <button onClick={() => downloadStreamedGeneralCard(streamedGeneralCard)} className={`${generationActionClassNames.secondary} flex-1`}>下载通用角色卡</button>
+                      <SaveToCloudButton data={streamedGeneralCard} cardType="character" buttonText="保存到云端" className={`${generationActionClassNames.primary} flex-1`} />
+                      <button onClick={() => void copyStreamedGeneralCard(streamedGeneralCard)} className={`${generationActionClassNames.secondary} flex-1`}>复制到剪贴板</button>
+                    </QuestionnaireResultActions>
                   </>
                 ) : (
                   <>
@@ -1685,56 +1655,29 @@ export const CanshouPage: React.FC = () => {
                       jsonRecommendLabels={{ download: '直接下载', text: '复制 JSON' }}
                       footerNote="提示：偏好设置已保存到浏览器，刷新后仍会保留；切换不会触发重新生成。"
                     />
-                    <div className="card" style={{ marginTop: '1rem' }}>
-                      <div className="text-center">
-                        <h3 className="text-lg font-medium text-gray-800" style={{ marginBottom: '1rem' }}>后续操作</h3>
-                        <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                          {resolvedResultPayload && (
-                            <>
-                              <SaveJsonButton
-                                data={resolvedResultPayload}
-                                mode={jsonSaveMode}
-                                recommendedMode={recommendedJsonMode}
-                                resolveFileName={resolveCanshouJsonFileName}
-                                downloadLabel="💾 下载残兽档案"
-                              />
-                              <SaveToCloudButton
-                                data={resolvedResultPayload}
-                                buttonText="保存到云端"
-                                className={`${generationActionClassNames.primary} flex-1`}
-                              />
-                            </>
-                          )}
-                        </div>
-                        {resolvedResultPayload && (
-                          <JsonSizeIndicator
-                            data={resolvedResultPayload}
-                            warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
-                          />
-                        )}
-                        <button
-                          onClick={handleRegenerate}
-                          disabled={submitting || isCooldown}
-                          className={generationSubmitClassName}
-                          style={{ marginTop: '0.5rem', backgroundColor: '#a855f7', backgroundImage: 'linear-gradient(to right, #a855f7, #d946ef)' }}
-                        >
-                          {isCooldown ? `冷却中 (${remainingTime}s)` : submitting ? '重新生成中...' : '不满意？再来一次'}
-                        </button>
-                        <div className="mt-2 pt-6 border-t border-gray-200">
-                          <p className="text-sm text-gray-600 mb-2">
-                            保存好你的档案了吗？
-                          </p>
-                          <Link href="/battle" className="footer-link text-lg text-purple-600">
-                            前往竞技场，让它大闹一场！→
-                          </Link>
-                        </div>
-                      </div>
-                    </div>
+                    <QuestionnaireResultActions
+                      variant="canshou"
+                      renderLink={(props) => <Link {...props} />}
+                      sizeIndicator={resolvedResultPayload && <JsonSizeIndicator data={resolvedResultPayload} warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。" />}
+                      regenerateAction={<button
+                        onClick={handleRegenerate}
+                        disabled={submitting || isCooldown}
+                        className={generationSubmitClassName}
+                        style={{ marginTop: '0.5rem', backgroundColor: '#a855f7', backgroundImage: 'linear-gradient(to right, #a855f7, #d946ef)' }}
+                      >
+                        {isCooldown ? `冷却中 (${remainingTime}s)` : submitting ? '重新生成中...' : '不满意？再来一次'}
+                      </button>}
+                    >
+                      {resolvedResultPayload && <>
+                        <SaveJsonButton data={resolvedResultPayload} mode={jsonSaveMode} recommendedMode={recommendedJsonMode} resolveFileName={resolveCanshouJsonFileName} downloadLabel="💾 下载残兽档案" />
+                        <SaveToCloudButton data={resolvedResultPayload} buttonText="保存到云端" className={`${generationActionClassNames.primary} flex-1`} />
+                      </>}
+                    </QuestionnaireResultActions>
                   </>
                 )}
                 <CanshouLorePanel open={showLore} onOpenChange={setShowLore} />
                 <div className="mt-8 text-center">
-                  <Link href="/" className="footer-link">返回首页</Link>
+                  <BackHomeLink renderLink={(props) => <Link {...props} />} />
                 </div>
               </div>
             )}

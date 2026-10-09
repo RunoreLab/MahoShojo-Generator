@@ -32,7 +32,7 @@ let presence = false;
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 40)); });
 const button = (name: string) => [...container.querySelectorAll('button')].find((item) => item.textContent === name);
 const click = async (name: string) => { expect(button(name), name).toBeTruthy(); await act(async () => button(name)!.click()); await settle(); };
-const generateLabel = (page: Page) => page === 'details' || page === 'canshou' ? '发送问卷并生成' : page === 'scenario' ? '生成情景' : '生成数据卡';
+const generateLabel = (page: Page) => page === 'details' ? '提交' : page === 'canshou' ? '生成档案' : page === 'scenario' ? '生成情景' : '生成数据卡';
 const questionnaire = (page: Page) => ({ id: 'test', kind: page === 'canshou' ? 'canshou' : 'magical-girl', title: '准备测试问卷', nativeAllowed: true, questions: [{ id: 'q', question: '描述' }] });
 function seedDraft(page: Page) {
   const shared = { version: 1, answers: { 'preset:test::q': '测试回答' }, language: 'zh-CN', questionnaireSelections: [{ source: 'preset', selectionId: 'preset:test', questionnaire: questionnaire(page) }] };
@@ -68,7 +68,8 @@ async function mount(page: Page, target: 'preset' | 'system' | 'legacy' = 'prese
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => ({ ok: true, json: async () => String(input).includes('languages') ? [{ code: 'zh-CN', name: '简体中文' }] : String(input).includes('index.json') ? { version: 1, presets: [] } : questionnaire(page) })));
   const router = createDesktopRouter(); await router.load();
   await act(async () => root!.render(<StrictMode><RouterProvider router={router} /></StrictMode>)); await settle();
-  await click('恢复草稿');
+  expect(button('恢复草稿')).toBeUndefined();
+  expect(mocks.execute).not.toHaveBeenCalled();
   const store = getDesktopAiConfigStore();
   await act(async () => {
     if (target === 'system') { store.selectExecutionLocation('server'); store.selectProviderTarget({ kind: 'system' }); }

@@ -37,6 +37,20 @@ let close: (event: { preventDefault: () => void }) => void;
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 120)); });
 const button = (name: string) => [...container.querySelectorAll('button')].find((item) => item.textContent === name)!;
 const click = async (name: string) => { await act(async () => button(name).click()); await settle(); };
+// Exercise the real final-step entry instead of a separate page-wide submit control.
+const finalSubmitButton = () => container.querySelector<HTMLButtonElement>('[aria-label="问卷翻页操作"] button:last-child')!;
+const goToFinalQuestion = async () => {
+  const select = container.querySelector<HTMLSelectElement>('#question-navigator-select');
+  if (!select?.options.length) return;
+  await act(async () => { select.value = select.options[select.options.length - 1]!.value; select.dispatchEvent(new Event('change', { bubbles: true })); });
+  await settle();
+};
+const submitQuestionnaire = async () => { await goToFinalQuestion(); await act(async () => finalSubmitButton().click()); await settle(); };
+const regenerate = async () => {
+  const resultButton = [...container.querySelectorAll('button')].find((item) => item.textContent === '重新生成');
+  if (resultButton) { await act(async () => resultButton.click()); await settle(); }
+  else await submitQuestionnaire();
+};
 const draft = () => ({ version: 1, answers: { [`${builtinSelectionId(questionnaire.id)}::${questionnaire.questions[0].id}`]: '善良' }, language: '简体中文' });
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -88,6 +102,43 @@ const fillCurrentAnswer = async (value: string) => {
 
 describe('Desktop Details real route and session UI (native adapter mock)', () => {
 
+  it.each(['route', 'native'] as const)('allows confirmed %s leave after memory-only editing and saving a result, preserving damaged storage', async (kind) => {
+    window.localStorage.setItem(DETAILS_DRAFT_KEY, '{broken');
+    const router = await mount(); await click('开始回答问卷');
+    await fillCurrentAnswer('未持久化的回答'); await settle();
+    const denied = vi.fn();
+    await act(async () => { if (kind === 'route') void router.navigate({ to: '/' }); else close({ preventDefault: denied }); });
+    expect(window.confirm).toHaveBeenCalled();
+    if (kind === 'route') expect(router.state.location.pathname).toBe('/details');
+    else expect(denied).toHaveBeenCalledOnce();
+    await submitQuestionnaire(); await click('保存到本地卡库');
+    vi.mocked(window.confirm).mockReturnValue(true);
+    const accepted = vi.fn();
+    await act(async () => { if (kind === 'route') await router.navigate({ to: '/' }); else close({ preventDefault: accepted }); }); await settle();
+    if (kind === 'route') expect(router.state.location.pathname).toBe('/');
+    else expect(accepted).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem(DETAILS_DRAFT_KEY)).toBe('{broken');
+    expect(mocks.execute).toHaveBeenCalledOnce(); expect(mocks.save).toHaveBeenCalledOnce();
+  });
+
+  it('does not claim stored answers were cleared when persistence fails', async () => {
+    window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify(draft()));
+    await mount();
+    const originalDraft = window.localStorage.getItem(DETAILS_DRAFT_KEY);
+    const originalSet = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
+      if (key === DETAILS_DRAFT_KEY) throw new Error('quota exceeded');
+      return originalSet.call(this, key, value);
+    });
+    vi.mocked(window.confirm).mockReturnValue(true);
+    await act(async () => [...container.querySelectorAll('button')].find((item) => item.textContent?.startsWith('一键填充答案'))!.click());
+    await click('清空存档');
+    expect(container.querySelector<HTMLTextAreaElement>('.ui-web-questionnaire-answer-input')?.value).toBe('');
+    expect(window.localStorage.getItem(DETAILS_DRAFT_KEY)).toBe(originalDraft);
+    expect(container.textContent).toContain('当前答案已清空，原存档仍保留');
+    expect(container.textContent).not.toContain('存档已清空！');
+  });
+
   it('fills suggestions without advancing and follows updated displayIf/jump flow through option submission', async () => {
     storeStepQuestionnaire([
       { id: 'prelude', question: '后来显现的前题', displayIf: { questionId: 'gate', operator: 'equals', value: '展开分支' } },
@@ -97,7 +148,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
       { id: 'last', question: '收尾选项', options: ['结束调查'], maxLength: 2, jump: { when: { questionId: 'last', operator: 'notEmpty' }, toEnd: true } },
       { id: 'tail', question: '跳过的尾题' },
     ], { middle: '旧中题回答', tail: '旧尾题回答' });
-    await mount(); await click('恢复草稿');
+    await mount();
     await click('文字灵感');
     expect(container.querySelector('.ui-web-questionnaire-answer-input')?.getAttribute('aria-label')).toBe('选择路线');
     expect(container.querySelector<HTMLTextAreaElement>('.ui-web-questionnaire-answer-input')?.value).toBe('文字灵感');
@@ -125,18 +176,18 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
       { id: 'optional', question: '选答题' },
       { id: 'last', question: '末题' },
     ]);
-    await mount(); await click('恢复草稿');
+    await mount();
     expect(container.querySelector('[aria-label="问卷翻页操作"]')?.className).toBe('ui-web-questionnaire-navigation');
     expect(button('下一题').classList.contains('ui-web-questionnaire-step-button')).toBe(true);
     expect(button('下一题').type).toBe('button');
     expect(button('下一题').disabled).toBe(true);
     await click('下一题');
-    expect(container.textContent).toContain('第 1 / 3 题');
+    expect(container.textContent).toContain('问题 1 / 3');
     expect(mocks.execute).not.toHaveBeenCalled();
     await fillCurrentAnswer('  必答内容  '); await click('下一题');
     await click('跳过并继续');
-    expect(button('跳过并生成').disabled).toBe(false);
-    await click('跳过并生成');
+    expect(button('跳过并提交').disabled).toBe(false);
+    await click('跳过并提交');
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(mocks.execute.mock.calls[0]![1].answers).toEqual([expect.objectContaining({ question: '必答题', answer: '必答内容' })]);
   });
@@ -146,11 +197,11 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
       { id: 'required', question: '此前的必答题', required: true },
       { id: 'last', question: '末题' },
     ]);
-    await mount(); await click('恢复草稿'); await click('2');
-    await click('跳过并生成');
+    await mount(); await click('2');
+    await click('跳过并提交');
     expect(container.textContent).toContain('请至少填写一题后再生成。');
     expect(mocks.execute).not.toHaveBeenCalled();
-    await fillCurrentAnswer('末题回答'); await click('生成');
+    await fillCurrentAnswer('末题回答'); await click('提交');
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(mocks.execute.mock.calls[0]![1].answers).toEqual([expect.objectContaining({ question: '末题', answer: '末题回答' })]);
   });
@@ -159,9 +210,9 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     storeStepQuestionnaire([{ id: 'last', question: '末题', options: ['推荐回答'] }]);
     let finish!: (outcome: DetailsGenerationOutcome) => void;
     mocks.execute.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
-    await mount(); await click('恢复草稿');
+    await mount();
     if (entry === 'next') await fillCurrentAnswer('文本回答');
-    const submit = button(entry === 'option' ? '推荐回答' : '生成');
+    const submit = button(entry === 'option' ? '推荐回答' : '提交');
     await act(async () => { submit.click(); submit.click(); });
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(mocks.execute.mock.calls[0]![1]).toMatchObject({
@@ -173,8 +224,8 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
 
   it.each(['option', 'next'] as const)('keeps final %s regeneration behind unsaved and uncertain confirmations, including cancel', async (entry) => {
     storeStepQuestionnaire([{ id: 'last', question: '末题', options: ['推荐回答'] }], { last: '原回答' });
-    await mount(); await click('恢复草稿'); await click('发送问卷并生成');
-    const submit = () => click(entry === 'option' ? '推荐回答' : '生成');
+    await mount(); await submitQuestionnaire();
+    const submit = () => click(entry === 'option' ? '推荐回答' : '提交');
     await submit();
     expect(container.querySelector('dialog')?.open).toBe(true);
     expect(container.querySelector('dialog')?.textContent).toContain('尚未保存到本地卡库');
@@ -205,11 +256,11 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     expect(container.querySelectorAll('.container > .card > fieldset')).toHaveLength(3);
     expect([...container.querySelectorAll<HTMLFieldSetElement>('.container > .card > fieldset')].every((fieldset) => fieldset.disabled)).toBe(true);
     expect(mocks.execute).not.toHaveBeenCalled();
-    await click('恢复草稿');
+
     expect(button('推荐回答').closest('fieldset')?.disabled).toBe(true);
     expect(container.querySelectorAll('.container > .card > fieldset')).toHaveLength(3);
     expect([...container.querySelectorAll<HTMLFieldSetElement>('.container > .card > fieldset')].every((fieldset) => fieldset.disabled)).toBe(true);
-    await click('推荐回答'); await click('跳过并生成');
+    await click('推荐回答'); await click('跳过并提交');
     expect(mocks.execute).not.toHaveBeenCalled();
     expect(container.querySelector<HTMLTextAreaElement>('.ui-web-questionnaire-answer-input')?.value).toBe('');
     await act(async () => ready(vi.fn())); await settle();
@@ -220,9 +271,9 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
   it('keeps final option and Next generation blocked when the client Provider cannot load', async () => {
     storeStepQuestionnaire([{ id: 'last', question: '末题', options: ['推荐回答'] }]);
     mocks.profiles.mockRejectedValue(new Error('profile unavailable'));
-    await mount(); await click('恢复草稿'); await click('推荐回答');
+    await mount(); await click('推荐回答');
     expect(container.querySelector<HTMLTextAreaElement>('.ui-web-questionnaire-answer-input')?.value).toBe('推荐回答');
-    await click('生成');
+    await click('提交');
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 
@@ -233,6 +284,8 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     expect(logo?.closest('.card')?.firstElementChild?.contains(logo)).toBe(true);
     expect(container.querySelector('[aria-label="介绍"]')?.contains(logo)).toBe(false);
     expect(container.querySelector('h1')?.textContent).toBe('魔法少女问卷生成');
+    expect(container.querySelector('[aria-label="介绍"] a[href="#/creator"]')?.textContent).toBe('前往创作工坊');
+    for (const removed of ['发现上次草稿', '当前内容已保存', '草稿说明与管理', '重新加载问卷与配置', '填写问卷后，可选择客户端连接']) expect(container.textContent).not.toContain(removed);
     await click('开始回答问卷');
     expect(container.querySelector('[aria-label="介绍"]')).toBeNull();
     expect(container.querySelector('img[alt="Questionnaire Logo"]')).toBe(logo);
@@ -242,7 +295,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
 
   it('orders the questionnaire sections like Web and keeps the restored language fallback when expanded', async () => {
     window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify({ ...draft(), language: '草稿语言' }));
-    await mount(); await click('恢复草稿');
+    await mount();
     const languageToggle = [...container.querySelectorAll('button')].find((item) => item.textContent?.startsWith('生成语言'))!;
     expect(languageToggle.getAttribute('aria-expanded')).toBe('false');
     expect(container.querySelector('select[aria-label="生成语言"]')).toBeNull();
@@ -262,6 +315,11 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
       expect(orderedSections[index]).toBeTruthy();
       expect(orderedSections[index - 1]!.compareDocumentPosition(orderedSections[index]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     }
+    expect(button('1').classList.contains('bg-pink-500')).toBe(true);
+    expect(source.querySelector('.details-questionnaire-settings-panel')?.classList.contains('bg-indigo-50/70')).toBe(true);
+    expect(container.textContent).toContain(' tokens');
+    expect(container.textContent).toContain('已自动保存于');
+    expect(container.textContent).not.toContain('发送问卷并生成');
     expect(source.classList.contains('border')).toBe(false);
     expect(source.classList.contains('p-4')).toBe(false);
     await act(async () => languageToggle.click());
@@ -282,7 +340,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
         ? [{ code: 'en', name: 'English' }, { code: 'ja', name: '日本語' }]
         : questionnaire,
     } as Response));
-    await mount(); await click('恢复草稿');
+    await mount();
     const languageToggle = [...container.querySelectorAll('button')].find((item) => item.textContent?.startsWith('生成语言'))!;
     await act(async () => languageToggle.click());
     const language = container.querySelector<HTMLSelectElement>('select[aria-label="生成语言"]')!;
@@ -295,7 +353,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     await act(async () => languageToggle.click());
     await act(async () => languageToggle.click());
     expect(container.querySelector<HTMLSelectElement>('select[aria-label="生成语言"]')?.value).toBe('ja');
-    await click('发送问卷并生成');
+    await submitQuestionnaire();
     expect(mocks.execute.mock.calls[0]![1].language).toBe('ja');
   });
 
@@ -303,7 +361,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify(draft()));
     let finish!: (outcome: DetailsGenerationOutcome) => void;
     mocks.execute.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
-    await mount(); await click('恢复草稿');
+    await mount();
     const languageToggle = [...container.querySelectorAll('button')].find((item) => item.textContent?.startsWith('生成语言'))!;
     const sourceToggle = container.querySelector<HTMLButtonElement>('[aria-label="问卷来源"] button')!;
     await act(async () => { languageToggle.click(); sourceToggle.click(); });
@@ -320,10 +378,10 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
       expect(control).toBeTruthy();
       expect(control!.matches(':disabled')).toBe(false);
     }
-    await click('发送问卷并生成');
+    await submitQuestionnaire();
     for (const control of controls) expect(control!.matches(':disabled')).toBe(true);
     await act(async () => { button('2').click(); languageToggle.click(); });
-    expect(container.textContent).toContain(`第 1 / ${questionnaire.questions.length} 题`);
+    expect(container.textContent).toContain(`问题 ${questionnaire.questions.length} / ${questionnaire.questions.length}`);
     expect(languageToggle.getAttribute('aria-expanded')).toBe('true');
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     await act(async () => finish(completed));
@@ -343,7 +401,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
       version: 1, language: '简体中文', answers: { 'preset:answer-hints::required': '初始答案' },
       questionnaireSelections: [{ source: 'preset', questionnaire: custom, selectionId: 'preset:answer-hints' }],
     }));
-    await mount(); await click('恢复草稿');
+    await mount();
     expect(container.textContent).toContain('进度 33%');
     expect(container.textContent).toContain('请基于您构想的虚拟角色身份回答，并确保内容符合公序良俗，请勿使用任何真实信息。');
     expect(container.textContent).not.toContain('其他题目可以跳过');
@@ -356,7 +414,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     });
     expect(textarea.value).toBe('  保留超限回答  ');
     expect(container.textContent).toContain('有效字数：6/4');
-    expect(container.textContent).toContain('回答超过建议长度，仍可生成未签名角色卡。');
+    expect(container.textContent).toContain('已超过题目上限 4 字');
     await click('下一题');
     expect(container.textContent).toContain('进度 67%');
     expect(container.textContent).toContain('有效字数：0/500');
@@ -369,15 +427,15 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
 
   it('confirms replacement, keeps the old result on cancel/save failure, and saves before regenerating', async () => {
     window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify(draft()));
-    await mount(); await click('恢复草稿'); await click('发送问卷并生成');
-    await click('重新生成');
+    await mount(); await submitQuestionnaire();
+    await regenerate();
     expect(container.querySelector('dialog')?.open).toBe(true);
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     await click('取消');
     expect(container.querySelector('dialog')?.open).toBe(false);
     expect([...container.querySelectorAll('h2.sr-only')].some((heading) => heading.textContent === '百合')).toBe(true);
     expect(container.querySelector('[data-testid="result-signature-status"]')?.textContent).toContain('未签名');
-    await click('重新生成');
+    await regenerate();
     mocks.save.mockRejectedValueOnce(new Error('disk'));
     await click('保存后重新生成');
     expect(container.querySelector('dialog')?.open).toBe(true);
@@ -387,7 +445,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     expect(mocks.save).toHaveBeenCalledTimes(2);
     expect(mocks.execute).toHaveBeenCalledTimes(2);
     expect(container.querySelector('dialog')?.open).toBe(false);
-    await click('重新生成'); await click('确定重新生成');
+    await regenerate(); await click('确定重新生成');
     expect(mocks.execute).toHaveBeenCalledTimes(3);
     expect(mocks.save).toHaveBeenCalledTimes(2);
   });
@@ -395,7 +453,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify(draft()));
     let finish!: (outcome: DetailsGenerationOutcome) => void;
     mocks.execute.mockImplementation((_o, _i, _t, _s, partial) => { partial('离开前正文'); return new Promise((resolve) => { finish = resolve; }); });
-    const router = await mount(); await click('恢复草稿'); await click('发送问卷并生成');
+    const router = await mount(); await submitQuestionnaire();
     vi.mocked(window.confirm).mockReturnValue(true);
     const preventDefault = vi.fn();
     await act(async () => { if (kind === 'route') await router.navigate({ to: '/' }); else close({ preventDefault }); });
@@ -410,7 +468,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify(draft()));
     let finish!: (outcome: DetailsGenerationOutcome) => void;
     mocks.execute.mockImplementation((_o, _i, _t, _s, partial) => { partial('刷新前正文'); return new Promise((resolve) => { finish = resolve; }); });
-    await mount(); await click('恢复草稿'); await click('发送问卷并生成');
+    await mount(); await submitQuestionnaire();
     const unload = new Event('beforeunload', { cancelable: true });
     window.dispatchEvent(unload);
     expect(unload.defaultPrevented).toBe(true);
@@ -420,21 +478,23 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     expect(JSON.parse(window.localStorage.getItem(DETAILS_DRAFT_KEY)!).output.rawText).toBe('刷新前正文');
     await act(async () => finish({ status: 'cancelled', contractVersion: 1, requestId: 'r', mode: 'direct-local', rawText: '刷新前正文', reason: 'aborted' }));
   });
-  it('restores only on explicit action then generates Direct once and saves the shared result', async () => {
+  it('automatically restores without generation then generates Direct once and saves the shared result', async () => {
     window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify(draft()));
     await mount();
     expect(container.querySelector('[data-testid="page-details"]')).toBeTruthy();
-    expect(container.textContent).toContain('第 1 / 16 题');
+    expect(container.textContent).toContain('问题 1 / 16');
     expect(mocks.execute).not.toHaveBeenCalled();
-    expect(button('发送问卷并生成').disabled).toBe(true);
+    await goToFinalQuestion();
+    expect(finalSubmitButton().disabled).toBe(false);
     const logo = container.querySelector('img[alt="Questionnaire Logo"]');
     expect(logo).toBeTruthy();
-    await click('恢复草稿');
+
     expect(container.querySelector('img[alt="Questionnaire Logo"]')).toBe(logo);
+    await click('1');
     expect(container.querySelector('textarea')?.value).toBe('善良');
     const inputCard = container.querySelector('.container > .card')!;
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ top: window.innerHeight + 1 } as DOMRect);
-    await click('发送问卷并生成');
+    await submitQuestionnaire();
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(mocks.execute.mock.calls[0]![2]).toMatchObject({ mode: 'direct-local', modelId: 'model' });
     expect([...container.querySelectorAll('h2.sr-only')].some((heading) => heading.textContent === '百合')).toBe(true);
@@ -447,6 +507,8 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     expect(mocks.scrollResult).toHaveBeenCalledTimes(1);
     expect(mocks.scrollResult.mock.instances[0]).toBe(resultSection.parentElement);
     expect(button('保存到本地卡库').classList.contains('ui-web-generation-action--primary')).toBe(true);
+    expect(button('保存到本地卡库').closest('[aria-label="保存原始数据"]')?.classList.contains('card')).toBe(true);
+    expect(container.querySelector('[aria-label="保存原始数据"] a[href="#/battle"]')).toBeTruthy();
     await click('保存到本地卡库');
     expect(mocks.save).toHaveBeenCalledTimes(1);
     expect(container.textContent).toContain('已保存到本地卡库。');
@@ -457,10 +519,11 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     let finish!: (outcome: DetailsGenerationOutcome) => void;
     let emitPartial!: (text: string) => void;
     mocks.execute.mockImplementation((_options, _input, _intent, _signal, partial) => { emitPartial = partial; partial('部分正文'); return new Promise((resolve) => { finish = resolve; }); });
-    const router = await mount(); await click('恢复草稿');
+    const router = await mount();
     const preventDefault = vi.fn();
+    await goToFinalQuestion();
     await act(async () => {
-      button('发送问卷并生成').click(); button('发送问卷并生成').click();
+      finalSubmitButton().click(); finalSubmitButton().click();
       close({ preventDefault }); void router.navigate({ to: '/' });
     });
     await settle();
@@ -486,42 +549,37 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     expect(router.state.location.pathname).toBe('/');
     expect(container.querySelector('a[href="#/details"]')).toBeTruthy();
   });
-  it('requires confirmation before discarding corrupt draft, and blocks generation until native guard is ready', async () => {
+  it('preserves corrupt storage while allowing memory-only answers and generation, retaining native close protection', async () => {
     window.localStorage.setItem(DETAILS_DRAFT_KEY, '{broken');
     let ready!: (release: () => void) => void;
     mocks.listen.mockImplementation(() => new Promise((resolve) => { ready = resolve; }));
     await mount();
     expect(container.textContent).toContain('无法读取草稿');
-    await click('清除草稿');
+    expect(container.textContent).not.toContain('清除草稿');
     expect(window.localStorage.getItem(DETAILS_DRAFT_KEY)).toBe('{broken');
-    await click('保留草稿');
-    await click('清除草稿'); await click('确认清除');
-    // 「清除草稿」= 内容清空：清后可立即落一份干净初始草稿（空回答+默认内置问卷
-    // 选择；落盘格式恒带 output 头，须为 idle/空卡），语义等价于空——D5.1-P2
-    // 选择集入草稿后默认问卷会作为新草稿的一部分被持续保存。
-    const clearedRaw = window.localStorage.getItem(DETAILS_DRAFT_KEY);
-    const cleared = clearedRaw === null
-      ? null
-      : JSON.parse(clearedRaw) as { answers?: Record<string, string>; output?: { phase?: string; card?: unknown; rawText?: string } };
-    expect(cleared === null || (
-      (cleared.output === undefined || (cleared.output.phase === 'idle' && cleared.output.card === null && cleared.output.rawText === ''))
-      && Object.keys(cleared.answers ?? {}).length === 0
-    )).toBe(true);
     await click('开始回答问卷');
-    expect(button('发送问卷并生成').disabled).toBe(true);
+    await goToFinalQuestion();
+    expect(finalSubmitButton().disabled).toBe(true);
     await act(async () => ready(vi.fn())); await settle();
-    expect(button('发送问卷并生成').disabled).toBe(false);
-    expect(mocks.execute).not.toHaveBeenCalled();
+    await goToFinalQuestion();
+    expect(finalSubmitButton().disabled).toBe(false);
+    await fillCurrentAnswer('保留当前页面的回答'); await settle();
+    const unload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(unload); expect(unload.defaultPrevented).toBe(true);
+    await submitQuestionnaire();
+    expect(mocks.execute).toHaveBeenCalledOnce();
+    expect(window.localStorage.getItem(DETAILS_DRAFT_KEY)).toBe('{broken');
+    expect(container.querySelector('[aria-label="保存原始数据"]')).toBeTruthy();
   });
   it('shows external recipient and restores partial without resending, preserving save failures for retry', async () => {
     mocks.profiles.mockResolvedValue({ id: 'local', name: '外部模型', adapter: 'openai-compatible', baseUrl: 'https://model.example/v1', modelId: 'model' });
     window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify({ ...draft(), output: { mode: 'direct-remote', phase: 'cancelled', card: null, rawText: '上次中断' } }));
-    await mount(); await click('恢复草稿');
+    await mount();
     expect(container.textContent).toContain('接收方：https://model.example/v1');
     expect(container.textContent).toContain('https://model.example/v1');
     expect(container.querySelector('pre')?.textContent).toBe('上次中断');
     expect(mocks.execute).not.toHaveBeenCalled();
-    await click('重新生成');
+    await regenerate();
     mocks.save.mockRejectedValueOnce(new Error('busy'));
     await click('保存到本地卡库');
     expect(container.textContent).toContain('生成结果仍保留');
@@ -535,7 +593,8 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     await mount(); await click('开始回答问卷');
     expect(container.querySelector('textarea')).toBeTruthy();
     expect(container.textContent).toContain('本地 Provider 配置加载失败');
-    expect(button('发送问卷并生成').disabled).toBe(true);
+    await goToFinalQuestion();
+    expect(finalSubmitButton().disabled).toBe(true);
   });
 
   it('keeps hosted generation available when the local Provider bridge fails', async () => {
@@ -548,14 +607,15 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     }));
     mocks.profiles.mockRejectedValue(new Error('profile bridge unavailable'));
     window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify(draft()));
-    await mount(); await click('恢复草稿');
+    await mount();
     // 服务器模式下如实标注影响范围而不是无条件告警原文（D5.1-P2-r4）。
     expect(container.textContent).toContain('本地 Provider 配置加载失败，仅影响客户端执行');
     expect(container.textContent).not.toContain('可以稍后重试');
     expect(container.textContent).toContain('使用系统默认配置');
     expect(container.textContent).not.toContain('服务器 · 云端');
-    expect(button('发送问卷并生成').disabled).toBe(false);
-    await click('发送问卷并生成');
+    await goToFinalQuestion();
+    expect(finalSubmitButton().disabled).toBe(false);
+    await submitQuestionnaire();
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(mocks.execute.mock.calls[0]![2]).toMatchObject({ mode: 'hosted-json' });
   });
@@ -566,13 +626,14 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     // 自定义连接选择器（非原生 select）：已选连接名展示在 trigger 上。
     expect(container.textContent).toContain('Anthropic profile');
     expect(container.textContent).toContain('当前客户端尚未实现 anthropic 适配器');
-    expect(button('发送问卷并生成').disabled).toBe(true);
+    await goToFinalQuestion();
+    expect(finalSubmitButton().disabled).toBe(true);
   });
 
   it('preserves corrupt drafts and permits leaving until new content becomes dirty', async () => {
     window.localStorage.setItem(DETAILS_DRAFT_KEY, '{broken');
     const router = await mount(); await click('开始回答问卷');
-    expect(container.querySelector('textarea')?.closest('fieldset')?.disabled).toBe(true);
+    expect(container.querySelector('textarea')?.closest('fieldset')?.disabled).toBe(false);
     await act(async () => { await router.navigate({ to: '/' }); });
     await settle();
     expect(router.state.location.pathname).toBe('/');
@@ -607,7 +668,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
       hiddenPresetIds: [],
     }));
     window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify(draft()));
-    await mount(); await click('恢复草稿');
+    await mount();
     expect(container.textContent).toContain('使用系统默认配置');
     expect(container.textContent).not.toContain('服务器 · 云端');
     // D5.1-AIP-r1：服务器模式呈现系统模型行与按系统模型保存的高级参数
@@ -615,8 +676,9 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     expect(container.textContent).toContain('使用系统默认配置');
     expect(container.textContent).toContain('高级生成设置');
     expect(container.textContent).not.toContain('服务器执行需要先登录');
-    expect(button('发送问卷并生成').disabled).toBe(false);
-    await click('发送问卷并生成');
+    await goToFinalQuestion();
+    expect(finalSubmitButton().disabled).toBe(false);
+    await submitQuestionnaire();
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(mocks.execute.mock.calls[0]![0].profileId).toBe('');
     expect(mocks.execute.mock.calls[0]![2]).toMatchObject({ mode: 'hosted-json' });
@@ -636,7 +698,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
       ...draft(),
       answers: { [`${builtinSelectionId(questionnaire.id)}::${questionnaire.questions[0].id}`]: '字'.repeat(501) },
     }));
-    await mount(); await click('恢复草稿'); await click('发送问卷并生成');
+    await mount(); await submitQuestionnaire();
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     expect(mocks.execute.mock.calls[0]![1].hosted.allowNativeSignature).toBe(false);
   });
@@ -666,7 +728,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
       questionnaireSelections: [{ source: 'preset', questionnaire: custom, selectionId: 'preset:preset-extra' }],
     }));
     await mount();
-    await click('恢复草稿');
+
     expect(container.querySelector('textarea')?.value).toBe('保留的回答');
     const stored = JSON.parse(window.localStorage.getItem(DETAILS_DRAFT_KEY)!) as { answers: Record<string, string> };
     expect(stored.answers['preset:preset-extra::q1']).toBe('保留的回答');
@@ -684,10 +746,9 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
       questionnaireSelections: [{ source: 'preset', questionnaire: custom, selectionId: 'preset:preset-extra' }],
     }));
     await mount();
-    expect(container.textContent).toContain('内置问卷加载失败');
-    await click('恢复草稿');
+
     expect(container.textContent).not.toContain('内置问卷加载失败');
-    await click('发送问卷并生成');
+    await submitQuestionnaire();
     expect(mocks.execute).toHaveBeenCalledTimes(1);
   });
 
@@ -704,7 +765,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     await mount();
     expect(container.textContent).not.toContain('发现上次草稿');
     await click('开始回答问卷');
-    expect(container.textContent).toContain('第 1 / 16 题');
+    expect(container.textContent).toContain('问题 1 / 16');
   });
 
   it('warns about possible duplicate cost before regenerating after an uncertain hosted-json outcome', async () => {
@@ -718,10 +779,10 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
       status: 'uncertain', mode: 'hosted-json', rawText: '',
       message: '无法确认这次生成是否在服务器执行——请求可能已发送。不会自动重试；再次生成会发起新请求，可能产生重复调用与费用。',
     } satisfies DetailsGenerationOutcome);
-    await mount(); await click('恢复草稿'); await click('发送问卷并生成');
+    await mount(); await submitQuestionnaire();
     expect(container.textContent).toContain('无法确认这次生成是否在服务器执行');
     expect(mocks.execute).toHaveBeenCalledTimes(1);
-    await click('重新生成');
+    await regenerate();
     // uncertain 终态下再次生成必须显式确认——无保存按钮（没有卡可保存）。
     expect(container.querySelector('dialog')?.open).toBe(true);
     expect(container.querySelector('dialog')?.textContent).toContain('重复调用与费用');
@@ -729,7 +790,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     expect(mocks.execute).toHaveBeenCalledTimes(1);
     await click('取消');
     expect(mocks.execute).toHaveBeenCalledTimes(1);
-    await click('重新生成'); await click('确定重新生成');
+    await regenerate(); await click('确定重新生成');
     expect(mocks.execute).toHaveBeenCalledTimes(2);
   });
 
@@ -753,7 +814,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
       ...draft(),
       output: { mode: 'hosted-json', phase: 'completed', rawText: JSON.stringify(signedCard), card: signedCard },
     }));
-    await mount(); await click('恢复草稿');
+    await mount();
     const heading = container.querySelector('section[aria-label="生成结果"] h2');
     expect(heading?.textContent).toBe('百合');
     expect(heading?.classList.contains('sr-only')).toBe(true);
@@ -783,10 +844,11 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
       { q1: '答' },
     );
     await mount();
-    await click('恢复草稿');
+
     expect(container.textContent).toContain('已不在支持列表中');
-    expect(button('发送问卷并生成').disabled).toBe(true);
-    button('发送问卷并生成').click();
+    await goToFinalQuestion();
+    expect(finalSubmitButton().disabled).toBe(true);
+    finalSubmitButton().click();
     await settle();
     expect(mocks.execute).not.toHaveBeenCalled();
   });

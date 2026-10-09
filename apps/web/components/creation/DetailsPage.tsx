@@ -1,5 +1,9 @@
 'use client';
 
+import { BackHomeLink } from '@mahoshojo/ui-web/shell';
+import { getQuestionnaireQuestionPresentation } from '@mahoshojo/ui-web/questionnaire';
+import { QuestionnaireResultActions } from '@mahoshojo/ui-web/details-controls';
+
 import { generationActionClassNames, generationSubmitClassName } from '@mahoshojo/ui-web/generation-actions';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import MagicalGirlCard from '@/components/MagicalGirlCard';
@@ -1503,7 +1507,6 @@ export const DetailsPage: React.FC = () => {
     );
   }
 
-  const isLastQuestion = currentQuestionIndex === mergedQuestions.length - 1;
   const currentQuestionItem = mergedQuestions[currentQuestionIndex];
   const currentQuestion = currentQuestionItem?.question;
   const currentQuestionnaireTitle = currentQuestionItem?.questionnaireTitle ?? '';
@@ -1511,12 +1514,7 @@ export const DetailsPage: React.FC = () => {
   const currentMaxLength = currentLimitInfo.limit;
   const currentAnswerLength = currentAnswer.trim().length;
   const isCurrentOverLimit = Boolean(currentMaxLength && currentAnswerLength > currentMaxLength);
-  const currentLimitLabel = currentLimitInfo.source === 'question'
-    ? `题目上限 ${currentMaxLength} 字`
-    : currentLimitInfo.source === 'global'
-      ? `原生统一上限 ${currentMaxLength} 字`
-      : '不限';
-  const quickSuggestions = currentQuestion?.suggestions ?? [];
+
   const hasOptions = (currentQuestion?.options?.length ?? 0) > 0;
   const allowCustomInput = currentQuestion?.allowCustom !== false;
   const isCurrentRequired = currentQuestion?.required === true;
@@ -1526,19 +1524,12 @@ export const DetailsPage: React.FC = () => {
     label: item.questionnaireTitle ? `${item.question.question} · ${item.questionnaireTitle}` : item.question.question
   }));
   const progressPercent = Math.round(((currentQuestionIndex + 1) / mergedQuestions.length) * 100);
-  const fallbackQuickOptions = allowCustomInput ? ['还没想好', '不想回答'] : [];
-  const suggestionPool = showTextInput ? quickSuggestions.filter(Boolean) : [];
-  const nextButtonLabel = isCooldown
-    ? `请等待 ${remainingTime} 秒`
-    : submitting
-      ? '提交中...'
-      : isLastQuestion
-        ? (isCurrentRequired || currentAnswer.trim() ? '提交' : '跳过并提交')
-        : (!isCurrentRequired && !currentAnswer.trim() ? '跳过并继续' : '下一题');
-  const optionsHintText = allowCustomInput
-    ? '推荐选项（点击后自动跳转下一题，也可继续补充文本）'
-    : '推荐选项（点击后自动跳转下一题，本题仅可从选项中选择）';
-  const overLimitText = `⚠️ 已超过${currentLimitLabel}，继续提交将导致生成内容丧失原生性。`;
+  const questionPresentation = getQuestionnaireQuestionPresentation({
+    variant: 'details', question: currentQuestion, answer: currentAnswer,
+    index: currentQuestionIndex, total: mergedQuestions.length,
+    busy: submitting, cooldownSeconds: isCooldown ? remainingTime : 0,
+  });
+  const { quickOptions: fallbackQuickOptions, nextButtonLabel, optionsHintText, overLimitText, limitLabel: currentLimitLabel, suggestions: suggestionPool } = questionPresentation;
   const nextButtonContent = submitting ? (
     <span className="flex items-center justify-center">
       <svg className="animate-spin h-4 w-4 text-white" style={{ marginLeft: '-0.25rem', marginRight: '0.5rem' }} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -1579,9 +1570,7 @@ export const DetailsPage: React.FC = () => {
                 onNavigateEntry={(href) => router.push(href)}
                 extraLink={<CreatorEntryLink />}
                 backHome={(
-                  <button type="button" onClick={() => router.push('/')} className="footer-link">
-                    返回首页
-                  </button>
+                  <BackHomeLink renderLink={(props) => <Link {...props} />} />
                 )}
               />
             ) : (
@@ -1641,7 +1630,7 @@ export const DetailsPage: React.FC = () => {
 
                 <QuestionnaireQuestionPanel
                   theme={DETAILS_QUESTIONNAIRE_THEME}
-                  progressLabel={`问题 ${currentQuestionIndex + 1} / ${mergedQuestions.length}`}
+                  progressLabel={questionPresentation.progressLabel}
                   progressPercent={progressPercent}
                   progressExtra={autoSaveTimestamp ? (
                     <span className="text-xs text-gray-400">已自动保存于 {new Date(autoSaveTimestamp).toLocaleTimeString()}</span>
@@ -1663,7 +1652,7 @@ export const DetailsPage: React.FC = () => {
                   showTextInput={showTextInput}
                   answer={currentAnswer}
                   onAnswerChange={handleCurrentAnswerChange}
-                  placeholder={currentQuestion?.placeholder ?? '请输入您的答案（建议控制在适中长度）'}
+                  placeholder={questionPresentation.placeholder}
                   answerLength={currentAnswerLength}
                   maxLength={currentMaxLength}
                   limitLabel={currentLimitLabel}
@@ -1676,7 +1665,7 @@ export const DetailsPage: React.FC = () => {
                     opacity: isTransitioning ? 0 : 1,
                     transform: isTransitioning ? 'translateX(-16px)' : 'translateX(0)',
                   }}
-                  prevLabel="返回上题"
+                  prevLabel={questionPresentation.prevLabel}
                   nextButtonContent={nextButtonContent}
                   onPrev={handlePreviousQuestion}
                   onNext={handleNext}
@@ -1784,12 +1773,7 @@ export const DetailsPage: React.FC = () => {
 
                 {/* 返回首页链接 */}
                 <div className="text-center" style={{ marginTop: '1rem' }}>
-                  <button
-                    onClick={() => router.push('/')}
-                    className="footer-link"
-                  >
-                    返回首页
-                  </button>
+                  <BackHomeLink renderLink={(props) => <Link {...props} />} />
                 </div>
               </>
             )}
@@ -1900,48 +1884,31 @@ export const DetailsPage: React.FC = () => {
                 onToggle={() => setShowDetails(!showDetails)}
               />
 
-              {/* 保存原始数据按钮 */}
-              <div className="card" style={{ marginTop: '1rem' }}>
-                <div className="text-center">
-                  <h3 className="text-lg font-medium text-gray-800" style={{ marginBottom: '1rem' }}>保存人物设定</h3>
+              <QuestionnaireResultActions
+                variant="details"
+                renderLink={(props) => <Link {...props} />}
+                sizeIndicator={resolvedResultPayload && <JsonSizeIndicator
+                  data={resolvedResultPayload}
+                  warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
+                />}
+              >
+                {resolvedResultPayload && <>
+                  <SaveJsonButton
+                    data={resolvedResultPayload}
+                    mode={jsonSaveMode}
+                    recommendedMode={recommendedJsonMode}
+                    resolveFileName={resolveDetailsJsonFileName}
+                  />
                   <div className="flex flex-col gap-3">
-                    {resolvedResultPayload && (
-                      <>
-                        <SaveJsonButton
-                          data={resolvedResultPayload}
-                          mode={jsonSaveMode}
-                          recommendedMode={recommendedJsonMode}
-                          resolveFileName={resolveDetailsJsonFileName}
-                        />
-                        {/* SaveToCloudButton 内部为「保存 + 替换」双按钮，独占一列避免与相邻按钮挤压 */}
-                        <div className="flex flex-col gap-3">
-                          <SaveToCloudButton
-                            data={resolvedResultPayload}
-                            buttonText="保存到云端"
-                            className={`${generationActionClassNames.primary} w-full`}
-                            style={{ marginLeft: 0 }}
-                          />
-                        </div>
-                      </>
-                    )}
-                  </div>
-                  {resolvedResultPayload && (
-                    <JsonSizeIndicator
+                    <SaveToCloudButton
                       data={resolvedResultPayload}
-                      warningText="⚠️ 接近云端 300KB 上限，保存/替换可能失败，请先精简数据。"
+                      buttonText="保存到云端"
+                      className={`${generationActionClassNames.primary} w-full`}
+                      style={{ marginLeft: 0 }}
                     />
-                  )}
-                  {/* 新增：前往竞技场的入口 */}
-                  <div className="mt-2 pt-6 border-t border-gray-200">
-                    <p className="text-sm text-gray-600 mb-2">
-                      保存好你的设定文件了吗？
-                    </p>
-                    <Link href="/battle" className="footer-link text-lg">
-                      前往竞技场，开始战斗！→
-                    </Link>
                   </div>
-                </div>
-              </div>
+                </>}
+              </QuestionnaireResultActions>
 
               {/* 立绘生成器 */}
               <div className="card" style={{ marginTop: '1rem' }}>

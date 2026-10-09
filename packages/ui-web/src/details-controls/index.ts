@@ -93,3 +93,5 @@ export {
 } from './QuestionnairePageCard';
 
 export { QuestionnaireLanguageSection, type QuestionnaireLanguageSectionProps } from './QuestionnaireLanguageSection';
+export { CreatorEntryLink, type CreatorEntryLinkProps } from './CreatorEntryLink';
+export { QuestionnaireResultActions, type QuestionnaireResultActionsProps } from './QuestionnaireResultActions';

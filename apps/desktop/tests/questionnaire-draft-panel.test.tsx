@@ -11,33 +11,27 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); });
-const props = () => ({ pendingRestore: false, draftSaved: true, draftError: null, draftBlocked: false, busy: false, actionClass: 'action', onRestore: vi.fn(), onRetrySave: vi.fn(), onRequestClear: vi.fn(), onReload: vi.fn() });
+const props = () => ({ draftError: null, draftBlocked: false, busy: false, actionClass: 'action', onRetrySave: vi.fn() });
 
-it('collapses normal maintenance while exposing saved state and retains explicit maintenance actions', () => {
-  const input = props();
-  act(() => root.render(<QuestionnaireDraftPanel {...input} />));
-  const details = container.querySelector('details')!;
-  expect(details.open).toBe(false);
-  expect(container.querySelector('[role="status"]')?.closest('details')).toBeNull();
-  expect(container.querySelector('[role="status"]')?.textContent).toContain('已保存');
-  act(() => { details.open = true; });
-  const buttons = [...details.querySelectorAll('button')];
-  act(() => buttons.find((button) => button.textContent === '清除草稿')!.click());
-  act(() => buttons.find((button) => button.textContent === '重新加载问卷与配置')!.click());
-  expect(input.onRequestClear).toHaveBeenCalledOnce();
-  expect(input.onReload).toHaveBeenCalledOnce();
-  expect(input.onRestore).not.toHaveBeenCalled();
+it('renders no routine saved, restore, clear or maintenance controls', () => {
+  act(() => root.render(<QuestionnaireDraftPanel {...props()} />));
+  expect(container.textContent).toBe('');
+  expect(container.querySelector('button')).toBeNull();
 });
 
-it('keeps pending restore, errors and clear confirmation visible, and preserves busy/blocked action gates', () => {
+it('exposes only recoverable save failure retry and disables it while busy', () => {
   const input = props();
-  act(() => root.render(<QuestionnaireDraftPanel {...input} pendingRestore draftError="读取失败" draftBlocked busy confirmation={<div role="group" aria-label="确认清除草稿">确认内容</div>} />));
-  expect(container.querySelector('details')?.open).toBe(true);
-  expect(container.querySelector('[role="alert"]')?.closest('details')).toBeNull();
-  expect(container.querySelector('[role="group"]')?.closest('details')).toBeNull();
-  const buttons = [...container.querySelectorAll('button')];
-  expect(buttons.some((button) => button.textContent === '重试保存草稿')).toBe(false);
-  expect(buttons.find((button) => button.textContent === '清除草稿')?.disabled).toBe(true);
-  expect(buttons.find((button) => button.textContent === '重新加载问卷与配置')?.disabled).toBe(true);
-  expect(buttons.find((button) => button.textContent === '恢复草稿')?.closest('details')).toBeNull();
+  act(() => root.render(<QuestionnaireDraftPanel {...input} draftError="写入失败" />));
+  expect(container.querySelector('[role="alert"]')?.textContent).toBe('写入失败');
+  act(() => container.querySelector('button')!.click());
+  expect(input.onRetrySave).toHaveBeenCalledOnce();
+  act(() => root.render(<QuestionnaireDraftPanel {...input} draftError="写入失败" busy />));
+  expect(container.querySelector('button')?.disabled).toBe(true);
+});
+
+it('keeps damaged source protection visible without offering overwrite or destructive recovery', () => {
+  act(() => root.render(<QuestionnaireDraftPanel {...props()} draftError="损坏" draftBlocked />));
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('可继续填写和生成');
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('原数据已保留');
+  expect(container.querySelector('button')).toBeNull();
 });

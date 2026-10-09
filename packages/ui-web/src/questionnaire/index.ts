@@ -16,3 +16,4 @@ export {
   type QuestionnaireSelectionTheme,
 } from './QuestionnaireSelectionPanel';
 export { QuestionnaireNavigationActions, type QuestionnaireNavigationActionsProps } from './QuestionnaireNavigationActions';
+export { getQuestionnaireQuestionPresentation } from './question-presentation';
