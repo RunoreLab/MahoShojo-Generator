@@ -36,6 +36,7 @@ const completed: DetailsGenerationOutcome = { status: 'completed', mode: 'direct
 let root: Root;
 let container: HTMLDivElement;
 let close: (event: { preventDefault: () => void }) => void;
+let activeCloseHandlers: Set<typeof close>;
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 120)); });
 const button = (name: string) => [...container.querySelectorAll('button')].find((item) => item.textContent === name)!;
 const click = async (name: string) => { await act(async () => button(name).click()); await settle(); };
@@ -56,7 +57,7 @@ const regenerate = async () => {
 const draft = () => ({ version: 1, answers: { [`${builtinSelectionId(questionnaire.id)}::${questionnaire.questions[0].id}`]: '善良' }, language: '简体中文' });
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  vi.clearAllMocks(); vi.mocked(invoke).mockReset(); resetDesktopCloudSessionStoreForTests(); window.localStorage.clear();
+  vi.clearAllMocks(); activeCloseHandlers = new Set(); vi.mocked(invoke).mockReset(); resetDesktopCloudSessionStoreForTests(); window.localStorage.clear();
   // 新 overlay 模型下执行位置与连接选择正交且默认不自动选中；
   // 需要走通生成路径的用例统一预置"客户端执行 + 已选 local 连接"。
   window.localStorage.setItem(DESKTOP_AI_CONFIG_STORAGE_KEY, JSON.stringify({
@@ -67,7 +68,7 @@ beforeEach(() => {
   resetDesktopAiConfigStoreForTests();
   mocks.profiles.mockResolvedValue({ id: 'local', name: '本地模型', adapter: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', modelId: 'model' });
   mocks.execute.mockResolvedValue(completed); mocks.save.mockResolvedValue({ written: true });
-  mocks.listen.mockImplementation(async (handler) => { close = handler; return vi.fn(); });
+  mocks.listen.mockImplementation(async (handler) => { close = handler; activeCloseHandlers.add(handler); return vi.fn(() => { activeCloseHandlers.delete(handler); }); });
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => questionnaire })));
   vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
   HTMLElement.prototype.scrollIntoView = mocks.scrollResult;
@@ -118,6 +119,7 @@ describe('Desktop Details real route and session UI (native adapter mock)', () =
     });
     window.localStorage.setItem(DETAILS_DRAFT_KEY, JSON.stringify(draft()));
     const router = await mount(); await submitQuestionnaire(); await click('保存到云端');
+    expect(activeCloseHandlers.size).toBe(1);
     await act(async () => { [...document.querySelectorAll('button')].find((node) => node.textContent === '保存')!.click(); }); await settle();
     expect(button('重新生成').disabled).toBe(true); expect(button('保存到本地卡库').disabled).toBe(true);
     await act(async () => { void router.navigate({ to: '/' }); }); await settle(); expect(router.state.location.pathname).toBe('/details');

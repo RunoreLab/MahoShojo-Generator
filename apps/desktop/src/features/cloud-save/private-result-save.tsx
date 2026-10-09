@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { SaveCardModal, ReplaceCardModal } from '@mahoshojo/ui-web/cloud-save';
 import type { OnlineDataCardType, OwnedDataCardReplacementTarget } from '@mahoshojo/contracts/data-cards';
@@ -8,14 +8,13 @@ import { useLeaveGuard } from '../../app/useLeaveGuard';
 import { DesktopOwnedCardsModal, type DesktopOwnedCard } from './owned-cards-modal';
 import type { InvokeFn } from '../../platform/cloud-bridge';
 
-export interface DesktopCloudCardActionsProps {
+interface DesktopCloudCardActionsBaseProps {
   data: unknown;
   cardType?: OnlineDataCardType;
   isBlocked?: () => boolean;
   disabled?: boolean;
   className?: string;
   invokeFn?: InvokeFn;
-  onBusyChange?: (busy: boolean) => void;
   defaultName?: string;
   defaultDescription?: string;
   manageOpen?: boolean;
@@ -23,6 +22,11 @@ export interface DesktopCloudCardActionsProps {
   onSelectCard?: (card: DesktopOwnedCard) => void | Promise<void>;
   showManageButton?: boolean;
 }
+/** External guard owners must synchronously receive cloud busy state. */
+export type DesktopCloudCardActionsProps = DesktopCloudCardActionsBaseProps & (
+  | { externalLeaveGuard?: undefined; onBusyChange?: (busy: boolean) => void }
+  | { externalLeaveGuard: { ready: boolean; message: string | null }; onBusyChange: (busy: boolean) => void }
+);
 
 /** One result/account scope owns creation, target selection, confirmation and unknown writes. */
 export function DesktopCloudCardActions(props: DesktopCloudCardActionsProps) {
@@ -37,10 +41,21 @@ export function DesktopCloudCardActions(props: DesktopCloudCardActionsProps) {
     isCurrent={() => store.getSnapshot().account?.userId === userId && store.getCredentialEpoch() === epoch && store.getSnapshot().verification === 'verified' && store.getSnapshot().authFlow.kind === 'idle'} />;
 }
 
-export function DesktopCloudCardActionsScope({ data, cardType = 'character', isBlocked, disabled = false, className, invokeFn = invoke, userId, isCurrent, canSave, onBusyChange,
-  defaultName, defaultDescription, manageOpen, onManageClose, onSelectCard, showManageButton = false }: DesktopCloudCardActionsProps & {
-    userId: number | null; canSave: boolean; isCurrent: () => boolean;
-  }) {
+type CloudCardScopeProps = DesktopCloudCardActionsProps & { userId: number | null; canSave: boolean; isCurrent: () => boolean };
+type CloudCardViewProps = CloudCardScopeProps & { pending: RefObject<boolean>; guard: { ready: boolean; message: string | null } };
+
+export function DesktopCloudCardActionsScope(props: CloudCardScopeProps) {
+  const pending = useRef(false);
+  return props.externalLeaveGuard
+    ? <DesktopCloudCardActionsView {...props} pending={pending} guard={props.externalLeaveGuard} />
+    : <InternallyGuardedCloudCardActions {...props} pending={pending} />;
+}
+function InternallyGuardedCloudCardActions(props: CloudCardScopeProps & { pending: RefObject<boolean> }) {
+  const guard = useLeaveGuard(() => props.pending.current, '正在保存云端数据卡，请等待响应后再离开；本地结果保留。');
+  return <DesktopCloudCardActionsView {...props} guard={guard} />;
+}
+function DesktopCloudCardActionsView({ data, cardType = 'character', isBlocked, disabled = false, className, invokeFn = invoke, userId, isCurrent, canSave, onBusyChange,
+  defaultName, defaultDescription, manageOpen, onManageClose, onSelectCard, showManageButton = false, pending, guard }: CloudCardViewProps) {
   const [saveOpen, setSaveOpen] = useState(false);
   const [replaceOpen, setReplaceOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -66,10 +81,8 @@ export function DesktopCloudCardActionsScope({ data, cardType = 'character', isB
   const capacityEpoch = useRef(0);
   const operation = useRef(0);
   const frozenData = useRef<unknown>(null);
-  const pending = useRef(false);
   const preparingRef = useRef(false);
   const active = useRef(true);
-  const guard = useLeaveGuard(() => pending.current, '正在保存云端数据卡，请等待响应后再离开；本地结果保留。');
   const busyChanged = useRef(onBusyChange); busyChanged.current = onBusyChange;
   const current = useRef(isCurrent); current.current = isCurrent;
   useEffect(() => { active.current = true; return () => { active.current = false; operation.current++; busyChanged.current?.(false); }; }, []);

@@ -360,7 +360,7 @@ function FreeForm({ session }: { session: FreeSession }) {
                     <FreeJsonResult data={card} />
                   </FreeResultPanel>
                 )}
-                {resultCardType && <PrivateResultSave data={card} cardType={resultCardType} onBusyChange={onCloudSavingChange} isBlocked={() => session.isBusy() || aiStore.isPreparingGeneration() || attachmentReadingRef.current} disabled={!guard.ready || busy || isReadingAttachments} className={generationActionClassNames.primary} />}
+                {resultCardType && <PrivateResultSave externalLeaveGuard={guard} data={card} cardType={resultCardType} onBusyChange={onCloudSavingChange} isBlocked={() => session.isBusy() || aiStore.isPreparingGeneration() || attachmentReadingRef.current} disabled={!guard.ready || busy || isReadingAttachments} className={generationActionClassNames.primary} />}
                   <button className={generationActionClassNames.primary} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => { if (guard.ready) void session.saveResult(); }}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>
                 {state.saveStatus === 'saved' && <p role="status">已保存到本地卡库。</p>}
                 {state.saveStatus === 'already-present' && <p role="status">本地卡库已存在相同内容，原记录保持不变。</p>}

@@ -58,6 +58,9 @@ const draftFor = (page: Page, kind: Kind, mode: Mode) => {
   return { answers: { 'preset:cloud-test::q': '输入答案不可上传' }, language: 'zh-CN', template: kind, generationMode: mode, freeformBrief: '输入说明不可上传', selectedRuleIds: [], primaryRuleId: '', questionnaireSelections: [{ source: 'preset', selectionId: 'preset:cloud-test', questionnaire: { ...questionnaire, kind: page === 'canshou' ? 'canshou' : 'magical-girl' } }] };
 };
 let root: Root; let container: HTMLDivElement; let closeHandlers: ((event: { preventDefault: () => void }) => void)[];
+let activeCloseHandlers: Set<(event: { preventDefault: () => void }) => void>;
+// Mirror Tauri's per-callback default destroy, not a shared preventDefault flag.
+const dispatchNativeClose = () => { let destroys = 0; for (const handler of activeCloseHandlers) { let prevented = false; handler({ preventDefault: () => { prevented = true; } }); if (!prevented) destroys++; } return destroys; };
 let finish: (response: unknown) => void;
 const flush = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 80)); });
 const button = (text: string) => [...document.querySelectorAll('button')].find((node) => node.textContent?.trim() === text)!;
@@ -66,13 +69,13 @@ const writes = () => mocks.invoke.mock.calls.filter(([command, args]) => command
 const resultData = (kind: Kind) => ({ ...cards[kind], futureExtension: { unknown: ['keep', { nested: true }] }, _author: { input: 'preserve existing fields' } });
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  vi.clearAllMocks(); window.localStorage.clear(); resetDesktopCloudSessionStoreForTests(); closeHandlers = [];
+  vi.clearAllMocks(); window.localStorage.clear(); resetDesktopCloudSessionStoreForTests(); closeHandlers = []; activeCloseHandlers = new Set();
   window.localStorage.setItem(DESKTOP_AI_CONFIG_STORAGE_KEY, JSON.stringify({ version: 2, selection: { executionPreference: 'client', clientConnectionId: 'local' }, hiddenPresetIds: [] }));
   resetDesktopAiConfigStoreForTests();
   mocks.profiles.mockResolvedValue({ id: 'local', name: '本地模型', adapter: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', modelId: 'model' });
   mocks.save.mockResolvedValue({ written: true });
   mocks.readAttachments.mockReset().mockResolvedValue({ added: [], skipped: 0 });
-  mocks.listen.mockImplementation(async (handler) => { closeHandlers.push(handler); return vi.fn(); });
+  mocks.listen.mockImplementation(async (handler) => { closeHandlers.push(handler); activeCloseHandlers.add(handler); return vi.fn(() => { activeCloseHandlers.delete(handler); }); });
   mocks.invoke.mockImplementation(async (command, args) => {
     const account = { userId: 7, username: 'mock-user' }; const sessionExpiresAt = '2099-01-01T00:00:00.000Z';
     if (command === 'cloud_cached_account') return { account, sessionExpiresAt };
@@ -112,7 +115,7 @@ describe('all actual generator hosts reuse the private completed-result save', (
       } else await click(page === 'scenario' ? '生成情景' : page === 'sublimation' ? '开始升华' : '生成数据卡');
       expect(mocks.execute).toHaveBeenCalledTimes(1);
     } else expect(mocks.execute).not.toHaveBeenCalled();
-    expect(button('保存到云端')).toBeTruthy(); expect(writes()).toHaveLength(0);
+    expect(button('保存到云端')).toBeTruthy(); expect(writes()).toHaveLength(0); expect(activeCloseHandlers.size).toBe(1);
     // Editable input changes after completion never decide the completed card's cloud type.
     if (page === 'free') {
       const select = container.querySelector<HTMLSelectElement>('[aria-label="选择 Schema"]')!;
@@ -132,7 +135,7 @@ describe('all actual generator hosts reuse the private completed-result save', (
     expect(writes()[0][1].request).toEqual({ routeId: 'data-cards.create', expectedUserId: 7, body: { type: kind === 'scenario' || kind === 'general-scenario' ? 'scenario' : 'character', name: kind === 'magical-girl' ? '已完成少女' : kind === 'canshou' ? '已完成残兽' : kind === 'general' ? '已完成角色' : kind === 'scenario' ? '已完成情景' : '已完成通用情景', description: kind === 'scenario' || kind === 'general-scenario' ? '情景数据卡' : '角色数据卡', data: completedData, isPublic: 0 } });
     expect(button('保存到本地卡库').disabled).toBe(true);
     await act(async () => { void router.navigate({ to: '/' }); }); await flush(); expect(router.state.location.pathname).toBe(`/${page}`);
-    const preventDefault = vi.fn(); await act(async () => { closeHandlers.forEach((handler) => handler({ preventDefault })); }); expect(preventDefault).toHaveBeenCalled();
+    const preventDefault = vi.fn(); await act(async () => { closeHandlers.forEach((handler) => handler({ preventDefault })); expect(dispatchNativeClose()).toBe(0); }); expect(preventDefault).toHaveBeenCalled();
     await act(async () => finish({ status: 500, body: { error: 'after insert' } })); await flush();
     expect(document.body.textContent).toContain('服务器可能已创建副本'); expect(button('保存').disabled).toBe(true);
     await click('取消'); await click('保存到云端'); expect(writes()).toHaveLength(1); expect(button('保存').disabled).toBe(true);
@@ -192,6 +195,30 @@ describe('all actual generator hosts reuse the private completed-result save', (
     window.localStorage.setItem(`mahoshojo.desktop.${page}.draft.v1`, JSON.stringify({ version: 1, ...draftFor(page, kind, 'stream'), output: { phase: 'uncertain', mode: 'direct-local', cardKind: kind, card: resultData(kind), rawText: 'partial' } }));
     await mount(page);
     expect(button('保存到云端')).toBeUndefined(); expect(writes()).toHaveLength(0); expect(mocks.execute).not.toHaveBeenCalled();
+  });
+
+  it('one native owner protects completed-result regeneration and cancelled close decisions', async () => {
+    const data = resultData('general');
+    window.localStorage.setItem('mahoshojo.desktop.free.draft.v1', JSON.stringify({ version: 1, ...draftFor('free', 'general', 'non-stream'), output: { phase: 'completed', mode: 'direct-local', cardKind: 'general', card: data, rawText: '' } }));
+    let finishGeneration!: (outcome: unknown) => void;
+    mocks.execute.mockImplementation(() => new Promise((resolve) => { finishGeneration = resolve; }));
+    const router = await mount('free');
+    expect(activeCloseHandlers.size).toBe(1); expect(dispatchNativeClose()).toBe(1);
+    const pageHandler = [...activeCloseHandlers][0];
+    await click('重新生成');
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    await act(async () => { button('确定重新生成').click(); expect(dispatchNativeClose()).toBe(0); }); await flush();
+    expect(activeCloseHandlers.size).toBe(1); expect(mocks.execute).toHaveBeenCalledOnce();
+    await act(async () => { expect(dispatchNativeClose()).toBe(0); });
+    expect(mocks.execute.mock.calls[0][3].aborted).toBe(false);
+    // A callback from StrictMode's released registration may arrive late, but cannot destroy.
+    for (const stale of closeHandlers.filter((handler) => !activeCloseHandlers.has(handler))) {
+      const prevented = vi.fn(); stale({ preventDefault: prevented }); expect(prevented).toHaveBeenCalledOnce();
+    }
+    await click('取消生成');
+    await act(async () => { finishGeneration({ status: 'cancelled', mode: 'direct-local', rawText: '', reason: 'aborted' }); }); await flush();
+    await act(async () => { await router.navigate({ to: '/' }); }); await flush();
+    const prevented = vi.fn(); pageHandler({ preventDefault: prevented }); expect(prevented).toHaveBeenCalledOnce();
   });
 
 });
