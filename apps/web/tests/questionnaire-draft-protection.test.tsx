@@ -95,10 +95,29 @@ describe.each(pages)('%s Web answer-draft protection', (targetPage) => {
     await act(async () => home().click()); expect(mocks.push).not.toHaveBeenCalled();
   });
 
+  it('guards deletion of the final restored answer when autosave removal fails, then clears protection only after successful retry', async () => {
+    window.localStorage.setItem(key(), JSON.stringify({ version: 3, answerEntries: [{ key: 'draft-guard::q1', question: '角色想法', questionId: 'q1', questionnaireId: 'draft-guard', answer: '合法旧回答' }] }));
+    await mount(); await click(page === 'Canshou' ? '开始调查' : '开始回答问卷');
+    expect(input().value).toBe('合法旧回答');
+    const saved = window.localStorage.getItem(key()); const originalRemove = Storage.prototype.removeItem;
+    const failedRemoval = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, name) {
+      if (name === key()) throw new Error('disk');
+      return originalRemove.call(this, name);
+    });
+    await typeAnswer('');
+    expect(input().value).toBe(''); expect(window.localStorage.getItem(key())).toBe(saved);
+    expect(container.textContent).toContain('问卷存档写入失败');
+    const dirty = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(dirty); expect(dirty.defaultPrevented).toBe(true);
+    await act(async () => home().click()); expect(mocks.push).not.toHaveBeenCalled();
+    failedRemoval.mockRestore(); vi.mocked(window.confirm).mockReturnValue(true); await clearAnswers();
+    expect(window.localStorage.getItem(key())).toBeNull(); expect(input().value).toBe('');
+    const clean = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(clean); expect(clean.defaultPrevented).toBe(false);
+  });
+
   it('keeps write-failed answers dirty until an actual successful save, without blocking generation controls', async () => {
     await mount(); await click(page === 'Canshou' ? '开始调查' : '开始回答问卷');
     const originalSet = Storage.prototype.setItem;
-    const failWrite = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (name, value) {
+    const failWrite = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, name, value) {
       if (name === key()) throw new Error('quota');
       return originalSet.call(this, name, value);
     });
@@ -116,7 +135,7 @@ describe.each(pages)('%s Web answer-draft protection', (targetPage) => {
 
   it('does not trap a pristine empty page when its initial empty cleanup cannot persist', async () => {
     const originalRemove = Storage.prototype.removeItem;
-    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (name) {
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, name) {
       if (name === key()) throw new Error('disk');
       return originalRemove.call(this, name);
     });
@@ -130,7 +149,7 @@ describe.each(pages)('%s Web answer-draft protection', (targetPage) => {
     await mount(); await click(page === 'Canshou' ? '开始调查' : '开始回答问卷');
     expect(input().value).toBe('合法回答'); expect(container.textContent).not.toContain('旧问卷存档无法读取');
     const saved = window.localStorage.getItem(key()); const remove = Storage.prototype.removeItem;
-    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (name) { if (name === key()) throw new Error('disk'); return remove.call(this, name); });
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(function (this: Storage, name) { if (name === key()) throw new Error('disk'); return remove.call(this, name); });
     vi.mocked(window.confirm).mockReturnValue(true); await clearAnswers();
     expect(input().value).toBe('合法回答'); expect(window.localStorage.getItem(key())).toBe(saved);
     expect(container.textContent).toContain('清空存档失败'); expect(window.alert).not.toHaveBeenCalledWith('存档已清空！');

@@ -6,7 +6,7 @@ import { QuestionnaireResultActions } from '@mahoshojo/ui-web/details-controls';
 
 import { generationActionClassNames, generationSubmitClassName } from '@mahoshojo/ui-web/generation-actions';
 import { useUnsavedPageGuard } from '@mahoshojo/ui-web/client';
-import { assertSupportedQuestionnaireAnswerDraft } from '@/lib/questionnaire-draft-shape';
+import { assertSupportedQuestionnaireAnswerDraft, questionnaireAnswerDraftFingerprint } from '@/lib/questionnaire-draft-shape';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import MagicalGirlCard from '@/components/MagicalGirlCard';
 import GeneralCharacterCard from '@/components/GeneralCharacterCard';
@@ -179,6 +179,7 @@ export const DetailsPage: React.FC = () => {
   const draftRestoredRef = useRef(false);
   const draftStorageBlocked = useRef(false);
   const unsavedAnswers = useRef(false);
+  const savedAnswersBaseline = useRef(questionnaireAnswerDraftFingerprint({}));
   const unpersistedResult = useRef(false);
   const [draftError, setDraftError] = useState<string | null>(null);
   const previousQuestionTargetsRef = useRef<QuestionnaireAnswerMatchTarget[] | null>(null);
@@ -907,6 +908,7 @@ export const DetailsPage: React.FC = () => {
         }
       }
 
+      savedAnswersBaseline.current = questionnaireAnswerDraftFingerprint(nextAnswers);
       if (Object.keys(nextAnswers).length > 0) {
         setAnswersByKey((prev) => ({ ...prev, ...nextAnswers }));
         const firstKey = mergedQuestions[0]?.key;
@@ -925,7 +927,7 @@ export const DetailsPage: React.FC = () => {
   useEffect(() => {
     if (!draftRestoreReady || allQuestionTargets.length === 0) return;
     if (draftStorageBlocked.current) {
-      unsavedAnswers.current = Object.values(answersByKey).some((answer) => answer.trim());
+      unsavedAnswers.current = questionnaireAnswerDraftFingerprint(answersByKey) !== savedAnswersBaseline.current;
       return;
     }
     try {
@@ -937,11 +939,12 @@ export const DetailsPage: React.FC = () => {
       } else {
         localStorage.removeItem(LOCAL_STORAGE_KEY);
       }
+      savedAnswersBaseline.current = questionnaireAnswerDraftFingerprint(answersByKey);
       unsavedAnswers.current = false;
       setDraftError(null);
     } catch (e) {
       console.error("Failed to save answers to localStorage", e);
-      unsavedAnswers.current = Object.values(answersByKey).some((answer) => answer.trim());
+      unsavedAnswers.current = questionnaireAnswerDraftFingerprint(answersByKey) !== savedAnswersBaseline.current;
       setAutoSaveTimestamp(null);
       setDraftError('问卷存档写入失败，当前内容仅保留在本页，请及时导出备份。');
     }
@@ -1175,6 +1178,7 @@ export const DetailsPage: React.FC = () => {
         setDraftError('清空存档失败，当前答案和原存档均已保留。');
         return;
       }
+      savedAnswersBaseline.current = questionnaireAnswerDraftFingerprint({});
       unsavedAnswers.current = false;
       setDraftError(null);
     }

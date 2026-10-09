@@ -15,3 +15,9 @@ it.each([
 ].map((value) => [value]))('rejects an unknown payload before an empty autosave can remove it: %j', (value) => {
   expect(() => assertSupportedQuestionnaireAnswerDraft(value, targets)).toThrow();
 });
+
+it.each(['version', 'answerEntries', 'answersByKey'])('retains a legacy question id named %s without accepting a future envelope', (questionId) => {
+  const custom = [{ key: `preset:q::${questionId}`, index: 0, question: '旧题', questionId }];
+  expect(() => assertSupportedQuestionnaireAnswerDraft({ [questionId]: '旧回答' }, custom)).not.toThrow();
+  expect(() => assertSupportedQuestionnaireAnswerDraft({ version: 99, answersByKey: {} }, custom)).toThrow();
+});
