@@ -227,7 +227,8 @@
     "./tavern-card/worldbook": "./src/tavern-card/worldbook.ts",
     "./tavern-card/scenario": "./src/tavern-card/scenario.ts",
     "./tavern-card/limits": "./src/tavern-card/limits.ts",
-    "./tavern-card/recommend": "./src/tavern-card/recommend.ts"
+    "./tavern-card/recommend": "./src/tavern-card/recommend.ts",
+    "./team-merge": "./src/team-merge.ts"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",
