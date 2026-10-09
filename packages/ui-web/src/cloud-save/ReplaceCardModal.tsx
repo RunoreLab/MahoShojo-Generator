@@ -26,8 +26,8 @@ export function ReplaceCardModal({ isOpen, target, onClose, onConfirm, isSaving 
     <div className="space-y-4 text-sm">
       <p>确认用当前编辑内容替换「{target?.name}」吗？</p>
       <p className="text-gray-600">保留目标卡片的名称、描述、公开状态和 ID。当前编辑内容及本地库保持不变。</p>
-      {target?.hasPendingUpdate ? <p className="rounded border border-yellow-200 bg-yellow-50 p-3 text-yellow-800">这张卡已有待审核更新；本次替换将更新待审稿。审核通过前，线上仍展示已生效的版本。</p>
-        : target?.isPublic === 1 || target?.isPublic === true ? <p className="rounded border border-yellow-200 bg-yellow-50 p-3 text-yellow-800">公开卡替换可能进入审核，审核通过后生效；以服务器返回的状态为准。</p> : null}
+      {target?.hasPendingUpdate && <p className="rounded border border-yellow-200 bg-yellow-50 p-3 text-yellow-800">这张卡已有待审核版本，请确认当前编辑内容是否为你希望提交的版本。</p>}
+      <p className="text-gray-600">本次替换可能需要审核；是否立即生效、是否更新待审版本，以服务器确认结果为准。</p>
       {error && <p role="alert" className="rounded bg-red-100 p-3 text-red-700">{error}</p>}
       <div className="flex gap-2">
         <button type="button" className="generate-button flex-1" disabled={isSaving || submitDisabled || target === null} onClick={onConfirm}>{isSaving ? '替换中...' : '确认替换'}</button>

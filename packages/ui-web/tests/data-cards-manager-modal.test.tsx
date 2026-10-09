@@ -83,7 +83,7 @@ describe('共源替换确认', () => {
     const close = vi.fn(); const confirm = vi.fn();
     const props = { isOpen: true, target: { name: '旧卡', type: 'character', isPublic: 1, hasPendingUpdate: true }, onClose: close, onConfirm: confirm };
     await act(async () => { root.render(<ReplaceCardModal {...props} error="替换失败，正文保留" />); });
-    expect(document.body.textContent).toContain('更新待审稿'); expect(document.body.textContent).toContain('保留目标卡片的名称');
+    expect(document.body.textContent).toContain('已有待审核版本'); expect(document.body.textContent).toContain('保留目标卡片的名称');
     await click(button('取消')); expect(close).toHaveBeenCalledOnce(); expect(confirm).not.toHaveBeenCalled();
     expect(document.querySelector('[role=alert]')?.textContent).toBe('替换失败，正文保留');
     await act(async () => { root.render(<ReplaceCardModal {...props} isSaving />); });
