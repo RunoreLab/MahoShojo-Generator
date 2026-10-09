@@ -66,6 +66,20 @@ function button(label: string): HTMLButtonElement {
 }
 
 describe('Sublimation shared Lore selection', () => {
+  it('renders optional supplemental Lore with a label, controlled edits and disabled state', () => {
+    const onChange = vi.fn();
+    const input = props({ supplementalLore: { text: '既有补充', onChange } });
+    act(() => root.render(<SublimationLoreSelection {...input} />));
+    const area = container.querySelector<HTMLTextAreaElement>('[aria-label="补充设定"]')!;
+    expect(area.value).toBe('既有补充');
+    expect(container.querySelector(`label[for="${area.id}"]`)?.textContent).toBe('补充设定');
+    act(() => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(area, '新补充'); area.dispatchEvent(new Event('input', { bubbles: true })); });
+    expect(onChange).toHaveBeenCalledWith('新补充');
+    act(() => root.render(<SublimationLoreSelection {...input} disabled />));
+    expect(area.disabled).toBe(true);
+    act(() => root.render(<SublimationLoreSelection {...props()} />));
+    expect(container.querySelector('[aria-label="补充设定"]')).toBeNull();
+  });
   it('uses host-controlled accessible disclosures, with stable unique targets', () => {
     const input = props({ expanded: false });
     act(() => root.render(<SublimationLoreSelection {...input} />));

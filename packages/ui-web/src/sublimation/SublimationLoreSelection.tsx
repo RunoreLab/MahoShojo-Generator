@@ -26,6 +26,8 @@ export interface SublimationLoreSelectionProps {
   pasteError?: string | null;
   tokenIndicator?: ReactNode;
   warnNonNative?: boolean;
+  /** Optional host-owned free-text Lore, including legacy restored drafts. */
+  supplementalLore?: { text: string; onChange: (text: string) => void };
   /** 只有已提供编辑器入口的宿主才传入，避免生成不可用的链接。 */
   editorNavigation?: { href?: string; onNavigate?: (href: string) => void };
 }
@@ -54,11 +56,13 @@ export function SublimationLoreSelection({
   pasteError,
   tokenIndicator,
   warnNonNative = false,
+  supplementalLore,
   editorNavigation,
 }: SublimationLoreSelectionProps) {
   const id = useId();
   const panelId = `${id}-lore`;
   const pastePanelId = `${id}-paste`;
+  const supplementalInputId = `${id}-supplemental-lore`;
   const pasteInputId = `${id}-paste-json`;
   const pasteErrorId = `${id}-paste-error`;
   const editorHref = editorNavigation?.href ?? '/questionnaire-editor';
@@ -73,7 +77,7 @@ export function SublimationLoreSelection({
         className="flex items-center justify-between w-full text-left font-medium text-purple-800 hover:text-purple-900"
         disabled={disabled}
       >
-        <span>设定（Lore）注入：选择问卷/设定卡</span>
+        <span>设定（Lore）注入：选择问卷/设定卡{supplementalLore?.text.trim() ? ' · 含补充设定' : ''}</span>
         <span className="ml-2" aria-hidden="true">{expanded ? '▼' : '▶'}</span>
       </button>
       <div id={panelId} hidden={!expanded}>
@@ -234,6 +238,12 @@ export function SublimationLoreSelection({
               )}
             </div>
 
+            {supplementalLore && <div>
+              <label htmlFor={supplementalInputId} className="text-xs font-semibold">补充设定</label>
+              <textarea id={supplementalInputId} aria-label="补充设定" className="input-field mt-2 h-28" rows={6}
+                value={supplementalLore.text} disabled={disabled} onChange={(event) => supplementalLore.onChange(event.target.value)} />
+              <p className="mt-1 text-xs text-purple-700">与已选来源一起注入；清空只移除这段补充设定。手写补充设定不授予原生许可。</p>
+            </div>}
             {loadError && <p role="alert" className="text-xs text-rose-500">{loadError}</p>}
             {tokenIndicator}
             {warnNonNative && (

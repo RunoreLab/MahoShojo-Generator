@@ -1,17 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { type QuestionnairePresetEntry, MAX_QUESTIONNAIRE_IMPORT_BYTES } from '@mahoshojo/domain/questionnaire-definition';
-import { ensureQuestionnaireSelectionId, collectUsedQuestionnaireSelectionIds, removeQuestionnaireSelection, setQuestionnaireSelectionLore, buildQuestionnaireSelectionLoreText, type QuestionnaireSelection } from '@mahoshojo/domain/questionnaire-selection';
+import { ensureQuestionnaireSelectionId, collectUsedQuestionnaireSelectionIds, removeQuestionnaireSelection, setQuestionnaireSelectionLore, type QuestionnaireSelection } from '@mahoshojo/domain/questionnaire-selection';
 import { CardLibraryModal, type BattleSelectionPayload, type CardLibrarySelectionContext } from '@mahoshojo/ui-web/card-library';
 import { SublimationLoreSelection } from '@mahoshojo/ui-web/sublimation';
 import { TokenIndicator } from '@mahoshojo/ui-web/details-controls';
 import { useDesktopCardLibraryHost } from '../../platform/card-library-host';
 import { loadBuiltinQuestionnaire, parseQuestionnaireCardSelection, toQuestionnaireSelection } from '../questionnaire/flow';
 import presetIndex from '../../../../../content/questionnaires/presets/index.json';
-import { importSublimationLore, retainSublimationLoreSource, parseSublimationLoreSelections } from './lore-selection';
+import { importSublimationLore, retainSublimationLoreSource, parseSublimationLoreSelections, sublimationLoreText } from './lore-selection';
 
 const presets = presetIndex.presets as QuestionnairePresetEntry[];
 const family = { fallbackKind: 'magical-girl' as const, builtinQuestionnaireId: '', builtinPresetPath: '' };
-export function DesktopSublimationLoreSelector({ selections, onChange, disabled, onLoadingChange }: {
+export function DesktopSublimationLoreSelector({ selections, onChange, disabled, onLoadingChange, supplementalLore }: {
+  supplementalLore?: { text: string; onChange: (text: string) => void };
   selections: QuestionnaireSelection[]; onChange: (value: QuestionnaireSelection[]) => void; disabled: boolean; onLoadingChange: (value: boolean) => void;
 }) {
   const host = useDesktopCardLibraryHost();
@@ -53,7 +54,7 @@ export function DesktopSublimationLoreSelector({ selections, onChange, disabled,
     try { append(retainSublimationLoreSource(toQuestionnaireSelection(parsed.source, parsed.questionnaire), context.rawSourceData ?? payload)); setPicker(false); }
     catch (cause) { setError(cause instanceof Error ? cause.message : '设定来源无法读取'); }
   };
-  const text = buildQuestionnaireSelectionLoreText(selections);
+  const text = sublimationLoreText({ selectedQuestionnaires: selections, loreText: supplementalLore?.text ?? '', targetTemplate: 'general' });
   return <>
     <SublimationLoreSelection expanded={expanded} onExpandedChange={setExpanded} disabled={disabled} selections={selections} presets={presets}
       onSelectPreset={(id) => { const preset = presets.find((item) => item.id === id); if (preset) void load(async (signal) => ({ source: 'preset', questionnaire: await loadBuiltinQuestionnaire({ fallbackKind: preset.kind, builtinQuestionnaireId: preset.id, builtinPresetPath: preset.path }, signal) })); }}
@@ -65,7 +66,8 @@ export function DesktopSublimationLoreSelector({ selections, onChange, disabled,
       onPasteImport={() => { try { append(importSublimationLore(paste)); } catch (cause) { setError(cause instanceof Error ? cause.message : '解析失败'); } }}
       onPasteClear={() => { setPaste(''); setError(null); }} loadError={error}
       tokenIndicator={text.trim() ? <TokenIndicator text={text} /> : undefined}
-      warnNonNative={selections.some((s) => s.useLore !== false && !!s.questionnaire.loreMarkdown?.trim() && (s.source === 'upload' || s.questionnaire.nativeAllowed !== true))}
+      supplementalLore={supplementalLore}
+      warnNonNative={!!supplementalLore?.text.trim() || selections.some((s) => s.useLore !== false && !!s.questionnaire.loreMarkdown?.trim() && (s.source === 'upload' || s.questionnaire.nativeAllowed !== true))}
     />
     <CardLibraryModal key={identity} host={host} isOpen={picker} onClose={() => setPicker(false)} onSelectCard={(payload, context) => choose(payload, context, identity)} selectedType="questionnaire" allowedTypes={['questionnaire']} initialTab="local" titleOverride="选择问卷 / 设定卡" allowDeckImport={false} />
     {details && <div role="region" aria-label="设定来源详情" className="mb-6 rounded-lg border p-4"><h3>{details.questionnaire.title}</h3><pre className="max-h-72 overflow-auto whitespace-pre-wrap">{JSON.stringify(details.questionnaire, null, 2)}</pre><button type="button" onClick={() => setDetails(null)}>关闭详情</button></div>}

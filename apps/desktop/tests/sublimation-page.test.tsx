@@ -100,6 +100,28 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); container.remove(); release?.(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('Desktop Sublimation real page/session/executor with fake IPC (not native acceptance)', () => {
+  it.each(['client', 'server'] as const)('%s restores visible supplemental Lore and clears it without dropping typed sources', async (location) => {
+    preference(location);
+    const typed = { source: 'upload', selectionId: 'kept-lore', questionnaire: { id: 'kept-lore', kind: 'magical-girl', title: '独立来源', questions: [], loreMarkdown: '仍保留的来源正文', nativeAllowed: false } };
+    writeDraft({ originalData: source, loreText: '旧草稿补充限制', selectedQuestionnaires: [typed] });
+    await mount();
+    expect(container.textContent).toContain('含补充设定');
+    const expand = [...container.querySelectorAll('button')].find((item) => item.textContent?.includes('设定（Lore）注入'))!;
+    await act(async () => expand.click());
+    const supplemental = container.querySelector<HTMLTextAreaElement>('[aria-label="补充设定"]');
+    expect(supplemental).not.toBeNull();
+    expect(supplemental!.value).toBe('旧草稿补充限制');
+    await change('[aria-label="补充设定"]', '已编辑的补充限制');
+    expect(stored().loreText).toBe('已编辑的补充限制');
+    await change('[aria-label="补充设定"]', '');
+    expect(stored().selectedQuestionnaires).toEqual([typed]);
+    await click('开始升华');
+    expect(generationCalls()).toHaveLength(1);
+    const wire = JSON.stringify(generationCalls()[0]![1]!.request);
+    expect(wire).toContain('仍保留的来源正文');
+    expect(wire).not.toContain('旧草稿补充限制');
+    expect(wire).not.toContain('已编辑的补充限制');
+  });
   it('loads JSON/history, generates, previews, saves a new card, exports and copies without touching the source', async () => {
     await mount(); expect(container.querySelector('[data-testid="page-sublimation"]')).toBeTruthy();
     await change('#source-json', JSON.stringify(source)); await click('从文本加载设定');
