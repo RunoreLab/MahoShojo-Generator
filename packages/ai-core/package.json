@@ -80,7 +80,8 @@
       "import": "./src/sublimation-generation.ts",
       "default": "./src/sublimation-generation.ts"
     },
-    "./arena-generation": "./src/arena-generation/index.ts"
+    "./arena-generation": "./src/arena-generation/index.ts",
+    "./repair-pipeline": "./src/repair-pipeline.ts"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",
