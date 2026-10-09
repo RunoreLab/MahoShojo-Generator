@@ -102,6 +102,7 @@ export function ExternalLinksProvider({
       <BaseModal
         isOpen={pending !== null}
         title="打开外部链接？"
+        zIndexClassName="z-[1100]"
         onClose={() => {
           pendingRef.current = null;
           setPending(null);
@@ -145,7 +146,7 @@ export function ExternalLinksProvider({
           </p>
         </div>
       </BaseModal>
-      <BaseModal isOpen={error !== null} title="无法打开链接" onClose={() => setError(null)}>
+      <BaseModal isOpen={error !== null} zIndexClassName="z-[1100]" title="无法打开链接" onClose={() => setError(null)}>
         <p>{error}</p>
       </BaseModal>
     </ExternalLinksContext.Provider>
