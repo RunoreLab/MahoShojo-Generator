@@ -203,3 +203,98 @@ fn registry_finish_releases_the_entry_so_the_id_can_be_reused() {
         .register("req-1")
         .expect("id must be reusable after finish");
 }
+
+const ARENA_FIXTURE: &str =
+    include_str!("../../../../packages/contracts/fixtures/arena-direct-execution.json");
+
+#[test]
+fn arena_policy_fixture_roundtrips_both_directions_without_authority_or_numeric_budgets() {
+    use crate::ai::{validate_request_resources, AiExecutionRequest};
+    let fixture: serde_json::Value = serde_json::from_str(ARENA_FIXTURE).unwrap();
+    let request: AiExecutionRequest = serde_json::from_value(fixture["request"].clone()).unwrap();
+    validate_request_resources(&request).unwrap();
+    assert_eq!(serde_json::to_value(&request).unwrap(), fixture["request"]);
+    for value in fixture["events"].as_array().unwrap() {
+        let event: AiStreamEvent = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(event).unwrap(), *value);
+    }
+    for (key, value) in [
+        ("inputSourceUtf8Bytes", crate::ai::ARENA_INPUT_BYTES),
+        (
+            "outputTextAndReasoningUtf8Bytes",
+            crate::ai::ARENA_OUTPUT_CONTENT_BYTES,
+        ),
+        ("wireMetadataBytes", crate::ai::ARENA_WIRE_METADATA_BYTES),
+        ("wireMaxBytes", crate::ai::ARENA_MAX_WIRE_BYTES),
+    ] {
+        assert_eq!(fixture["measurements"][key], value);
+    }
+    for (key, value) in [
+        ("requestKind", serde_json::json!("arbitrary")),
+        ("maxOutputBytes", serde_json::json!(99999999)),
+        ("endpoint", serde_json::json!("https://evil.test")),
+    ] {
+        let mut raw = fixture["request"].clone();
+        raw[key] = value;
+        assert!(serde_json::from_value::<AiExecutionRequest>(raw).is_err());
+    }
+    // Formatted messages retain the existing Direct freedom. Source evidence
+    // neither certifies their equivalence nor widens endpoint/secret authority.
+    let mut request = request;
+    request.messages[0].content = "x".repeat(crate::ai::ARENA_INPUT_BYTES + 1);
+    validate_request_resources(&request).unwrap();
+}
+
+#[test]
+fn arena_native_rechecks_original_source_bytes_and_existing_counts() {
+    use crate::ai::{validate_request_resources, AiExecutionRequest};
+    let fixture: serde_json::Value = serde_json::from_str(ARENA_FIXTURE).unwrap();
+    let mut request: AiExecutionRequest =
+        serde_json::from_value(fixture["request"].clone()).unwrap();
+    for (mode, min) in [("classic", 2), ("kizuna", 2), ("daily", 1), ("scenario", 1)] {
+        for (count, accepted) in [(min - 1, false), (min, true), (32, true), (33, false)] {
+            let payload = serde_json::json!({ "mode": mode, "scenario": {}, "combatants": vec![serde_json::json!({}); count] });
+            request.arena_input_json = Some(payload.to_string());
+            assert_eq!(validate_request_resources(&request).is_ok(), accepted);
+        }
+    }
+    for (refs, adjudications, accepted) in [(256, 100, true), (257, 100, false), (256, 101, false)]
+    {
+        request.arena_input_json = Some(serde_json::json!({ "mode": "daily", "combatants": [{}],
+            "materials": vec![serde_json::json!({}); refs], "adjudicationEvents": vec![serde_json::json!({}); adjudications] }).to_string());
+        assert_eq!(validate_request_resources(&request).is_ok(), accepted);
+    }
+    let base =
+        serde_json::json!({ "mode": "daily", "combatants": [{}], "padding": "" }).to_string();
+    let at = base.replace(
+        "\"padding\":\"\"",
+        &format!(
+            "\"padding\":\"{}\"",
+            "x".repeat(crate::ai::ARENA_INPUT_BYTES - base.len())
+        ),
+    );
+    request.arena_input_json = Some(at.clone());
+    validate_request_resources(&request).unwrap();
+    request.arena_input_json = Some(format!("{at} "));
+    assert!(validate_request_resources(&request).is_err());
+    request.arena_input_json = None;
+    assert!(validate_request_resources(&request).is_err());
+}
+
+#[test]
+fn arena_rejects_shared_malformed_source_and_large_metadata() {
+    let fixture: serde_json::Value = serde_json::from_str(ARENA_FIXTURE).unwrap();
+    let mut request: crate::ai::AiExecutionRequest =
+        serde_json::from_value(fixture["request"].clone()).unwrap();
+    for source in fixture["invalidInputSources"].as_array().unwrap() {
+        request.arena_input_json = Some(source.to_string());
+        assert!(crate::ai::validate_request_resources(&request).is_err());
+    }
+    let raw = fixture["events"].as_array().unwrap().last().unwrap()["result"].clone();
+    let mut result: AiExecutionResult = serde_json::from_value(raw).unwrap();
+    assert!(crate::ai::arena_result_within_budget(&result));
+    if let AiExecutionResult::Completed(ref mut result) = result {
+        result.resolved_model_id = Some("x".repeat(crate::ai::ARENA_WIRE_METADATA_BYTES));
+    }
+    assert!(!crate::ai::arena_result_within_budget(&result));
+}

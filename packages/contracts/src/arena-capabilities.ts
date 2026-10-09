@@ -70,3 +70,10 @@ export const evaluateArenaBasicGenerationReadiness = (
   }
   return Object.freeze(issues);
 };
+
+/** Existing Hosted measurements, shared without changing their meanings. */
+export const ARENA_CANONICAL_RESOURCE_LIMITS = Object.freeze({
+  requestBodyBytes: 12 * 1024 * 1024,
+  outputContentBytes: 4 * 1024 * 1024,
+  maxAdjudicationEvents: 100,
+});

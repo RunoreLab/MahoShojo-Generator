@@ -1,0 +1,147 @@
+{
+  "measurements": {
+    "inputSourceUtf8Bytes": 12582912,
+    "outputTextAndReasoningUtf8Bytes": 4194304,
+    "wireMetadataBytes": 16384,
+    "wireMaxBytes": 25182208,
+    "legacyResultJsonUtf8Bytes": 1000000,
+    "legacyDeltaUtf16Units": 1000000,
+    "legacyStructuredInputChars": 250000,
+    "maxCombatants": 32,
+    "maxReferences": 256,
+    "maxAdjudicationEvents": 100
+  },
+  "request": {
+    "requestId": "arena-fixture",
+    "contractVersion": 1,
+    "mode": "direct-local",
+    "requestKind": "arena",
+    "arenaInputJson": "{\"mode\":\"daily\",\"combatants\":[{\"data\":{\"name\":\"测试\"}}]}",
+    "messages": [
+      {
+        "role": "user",
+        "content": "冻结测试正文"
+      }
+    ],
+    "modelId": "fixture-model",
+    "maxOutputTokens": 1024,
+    "temperature": 0.5,
+    "responseFormat": "text"
+  },
+  "events": [
+    {
+      "type": "started",
+      "requestId": "arena-fixture",
+      "contractVersion": 1,
+      "mode": "direct-local",
+      "sequence": 0
+    },
+    {
+      "type": "reasoning-delta",
+      "requestId": "arena-fixture",
+      "contractVersion": 1,
+      "mode": "direct-local",
+      "sequence": 1,
+      "delta": "推理"
+    },
+    {
+      "type": "text-delta",
+      "requestId": "arena-fixture",
+      "contractVersion": 1,
+      "mode": "direct-local",
+      "sequence": 2,
+      "delta": "正文🪄"
+    },
+    {
+      "type": "result",
+      "requestId": "arena-fixture",
+      "contractVersion": 1,
+      "mode": "direct-local",
+      "sequence": 3,
+      "result": {
+        "status": "completed",
+        "requestId": "arena-fixture",
+        "contractVersion": 1,
+        "mode": "direct-local",
+        "output": {
+          "text": "正文🪄",
+          "reasoning": "推理"
+        },
+        "finishReason": "stop",
+        "resolvedModelId": "fixture-model",
+        "usage": {
+          "inputTokens": 10,
+          "outputTokens": 8,
+          "reasoningTokens": 2,
+          "totalTokens": 18
+        }
+      }
+    }
+  ],
+  "contentBoundaries": [
+    {
+      "name": "ascii-at",
+      "character": "x",
+      "repeat": 4194304,
+      "suffix": "",
+      "accepted": true
+    },
+    {
+      "name": "ascii-over",
+      "character": "x",
+      "repeat": 4194304,
+      "suffix": "x",
+      "accepted": false
+    },
+    {
+      "name": "chinese-at",
+      "character": "中",
+      "repeat": 1398101,
+      "suffix": "x",
+      "accepted": true
+    },
+    {
+      "name": "chinese-over",
+      "character": "中",
+      "repeat": 1398101,
+      "suffix": "中",
+      "accepted": false
+    },
+    {
+      "name": "escaped-at",
+      "character": "\u0000",
+      "repeat": 4194303,
+      "suffix": "x",
+      "accepted": true
+    }
+  ],
+  "invalidInputSources": [
+    {
+      "mode": [
+        "daily"
+      ],
+      "combatants": [
+        {}
+      ]
+    },
+    {
+      "mode": {},
+      "combatants": [
+        {}
+      ]
+    },
+    {
+      "mode": "scenario",
+      "combatants": [
+        {}
+      ]
+    },
+    {
+      "mode": "daily",
+      "combatants": [
+        {}
+      ],
+      "materials": {}
+    }
+  ]
+}

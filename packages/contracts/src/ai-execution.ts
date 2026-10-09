@@ -3,8 +3,38 @@ import { z } from './zod';
 import { OpaqueKeySchema } from './primitives';
 import { SafeJsonValueSchema } from './json-value';
 import { jsonUtf8ByteLength } from './wire-size';
+import { ARENA_CANONICAL_CAPABILITIES, ARENA_CANONICAL_RESOURCE_LIMITS } from './arena-capabilities';
 
 export const MAX_AI_EXECUTION_RESULT_BYTES = 1_000_000;
+
+/** Fixed policy selection, never a renderer-supplied numeric budget. */
+export const ARENA_AI_WIRE_METADATA_BYTES = 16 * 1024;
+export const ARENA_AI_MAX_WIRE_BYTES = ARENA_CANONICAL_RESOURCE_LIMITS.outputContentBytes * 6 + ARENA_AI_WIRE_METADATA_BYTES;
+export const aiOutputContentBytes = (output: { text?: string; reasoning?: string }): number =>
+  new TextEncoder().encode(output.text ?? '').byteLength + new TextEncoder().encode(output.reasoning ?? '').byteLength;
+
+/** Resource evidence only: it does not prove messages/source equivalence or grant authority. */
+export const validateArenaAiInputJson = (value: string): boolean => {
+  if (new TextEncoder().encode(value).byteLength > ARENA_CANONICAL_RESOURCE_LIMITS.requestBodyBytes) return false;
+  try {
+    const input = JSON.parse(value) as Record<string, unknown>;
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return false;
+    const mode = input.mode as keyof typeof ARENA_CANONICAL_CAPABILITIES.minCombatantsByMode;
+    if (typeof mode !== 'string' || !Object.prototype.hasOwnProperty.call(ARENA_CANONICAL_CAPABILITIES.minCombatantsByMode, mode)) return false;
+    if (!Array.isArray(input.combatants)
+      || input.combatants.length < ARENA_CANONICAL_CAPABILITIES.minCombatantsByMode[mode]
+      || input.combatants.length > ARENA_CANONICAL_CAPABILITIES.maxCombatants) return false;
+    if (mode === 'scenario' && (!input.scenario || typeof input.scenario !== 'object' || Array.isArray(input.scenario))) return false;
+    let references = 0;
+    for (const key of ['auxScenarios', 'materials', 'questionnaires', 'narrativeHistory']) {
+      if (input[key] !== undefined && !Array.isArray(input[key])) return false;
+      references += Array.isArray(input[key]) ? input[key].length : 0;
+    }
+    return references <= ARENA_CANONICAL_CAPABILITIES.maxReferenceItemsSanity
+      && (input.adjudicationEvents === undefined || Array.isArray(input.adjudicationEvents)
+        && input.adjudicationEvents.length <= ARENA_CANONICAL_RESOURCE_LIMITS.maxAdjudicationEvents);
+  } catch { return false; }
+};
 
 export const AI_EXECUTION_CONTRACT_VERSION = 1 as const;
 export const AiExecutionContractVersionSchema = z.literal(AI_EXECUTION_CONTRACT_VERSION);
@@ -54,6 +84,8 @@ export const AiExecutionRequestSchema = z.object({
   requestId: OpaqueKeySchema,
   contractVersion: AiExecutionContractVersionSchema,
   mode: AiExecutionModeSchema,
+  requestKind: z.literal('arena').optional(),
+  arenaInputJson: z.string().optional(),
   messages: z.array(AiExecutionMessageSchema).min(1),
   modelId: z.string().superRefine((value, context) => {
     if (value.trim().length === 0) {
@@ -64,7 +96,16 @@ export const AiExecutionRequestSchema = z.object({
   temperature: z.number().finite().min(0).optional(),
   thinking: AiExecutionThinkingSchema.optional(),
   responseFormat: z.enum(['text', 'json']).optional(),
-}).strict();
+}).strict().superRefine((request, context) => {
+  if (request.requestKind === 'arena') {
+    if ((request.mode !== 'direct-local' && request.mode !== 'direct-remote')
+      || request.arenaInputJson === undefined || !validateArenaAiInputJson(request.arenaInputJson)) {
+      context.addIssue({ code: 'custom', message: 'invalid Arena Direct resource evidence' });
+    }
+  } else if (request.arenaInputJson !== undefined) {
+    context.addIssue({ code: 'custom', message: 'Arena resource evidence requires the fixed arena kind' });
+  }
+});
 export type AiExecutionRequest = z.infer<typeof AiExecutionRequestSchema>;
 
 export const AiExecutionFinishReasonSchema = z.enum(['stop', 'length', 'content-filter', 'tool-calls', 'other']);
@@ -154,12 +195,14 @@ export const AiExecutionCancelledResultSchema = z.object({
 }).strict();
 export type AiExecutionCancelledResult = z.infer<typeof AiExecutionCancelledResultSchema>;
 
-export const AiExecutionResultSchema = z
+const AiExecutionResultShapeSchema = z
   .discriminatedUnion('status', [
     AiExecutionCompletedResultSchema,
     AiExecutionFailedResultSchema,
     AiExecutionCancelledResultSchema,
-  ])
+  ]);
+
+export const AiExecutionResultSchema = AiExecutionResultShapeSchema
   .superRefine((result, context) => {
     if (jsonUtf8ByteLength(result) > MAX_AI_EXECUTION_RESULT_BYTES) {
       context.addIssue({
@@ -172,3 +215,17 @@ export const AiExecutionResultSchema = z
     }
   });
 export type AiExecutionResult = z.infer<typeof AiExecutionResultSchema>;
+
+/** Arena counts decoded output content, not duplicated/escaped terminal JSON. */
+export const ArenaAiExecutionResultSchema = AiExecutionResultShapeSchema.superRefine((result, context) => {
+  const fail = () => context.addIssue({ code: 'custom', message: 'Arena execution result exceeds its fixed resource policy' });
+  if (result.status === 'completed') {
+    if (result.output.structured !== undefined || result.output.text === undefined
+      || aiOutputContentBytes(result.output) > ARENA_CANONICAL_RESOURCE_LIMITS.outputContentBytes) fail();
+    if (jsonUtf8ByteLength({ ...result, output: {} }) > ARENA_AI_WIRE_METADATA_BYTES) fail();
+  } else if (jsonUtf8ByteLength(result) > ARENA_AI_WIRE_METADATA_BYTES) fail();
+  if (jsonUtf8ByteLength(result) > ARENA_AI_MAX_WIRE_BYTES) fail();
+});
+
+export const aiExecutionResultSchemaForKind = (requestKind?: AiExecutionRequest['requestKind']) =>
+  requestKind === 'arena' ? ArenaAiExecutionResultSchema : AiExecutionResultSchema;

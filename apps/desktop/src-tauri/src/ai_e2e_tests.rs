@@ -26,6 +26,7 @@ use crate::store::LocalStore;
 /// 服务端在测试结束时观察到的事实。
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ServerObservation {
+    request_count: usize,
     /// 是否观察到客户端断连（读到 EOF）。这是"上游 body 真的被中止"的证据。
     client_disconnected: bool,
     /// 收到的请求行，用于确认端点路径拼接正确。
@@ -70,7 +71,13 @@ async fn spawn_sse_server(scenario: Scenario) -> TestServer {
     let (request_received_tx, request_received_rx) = oneshot::channel();
 
     tokio::spawn(async move {
-        let observation = serve_one(listener, scenario, request_received_tx).await;
+        let mut observation = serve_one(&listener, scenario, request_received_tx).await;
+        // The execution has dropped its sole response. Detect an unrequested retry.
+        while let Ok(Ok((_stream, _))) =
+            tokio::time::timeout(std::time::Duration::from_millis(25), listener.accept()).await
+        {
+            observation.request_count += 1;
+        }
         let _ = tx.send(observation);
     });
 
@@ -82,7 +89,7 @@ async fn spawn_sse_server(scenario: Scenario) -> TestServer {
 }
 
 async fn serve_one(
-    listener: TcpListener,
+    listener: &TcpListener,
     scenario: Scenario,
     request_received: oneshot::Sender<()>,
 ) -> ServerObservation {
@@ -90,6 +97,7 @@ async fn serve_one(
         Ok(accepted) => accepted,
         Err(_) => {
             return ServerObservation {
+                request_count: 0,
                 client_disconnected: false,
                 request_line: String::new(),
                 saw_authorization: false,
@@ -191,6 +199,7 @@ async fn observe_disconnect(
             // 读到 0 字节 = 对端关闭了写方向，也就是我们的 response body 被中止了。
             Ok(Ok(0)) => {
                 return ServerObservation {
+                    request_count: 1,
                     client_disconnected: true,
                     request_line,
                     saw_authorization,
@@ -199,6 +208,7 @@ async fn observe_disconnect(
             Ok(Ok(_)) => continue,
             Ok(Err(_)) => {
                 return ServerObservation {
+                    request_count: 1,
                     client_disconnected: true,
                     request_line,
                     saw_authorization,
@@ -207,6 +217,7 @@ async fn observe_disconnect(
             // 超时仍未断开：对挂起场景来说意味着测试没能证明取消生效。
             Err(_) => {
                 return ServerObservation {
+                    request_count: 1,
                     client_disconnected: false,
                     request_line,
                     saw_authorization,
@@ -361,6 +372,8 @@ fn request(request_id: &str) -> AiExecutionRequest {
         max_output_tokens: None,
         temperature: None,
         response_format: None,
+        request_kind: None,
+        arena_input_json: None,
     }
 }
 
@@ -1678,4 +1691,275 @@ async fn audit_blank_output_matches_the_typescript_contract_without_trimming_val
         }
         assert_eq!(registry.len(), 0);
     }
+}
+
+fn arena_request(id: &str) -> AiExecutionRequest {
+    let mut value = request(id);
+    value.request_kind = Some(crate::ai::AiRequestKind::Arena);
+    value.arena_input_json =
+        Some(r#"{"mode":"daily","combatants":[{"data":{"name":"测试"}}]}"#.into());
+    value
+}
+
+#[tokio::test]
+async fn arena_content_boundaries_and_escaped_wire_use_one_post_and_release_registration() {
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../packages/contracts/fixtures/arena-direct-execution.json"
+    ))
+    .unwrap();
+    for case in fixture["contentBoundaries"].as_array().unwrap() {
+        let name = case["name"].as_str().unwrap();
+        let text = case["character"]
+            .as_str()
+            .unwrap()
+            .repeat(case["repeat"].as_u64().unwrap() as usize)
+            + case["suffix"].as_str().unwrap();
+        let chunk = serde_json::json!({ "choices": [{ "delta": { "content": text }, "finish_reason": "stop" }] });
+        let wire = format!("data: {chunk}\n\ndata: [DONE]\n\n");
+        let server = spawn_sse_server(Scenario::RawBytes(wire.into_bytes())).await;
+        let store = LocalStore::open_in_memory().unwrap();
+        store
+            .put(
+                "arena",
+                &stored_profile("arena", &server.base_url, false),
+                "t",
+            )
+            .unwrap();
+        let registry = RequestRegistry::default();
+        let sink = CollectingSink::default();
+        stream_direct_ai(
+            "arena",
+            arena_request("arena-boundary"),
+            &store,
+            &TestSecretStore::default(),
+            &registry,
+            &sink,
+        )
+        .await
+        .unwrap();
+        let events = sink.snapshot();
+        assert_well_formed(&events, "arena-boundary");
+        let accepted = case["accepted"].as_bool().unwrap();
+        match terminals(&events)[0] {
+            AiExecutionResult::Completed(result) => {
+                assert!(accepted, "{name} should fail");
+                assert!(
+                    result.output.text.as_deref() == Some(text.as_str()),
+                    "{name}: preserve all content"
+                );
+                let deltas = events
+                    .iter()
+                    .filter_map(|e| match e {
+                        AiStreamEvent::TextDelta { delta, .. } => Some(delta.as_str()),
+                        _ => None,
+                    })
+                    .collect::<String>();
+                assert!(deltas == text, "{name}: preserve all deltas");
+            }
+            AiExecutionResult::Failed(result) => {
+                assert!(!accepted, "{name}: unexpected {}", result.error.code);
+                assert_eq!(result.error.code, "output-too-large");
+            }
+            _ => panic!("unexpected cancellation"),
+        }
+        if let Ok(directory) = std::env::var("MAHO_NATIVE_EVENT_FIXTURE_DIR") {
+            std::fs::create_dir_all(&directory).unwrap();
+            std::fs::write(
+                std::path::Path::new(&directory).join(format!("arena-{name}.json")),
+                serde_json::to_vec(&events).unwrap(),
+            )
+            .unwrap();
+        }
+        let observation = server.observation.await.unwrap();
+        assert_eq!(observation.request_count, 1);
+        assert!(observation
+            .request_line
+            .starts_with("POST /v1/chat/completions "));
+        assert_eq!(registry.len(), 0);
+    }
+}
+
+#[tokio::test]
+async fn arena_overflow_combines_reasoning_and_body_without_accepting_overflow_or_retrying() {
+    let prefix = "x".repeat(crate::ai::ARENA_OUTPUT_CONTENT_BYTES - 3);
+    let first = serde_json::json!({ "choices": [{ "delta": { "content": prefix } }] });
+    let second = serde_json::json!({ "choices": [{ "delta": { "reasoning_content": "中文" }, "finish_reason": "stop" }] });
+    let wire = format!("data: {first}\n\ndata: {second}\n\ndata: [DONE]\n\n");
+    let server = spawn_sse_server(Scenario::RawBytes(wire.into_bytes())).await;
+    let store = LocalStore::open_in_memory().unwrap();
+    store
+        .put(
+            "arena",
+            &stored_profile("arena", &server.base_url, false),
+            "t",
+        )
+        .unwrap();
+    let registry = RequestRegistry::default();
+    let sink = CollectingSink::default();
+    stream_direct_ai(
+        "arena",
+        arena_request("arena-overflow"),
+        &store,
+        &TestSecretStore::default(),
+        &registry,
+        &sink,
+    )
+    .await
+    .unwrap();
+    let events = sink.snapshot();
+    assert_well_formed(&events, "arena-overflow");
+    assert!(
+        matches!(terminals(&events)[0], AiExecutionResult::Failed(result) if result.error.code == "output-too-large")
+    );
+    let accepted = events
+        .iter()
+        .filter_map(|e| match e {
+            AiStreamEvent::TextDelta { delta, .. } => Some(delta.as_str()),
+            _ => None,
+        })
+        .collect::<String>();
+    assert!(accepted == prefix);
+    assert!(!events
+        .iter()
+        .any(|e| matches!(e, AiStreamEvent::ReasoningDelta { .. })));
+    assert_eq!(server.observation.await.unwrap().request_count, 1);
+    assert_eq!(registry.len(), 0);
+}
+
+#[tokio::test]
+async fn arena_unicode_eof_length_and_duplicate_done_remain_honest_terminal_states() {
+    for (suffix, status) in [("\n\n", "failed"), ("\n\ndata: [DONE]\n\ndata: [DONE]\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"晚包\"}}]}\n\n", "completed")] {
+        let wire = format!("data: {{\"choices\":[{{\"delta\":{{\"content\":\"中文🪄\"}},\"finish_reason\":\"length\"}}]}}{suffix}");
+        let server = spawn_sse_server(Scenario::ByteChunks(wire.into_bytes())).await;
+        let store = LocalStore::open_in_memory().unwrap(); store.put("arena", &stored_profile("arena", &server.base_url, false), "t").unwrap();
+        let registry = RequestRegistry::default(); let sink = CollectingSink::default();
+        stream_direct_ai("arena", arena_request("arena-utf8"), &store, &TestSecretStore::default(), &registry, &sink).await.unwrap();
+        let events = sink.snapshot(); assert_well_formed(&events, "arena-utf8");
+        let terminal = serde_json::to_value(terminals(&events)[0]).unwrap();
+        assert_eq!(terminal["status"], status);
+        if status == "completed" { assert_eq!(terminal["finishReason"], "length"); assert_eq!(terminal["output"]["text"], "中文🪄"); }
+        assert_eq!(registry.len(), 0); assert_eq!(server.observation.await.unwrap().request_count, 1);
+    }
+}
+
+#[tokio::test]
+async fn arena_late_cancel_closes_upstream_and_early_cancel_never_posts() {
+    struct CancelOnStart {
+        registry: RequestRegistry,
+        sink: CollectingSink,
+    }
+    impl EventSink for CancelOnStart {
+        fn send(&self, event: AiStreamEvent) -> Result<(), ()> {
+            if let AiStreamEvent::Started { request_id, .. } = &event {
+                assert!(self.registry.cancel(request_id));
+            }
+            self.sink.send(event)
+        }
+    }
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let store = LocalStore::open_in_memory().unwrap();
+    store
+        .put(
+            "arena",
+            &stored_profile(
+                "arena",
+                &format!("http://{}/v1", listener.local_addr().unwrap()),
+                false,
+            ),
+            "t",
+        )
+        .unwrap();
+    let registry = RequestRegistry::default();
+    let sink = CancelOnStart {
+        registry: registry.clone(),
+        sink: CollectingSink::default(),
+    };
+    stream_direct_ai(
+        "arena",
+        arena_request("arena-early"),
+        &store,
+        &TestSecretStore::default(),
+        &registry,
+        &sink,
+    )
+    .await
+    .unwrap();
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(25), listener.accept())
+            .await
+            .is_err()
+    );
+    assert!(matches!(
+        terminals(&sink.sink.snapshot())[0],
+        AiExecutionResult::Cancelled(_)
+    ));
+    assert_eq!(registry.len(), 0);
+
+    let server = spawn_sse_server(Scenario::Hang).await;
+    store
+        .put(
+            "arena",
+            &stored_profile("arena", &server.base_url, false),
+            "t",
+        )
+        .unwrap();
+    let sink = CollectingSink::default();
+    let secrets = TestSecretStore::default();
+    let stream = stream_direct_ai(
+        "arena",
+        arena_request("arena-late"),
+        &store,
+        &secrets,
+        &registry,
+        &sink,
+    );
+    tokio::pin!(stream);
+    tokio::select! { result = &mut stream => panic!("unexpected completion: {result:?}"), _ = async {
+        loop { if sink.snapshot().iter().any(|e| matches!(e, AiStreamEvent::TextDelta {..})) { break; }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await; }
+    } => {} }
+    assert!(registry.cancel("arena-late"));
+    stream.await.unwrap();
+    assert!(matches!(
+        terminals(&sink.snapshot())[0],
+        AiExecutionResult::Cancelled(_)
+    ));
+    assert_eq!(registry.len(), 0);
+    let observation = server.observation.await.unwrap();
+    assert!(observation.client_disconnected);
+    assert_eq!(observation.request_count, 1);
+}
+
+#[tokio::test]
+async fn legacy_native_behavior_is_unchanged_and_ts_retains_its_result_boundary() {
+    let chunk = serde_json::json!({"choices":[{"delta":{"content":"x".repeat(1_000_000)},"finish_reason":"stop"}]});
+    let server = spawn_sse_server(Scenario::RawBytes(
+        format!("data: {chunk}\n\ndata: [DONE]\n\n").into_bytes(),
+    ))
+    .await;
+    let store = LocalStore::open_in_memory().unwrap();
+    store
+        .put(
+            "legacy",
+            &stored_profile("legacy", &server.base_url, false),
+            "t",
+        )
+        .unwrap();
+    let registry = RequestRegistry::default();
+    let sink = CollectingSink::default();
+    stream_direct_ai(
+        "legacy",
+        request("legacy-budget"),
+        &store,
+        &TestSecretStore::default(),
+        &registry,
+        &sink,
+    )
+    .await
+    .unwrap();
+    assert!(
+        matches!(terminals(&sink.snapshot())[0], AiExecutionResult::Completed(result) if result.output.text.as_ref().unwrap().len() == 1_000_000)
+    );
+    assert_eq!(registry.len(), 0);
+    assert_eq!(server.observation.await.unwrap().request_count, 1);
 }

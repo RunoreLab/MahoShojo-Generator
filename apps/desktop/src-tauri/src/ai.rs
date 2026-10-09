@@ -34,6 +34,18 @@ const DELTA_FLUSH_INTERVAL: Duration = Duration::from_millis(40);
 /// TypeScript 字符串长度按 UTF-16 单元计数，不能用 Rust chars().count() 代替。
 /// 共享 fixture 同时对拍此值与 ai-core 的 AI_STREAM_MAX_DELTA_CHARS。
 pub(crate) const AI_STREAM_MAX_DELTA_UTF16_UNITS: usize = 65_536;
+// Fixed policy mirrored by the shared fixture; no numeric renderer budget is accepted.
+pub(crate) const ARENA_INPUT_BYTES: usize = 12 * 1024 * 1024;
+pub(crate) const ARENA_OUTPUT_CONTENT_BYTES: usize = 4 * 1024 * 1024;
+pub(crate) const ARENA_WIRE_METADATA_BYTES: usize = 16 * 1024;
+pub(crate) const ARENA_MAX_WIRE_BYTES: usize =
+    ARENA_OUTPUT_CONTENT_BYTES * 6 + ARENA_WIRE_METADATA_BYTES;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AiRequestKind {
+    Arena,
+}
 
 fn bounded_delta_chunks(mut remaining: &str) -> impl Iterator<Item = &str> {
     std::iter::from_fn(move || {
@@ -262,6 +274,11 @@ pub struct AiExecutionRequest {
     pub contract_version: u32,
     pub mode: AiExecutionMode,
     pub messages: Vec<AiExecutionMessage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_kind: Option<AiRequestKind>,
+    /// Resource evidence, never prompt equivalence, endpoint or signature authority.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arena_input_json: Option<String>,
     #[serde(default)]
     pub model_id: Option<String>,
     #[serde(default)]
@@ -270,6 +287,78 @@ pub struct AiExecutionRequest {
     pub temperature: Option<f32>,
     #[serde(default)]
     pub response_format: Option<String>,
+}
+
+/// Validate the frozen source JSON separately from formatted messages. Existing Direct
+/// messages have no total byte limit; this does not claim an entire-IPC 12 MiB cap.
+pub(crate) fn validate_request_resources(
+    request: &AiExecutionRequest,
+) -> Result<(), DirectAiError> {
+    let invalid = || {
+        DirectAiError::new(
+            DirectAiErrorCode::UnsupportedRequest,
+            "invalid Arena Direct resource evidence",
+        )
+    };
+    match request.request_kind {
+        None => {
+            if request.arena_input_json.is_some() {
+                return Err(invalid());
+            }
+        }
+        Some(AiRequestKind::Arena) => {
+            if !matches!(
+                request.mode,
+                AiExecutionMode::DirectLocal | AiExecutionMode::DirectRemote
+            ) {
+                return Err(invalid());
+            }
+            if is_blank_output(&request.request_id)
+                || request.request_id.encode_utf16().count() > 256
+            {
+                return Err(invalid());
+            }
+            let raw = request.arena_input_json.as_deref().ok_or_else(invalid)?;
+            if raw.len() > ARENA_INPUT_BYTES {
+                return Err(invalid());
+            }
+            let input: serde_json::Value = serde_json::from_str(raw).map_err(|_| invalid())?;
+            let input = input.as_object().ok_or_else(invalid)?;
+            let min = match input.get("mode").and_then(|v| v.as_str()) {
+                Some("classic" | "kizuna") => 2,
+                Some("daily") => 1,
+                Some("scenario") if input.get("scenario").is_some_and(|v| v.is_object()) => 1,
+                _ => return Err(invalid()),
+            };
+            let combatants = input
+                .get("combatants")
+                .and_then(|v| v.as_array())
+                .ok_or_else(invalid)?;
+            if !(min..=32).contains(&combatants.len()) {
+                return Err(invalid());
+            }
+            let mut references = 0;
+            for key in [
+                "auxScenarios",
+                "materials",
+                "questionnaires",
+                "narrativeHistory",
+            ] {
+                if let Some(value) = input.get(key) {
+                    references += value.as_array().ok_or_else(invalid)?.len();
+                }
+            }
+            if references > 256 {
+                return Err(invalid());
+            }
+            if let Some(value) = input.get("adjudicationEvents") {
+                if value.as_array().ok_or_else(invalid)?.len() > 100 {
+                    return Err(invalid());
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -505,11 +594,25 @@ impl UpstreamStreamState {
             self.usage = Some(usage);
         }
         for choice in chunk.choices {
-            if let Some(delta) = choice.delta.reasoning_content.or(choice.delta.reasoning) {
+            let reasoning = choice.delta.reasoning_content.or(choice.delta.reasoning);
+            let text = choice.delta.content;
+            // Reject the overflowing delta as a whole; preserve already accepted bytes.
+            let bytes =
+                reasoning.as_ref().map_or(0, |s| s.len()) + text.as_ref().map_or(0, |s| s.len());
+            let overflow = request.request_kind == Some(AiRequestKind::Arena)
+                && self.text.len() + self.reasoning.len() + bytes > ARENA_OUTPUT_CONTENT_BYTES;
+            if overflow {
+                return Err(DirectAiError {
+                    code: DirectAiErrorCode::StreamProtocol,
+                    message: "upstream output exceeded the fixed content budget".into(),
+                    contract_code: Some("output-too-large".into()),
+                });
+            }
+            if let Some(delta) = reasoning {
                 self.reasoning.push_str(&delta);
                 self.pending_reasoning.push_str(&delta);
             }
-            if let Some(delta) = choice.delta.content {
+            if let Some(delta) = text {
                 self.text.push_str(&delta);
                 self.pending_text.push_str(&delta);
             }
@@ -866,7 +969,11 @@ pub async fn run_stream(
     // cancellation token, before request preparation or network dispatch.
     let mut sequence: u32 = 1;
 
-    let mut parser = SseFrameParser::new();
+    let mut parser = if request.request_kind == Some(AiRequestKind::Arena) {
+        SseFrameParser::with_max_bytes(ARENA_MAX_WIRE_BYTES)
+    } else {
+        SseFrameParser::new()
+    };
     let mut decoder = Utf8StreamDecoder::default();
     let mut state = UpstreamStreamState {
         text: String::new(),
@@ -1145,6 +1252,23 @@ pub async fn run_stream(
         resolved_model_id: Some(resolved_model_id.to_string()),
         usage: state.usage.clone(),
     });
+    let exceeded = request.request_kind == Some(AiRequestKind::Arena)
+        && !arena_result_within_budget(&completed);
+    let completed = if exceeded {
+        AiExecutionResult::Failed(AiExecutionFailedResult {
+            request_id: request_id.clone(),
+            contract_version,
+            mode,
+            error: AiExecutionErrorPayload {
+                code: "output-too-large".into(),
+                message: Some("upstream output exceeded the fixed result budget".into()),
+                retryable: None,
+                retry_after_ms: None,
+            },
+        })
+    } else {
+        completed
+    };
     emit_terminal(
         on_event,
         &request_id,
@@ -1153,6 +1277,26 @@ pub async fn run_stream(
         sequence,
         completed,
     )
+}
+
+pub(crate) fn arena_result_within_budget(result: &AiExecutionResult) -> bool {
+    let Ok(mut value) = serde_json::to_value(result) else {
+        return false;
+    };
+    let wire_bytes = serde_json::to_vec(&value).map_or(usize::MAX, |v| v.len());
+    if wire_bytes > ARENA_MAX_WIRE_BYTES {
+        return false;
+    }
+    if let AiExecutionResult::Completed(result) = result {
+        if result.output.text.as_ref().map_or(0, |s| s.len())
+            + result.output.reasoning.as_ref().map_or(0, |s| s.len())
+            > ARENA_OUTPUT_CONTENT_BYTES
+        {
+            return false;
+        }
+        value["output"] = serde_json::json!({});
+    }
+    serde_json::to_vec(&value).is_ok_and(|v| v.len() <= ARENA_WIRE_METADATA_BYTES)
 }
 
 pub fn error_code_string(code: DirectAiErrorCode) -> &'static str {
@@ -1324,6 +1468,7 @@ async fn stream_resolved_direct_ai(
     on_event: &dyn EventSink,
     purpose: CredentialPurpose,
 ) -> Result<(), DirectAiError> {
+    validate_request_resources(&request)?;
     let token = registry.register(&request.request_id)?;
     if let Err(error) = emit_event(
         on_event,

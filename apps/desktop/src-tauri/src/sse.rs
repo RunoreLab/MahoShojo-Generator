@@ -23,6 +23,7 @@ const MAX_SSE_LINE_BYTES: usize = 4 * 1024 * 1024;
 /// 单个帧的多行 `data:` 累计上限（含拼接分隔 `\n`）。
 ///
 /// 与行上限同理：永不以空行收尾的帧会让 `data_lines` 无限增长。
+#[cfg(test)]
 const MAX_SSE_FRAME_DATA_BYTES: usize = 4 * 1024 * 1024;
 
 /// 解析器输入缓冲超限。
@@ -40,12 +41,11 @@ impl std::fmt::Display for SseParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SseParseError::LineTooLong => {
-                write!(f, "SSE line exceeded {} bytes", MAX_SSE_LINE_BYTES)
+                write!(f, "SSE line exceeded the current request framing limit")
             }
             SseParseError::FrameDataTooLarge => write!(
                 f,
-                "SSE frame data exceeded {} bytes",
-                MAX_SSE_FRAME_DATA_BYTES
+                "SSE frame data exceeded the current request framing limit"
             ),
         }
     }
@@ -54,8 +54,9 @@ impl std::fmt::Display for SseParseError {
 impl std::error::Error for SseParseError {}
 
 /// 增量解析器。上游分块边界与 SSE 帧边界无关，因此必须跨 `push` 保留残余字节。
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SseFrameParser {
+    max_bytes: usize,
     buffer: String,
     /// 累积的 data 行。SSE 允许一个帧有多行 data，按 `\n` 拼接。
     data_lines: Vec<String>,
@@ -66,7 +67,25 @@ pub struct SseFrameParser {
     done: bool,
 }
 
+impl Default for SseFrameParser {
+    fn default() -> Self {
+        Self::with_max_bytes(MAX_SSE_LINE_BYTES)
+    }
+}
+
 impl SseFrameParser {
+    /// Only trusted native request policy supplies this transport framing bound.
+    pub(crate) fn with_max_bytes(max_bytes: usize) -> Self {
+        Self {
+            max_bytes,
+            buffer: String::new(),
+            data_lines: Vec::new(),
+            data_bytes: 0,
+            saw_any_field: false,
+            done: false,
+        }
+    }
+
     pub fn new() -> Self {
         Self::default()
     }
@@ -87,7 +106,7 @@ impl SseFrameParser {
 
         let mut frames = Vec::new();
         while let Some(index) = self.buffer.find('\n') {
-            if index > MAX_SSE_LINE_BYTES {
+            if index > self.max_bytes {
                 return Err(SseParseError::LineTooLong);
             }
             let line: String = self.buffer.drain(..=index).collect();
@@ -107,7 +126,7 @@ impl SseFrameParser {
             }
             self.consume_line(line)?;
         }
-        if self.buffer.len() > MAX_SSE_LINE_BYTES {
+        if self.buffer.len() > self.max_bytes {
             return Err(SseParseError::LineTooLong);
         }
         Ok(frames)
@@ -117,7 +136,7 @@ impl SseFrameParser {
     pub fn finish(&mut self) -> Result<Vec<SseFrame>, SseParseError> {
         let mut frames = Vec::new();
         if !self.buffer.is_empty() {
-            if self.buffer.len() > MAX_SSE_LINE_BYTES {
+            if self.buffer.len() > self.max_bytes {
                 return Err(SseParseError::LineTooLong);
             }
             let line = std::mem::take(&mut self.buffer)
@@ -152,7 +171,7 @@ impl SseFrameParser {
             return Ok(());
         }
         let added = value.len() + usize::from(!self.data_lines.is_empty());
-        if self.data_bytes + added > MAX_SSE_FRAME_DATA_BYTES {
+        if self.data_bytes + added > self.max_bytes {
             return Err(SseParseError::FrameDataTooLarge);
         }
         self.data_bytes += added;

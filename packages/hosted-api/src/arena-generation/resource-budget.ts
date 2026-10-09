@@ -1,14 +1,14 @@
-import { ARENA_CANONICAL_CAPABILITIES } from '@mahoshojo/contracts/arena-capabilities';
+import { ARENA_CANONICAL_CAPABILITIES, ARENA_CANONICAL_RESOURCE_LIMITS } from '@mahoshojo/contracts/arena-capabilities';
 
 export type ArenaHostedFundingMode = 'hosted-system' | 'hosted-byok';
 
 export const ARENA_RESOURCE_BUDGET = Object.freeze({
-  hardBodyBytes: 12 * 1_024 * 1_024,
+  hardBodyBytes: ARENA_CANONICAL_RESOURCE_LIMITS.requestBodyBytes,
   cancelBodyBytes: 1_024,
   maxCombatants: ARENA_CANONICAL_CAPABILITIES.maxCombatants,
-  maxAdjudicationEvents: 100,
+  maxAdjudicationEvents: ARENA_CANONICAL_RESOURCE_LIMITS.maxAdjudicationEvents,
   maxReferenceItemsSanity: ARENA_CANONICAL_CAPABILITIES.maxReferenceItemsSanity,
-  maxOutputBytes: 4 * 1_024 * 1_024,
+  maxOutputBytes: ARENA_CANONICAL_RESOURCE_LIMITS.outputContentBytes,
   maxEstimatedPromptTokens: Object.freeze({
     'hosted-system': 128_000,
     'hosted-byok': 1_000_000,

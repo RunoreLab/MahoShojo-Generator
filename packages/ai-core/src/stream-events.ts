@@ -3,12 +3,15 @@ import {
   AiExecutionModeSchema,
   AiExecutionRequestSchema,
   AiExecutionResultSchema,
+  ArenaAiExecutionResultSchema,
+  aiOutputContentBytes,
   AiExecutionUsageSchema,
   type AiExecutionRequest,
   type AiExecutionResult,
   type AiExecutionUsage,
 } from '@mahoshojo/contracts/ai-execution';
 import { z } from './zod';
+import { ARENA_CANONICAL_RESOURCE_LIMITS } from '@mahoshojo/contracts/arena-capabilities';
 
 export const AI_STREAM_MAX_DELTA_CHARS = 65_536;
 
@@ -50,11 +53,11 @@ export const AiStreamUsageEventSchema = z
   })
   .strict();
 
-export const AiStreamResultEventSchema = z
+const buildResultEventSchema = (resultSchema: typeof AiExecutionResultSchema) => z
   .object({
     type: z.literal('result'),
     ...eventIdentityShape,
-    result: AiExecutionResultSchema,
+    result: resultSchema,
   })
   .strict()
   .superRefine((event, context) => {
@@ -69,13 +72,16 @@ export const AiStreamResultEventSchema = z
     }
   });
 
-export const AiStreamEventSchema = z.discriminatedUnion('type', [
+export const AiStreamResultEventSchema = buildResultEventSchema(AiExecutionResultSchema);
+const buildEventSchema = (resultSchema: typeof AiExecutionResultSchema) => z.discriminatedUnion('type', [
   AiStreamStartedEventSchema,
   AiStreamTextDeltaEventSchema,
   AiStreamReasoningDeltaEventSchema,
   AiStreamUsageEventSchema,
-  AiStreamResultEventSchema,
+  buildResultEventSchema(resultSchema),
 ]);
+export const AiStreamEventSchema = buildEventSchema(AiExecutionResultSchema);
+export const ArenaAiStreamEventSchema = buildEventSchema(ArenaAiExecutionResultSchema);
 export type AiStreamEvent = z.infer<typeof AiStreamEventSchema>;
 export type AiStreamStartedEvent = z.infer<typeof AiStreamStartedEventSchema>;
 export type AiStreamTextDeltaEvent = z.infer<typeof AiStreamTextDeltaEventSchema>;
@@ -119,7 +125,7 @@ export class AiStreamProtocolError extends Error {
 }
 
 type AiStreamSource = Iterable<unknown> | AsyncIterable<unknown>;
-type AiStreamRequestIdentity = Pick<AiExecutionRequest, 'requestId' | 'contractVersion' | 'mode'>;
+type AiStreamRequestIdentity = Pick<AiExecutionRequest, 'requestId' | 'contractVersion' | 'mode' | 'requestKind'>;
 
 export type AiStreamLimits = {
   maxEvents: number;
@@ -167,9 +173,9 @@ const resolveAiStreamLimits = (limits?: Partial<AiStreamLimits>): AiStreamLimits
 const protocolError = (code: AiStreamProtocolErrorCode): AiStreamProtocolError =>
   new AiStreamProtocolError(code);
 
-const parseEvent = (value: unknown): AiStreamEvent => {
+const parseEvent = (value: unknown, arena: boolean): AiStreamEvent => {
   try {
-    const parsed = AiStreamEventSchema.safeParse(value);
+    const parsed = (arena ? ArenaAiStreamEventSchema : AiStreamEventSchema).safeParse(value);
     if (parsed.success) return parsed.data;
   } catch {
     // Provider values are untrusted. Expose only the stable protocol error.
@@ -231,12 +237,18 @@ export const collectAiStreamResult = async (
   source: AiStreamSource,
   options: CollectAiStreamResultOptions = {},
 ): Promise<AiExecutionResult> => {
-  const limits = resolveAiStreamLimits(options.limits);
+  const arena = request.requestKind === 'arena';
+  const limits = resolveAiStreamLimits(arena ? {
+    ...options.limits,
+    maxTotalDeltaChars: ARENA_CANONICAL_RESOURCE_LIMITS.outputContentBytes,
+    maxResultChars: ARENA_CANONICAL_RESOURCE_LIMITS.outputContentBytes,
+  } : options.limits);
   let expectedSequence = 0;
   let sawEvent = false;
   let terminalResult: AiExecutionResult | undefined;
   let eventCount = 0;
   let totalDeltaChars = 0;
+  let totalDeltaBytes = 0;
 
   try {
     for await (const rawEvent of source) {
@@ -246,7 +258,7 @@ export const collectAiStreamResult = async (
         throw protocolError('event-after-terminal');
       }
 
-      const event = parseEvent(rawEvent);
+      const event = parseEvent(rawEvent, arena);
 
       if (!sawEvent) {
         sawEvent = true;
@@ -270,6 +282,10 @@ export const collectAiStreamResult = async (
 
       if (event.type === 'text-delta' || event.type === 'reasoning-delta') {
         if (event.delta.length > limits.maxDeltaChars) throw protocolError('limit-exceeded');
+        if (arena) {
+          totalDeltaBytes += aiOutputContentBytes({ text: event.delta });
+          if (totalDeltaBytes > ARENA_CANONICAL_RESOURCE_LIMITS.outputContentBytes) throw protocolError('limit-exceeded');
+        }
         totalDeltaChars += event.delta.length;
         if (totalDeltaChars > limits.maxTotalDeltaChars) throw protocolError('limit-exceeded');
       }
