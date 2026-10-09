@@ -127,7 +127,20 @@ describe('generated content from a clean output root', () => {
       .toEqual(await readFile(path.join(REPO_ROOT, 'content/flowers.json')));
     const desktop = path.join(outputRoot, 'apps/desktop/public');
     expect(await readdir(desktop)).not.toContain('flowers.json');
-    expect(await readdir(desktop)).not.toContain('arena-card-white.webp');
+    // 已交付功能会把品牌资源从 Web 专属迁到 shared（例如 Tavern 的 arena-card-white）。
+    // 按当前权威清单逐项验证字节与排除边界，不能固定某个已迁移文件为永远 Web 专属。
+    const { brand } = JSON.parse(
+      await readFile(path.join(REPO_ROOT, 'content/sync-manifest.json'), 'utf8'),
+    ) as { brand: { shared: string[]; web: string[] } };
+    for (const asset of brand.shared) {
+      for (const publicRoot of [web, desktop]) {
+        expect(await readFile(path.join(publicRoot, asset))).toEqual(await readFile(path.join(REPO_ROOT, 'content/brand', asset)));
+      }
+    }
+    for (const asset of brand.web) {
+      expect(await readdir(desktop)).not.toContain(asset);
+      expect(await readFile(path.join(web, asset))).toEqual(await readFile(path.join(REPO_ROOT, 'content/brand', asset)));
+    }
     await writeFile(path.join(desktop, 'keep.txt'), 'unrelated');
     await writeFile(path.join(desktop, 'encyclopedia/stale.md'), 'retired');
     await writeFile(path.join(desktop, 'logo.svg'), 'drift');

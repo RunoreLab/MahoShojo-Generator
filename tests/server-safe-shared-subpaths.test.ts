@@ -71,6 +71,9 @@ const SERVER_SAFE_ENTRYPOINTS: Readonly<Record<string, string>> = {
   './card-library-visibility': 'card-library/visibility.ts',
   // Web /creator metadata 经由 lib/creator/page-copy 读取的纯文案叶子。
   './creator-copy': 'creator/page-copy.ts',
+  // Web 茶会服务端 handler → presets → lib/tavern-card → v3 会载入此叶子。
+  // DOM 栅格化只在调用时使用，Node 调用返回占位 PNG；不得经由含 hook 的 Tavern barrel。
+  './tavern-default-base': 'tavern/default-base.ts',
 };
 
 /**
@@ -183,6 +186,22 @@ describe('server-safe shared entrypoints stay free of React hooks', () => {
     expect(findHookCalls(bundled.outputFiles[0].text)).toEqual([]);
   });
 
+  it('keeps the actual Web Tavern server import graph free of client hooks', async () => {
+    const bundled = await build({
+      entryPoints: [path.resolve(PACKAGE_ROOT, '../../apps/web/lib/magic-tea-party/presets.ts')],
+      bundle: true,
+      platform: 'node',
+      format: 'esm',
+      write: false,
+      metafile: true,
+      logLevel: 'silent',
+    });
+    const inputs = Object.keys(bundled.metafile!.inputs);
+    expect(inputs.some((file) => file.endsWith('src/tavern/default-base.ts'))).toBe(true);
+    expect(inputs.some((file) => file.endsWith('src/tavern/index.ts'))).toBe(false);
+    expect(findHookCalls(bundled.outputFiles[0].text)).toEqual([]);
+  });
+
   it('lists every shared entrypoint so a new one is a deliberate decision', () => {
     // 新增 subpath 时如果忘了判断它是否 RSC 安全，这条会提醒你。刻意不在这里自动推断——推断需要
     // 知道 RSC 消费者，而那是仓库里另一处的事实。
@@ -215,6 +234,8 @@ describe('server-safe shared entrypoints stay free of React hooks', () => {
     // `app/settings/page.tsx` 只经 `'use client'` 的 SettingsRouteProviders 挂载它们，
     // RSC 消费的仅是同目录的 `./device-preferences-init`（已登记在 server-safe 列）。
     // `./generation-actions` 只由生成页与 SaveJsonButton 客户端操作消费；不新增 RSC 导入链。
+    // `./tavern` 是交互面板与状态 hook；服务端仅允许上面的 default-base 叶子。
+    // `./team` 由两端客户端组队页消费，包含交互状态，不进入服务端导入链。
     expect(unlisted.sort()).toEqual([
       './ai-provider',
       './announcement',
@@ -244,6 +265,8 @@ describe('server-safe shared entrypoints stay free of React hooks', () => {
       './settings',
       './shell',
       './sublimation',
+      './tavern',
+      './team',
     ]);
   });
 });
