@@ -186,7 +186,7 @@ describe('Desktop Canshou real route and session UI (native adapter mock)', () =
       if (command === 'cloud_card_library_request') {
         const request = (args as any).request;
         if (request.routeId === 'user-capacity.query') return { status: 200, body: { success: true, capacity: 10, usedSlots: 0 } } as never;
-        if (request.routeId === 'data-cards.create') return await new Promise((resolve) => { finish = resolve; }) as never;
+        if (request.routeId === 'data-cards.create') return await new Promise<unknown>((resolve) => { finish = resolve; }) as never;
       }
       return undefined as never;
     });
@@ -261,7 +261,7 @@ describe('Desktop Canshou real route and session UI (native adapter mock)', () =
     await mount();
     const originalDraft = window.localStorage.getItem(CANSHOU_DRAFT_KEY);
     const originalSet = Storage.prototype.setItem;
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
       if (key === CANSHOU_DRAFT_KEY) throw new Error('quota exceeded');
       return originalSet.call(this, key, value);
     });

@@ -114,19 +114,22 @@ function FreeForm({ session }: { session: FreeSession }) {
   // 附件会话共源（ui-web/free）：读取代际失效、合并前预算复核、input 复位
   // 由 hook 统一承担——附件不写入草稿。
   const attachmentReadingRef = useRef(false);
+  const attachmentReadEpoch = useRef(0);
   const readAttachments = useCallback(async (...args: Parameters<typeof readFreeAttachmentFiles>) => {
+    const epoch = ++attachmentReadEpoch.current;
     attachmentReadingRef.current = true;
     try { return await readFreeAttachmentFiles(...args); }
-    finally { attachmentReadingRef.current = false; }
+    finally { if (epoch === attachmentReadEpoch.current) attachmentReadingRef.current = false; }
   }, []);
   const attachmentState = useFreeAttachments(readAttachments);
   const guardedAttachments = {
     ...attachmentState,
     addFiles: (files: ArrayLike<File> | null | undefined) => cloudSavingRef.current ? Promise.resolve() : attachmentState.addFiles(files),
-    remove: (id: string) => { if (!cloudSavingRef.current) attachmentState.remove(id); },
-    clear: () => { if (!cloudSavingRef.current) attachmentState.clear(); },
+    remove: (id: string) => { if (!cloudSavingRef.current) { attachmentReadEpoch.current++; attachmentReadingRef.current = false; attachmentState.remove(id); } },
+    clear: () => { if (!cloudSavingRef.current) { attachmentReadEpoch.current++; attachmentReadingRef.current = false; attachmentState.clear(); } },
   };
-  const { items: attachments, isReading: isReadingAttachments, clear: clearAttachments } = attachmentState;
+  const { items: attachments, isReading: isReadingAttachments } = attachmentState;
+  const clearAttachments = guardedAttachments.clear;
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionInfo, setActionInfo] = useState<string | null>(null);
   const [confirmRegenerate, setConfirmRegenerate] = useState<false | ConfirmRegenerateKind>(false);
