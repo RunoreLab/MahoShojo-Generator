@@ -38,6 +38,8 @@ import { isQuestionnaireDataCard } from '@/lib/questionnaire-data-card';
 // 导入拆分的组件
 import AuthModal from '@/components/CharManager/AuthModal';
 import SaveCardModal from '@/components/CharManager/SaveCardModal';
+import { ReplaceCardModal } from '@mahoshojo/ui-web/cloud-save';
+import { useCharacterManagerCloudWrite } from './useCharacterManagerCloudWrite';
 import DataCardsModal from '@/components/CharManager/DataCardsModal';
 import RecycleBinModal from '@/components/CharManager/RecycleBinModal';
 import NarrativeHistoryCardEditorModal from '@/components/CharManager/NarrativeHistoryCardEditorModal';
@@ -279,7 +281,7 @@ const WEB_CHARACTER_MANAGER_CAPABILITIES: CharacterManagerCapabilities = {
 
 export const CharacterManagerPage: React.FC = () => {
     const router = useRouter();
-    const { user, loading: authLoading, isAuthenticated, register, login, logout } = useAuth();
+    const { user, loading: authLoading, isAuthenticated, authSource, register, login, logout } = useAuth();
     const [pastedJson, setPastedJson] = useState('');
     const [characterData, setCharacterData] = useState<any | null>(null);
     const [originalData, setOriginalData] = useState<any | null>(null);
@@ -296,15 +298,15 @@ export const CharacterManagerPage: React.FC = () => {
     // 数据卡管理相关状态
     const [cardsRefresh, setCardsRefresh] = useState(0);
     const [userCapacity, setUserCapacity] = useState(config.DEFAULT_DATA_CARD_CAPACITY);
+    const [capacityKnown, setCapacityKnown] = useState(false);
+    const accountScope = `${user?.id ?? ''}:${authSource ?? ''}`;
+    const accountScopeRef = useRef(accountScope); accountScopeRef.current = accountScope;
+    const cloudOperationBusyRef = useRef(false);
     const [userUsedSlots, setUserUsedSlots] = useState(0);
   const [showDataCardsModal, setShowDataCardsModal] = useState(false);
   const [recycleBinCards, setRecycleBinCards] = useState<any[]>([]);
   const [showRecycleBinModal, setShowRecycleBinModal] = useState(false);
   const [editingCard, setEditingCard] = useState<any | null>(null);
-  const [showSaveCardModal, setShowSaveCardModal] = useState(false);
-  const [newCardForm, setNewCardForm] = useState({ name: '', description: '', isPublic: 0 });
-  const [saveCardError, setSaveCardError] = useState<string | null>(null);
-  const [isSavingCard, setIsSavingCard] = useState(false);
   const [showHistoryCardEditor, setShowHistoryCardEditor] = useState(false);
   const [historyCardDraft, setHistoryCardDraft] = useState<NarrativeHistoryDataCardV1 | null>(null);
   const [historyCardTarget, setHistoryCardTarget] = useState<{
@@ -345,8 +347,9 @@ export const CharacterManagerPage: React.FC = () => {
     const protectedDraftDirty = (draftBlocked !== null || autoSaveFailed) && (characterData !== null
         ? characterData !== lastLocalSavedData : pastedJson.trim() !== '');
     const confirmProtectedDraftDiscard = useUnsavedPageGuard(
-        () => protectedDraftDirty,
+        () => protectedDraftDirty || cloudOperationBusyRef.current,
         '当前新编辑内容尚未保存到本地库，自动草稿保存已暂停。确认放弃当前内容并继续？',
+        () => !cloudOperationBusyRef.current,
     );
     // 【新增】图片保存模态框的状态
     const [showImageModal, setShowImageModal] = useState(false);
@@ -372,17 +375,20 @@ export const CharacterManagerPage: React.FC = () => {
     // 加载用户数据卡和容量
     const loadUserDataCards = useCallback(async () => {
         if (!isAuthenticated) return;
+        const requestedScope = accountScope;
         setCardsRefresh((value) => value + 1);
+        setCapacityKnown(false);
         await Promise.all([
             dataCardApi.getUserCapacity().then((capacityInfo) => {
-                if (capacityInfo !== null) {
+                if (accountScopeRef.current === requestedScope && capacityInfo !== null) {
+                    setCapacityKnown(true);
                     setUserCapacity(capacityInfo.capacity);
                     setUserUsedSlots(capacityInfo.usedSlots);
                 }
             }),
-            dataCardApi.getRecycleBin().then(setRecycleBinCards),
+            dataCardApi.getRecycleBin().then((cards) => { if (accountScopeRef.current === requestedScope) setRecycleBinCards(cards); }),
         ]);
-    }, [isAuthenticated]);
+    }, [isAuthenticated, accountScope]);
 
     useEffect(() => {
         if (isAuthenticated) {
@@ -396,21 +402,25 @@ export const CharacterManagerPage: React.FC = () => {
 
     const loadUserBadges = useCallback(async () => {
         if (!isAuthenticated) return;
+        const requestedScope = accountScope;
         try {
             const response = await authStorage.fetch('/api/badges/user');
 
+            if (accountScopeRef.current !== requestedScope) return;
             if (!response.ok) {
                 setUserBadges([]);
                 return;
             }
 
             const data = await response.json();
+            if (accountScopeRef.current !== requestedScope) return;
             setUserBadges(Array.isArray(data.badges) ? data.badges : []);
         } catch (error) {
+            if (accountScopeRef.current !== requestedScope) return;
             console.error('加载徽章失败:', error);
             setUserBadges([]);
         }
-    }, [isAuthenticated]);
+    }, [isAuthenticated, accountScope]);
 
     useEffect(() => {
         if (isAuthenticated) {
@@ -560,8 +570,8 @@ export const CharacterManagerPage: React.FC = () => {
     }, [logout]);
 
     // 统一构建可上传的数据（处理原生性签名）
-    const prepareFinalDataForUpload = useCallback(async (): Promise<any | null> => {
-        if (!characterData) return null;
+    const prepareFinalDataForUpload = useCallback(async (isCurrent: () => boolean): Promise<any | null> => {
+        if (!characterData || !isCurrent()) return null;
         let finalData = { ...characterData };
 
         if (isNative && !hasLostNativeness) {
@@ -574,6 +584,7 @@ export const CharacterManagerPage: React.FC = () => {
 
             if (!response.ok) {
                 const errorData = await response.json();
+                if (!isCurrent()) return null;
                 if (errorData.shouldRedirect) {
                     router.push(getArrestedHref(errorData.reason || '编辑内容不合规'));
                     return null;
@@ -581,6 +592,7 @@ export const CharacterManagerPage: React.FC = () => {
                 throw new Error(errorData.message || '签名服务器认证失败');
             }
             finalData = await response.json();
+            if (!isCurrent()) return null;
             setMessage({ type: 'success', text: '原生性签名认证成功！' });
         } else {
             delete finalData.signature;
@@ -589,26 +601,35 @@ export const CharacterManagerPage: React.FC = () => {
         return finalData;
     }, [characterData, hasLostNativeness, isNative, router, setMessage]);
 
-    // 保存当前角色为数据卡
-    const handleSaveAsDataCard = async () => {
-        if (!isAuthenticated || !characterData) return;
-
-        // 打开保存弹窗，设置默认值
-        const isScenario = isScenarioData(characterData);
-        const type = isScenario ? 'scenario' : 'character';
-        const defaultName = isScenario
-            ? (characterData.title || characterData.name || '')
-            : (characterData.codename || characterData.name || '');
-        const defaultDescription = `${type === 'character' ? '角色' : '情景'}数据卡`;
-
-        setNewCardForm({
-            name: defaultName,
-            description: defaultDescription,
-            isPublic: 0
-        });
-        setSaveCardError(null);
-        setShowSaveCardModal(true);
+    const isScenarioData = (data: any): boolean => {
+        const template = inferTemplate(data);
+        return template === 'scenario' || template === 'general-scenario';
     };
+
+    const cloudWrite = useCharacterManagerCloudWrite({
+        data: characterData,
+        cardType: isScenarioData(characterData) ? 'scenario' : 'character',
+        userId: user?.id ?? null,
+        isAuthenticated,
+        authSource,
+        prepareData: prepareFinalDataForUpload,
+        usedSlots: capacityKnown ? userUsedSlots : undefined,
+        userCapacity: capacityKnown ? userCapacity : undefined,
+        onBusyChange: (busy) => { cloudOperationBusyRef.current = busy; },
+        onSensitive: () => router.push('/arrested'),
+        onInspectCards: () => setShowDataCardsModal(true),
+        onSuccess: (text) => {
+            setMessage({ type: 'success', text });
+            void loadUserDataCards();
+            void loadUserBadges();
+        },
+    });
+    // 账号变更不将旧的资料编辑/选择/专用云端目标带到新账号；编辑器正文保留。
+    useEffect(() => {
+        setEditingCard(null); setShowDataCardsModal(false); setCurrentPage(1); setRecycleBinCards([]); setUserBadges([]);
+        setShowRecycleBinModal(false); setShowQuestionnaireCompatModal(false);
+        setQuestionnaireCompatTargetCard(null); setHistoryCardTarget(null); setShowHistoryCardEditor(false);
+    }, [user?.id, authSource]);
 
     // 本地保存沿用 Web IndexedDB 仓储与既有内容摘要协议；无需登录、补签或网络。
     // 保留正文中的未知字段和签名证据，库记录的 provenance 仍由既有 helper 标为 unsigned。
@@ -642,64 +663,6 @@ export const CharacterManagerPage: React.FC = () => {
         } finally {
             localSavingRef.current = false;
             setIsSavingLocal(false);
-        }
-    };
-
-    // 确认保存数据卡
-    const handleConfirmSaveCard = async () => {
-        if (!newCardForm.name.trim()) {
-            setSaveCardError('请输入数据卡名称');
-            return;
-        }
-
-        setIsSavingCard(true);
-        setSaveCardError(null);
-
-        try {
-            const finalData = await prepareFinalDataForUpload();
-            if (!finalData) {
-                setIsSavingCard(false);
-                return;
-            }
-
-            // 2. 前端敏感词检查 (使用处理后的 finalData)
-            const type = isScenarioData(finalData) ? 'scenario' : 'character';
-            const textToCheck = `${newCardForm.name} ${newCardForm.description} ${JSON.stringify(finalData)}`;
-            const sensitiveWordResult = await quickCheck(textToCheck);
-
-            if (sensitiveWordResult.hasSensitiveWords) {
-                router.push('/arrested');
-                return;
-            }
-
-            // 3. 调用 API 创建数据卡 (使用处理后的 finalData)
-            const result = await dataCardApi.createCard(
-                type,
-                newCardForm.name,
-                newCardForm.description,
-                finalData, // 使用经过原生性处理的数据
-                newCardForm.isPublic
-            );
-
-            if (result.success) {
-                setMessage({ type: 'success', text: `数据卡保存成功！${newCardForm.isPublic === 1 ? '（公开）' : '（私有）'}` });
-                setShowSaveCardModal(false);
-                setNewCardForm({ name: '', description: '', isPublic: 0 });
-                setSaveCardError(null);
-                loadUserDataCards();
-                loadUserBadges();
-            } else {
-                if (result.error === 'SENSITIVE_WORD_DETECTED' || (result as any).redirect === '/arrested') {
-                    router.push('/arrested');
-                    return;
-                }
-                setSaveCardError(result.error || '保存失败');
-            }
-        } catch (error) {
-            // 捕获签名或API调用中可能出现的任何错误
-            setSaveCardError(error instanceof Error ? error.message : '保存过程中发生未知错误');
-        } finally {
-            setIsSavingCard(false);
         }
     };
 
@@ -836,26 +799,7 @@ export const CharacterManagerPage: React.FC = () => {
             setMessage({ type: 'error', text: '请先在编辑区加载/生成要替换的内容' });
             return;
         }
-        if (!window.confirm(`确认用当前编辑内容替换「${card.name}」吗？`)) return;
-        try {
-            const payloadData = await prepareFinalDataForUpload();
-            if (!payloadData) return;
-            const result = await dataCardApi.replaceCard(card.id, {
-                name: card.name,
-                description: card.description,
-                isPublic: getDataCardVisibilityValue(card),
-                data: payloadData,
-            });
-            if (result.success) {
-                setMessage({ type: 'success', text: result.pendingReview ? '更新已提交审核，审核通过后生效' : '替换成功' });
-                loadUserDataCards();
-                loadUserBadges();
-            } else {
-                setMessage({ type: 'error', text: result.error || '替换失败' });
-            }
-        } catch (error) {
-            setMessage({ type: 'error', text: error instanceof Error ? error.message : '替换失败' });
-        }
+        if (await cloudWrite.selectReplacement(card.id)) setShowDataCardsModal(false);
     };
 
     const handleReplaceHistoryCard = async (payload: NarrativeHistoryDataCardV1) => {
@@ -887,10 +831,7 @@ export const CharacterManagerPage: React.FC = () => {
     };
 
     // 检测是否为情景文件（结构化情景/通用情景的统一判定）
-    const isScenarioData = (data: any): boolean => {
-        const template = inferTemplate(data);
-        return template === 'scenario' || template === 'general-scenario';
-    };
+
 
     // 分享数据卡
     const handleShareDataCard = async (card: any) => {
@@ -1764,8 +1705,8 @@ export const CharacterManagerPage: React.FC = () => {
                                 )}
                                 myDataCards={isAuthenticated ? {
                                     onOpen: () => setShowDataCardsModal(true),
-                                    usedSlots: userUsedSlots,
-                                    capacity: userCapacity,
+                                    usedSlots: capacityKnown ? userUsedSlots : undefined,
+                                    capacity: capacityKnown ? userCapacity : undefined,
                                 } : undefined}
                                 signedOut={{
                                     actionLabel: '登录 / 注册',
@@ -1861,7 +1802,8 @@ export const CharacterManagerPage: React.FC = () => {
                                             validationResult?.success ? (
                                                 <div className="space-y-2">
                                                     <button
-                                                        onClick={handleSaveAsDataCard}
+                                                        onClick={cloudWrite.openSave}
+                                                        disabled={cloudWrite.busy}
                                                         className="generate-button w-full"
                                                         style={{ backgroundColor: '#10b981', backgroundImage: 'linear-gradient(to right, #10b981, #059669)' }}
                                                     >
@@ -1870,7 +1812,7 @@ export const CharacterManagerPage: React.FC = () => {
                                                     <JsonSizeIndicator
                                                         data={characterData}
                                                         className="mt-0"
-                                                        warningText="⚠️ 接近云端 300KB 上限，保存可能失败，请先精简数据。"
+                                                        warningText="⚠️ 接近云端 1MiB 单卡上限，保存可能失败，请先精简数据。"
                                                     />
                                                 </div>
                                             ) : validationResult?.error && (
@@ -2204,11 +2146,14 @@ export const CharacterManagerPage: React.FC = () => {
             < DataCardsModal
                 isOpen={showDataCardsModal}
                 onClose={() => {
+                    cloudWrite.cancelReplacementSelection();
                     setShowDataCardsModal(false);
                     setCurrentPage(1);
                 }}
                 dataCards={[]}
                 summaryOwnerId={user?.id}
+                scopeKey={`${user?.id ?? ''}:${authSource ?? ''}`}
+                busy={cloudWrite.busy && !cloudWrite.replacementPreparing}
                 refreshKey={cardsRefresh}
                 editingCard={editingCard}
                 currentPage={currentPage}
@@ -2223,6 +2168,7 @@ export const CharacterManagerPage: React.FC = () => {
             onReplaceCard={handleReplaceExistingCard}
             allowHistoryReplace={true}
             userCapacity={userCapacity}
+            capacityKnown={capacityKnown}
             userUsedSlots={userUsedSlots}
             onOpenRecycleBin={() => {
                 setShowDataCardsModal(false);
@@ -2270,28 +2216,9 @@ export const CharacterManagerPage: React.FC = () => {
                 limit={config.RECYCLE_BIN_LIMIT}
             />
 
-            {/* 保存数据卡弹窗 */}
-            < SaveCardModal
-                isOpen={showSaveCardModal}
-                onClose={() => {
-                    setShowSaveCardModal(false);
-                    setNewCardForm({ name: '', description: '', isPublic: 0 });
-                    setSaveCardError(null);
-                    setIsSavingCard(false);
-                }}
-                onSave={handleConfirmSaveCard}
-                data={characterData}
-                name={newCardForm.name}
-                description={newCardForm.description}
-                isPublic={newCardForm.isPublic}
-                onNameChange={(value) => setNewCardForm({ ...newCardForm, name: value })}
-                onDescriptionChange={(value) => setNewCardForm({ ...newCardForm, description: value })}
-                onPublicChange={(value) => setNewCardForm({ ...newCardForm, isPublic: value })}
-                error={saveCardError}
-                isSaving={isSavingCard}
-                usedSlots={userUsedSlots}
-                userCapacity={userCapacity}
-            />
+            {/* 两端同一保存表单和目标确认；签名与安全写入由 Web 宿主控制。 */}
+            <SaveCardModal {...cloudWrite.saveModal} />
+            <ReplaceCardModal {...cloudWrite.replaceModal} />
 
         </>
     );
