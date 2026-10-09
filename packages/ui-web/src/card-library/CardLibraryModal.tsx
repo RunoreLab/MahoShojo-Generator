@@ -14,6 +14,7 @@ import { isDefinitiveClientTerminalStatus } from './net-status';
 import {
   isPublicVisibility,
   mapPublicDataCardRowToBattleSelectionPayload,
+  mapPublicDataCardRowToSourceData,
   normalizePublicVisibilityValue,
 } from './read-mappers';
 import { isLocalDataCardRow, mapLocalCardRecordToDetailsCard, markCachedDataCardRow, getCachedDataCardRowMeta, isCachedDataCardRow, type LocalDataCardRow } from './rows';
@@ -1318,6 +1319,7 @@ export function CardLibraryModal({
         : isCacheRow && cachedResolved?.viaCache !== false
           ? { selectionId: `cache:${cardId}`, storageLocation: 'cache' }
           : { selectionId: `cloud:${cardId}`, storageLocation: 'cloud', cloudCardId: cardId };
+      selectionContext.rawSourceData = mapPublicDataCardRowToSourceData(full);
 
       if (selectionMode === 'multi') {
         if (canToggle) {
@@ -1387,6 +1389,7 @@ export function CardLibraryModal({
             selectionId: `cloud:${cardId}`,
             storageLocation: 'cloud',
             cloudCardId: cardId,
+            rawSourceData: mapPublicDataCardRowToSourceData(card),
           };
 
           if (canToggle) {

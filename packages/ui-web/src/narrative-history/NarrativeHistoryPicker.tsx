@@ -14,6 +14,7 @@ import type { NarrativeHistorySort } from '@mahoshojo/domain/narrative-history-o
 import type { NarrativeHistoryEntry } from '@mahoshojo/domain/arena-types';
 
 export type NarrativeHistoryPickerProps = {
+  title?: string;
   entries: NarrativeHistoryEntry[];
   lastUpdatedAt: string | null;
   sort: NarrativeHistorySort;
@@ -30,7 +31,7 @@ export type NarrativeHistoryPickerProps = {
 const normalizeQuery = (value: string): string => value.trim().toLowerCase();
 
 export function NarrativeHistoryPicker({ isOpen, onClose, initialSelectedIds, onConfirm,
-  entries, lastUpdatedAt, sort, onSort, formatDateTime, sourceHint, readStatus,
+  entries, lastUpdatedAt, sort, onSort, formatDateTime, sourceHint, readStatus, title = '选择竞技场叙事历史',
 }: NarrativeHistoryPickerProps) {
   const [query, setQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<Record<string, true>>({});
@@ -124,7 +125,7 @@ export function NarrativeHistoryPicker({ isOpen, onClose, initialSelectedIds, on
       >
         <div className="flex items-center justify-between p-4 border-b gap-3">
           <div>
-            <div id={titleId} className="text-lg font-bold text-gray-800">选择竞技场叙事历史</div>
+            <div id={titleId} className="text-lg font-bold text-gray-800">{title}</div>
             <div className="text-xs text-gray-500 mt-1">
               共 {entries.length} 条{lastUpdatedAt ? `｜最近更新：${formatDateTime(lastUpdatedAt)}` : ''}｜已选 {selectedCount} 条
             </div>

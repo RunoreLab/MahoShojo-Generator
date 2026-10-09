@@ -186,6 +186,10 @@ const parseDataCardDataObject = (source: Record<string, unknown>): Record<string
   throw new Error('数据卡内容为空或格式不受支持。');
 };
 
+/** 不混入来源元数据；供编辑/升华这类必须保留全部原卡字段的消费者使用。 */
+export const mapPublicDataCardRowToSourceData = (rowInput: unknown): Record<string, unknown> =>
+  JSON.parse(JSON.stringify(parseDataCardDataObject(toRecord(rowInput) ?? {}))) as Record<string, unknown>;
+
 export const mapPublicDataCardRowToDetailsCard = (
   rowInput: unknown,
   fallback: { id: string; name: string; author: string },

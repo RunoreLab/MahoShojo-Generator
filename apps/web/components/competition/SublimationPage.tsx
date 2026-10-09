@@ -14,6 +14,7 @@ import { config as appConfig } from '@/lib/config';
 import SaveToCloudButton from '@/components/SaveToCloudButton';
 import Footer from '@/components/Footer';
 import BattleDataModal from '@/components/BattleDataModal';
+import type { CardLibrarySelectionContext } from '@mahoshojo/ui-web/card-library';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import { NarrativeHistoryModal } from '@/components/arena/components/NarrativeHistoryModal';
 import { NarrativeHistoryPickerModal } from '@/components/arena/components/NarrativeHistoryPickerModal';
@@ -24,11 +25,10 @@ import AiReasoningPanel from '@/components/ai/AiReasoningPanel';
 import { ProviderCooldownNotice } from '@/components/ai/ProviderCooldownNotice';
 import { ErrorMessage } from '@/components/ErrorMessage';
 import { GenerationModeSwitcher, type GenerationMode } from '@/components/shared/GenerationModeSwitcher';
-import { ThemeImage } from '@/components/shared/ThemeImage';
 import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { StreamStopButton } from '@/components/shared/StreamStopButton';
-import { SublimationArenaHistoryStrategyFieldset } from '@/components/shared/SublimationArenaHistoryStrategyFieldset';
+import { SublimationArenaHistoryStrategyFieldset, SublimationPageFrame, SublimationPageHeader, SublimationTargetField, SublimationGuidanceField, SublimationNarrativeField, SublimationPreserveFields, SublimationCurrentStateFieldset, TARGET_TEMPLATE_OPTIONS, PRESERVABLE_FIELDS_CONFIG, getDefaultPreserveFields, getPersonalityPreset } from '@mahoshojo/ui-web/sublimation';
 import { STREAM_ABORT_REASON_USER } from '@/lib/stream/abort';
 import { readSafeTextAndReasoningStreamFromResponse } from '@/lib/stream/read-safe-text-and-reasoning-stream';
 import { buildGeneralCharacterCardFromMarkdown } from '@/lib/stream/markdown-card';
@@ -96,14 +96,6 @@ const gradientColors: Record<string, { first: string; second: string }> = {
 
 type SupportedTargetTemplate = 'magical-girl' | 'canshou' | 'general';
 
-const TARGET_TEMPLATE_OPTIONS: SupportedTargetTemplate[] = ['magical-girl', 'canshou', 'general'];
-
-const TARGET_TEMPLATE_LABELS: Record<SupportedTargetTemplate, string> = {
-    'magical-girl': TEMPLATE_LABELS['magical-girl'],
-    'canshou': TEMPLATE_LABELS['canshou'],
-    'general': TEMPLATE_LABELS['general'],
-};
-
 const createQuestionnaireSelectionSuffix = () =>
     typeof crypto !== 'undefined' && 'randomUUID' in crypto
         ? crypto.randomUUID()
@@ -169,52 +161,6 @@ interface SublimationResponse {
     targetTemplate?: SupportedTargetTemplate;
 }
 
-// [新增] 定义可配置的字段及其显示名称
-const PRESERVABLE_FIELDS_CONFIG: Record<SupportedTargetTemplate, { id: string; label: string }[]> = {
-    'magical-girl': [
-        { id: 'appearance', label: '外观' },
-        { id: 'magicConstruct', label: '魔装' },
-        { id: 'wonderlandRule', label: '奇境' },
-        { id: 'blooming', label: '繁开' },
-        { id: 'analysis', label: '分析' },
-        { id: 'userAnswers', label: '问卷答案' },
-    ],
-    'canshou': [
-        { id: 'appearance', label: '外貌形态' },
-        { id: 'coreConcept', label: '核心概念' },
-        { id: 'coreEmotion', label: '核心情感' },
-        { id: 'materialAndSkin', label: '材质表皮' },
-        { id: 'featuresAndAppendages', label: '特征附属' },
-        { id: 'attackMethod', label: '攻击方式' },
-        { id: 'specialAbility', label: '特殊能力' },
-        { id: 'origin', label: '起源' },
-        { id: 'birthEnvironment', label: '诞生环境' },
-        { id: 'researcherNotes', label: '研究员笔记' },
-        { id: 'userAnswers', label: '问卷答案' },
-    ],
-    'general': [
-        { id: 'name', label: '角色名称' },
-        { id: 'content', label: '完整设定（content）' }
-    ]
-};
-
-const FIELD_PRESET_CONFIG: Record<SupportedTargetTemplate, { default: string[]; personality: string[] }> = {
-    'magical-girl': {
-        default: ['wonderlandRule', 'blooming'],
-        personality: ['appearance', 'magicConstruct', 'wonderlandRule', 'blooming']
-    },
-    'canshou': {
-        default: [],
-        personality: ['appearance', 'materialAndSkin', 'featuresAndAppendages', 'attackMethod', 'specialAbility']
-    },
-    'general': {
-        default: [],
-        personality: ['name']
-    }
-};
-
-const getDefaultPreserveFields = (target: SupportedTargetTemplate) => [...FIELD_PRESET_CONFIG[target].default];
-const getPersonalityPreset = (target: SupportedTargetTemplate) => [...FIELD_PRESET_CONFIG[target].personality];
 const getDefaultTargetTemplate = (source: InferableTemplate): SupportedTargetTemplate => {
     if (source === 'magical-girl') return 'magical-girl';
     if (source === 'canshou') return 'canshou';
@@ -224,7 +170,6 @@ const getDefaultTargetTemplate = (source: InferableTemplate): SupportedTargetTem
 
 const SUBLIMATION_STATE_PREF_KEY = 'sublimation-history-state-preferences-v1';
 const SUBLIMATION_PREFERENCE_KEY = 'mahoshojo.sublimation.preferences.v1';
-const SUBLIMATION_USER_GUIDANCE_MAX_CHARS = 200;
 
 
 export const SublimationPage: React.FC = () => {
@@ -801,8 +746,7 @@ export const SublimationPage: React.FC = () => {
         setShowBattleDataModal(true);
     };
 
-    const handleTargetTemplateChange = (event: ChangeEvent<HTMLSelectElement>) => {
-        const value = event.target.value as SupportedTargetTemplate;
+    const handleTargetTemplateChange = (value: SupportedTargetTemplate) => {
         if (!TARGET_TEMPLATE_OPTIONS.includes(value)) return;
         setTargetTemplate(value);
 
@@ -815,40 +759,11 @@ export const SublimationPage: React.FC = () => {
         setFieldsToPreserve(getDefaultPreserveFields(value));
     };
 
-    // 递归删除以 _ 开头的键
-    const removePrivateKeys = (obj: any): any => {
-        if (obj === null || typeof obj !== 'object') {
-            return obj;
-        }
-
-        if (Array.isArray(obj)) {
-            return obj.map(removePrivateKeys);
-        }
-
-        const cleaned: any = {};
-        for (const key in obj) {
-            if (!key.startsWith('_')) {
-                cleaned[key] = removePrivateKeys(obj[key]);
-            }
-        }
-        return cleaned;
-    };
-
-    // 处理从数据库选择的角色数据卡
-    const handleSelectDataCard = async (card: any) => {
+    const handleSelectDataCard = async (card: any, context: CardLibrarySelectionContext) => {
         try {
-            // =================================================================
-            // 【核心修正】
-            // 错误原因：原代码错误地认为从模态框返回的 card 对象还包含一个 .data 属性，
-            //           因此尝试执行 `JSON.parse(card.data)`，但此时 card.data 是 undefined，
-            //           导致后续逻辑中处理的角色数据为 undefined，从而引发崩溃。
-            // 解决方案：直接使用从模态框回调函数中接收到的 card 对象本身，因为它已经是
-            //           我们需要的、解析好的完整角色数据。
-            // =================================================================
-            const cardData = card; // 直接使用回调对象，不再访问 .data
-
-            // 删除内部使用的私有键（以_开头）
-            const cleanedCardData = removePrivateKeys(cardData);
+            // 正文与卡库来源元数据分开：不能删除源卡以 _ 开头的自定义扩展。
+            if (!context.rawSourceData) throw new Error('卡库未提供完整原文，请重新选择或导入 JSON。');
+            const cleanedCardData = JSON.parse(JSON.stringify(context.rawSourceData));
 
             setCharacterData(cleanedCardData);
             setFileName(`${card._cardName || '未命名'}(来自数据库)`); // 使用内部传递的_cardName
@@ -1165,7 +1080,6 @@ export const SublimationPage: React.FC = () => {
     const sourceTemplateLabel = sourceTemplate === 'unknown'
         ? '未识别模板'
         : TEMPLATE_LABELS[sourceTemplate as DataCardTemplate];
-    const targetTemplateLabel = TARGET_TEMPLATE_LABELS[targetTemplate];
     const hasCrossTemplateSelection = Boolean(characterData && sourceTemplate !== targetTemplate);
     const currentFieldsConfig = PRESERVABLE_FIELDS_CONFIG[targetTemplate];
     const trimmedGuidance = userGuidance.trim();
@@ -1221,31 +1135,84 @@ export const SublimationPage: React.FC = () => {
 
     return (
         <>
-            <div className="magic-background-white">
-                <div className="container">
+            <SublimationPageFrame afterContainer={<>
+                {showImageModal && savedImageUrl && (
+                    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4">
+                        <div className="bg-white rounded-lg max-w-lg w-full max-h-[80vh] overflow-auto relative">
+                            <div className="sticky top-0 z-10 bg-white/95 backdrop-blur flex justify-end p-2">
+                                <button
+                                    onClick={() => setShowImageModal(false)}
+                                    aria-label="关闭"
+                                    className="text-3xl leading-none text-gray-600 hover:text-gray-900"
+                                >
+                                    ×
+                                </button>
+                            </div>
+                            <div className="px-4 pb-4">
+                                <p className="text-center text-sm text-gray-600 mb-2">长按图片保存到相册</p>
+                                <img src={savedImageUrl} alt="角色卡片" className="w-full h-auto rounded-lg" />
+                            </div>
+                        </div>
+                    </div>
+                )}
+                <Footer />
+
+                {/* 数据库数据选择模态框 */}
+	                <BattleDataModal
+	                    isOpen={showBattleDataModal}
+	                    onClose={() => setShowBattleDataModal(false)}
+	                    onSelectCard={handleSelectDataCard}
+	                    selectedType={modalType}
+	                />
+
+                    <BattleDataModal
+                        isOpen={showQuestionnairePicker}
+                        onClose={() => {
+                            setShowQuestionnairePicker(false);
+                            setQuestionnairePickerError(null);
+                        }}
+                        selectedType="questionnaire"
+                        initialTab="public"
+                        titleOverride="选择云端问卷"
+                        onSelectCard={handleSelectQuestionnaireCard}
+                        externalError={questionnairePickerError}
+                    />
+
+                    {questionnaireDetailsCard && (
+                        <DataCardDetailsModal
+                            isOpen={showQuestionnaireDetailsModal}
+                            onClose={() => {
+                                setShowQuestionnaireDetailsModal(false);
+                                setQuestionnaireDetailsCard(null);
+                            }}
+                            card={{
+                                id: questionnaireDetailsCard.id,
+                                name: questionnaireDetailsCard.name,
+                                description: questionnaireDetailsCard.description,
+                                type: 'questionnaire',
+                                data: questionnaireDetailsCard.data,
+                                isPublic: questionnaireDetailsCard.isPublic,
+                                author: questionnaireDetailsCard.author,
+                            }}
+                        />
+                    )}
+
+                    <NarrativeHistoryPickerModal
+                        isOpen={showArenaNarrativePicker}
+                        onClose={() => setShowArenaNarrativePicker(false)}
+                        initialSelectedIds={arenaNarrativeSelectedIds}
+                        onConfirm={(entries) => {
+                            setArenaNarrativeSelectedIds(entries.map((entry) => entry.id));
+                            setShowArenaNarrativePicker(false);
+                        }}
+                    />
+                    <NarrativeHistoryModal
+                        isOpen={showArenaNarrativeManager}
+                        onClose={() => setShowArenaNarrativeManager(false)}
+                    />
+            </>}>
                     <div className="card">
-                        <div className="text-center mb-4">
-                            <div className="flex justify-center items-center" style={{ marginBottom: '1rem' }}>
-                                <ThemeImage lightSrc="/sublimation.svg" darkSrc="/sublimation-white.svg" width={360} height={40} alt="角色成长升华" />
-                            </div>
-                            <p className="subtitle mt-2">角色成长升华，见证她们在战斗与经历中完成的蜕变</p>
-                        </div>
-                        <div className="mb-6 p-4 bg-purple-50 border border-purple-200 rounded-lg text-sm text-purple-800">
-                            <h3 className="font-bold mb-2">✨ 功能说明</h3>
-                            <ol className="list-decimal list-inside space-y-1">
-                                <li>上传任意.json格式的设定文件（部分兼容非规范文件），历战记录 <span className="font-semibold">可选</span>，如存在会增强升华叙事。</li>
-                                <li>选择目标模板（默认沿用原模板，无匹配时自动切换为通用角色），并可指定需要保留的字段。如果希望借此切换角色模板，建议选择【完全重塑】。</li>
-                                <li>可额外提供叙事历史（手动输入或上传），AI 将结合设定、历战记录与成长引导生成“升华后”的新形态设定。</li>
-                                <li>若提供叙事历史，本次升华结果将标记为<strong>非原生</strong>。</li>
-                                <li>若注入了<strong>非原生许可</strong>的问卷/设定卡设定（Lore），本次升华结果同样会标记为<strong>非原生</strong>。</li>
-                            </ol>
-                            <div className="mt-3 flex flex-wrap gap-3 text-xs">
-                                <Link href="/encyclopedia/sublimation" className="text-blue-700 hover:underline">百科：成长升华</Link>
-                                <Link href="/encyclopedia/sensitive-words" className="text-blue-700 hover:underline">敏感词与逮捕（含恢复）</Link>
-                                <Link href="/encyclopedia/shield-words" className="text-blue-700 hover:underline">屏蔽词（和谐替换）</Link>
-                                <Link href="/encyclopedia/archive" className="text-blue-700 hover:underline">档案馆（角色管理）</Link>
-                            </div>
-                        </div>
+                        <SublimationPageHeader onNavigate={(href) => router.push(href)} />
 
                         {/* 文件上传与粘贴区域 */}
                         <div className="input-group">
@@ -1309,35 +1276,7 @@ export const SublimationPage: React.FC = () => {
                             )}
                         </div>
 
-                        {/* 目标模板选择 */}
-                        <div className="input-group">
-                            <label className="input-label">升华目标模板</label>
-                            <select
-                                value={targetTemplate}
-                                onChange={handleTargetTemplateChange}
-                                className="input-field"
-                                disabled={isGenerating || !characterData}
-                            >
-                                {TARGET_TEMPLATE_OPTIONS.map(option => (
-                                    <option key={option} value={option}>
-                                        {TARGET_TEMPLATE_LABELS[option]}
-                                    </option>
-                                ))}
-                            </select>
-                            <p className="text-xs text-gray-500 mt-1">
-                                当前素材识别为：<span className="font-semibold">{sourceTemplateLabel}</span>；默认根据该模板选择目标，可手动尝试跨模板升华。
-                            </p>
-                            {hasCrossTemplateSelection && (
-                                <p className="text-xs text-purple-600 mt-1">
-                                    检测到从 {sourceTemplateLabel} 升华为 {targetTemplateLabel}，系统已自动取消所有“保留字段”，AI 将完全重塑设定。
-                                </p>
-                            )}
-                            {targetTemplate === 'general' && (
-                                <p className="text-xs text-blue-600 mt-1">
-                                    通用角色的 <code>content</code> 字段将承载全部设定，AI 会输出结构化 Markdown 方便继续创作。
-                                </p>
-                            )}
-                        </div>
+                        <SublimationTargetField targetTemplate={targetTemplate} sourceTemplateLabel={sourceTemplateLabel} hasCrossTemplateSelection={hasCrossTemplateSelection} disabled={isGenerating || !characterData} onChange={handleTargetTemplateChange} />
 
                         {/* 问卷/设定卡 Lore 注入 */}
                         <div className="mb-6 p-4 bg-purple-50 border border-purple-200 rounded-lg text-sm text-purple-900">
@@ -1529,40 +1468,7 @@ export const SublimationPage: React.FC = () => {
                             )}
                         </div>
 
-                        {/* 成长方向引导输入框 */}
-                        <div className="input-group">
-                            <label htmlFor="sublimation-story-guidance" className="input-label">成长方向引导 (可选)</label>
-                            <div className="flex flex-wrap items-center gap-2">
-                                <input
-                                    id="sublimation-story-guidance"
-                                    name="sublimation_story_guidance"
-                                    type="text"
-                                    value={userGuidance}
-                                    onChange={(e) => setUserGuidance(e.target.value)}
-                                    className="input-field flex-1 min-w-[12rem]"
-                                    placeholder={`输入关键词或一句话 (最多${SUBLIMATION_USER_GUIDANCE_MAX_CHARS}字)`}
-                                    maxLength={SUBLIMATION_USER_GUIDANCE_MAX_CHARS}
-                                    autoComplete="new-password"
-                                    autoCorrect="off"
-                                    autoCapitalize="off"
-                                    spellCheck={false}
-                                    data-form-type="other"
-                                    data-lpignore="true"
-                                    data-1p-ignore="true"
-                                    data-bwignore="true"
-                                    disabled={isGenerating}
-                                />
-                                {userGuidance.trim() ? (
-                                    <button
-                                        type="button"
-                                        className="px-3 py-2 text-xs font-semibold rounded bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:opacity-50"
-                                        onClick={() => setUserGuidance('')}
-                                        disabled={isGenerating}
-                                    >
-                                        清空
-                                    </button>
-                                ) : null}
-                            </div>
+                        <SublimationGuidanceField value={userGuidance} onChange={setUserGuidance} disabled={isGenerating}>
                             {shouldConfirmGuidanceNativeness && (
                                 <p className="text-xs text-green-700 mt-1">✅ 管理员已允许引导升华保留原生签名。</p>
                             )}
@@ -1571,24 +1477,9 @@ export const SublimationPage: React.FC = () => {
                                     ⚠️ 当前素材为原生，提供引导将使升华结果变为“衍生数据”（非原生），并移除原生签名。
                                 </p>
                             )}
-                        </div>
+                        </SublimationGuidanceField>
 
-	                        {/* 叙事历史输入框 */}
-	                        <div className="input-group">
-	                            <label htmlFor="narrative-history" className="input-label">叙事历史（可选）</label>
-	                            <textarea
-	                                id="narrative-history"
-	                                value={narrativeHistory}
-	                                onChange={(e) => {
-	                                    setNarrativeHistory(e.target.value);
-	                                    if (narrativeHistoryFileName) {
-	                                        setNarrativeHistoryFileName(null);
-	                                    }
-	                                }}
-	                                placeholder="输入或粘贴叙事历史（可多段文字），也可使用下方上传文件或从竞技场叙事历史中选择"
-	                                className="input-field resize-y h-28"
-	                                disabled={isGenerating}
-	                            />
+                        <SublimationNarrativeField value={narrativeHistory} onChange={(value) => { setNarrativeHistory(value); if (narrativeHistoryFileName) setNarrativeHistoryFileName(null); }} disabled={isGenerating}>
 	                            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
 	                                <input
 	                                    id="narrative-history-upload"
@@ -1649,7 +1540,7 @@ export const SublimationPage: React.FC = () => {
                                     已加入叙事历史，本次升华结果将标记为“衍生数据”（非原生），AI 将据此补充升华背景。
                                 </p>
                             )}
-                        </div>
+                        </SublimationNarrativeField>
 
                         {/* 历战记录 / 当前状态策略 */}
                         <div className="input-group">
@@ -1664,83 +1555,11 @@ export const SublimationPage: React.FC = () => {
                                     onWriteArenaHistoryChange={setWriteArenaHistory}
                                     onRetentionStrategyChange={setArenaHistoryRetentionStrategy}
                                 />
-                                <fieldset className="border border-gray-200 rounded-lg p-3">
-                                    <legend className="text-xs font-semibold text-gray-600 px-1">当前状态</legend>
-                                    <label className="flex items-center text-sm text-gray-700 mt-2">
-                                        <input
-                                            type="checkbox"
-                                            className="h-4 w-4 mr-2 text-purple-600 border-gray-300 rounded"
-                                            checked={readCurrentState}
-                                            onChange={(e) => setReadCurrentState(e.target.checked)}
-                                            disabled={isGenerating}
-                                        />
-                                        升华时读取
-                                    </label>
-                                    <label className="flex items-center text-sm text-gray-700 mt-2">
-                                        <input
-                                            type="checkbox"
-                                            className="h-4 w-4 mr-2 text-purple-600 border-gray-300 rounded"
-                                            checked={writeCurrentState}
-                                            onChange={(e) => setWriteCurrentState(e.target.checked)}
-                                            disabled={isGenerating}
-                                        />
-                                        升华后写入
-                                    </label>
-                                    <p className="text-[11px] text-gray-500 mt-1">当前状态用于追踪角色即时状况。开启写入后，AI 只会更新摘要，保留你自定义的字段。</p>
-                                </fieldset>
+                                <SublimationCurrentStateFieldset readCurrentState={readCurrentState} writeCurrentState={writeCurrentState} disabled={isGenerating} streamMode={generationMode === 'stream'} onReadChange={setReadCurrentState} onWriteChange={setWriteCurrentState} />
                             </div>
                         </div>
 
-                        {/* [新增] 高级选项UI */}
-                        <div className="input-group mt-6">
-                            <button onClick={() => setIsAdvancedVisible(!isAdvancedVisible)} className="text-sm font-semibold text-purple-700 hover:underline focus:outline-none">
-                                {isAdvancedVisible ? '▼ ' : '▶ '}高级选项：自定义升华范围
-                            </button>
-                            {isAdvancedVisible && characterData && (
-                                <div className="mt-3 p-4 bg-purple-50 border border-purple-200 rounded-lg">
-                                    <p className="text-xs text-gray-600 mb-3">勾选你希望<span className="font-bold">保留不变</span>的字段，未勾选的字段将由AI重塑。</p>
-                                    {targetTemplate === 'magical-girl' && (
-                                        <div className="mb-4 rounded-lg border border-purple-200 bg-white/70 p-3">
-                                            <label className="flex items-center text-sm cursor-pointer">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={allowReshapeNames}
-                                                    onChange={(event) => setAllowReshapeNames(event.target.checked)}
-                                                    className="h-4 w-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
-                                                />
-                                                <span className="ml-2 text-gray-700">重塑名称（魔装 / 奇境 / 繁开）</span>
-                                            </label>
-                                            <p className="text-[11px] text-gray-500 mt-1">
-                                                默认会保留上述 <code>name</code> 字段；开启后允许 AI 也对其进行“改名/追加称号”。
-                                            </p>
-                                        </div>
-                                    )}
-                                    {targetTemplate === 'general' && (
-                                        <p className="text-xs text-blue-700 mb-3">
-                                            提醒：<code>content</code> 字段包含角色的全部设定（外观、能力、背景、经历等）。如需完整改写，请取消勾选。
-                                        </p>
-                                    )}
-                                    <div className="mb-4 flex flex-wrap gap-2">
-                                        <button onClick={() => applyPreset('default')} className="text-xs bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-1 px-3 rounded-full">默认</button>
-                                        <button onClick={() => applyPreset('full')} className="text-xs bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-1 px-3 rounded-full">完全重塑</button>
-                                        <button onClick={() => applyPreset('personality')} className="text-xs bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold py-1 px-3 rounded-full">仅心灵成长</button>
-                                    </div>
-                                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                                        {currentFieldsConfig.map(field => (
-                                            <label key={field.id} className="flex items-center text-sm cursor-pointer">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={fieldsToPreserve.includes(field.id)}
-                                                    onChange={() => handleOptionalFieldChange(field.id)}
-                                                    className="h-4 w-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500"
-                                                />
-                                                <span className="ml-2 text-gray-700">{field.label}</span>
-                                            </label>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                        </div>
+                        <SublimationPreserveFields expanded={isAdvancedVisible} hasSource={!!characterData} disabled={isGenerating} onToggle={() => setIsAdvancedVisible(!isAdvancedVisible)} targetTemplate={targetTemplate} fieldsToPreserve={fieldsToPreserve} allowReshapeNames={allowReshapeNames} onAllowReshapeNamesChange={setAllowReshapeNames} onFieldChange={handleOptionalFieldChange} onPreset={applyPreset} />
 
                         {/* 多语言支持 */}
                         <div className="input-group">
@@ -1920,83 +1739,8 @@ export const SublimationPage: React.FC = () => {
                     <div className="text-center" style={{ marginTop: '2rem' }}>
                         <Link href="/" className="footer-link">返回首页</Link>
                     </div>
-                </div>
+            </SublimationPageFrame>
 
-                {showImageModal && savedImageUrl && (
-                    <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4">
-                        <div className="bg-white rounded-lg max-w-lg w-full max-h-[80vh] overflow-auto relative">
-                            <div className="sticky top-0 z-10 bg-white/95 backdrop-blur flex justify-end p-2">
-                                <button
-                                    onClick={() => setShowImageModal(false)}
-                                    aria-label="关闭"
-                                    className="text-3xl leading-none text-gray-600 hover:text-gray-900"
-                                >
-                                    ×
-                                </button>
-                            </div>
-                            <div className="px-4 pb-4">
-                                <p className="text-center text-sm text-gray-600 mb-2">长按图片保存到相册</p>
-                                <img src={savedImageUrl} alt="角色卡片" className="w-full h-auto rounded-lg" />
-                            </div>
-                        </div>
-                    </div>
-                )}
-                <Footer />
-
-                {/* 数据库数据选择模态框 */}
-	                <BattleDataModal
-	                    isOpen={showBattleDataModal}
-	                    onClose={() => setShowBattleDataModal(false)}
-	                    onSelectCard={handleSelectDataCard}
-	                    selectedType={modalType}
-	                />
-
-                    <BattleDataModal
-                        isOpen={showQuestionnairePicker}
-                        onClose={() => {
-                            setShowQuestionnairePicker(false);
-                            setQuestionnairePickerError(null);
-                        }}
-                        selectedType="questionnaire"
-                        initialTab="public"
-                        titleOverride="选择云端问卷"
-                        onSelectCard={handleSelectQuestionnaireCard}
-                        externalError={questionnairePickerError}
-                    />
-
-                    {questionnaireDetailsCard && (
-                        <DataCardDetailsModal
-                            isOpen={showQuestionnaireDetailsModal}
-                            onClose={() => {
-                                setShowQuestionnaireDetailsModal(false);
-                                setQuestionnaireDetailsCard(null);
-                            }}
-                            card={{
-                                id: questionnaireDetailsCard.id,
-                                name: questionnaireDetailsCard.name,
-                                description: questionnaireDetailsCard.description,
-                                type: 'questionnaire',
-                                data: questionnaireDetailsCard.data,
-                                isPublic: questionnaireDetailsCard.isPublic,
-                                author: questionnaireDetailsCard.author,
-                            }}
-                        />
-                    )}
-
-                    <NarrativeHistoryPickerModal
-                        isOpen={showArenaNarrativePicker}
-                        onClose={() => setShowArenaNarrativePicker(false)}
-                        initialSelectedIds={arenaNarrativeSelectedIds}
-                        onConfirm={(entries) => {
-                            setArenaNarrativeSelectedIds(entries.map((entry) => entry.id));
-                            setShowArenaNarrativePicker(false);
-                        }}
-                    />
-                    <NarrativeHistoryModal
-                        isOpen={showArenaNarrativeManager}
-                        onClose={() => setShowArenaNarrativeManager(false)}
-                    />
-	            </div>
 	        </>
 	    );
 	};

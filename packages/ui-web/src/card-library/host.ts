@@ -296,6 +296,8 @@ export interface CardLibrarySelectionContext {
   storageLocation: 'local' | 'cloud' | 'cache';
   /** 仅云端行有值；本地行与缓存快照行 MUST NOT 产出（与 `_cardId === ''` 同一不变量）。 */
   cloudCardId?: string;
+  /** 原卡 JSON 正文的独立副本。与 battle payload 的 _cardName 等展示元数据分离，保留同名扩展。 */
+  rawSourceData?: Record<string, unknown>;
 }
 
 /** 本机本地库通路：设备拥有，不要求登录、不依赖网络。 */

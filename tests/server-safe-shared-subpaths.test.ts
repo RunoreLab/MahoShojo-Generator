@@ -238,10 +238,12 @@ describe('server-safe shared entrypoints stay free of React hooks', () => {
       './media',
       './messages',
       './modal',
+      './narrative-history',
       './questionnaire',
       './scenario',
       './settings',
       './shell',
+      './sublimation',
     ]);
   });
 });

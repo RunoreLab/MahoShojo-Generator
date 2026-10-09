@@ -191,6 +191,11 @@
       "types": "./src/narrative-history/index.ts",
       "import": "./src/narrative-history/index.ts",
       "default": "./src/narrative-history/index.ts"
+    },
+    "./sublimation": {
+      "types": "./src/sublimation/index.ts",
+      "import": "./src/sublimation/index.ts",
+      "default": "./src/sublimation/index.ts"
     }
   },
   "scripts": {

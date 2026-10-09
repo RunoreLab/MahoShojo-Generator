@@ -355,7 +355,7 @@ test('选中回调携带来源实例上下文（local:<recordId> / cloud:<cardId
   await click(document.body.querySelector('[role="button"][aria-label="选择本地角色 a"]')!);
   await settle();
   expect(onSelectCard).toHaveBeenCalledTimes(1);
-  expect(onSelectCard.mock.calls[0]![1]).toEqual({
+  expect(onSelectCard.mock.calls[0]![1]).toMatchObject({
     selectionId: 'local:a', storageLocation: 'local',
   });
 });
@@ -457,7 +457,7 @@ test('同账号下的卡组导入正常写入多选状态并跳不可访问项',
   const [payload, nextSelected, context] = onToggleCard.mock.calls[0]! as [Record<string, unknown>, boolean, unknown];
   expect(payload._cardId).toBe('card-9');
   expect(nextSelected).toBe(true);
-  expect(context).toEqual({ selectionId: 'cloud:card-9', storageLocation: 'cloud', cloudCardId: 'card-9' });
+  expect(context).toMatchObject({ selectionId: 'cloud:card-9', storageLocation: 'cloud', cloudCardId: 'card-9' });
 });
 
 test('会话探测（unknown）不清账号绑定状态：A→unknown→A 收藏投影不失配', async () => {
@@ -576,7 +576,7 @@ test('缓存快照行选择：cache 作用域、无服务器身份、不触发�
   expect(payload._cardId).toBe('');
   expect(payload._storageLocation).toBe('local');
   expect(payload.codename).toBe('card-c');
-  expect(context).toEqual({ selectionId: 'cache:card-c', storageLocation: 'cache' });
+  expect(context).toMatchObject({ selectionId: 'cache:card-c', storageLocation: 'cache' });
   expect(cache.loadCachedCard).toHaveBeenCalledWith('card-c', expect.anything());
   // 降级中不重撞刚失败的在线路径；正文读取走缓存通道。
   expect(online.fetchPublicCardById).not.toHaveBeenCalled();
@@ -878,7 +878,7 @@ test('缓存正文重验证：返回卡 id 匹配才升级为 cloud 选择语义
   await settle();
   expect(onSelectCard).toHaveBeenCalledTimes(1);
   const [, context] = onSelectCard.mock.calls[0]! as [unknown, { selectionId: string; cloudCardId: string }];
-  expect(context).toEqual({ selectionId: 'cloud:card-c', storageLocation: 'cloud', cloudCardId: 'card-c' });
+  expect(context).toMatchObject({ selectionId: 'cloud:card-c', storageLocation: 'cloud', cloudCardId: 'card-c' });
 });
 
 test('缓存通道自身判撤回时同样终止并即时移除行', async () => {
