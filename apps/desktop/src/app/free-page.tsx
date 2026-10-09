@@ -1,6 +1,7 @@
+import { PrivateResultSave } from '../features/cloud-save/private-result-save';
 import { GenerationMarkdownPreview } from './generation-markdown-preview';
 import { generationActionClassNames, generationSubmitClassName } from '@mahoshojo/ui-web/generation-actions';
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useRouter } from '@tanstack/react-router';
 import {
@@ -92,6 +93,10 @@ const describeRegenerateConfirm = (kind: ConfirmRegenerateKind): { title: string
 
 function FreeForm({ session }: { session: FreeSession }) {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
+  const cloudSavingRef = useRef(false);
+  const [cloudSaving, setCloudSaving] = useState(false);
+  const onCloudSavingChange = useCallback((saving: boolean) => { cloudSavingRef.current = saving; setCloudSaving(saving); }, []);
+
   const router = useRouter();
   const { openFixed } = useExternalLinks();
   // AI 连接与执行位置与设置页共用同一份 overlay/profiles 状态（D5.0b）。
@@ -108,7 +113,19 @@ function FreeForm({ session }: { session: FreeSession }) {
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);
   // 附件会话共源（ui-web/free）：读取代际失效、合并前预算复核、input 复位
   // 由 hook 统一承担——附件不写入草稿。
-  const attachmentState = useFreeAttachments(readFreeAttachmentFiles);
+  const attachmentReadingRef = useRef(false);
+  const readAttachments = useCallback(async (...args: Parameters<typeof readFreeAttachmentFiles>) => {
+    attachmentReadingRef.current = true;
+    try { return await readFreeAttachmentFiles(...args); }
+    finally { attachmentReadingRef.current = false; }
+  }, []);
+  const attachmentState = useFreeAttachments(readAttachments);
+  const guardedAttachments = {
+    ...attachmentState,
+    addFiles: (files: ArrayLike<File> | null | undefined) => cloudSavingRef.current ? Promise.resolve() : attachmentState.addFiles(files),
+    remove: (id: string) => { if (!cloudSavingRef.current) attachmentState.remove(id); },
+    clear: () => { if (!cloudSavingRef.current) attachmentState.clear(); },
+  };
   const { items: attachments, isReading: isReadingAttachments, clear: clearAttachments } = attachmentState;
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionInfo, setActionInfo] = useState<string | null>(null);
@@ -123,12 +140,12 @@ function FreeForm({ session }: { session: FreeSession }) {
     else if (!confirmRegenerate && dialog?.open) dialog.close();
   }, [confirmRegenerate]);
   const guard = useLeaveGuard(
-    () => session.isBusy() || session.hasUnsavedDraft(),
+    () => cloudSavingRef.current || session.isBusy() || session.hasUnsavedDraft(),
     '生成或保存尚未完成，或当前草稿未能保存。请等待、取消生成，或重试保存草稿后再离开。也可以确认清除草稿以放弃当前内容。',
     '窗口关闭保护初始化失败，生成与保存暂不可用。请重新打开页面后重试。',
     () => {
       const current = session.getSnapshot();
-      if (current.saving || aiStore.isPreparingGeneration()) return false;
+      if (cloudSavingRef.current || current.saving || aiStore.isPreparingGeneration()) return false;
       if (current.phase !== 'generating') return !session.hasUnsavedDraft() || window.confirm('当前新内容尚未保存到本机草稿。确认放弃这些未保存更改并离开？原有存档不会被删除。');
       if (!window.confirm('生成尚未完成。确认终止生成并离开？未能保存到本机草稿的内容将丢失，可以先复制或保存。')) return false;
       session.cancel();
@@ -151,6 +168,7 @@ function FreeForm({ session }: { session: FreeSession }) {
   }, []);
   const draft = state.draft;
   const updateDraft = (patch: Partial<FreeDraft>) => {
+    if (cloudSavingRef.current) return;
     session.updateDraft({ ...session.getSnapshot().draft, ...patch });
   };
   // 与 Web 共用流式 Schema 白名单；归并与执行位置无关，切换位置不改写 Schema。
@@ -161,7 +179,7 @@ function FreeForm({ session }: { session: FreeSession }) {
   }, [session, draft.generationMode, draft.schemaId]);
   const schemaOptionsForMode = freeSchemaOptionsForMode(draft.generationMode);
   const mode = target.mode;
-  const busy = state.phase === 'generating' || state.saving || aiState.generationActive;
+  const busy = cloudSaving || state.phase === 'generating' || state.saving || aiState.generationActive;
   const showStreamPreview = state.phase === 'generating' && state.activeGenerationMode === 'stream';
   useEffect(() => () => aiStore.cancelPreparingGeneration(), [aiStore]);
   const blockedDraft = state.pendingRestore;
@@ -185,7 +203,7 @@ function FreeForm({ session }: { session: FreeSession }) {
   const generate = (discardUnsavedResult = false) => {
     // 悬空选择（含服务器侧被目录移除的系统模型）保留诊断值但禁止派发——
     // unavailableReason 与按钮 disabled 必须同口径（D5.1-AIP-r1-r1）。
-    if (!guard.ready || busy || !executionMode || isReadingAttachments || blockedDraft || target.unavailableReason !== null) return;
+    if (cloudSavingRef.current || !guard.ready || busy || !executionMode || isReadingAttachments || blockedDraft || target.unavailableReason !== null) return;
     if (target.location === 'client' && !target.providerTarget) return;
     if (!discardUnsavedResult) {
       if (session.hasUnsavedResult()) { setConfirmRegenerate('unsaved'); return; }
@@ -217,6 +235,7 @@ function FreeForm({ session }: { session: FreeSession }) {
   };
 
   const card = state.card;
+  const resultCardType = session.resultCardType();
   const cardKind = state.cardKind;
   const resultJsonName = card ? resolveResultJsonFileName(card, cardKind) : 'data.json';
   const confirmCopy = confirmRegenerate === false ? null : describeRegenerateConfirm(confirmRegenerate);
@@ -239,6 +258,7 @@ function FreeForm({ session }: { session: FreeSession }) {
                 actions={<FreePromptActions canCopy={!!draft.prompt.trim()} disabled={busy} onCopy={() => {
                   void Promise.resolve().then(() => navigator.clipboard.writeText(draft.prompt)).then(() => setActionInfo('已复制提示词到剪贴板')).catch(() => setActionError('复制失败'));
                 }} onClear={() => {
+                  if (cloudSavingRef.current) return;
                   session.updateDraft({ ...session.getSnapshot().draft, prompt: '' });
                   clearAttachments();
                   setActionError(null);
@@ -250,7 +270,7 @@ function FreeForm({ session }: { session: FreeSession }) {
                   ? `服务器通路请求体（提示词 + 附件 + JSON 包装）上限 ${formatBytes(hostedGenerationBodyMaxBytes(draft.generationMode === 'stream' ? 'generate-free-stream' : 'generate-free'))}，超出会在派发前拦截`
                   : '客户端执行的输入上限由所连模型服务自身决定'}
               />}
-          attachments={<FreeAttachmentPanel state={attachmentState} disabled={busy || blockedDraft} />}
+          attachments={<FreeAttachmentPanel state={guardedAttachments} disabled={busy || blockedDraft} />}
           mode={<fieldset disabled={busy || blockedDraft}>
             <GenerationModeSwitcher
               value={draft.generationMode}
@@ -337,7 +357,8 @@ function FreeForm({ session }: { session: FreeSession }) {
                     <FreeJsonResult data={card} />
                   </FreeResultPanel>
                 )}
-                <button className={generationActionClassNames.primary} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => { if (guard.ready) void session.saveResult(); }}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>
+                {resultCardType && <PrivateResultSave data={card} cardType={resultCardType} onBusyChange={onCloudSavingChange} isBlocked={() => session.isBusy() || aiStore.isPreparingGeneration() || attachmentReadingRef.current} disabled={!guard.ready || busy || isReadingAttachments} className={generationActionClassNames.primary} />}
+                  <button className={generationActionClassNames.primary} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => { if (guard.ready) void session.saveResult(); }}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>
                 {state.saveStatus === 'saved' && <p role="status">已保存到本地卡库。</p>}
                 {state.saveStatus === 'already-present' && <p role="status">本地卡库已存在相同内容，原记录保持不变。</p>}
                 {state.saveError && <p role="alert">{state.saveError}</p>}
