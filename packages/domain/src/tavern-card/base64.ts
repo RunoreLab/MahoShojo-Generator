@@ -28,16 +28,19 @@ const stripBase64Whitespace = (input: string): string => {
 export function decodeBase64ToBytes(input: string): Uint8Array {
   const normalized = stripBase64Whitespace(input.trim());
   if (!normalized) return new Uint8Array();
-  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(normalized)) {
-    throw new Error('Base64 包含非法字符或填充');
-  }
   if (normalized.length % 4 !== 0) {
     throw new Error('Base64 长度不是 4 的倍数');
   }
-
   let padding = 0;
   if (normalized.endsWith('==')) padding = 2;
   else if (normalized.endsWith('=')) padding = 1;
+  // Linear validation avoids regexp backtracking/stack overflow on legal multi-MiB cards.
+  for (let i = 0; i < normalized.length - padding; i += 1) {
+    const code = normalized.charCodeAt(i);
+    if (code > 255 || code === 61 || BASE64_DECODE_TABLE[code] < 0) {
+      throw new Error('Base64 包含非法字符或填充');
+    }
+  }
 
   const outLen = (normalized.length / 4) * 3 - padding;
   const out = new Uint8Array(outLen);
