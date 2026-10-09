@@ -59,6 +59,8 @@ describe('local questionnaire editor', () => {
     edit(field('问卷标题'), '再次修改'); expect(container.textContent).not.toContain('已另存为本地未签名问卷');
     const arrayBuffer = vi.fn(async () => new Uint8Array([0xff]).buffer);
     await expect(readQuestionnaireJsonFile({ size: 1, arrayBuffer })).rejects.toThrow('UTF-8');
+    const bom = '\uFEFF' + JSON.stringify({ ...original, title: '中文问卷' });
+    await expect(readQuestionnaireJsonFile({ size: new TextEncoder().encode(bom).length, arrayBuffer: async () => new TextEncoder().encode(bom).buffer })).resolves.toBe(bom);
     arrayBuffer.mockClear(); await expect(readQuestionnaireJsonFile({ size: 1024 * 1024 + 1, arrayBuffer })).rejects.toThrow('1 MiB'); expect(arrayBuffer).not.toHaveBeenCalled();
   });
   it('takes over advanced conditions explicitly without reviving them after disabling', async () => {

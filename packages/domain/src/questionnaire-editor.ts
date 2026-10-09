@@ -170,14 +170,15 @@ const parseSimpleCondition = (
 ): { questionId: string; operator: string; value: string } | null => {
   if (!condition || Array.isArray(condition)) return null;
   if (Object.keys(condition).some((key) => !['questionId', 'operator', 'value'].includes(key))) return null;
-  if (Array.isArray(condition.value) || (typeof condition.value === 'string' && condition.value.includes('|'))) return null;
+  if (Array.isArray(condition.value) || (typeof condition.value === 'string' && (condition.value.includes('|') || condition.value !== condition.value.trim()))) return null;
+  if (condition.operator && !CONDITION_OPERATORS.some((item) => item.value === condition.operator)) return null;
   const target = Array.isArray(condition) ? (condition.length === 1 ? condition[0] : null) : condition;
   if (!target || typeof target !== 'object') return null;
   if ('any' in target || 'all' in target || 'not' in target) return null;
   const questionId = typeof target.questionId === 'string'
     ? target.questionId
     : (typeof target.key === 'string' ? target.key : '');
-  if (!questionId) return null;
+  if (!questionId || questionId !== questionId.trim()) return null;
   const operator = typeof target.operator === 'string' ? target.operator : 'equals';
   const value = parseConditionValue(target.value);
   return { questionId, operator, value };
@@ -200,7 +201,8 @@ const parseSimpleJump = (
   const condition = parseSimpleCondition(rule.when);
   if (!condition || Array.isArray(condition)) return null;
   if (Object.keys(condition).some((key) => !['questionId', 'operator', 'value'].includes(key))) return null;
-  if (Array.isArray(condition.value) || (typeof condition.value === 'string' && condition.value.includes('|'))) return null;
+  if (Array.isArray(condition.value) || (typeof condition.value === 'string' && (condition.value.includes('|') || condition.value !== condition.value.trim()))) return null;
+  if (condition.operator && !CONDITION_OPERATORS.some((item) => item.value === condition.operator)) return null;
   const targetId = toQuestionRefId(rule.to);
   const toEnd = Boolean(rule.toEnd);
   return {

@@ -18,6 +18,8 @@ describe('shared questionnaire editor mapping', () => {
     { displayIf: { questionId: 'q1', questionnaireId: 'other', value: 'A' } },
     { displayIf: { questionId: 'q1', value: ['A|B', 'C'] } },
     { displayIf: [{ questionId: 'q1', value: 'A' }] },
+    { displayIf: { questionId: 'q1', value: ' A ' } },
+    { displayIf: { questionId: 'q1', operator: 'eq', value: 'A' } },
     { displayIf: { any: [{ questionId: 'q1', value: 'A' }], extension: true } },
     { optionsFrom: { questionId: 'q1', questionnaireId: 'other', extension: true }, suggestionsFrom: 'scope::q1' },
     { jump: [{ when: { questionId: 'q1', value: 'A' }, toEnd: true }] },
