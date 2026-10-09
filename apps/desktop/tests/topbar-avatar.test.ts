@@ -3,6 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { InvokeFn } from '../src/platform/cloud-bridge';
 import {
   ensureTopbarAvatar,
+  getCachedMyProfile,
+  getMyProfileGeneration,
+  acceptSavedProfileSignature,
+  refreshMyProfile,
   getTopbarAvatar,
   invalidateTopbarAvatar,
   resetTopbarAvatarForTests,
@@ -259,4 +263,23 @@ describe('topbar avatar cache', () => {
     await flush();
     expect(getTopbarAvatar(7)).toBe(WEBP_AVATAR);
   });
+  it('confirmed signature uses the same cache and fences an older in-flight GET', async () => {
+    let finish!: (profile: unknown) => void;
+    const invoke = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
+    ensureTopbarAvatar(7, invoke);
+    expect(acceptSavedProfileSignature(7, '新签名', getMyProfileGeneration(7))).toBe(true);
+    finish({ userId: 7, signature: '旧签名', avatarDataUrl: WEBP_AVATAR }); await flush();
+    expect(getCachedMyProfile(7)?.signature).toBe('新签名');
+  });
+  it('an explicit readback single-flights and never writes; stale generations cannot publish', async () => {
+    const initial = vi.fn(async () => ({ userId: 7, signature: '旧签名', avatarDataUrl: WEBP_AVATAR }));
+    ensureTopbarAvatar(7, initial); await flush(); const generation = getMyProfileGeneration(7);
+    let finish!: (profile: unknown) => void; const read = vi.fn(() => new Promise((resolve) => { finish = resolve; }));
+    refreshMyProfile(7, read); refreshMyProfile(7, read); expect(read).toHaveBeenCalledTimes(1);
+    expect(read).toHaveBeenCalledWith('cloud_me_profile');
+    expect(acceptSavedProfileSignature(7, '过期结果', generation)).toBe(false);
+    finish({ userId: 7, signature: '线上确认', avatarDataUrl: WEBP_AVATAR }); await flush();
+    expect(getCachedMyProfile(7)?.signature).toBe('线上确认'); expect(getTopbarAvatar(7)).toBe(WEBP_AVATAR);
+  });
+
 });

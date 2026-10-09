@@ -199,7 +199,7 @@ export const SETTINGS_FIELD_REGISTRY: readonly SettingsFieldRecord[] = [
     owner: { kind: 'server' },
     defaultValue: '服务器权威',
     status: 'wired',
-    notes: '服务器为 owner；本地只是展示缓存/草稿，详见 DESK-SET-002。',
+    notes: '服务器为 owner；个性签名编辑/确认保存已双端共源，Desktop 仅开放 signature 窄写入。头像修改与敏感账号流程仍归各自后续切片；本地只是展示缓存/草稿，详见 DESK-SET-002。',
   },
   {
     id: 'ai.providerProfiles',

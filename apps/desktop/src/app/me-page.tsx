@@ -10,6 +10,7 @@
 // `verification` 结论由 AccountPanel 的状态徽标如实表达。
 
 import { AccountPanel } from '../features/account/AccountPanel';
+import { ProfileSignaturePanel } from '../features/account/ProfileSignaturePanel';
 import { useDesktopCloudSession } from '../features/account/use-desktop-cloud-session';
 import { useTopbarAvatar } from '../features/account/use-topbar-avatar';
 
@@ -54,6 +55,7 @@ export function DesktopMe() {
           </section>
 
           <AccountPanel />
+          <ProfileSignaturePanel />
         </div>
       </div>
     </div>

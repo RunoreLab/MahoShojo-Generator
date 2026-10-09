@@ -123,7 +123,7 @@ export function useMeProfile(userId: number | null) {
     // 不继承全局 mutation 重试策略：失败/未知结果只由用户显式重试。
     retry: false,
     mutationFn: async ({ signature, initiatedBy }: { signature: string; initiatedBy: typeof currentOwner }) => {
-      if (initiatedBy.userId === null || !isCurrentOwner(initiatedBy)) throw new Error('账号已变化，请重新载入资料');
+      if (initiatedBy.userId === null || initiatedBy.authIdentity?.id !== initiatedBy.userId || !isCurrentOwner(initiatedBy)) throw new Error('账号已变化，请重新载入资料');
       const key = ['me-profile', initiatedBy.userId] as const;
       await queryClient.cancelQueries({ queryKey: key, exact: true });
       if (!isCurrentOwner(initiatedBy)) throw new Error('账号已变化，请重新载入资料');
@@ -181,7 +181,6 @@ export function useMeProfile(userId: number | null) {
   const profile: MeProfile = profileQuery.data?.profile ?? { signature: '', avatarDataUrl: null };
   const error =
     (profileQuery.error instanceof Error ? profileQuery.error.message : null) ||
-    (saveSignatureMutation.variables?.initiatedBy === currentOwner && saveSignatureMutation.error instanceof Error ? saveSignatureMutation.error.message : null) ||
     (uploadAvatarMutation.error instanceof Error ? uploadAvatarMutation.error.message : null) ||
     (clearAvatarMutation.error instanceof Error ? clearAvatarMutation.error.message : null);
 

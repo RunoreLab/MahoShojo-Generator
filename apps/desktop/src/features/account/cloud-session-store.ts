@@ -159,6 +159,9 @@ export class DesktopCloudSessionStore {
 
   getSnapshot = (): DesktopCloudSessionState => this.state;
 
+  /** 窄资料写入读取世代，不向 renderer 暴露凭据。 */
+  getCredentialEpoch = (): number => this.credentialEpoch;
+
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
