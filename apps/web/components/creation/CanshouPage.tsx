@@ -6,6 +6,8 @@ import { QuestionnaireResultActions } from '@mahoshojo/ui-web/details-controls';
 
 import { generationActionClassNames, generationSubmitClassName } from '@mahoshojo/ui-web/generation-actions';
 import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
+import { useUnsavedPageGuard } from '@mahoshojo/ui-web/client';
+import { assertSupportedQuestionnaireAnswerDraft } from '@/lib/questionnaire-draft-shape';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useProviderModeCooldown } from '@/lib/cooldown';
 import Link from 'next/link';
@@ -148,6 +150,10 @@ export const CanshouPage: React.FC = () => {
   const [pasteQuestionnaireError, setPasteQuestionnaireError] = useState<string | null>(null);
   const [draftRestoreReady, setDraftRestoreReady] = useState(false);
   const draftRestoredRef = useRef(false);
+  const draftStorageBlocked = useRef(false);
+  const unsavedAnswers = useRef(false);
+  const unpersistedResult = useRef(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
   const previousQuestionTargetsRef = useRef<QuestionnaireAnswerMatchTarget[] | null>(null);
   const previousQuestionTargetSignatureRef = useRef<string | null>(null);
   const currentQuestionKeyRef = useRef<string | null>(null);
@@ -744,8 +750,9 @@ export const CanshouPage: React.FC = () => {
 
     try {
       const savedDraft = localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (!savedDraft) return;
+      if (savedDraft === null) return;
       const parsed = JSON.parse(savedDraft);
+      assertSupportedQuestionnaireAnswerDraft(parsed, allQuestionTargets);
       const nextAnswers: Record<string, string> = {};
       const applyStoredEntry = (entry: StoredQuestionnaireAnswerItem, index: number, allowIndexFallback: boolean) => {
         const answer = typeof entry.answer === 'string' ? entry.answer : '';
@@ -844,6 +851,8 @@ export const CanshouPage: React.FC = () => {
       }
     } catch (e) {
       console.error("Failed to load answers from localStorage", e);
+      draftStorageBlocked.current = true;
+      setDraftError('旧问卷存档无法读取，原数据已保留。可以继续填写和生成；本次内容暂不自动保存，请及时导出备份。');
     } finally {
       setDraftRestoreReady(true);
     }
@@ -851,6 +860,10 @@ export const CanshouPage: React.FC = () => {
 
   useEffect(() => {
     if (!draftRestoreReady || allQuestionTargets.length === 0) return;
+    if (draftStorageBlocked.current) {
+      unsavedAnswers.current = Object.values(answersByKey).some((answer) => answer.trim());
+      return;
+    }
     try {
       const answerEntries = collectStoredQuestionnaireAnswerItems(allQuestionTargets, answersByKey);
       if (answerEntries.length > 0) {
@@ -860,8 +873,13 @@ export const CanshouPage: React.FC = () => {
       } else {
         localStorage.removeItem(LOCAL_STORAGE_KEY);
       }
+      unsavedAnswers.current = false;
+      setDraftError(null);
     } catch (e) {
       console.error("Failed to save answers to localStorage", e);
+      unsavedAnswers.current = Object.values(answersByKey).some((answer) => answer.trim());
+      setAutoSaveTimestamp(null);
+      setDraftError('问卷存档写入失败，当前内容仅保留在本页，请及时导出备份。');
     }
   }, [allQuestionTargets, answersByKey, draftRestoreReady]);
 
@@ -1232,14 +1250,29 @@ export const CanshouPage: React.FC = () => {
     }
   };
 
+  const hasDraftResult = canshouDetails !== null || streamedGeneralCard !== null || Boolean(streamingMarkdown);
+  useEffect(() => {
+    if (!hasDraftResult) unpersistedResult.current = false;
+    else if (draftStorageBlocked.current || draftError !== null) unpersistedResult.current = true;
+  }, [hasDraftResult, draftError]);
+  useUnsavedPageGuard(() => unsavedAnswers.current || unpersistedResult.current || ((draftStorageBlocked.current || draftError !== null)
+    && (hasDraftResult)));
+
   const handleClearDraft = () => {
-    if (window.confirm('确定要清空所有已保存的问卷答案吗？此操作不可撤销。')) {
-      localStorage.removeItem(LOCAL_STORAGE_KEY);
-      setAnswersByKey({});
-      setCurrentAnswer('');
-      setAutoSaveTimestamp(null);
-      alert('存档已清空！');
+    if (!window.confirm(draftStorageBlocked.current ? '确定清空本页填写的问卷答案吗？原有存档会保留，生成结果不会清除。' : '确定要清空所有已保存的问卷答案吗？此操作不可撤销。')) return;
+    if (!draftStorageBlocked.current) {
+      try { localStorage.removeItem(LOCAL_STORAGE_KEY); }
+      catch {
+        setDraftError('清空存档失败，当前答案和原存档均已保留。');
+        return;
+      }
+      unsavedAnswers.current = false;
+      setDraftError(null);
     }
+    setAnswersByKey({});
+    setCurrentAnswer('');
+    setAutoSaveTimestamp(null);
+    if (!draftStorageBlocked.current) alert('存档已清空！');
   };
 
   // 批量填充/角色卡导入成功后统一写回：同步当前题输入框并清错误态。
@@ -1354,6 +1387,7 @@ export const CanshouPage: React.FC = () => {
       <div className="magic-background-dark">
         <div className="container">
           <QuestionnairePageCard variant="canshou" description={primaryQuestionnaire?.description}>
+            {draftError && <p role="alert" className="my-3 text-sm text-amber-700">{draftError}</p>}
             {showIntroduction ? (
               <DetailsIntroSection
                 description={null}
