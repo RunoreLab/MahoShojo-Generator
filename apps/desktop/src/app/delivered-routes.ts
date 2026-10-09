@@ -28,6 +28,7 @@ export const DELIVERED_ROUTES: readonly string[] = [
   '/scenario',
   '/sublimation',
   '/tavern',
+  '/character-party',
   '/creator',
   '/character-manager',
   '/encyclopedia',

@@ -15,8 +15,12 @@ describe('desktop capability snapshot', () => {
     }
   });
 
+  it('exposes the delivered local party route', () => {
+    expect(readCapability(snapshot, '/character-party').kind).toBe('available');
+  });
+
   it('does not declare Web-only homepage entries', () => {
-    for (const href of ['/character-party', '/magic-tea-party', '/card-forge']) {
+    for (const href of ['/magic-tea-party', '/card-forge']) {
       expect(readCapability(snapshot, href).kind).toBe('unknown');
     }
   });
