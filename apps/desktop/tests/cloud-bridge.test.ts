@@ -4,6 +4,7 @@ import {
   CANCEL_HOSTED_AI_COMMAND,
   CLOUD_CACHED_ACCOUNT_COMMAND,
   CLOUD_ME_PROFILE_COMMAND,
+  CLOUD_SAVE_ME_PROFILE_SIGNATURE_COMMAND,
   CLOUD_LOGIN_AWAIT_COMMAND,
   CLOUD_LOGIN_BEGIN_COMMAND,
   CLOUD_LOGIN_CANCEL_COMMAND,
@@ -21,6 +22,7 @@ import {
   readCachedCloudAccount,
   readCloudAuthStatus,
   readMyProfile,
+  saveMyProfileSignature,
   signOutCloud,
   streamHostedAi,
 } from '../src/platform/cloud-bridge';
@@ -128,6 +130,48 @@ describe('cloud bridge', () => {
     // strict schema：夹带任何额外字段（凭据/任意键）按违例拦下。
     const leaky = vi.fn(async () => ({ ...profile, cookie: 'session=tok' }));
     await expect(readMyProfile(leaky)).rejects.toMatchObject({ code: 'bridge-invalid' });
+  });
+
+  it('signature：只 invoke 一次固定命令，并返回服务端确认值而非请求值', async () => {
+    const confirmed = { userId: 7, signature: 'server canonical' };
+    const invoke = vi.fn(async () => confirmed);
+    await expect(saveMyProfileSignature(invoke, {
+      expectedUserId: 7, signature: 'draft\r\nvalue',
+    })).resolves.toEqual(confirmed);
+    expect(invoke).toHaveBeenCalledExactlyOnceWith(CLOUD_SAVE_ME_PROFILE_SIGNATURE_COMMAND, {
+      request: { expectedUserId: 7, signature: 'draft\nvalue' },
+    });
+  });
+
+  it('signature：未知字段/越界/孤立代理项在 invoke 前拒绝', async () => {
+    const invoke = vi.fn();
+    for (const signature of ['a'.repeat(121), '😀'.repeat(61), '\ud800', '\udc00']) {
+      await expect(saveMyProfileSignature(invoke, { expectedUserId: 7, signature })).rejects.toThrow();
+    }
+    for (const extra of [{ url: 'https://example.test' }, { Cookie: 'secret' }, { avatarDataUrl: 'x' }]) {
+      await expect(saveMyProfileSignature(invoke, { expectedUserId: 7, signature: 'ok', ...extra }))
+        .rejects.toThrow();
+    }
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('signature：拒绝假成功/缺失结果/错账号，失败不自动重试', async () => {
+    for (const result of [
+      { userId: 7 }, { userId: 7, signature: null }, { userId: 8, signature: 'other account' },
+      { userId: 7, signature: 'ok', cookie: 'secret' },
+      { userId: 7, signature: '😀'.repeat(61) },
+    ]) {
+      const invoke = vi.fn(async () => result);
+      await expect(saveMyProfileSignature(invoke, { expectedUserId: 7, signature: 'draft' }))
+        .rejects.toMatchObject({ code: 'bridge-invalid' });
+      expect(invoke).toHaveBeenCalledTimes(1);
+    }
+    for (const code of ['not-authenticated', 'network-error', 'server-unavailable', 'invalid-response']) {
+      const invoke = vi.fn(async () => { throw { code, message: '保存未获确认' }; });
+      await expect(saveMyProfileSignature(invoke, { expectedUserId: 7, signature: 'draft' }))
+        .rejects.toMatchObject({ code, command: CLOUD_SAVE_ME_PROFILE_SIGNATURE_COMMAND });
+      expect(invoke).toHaveBeenCalledTimes(1);
+    }
   });
 
   it('status：四种状态投影都过契约；unreachable 不带账号', async () => {

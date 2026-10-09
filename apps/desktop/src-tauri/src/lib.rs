@@ -1020,6 +1020,16 @@ async fn cloud_me_profile(
     cloud::cloud_me_profile(&cloud, secrets.inner().as_ref()).await
 }
 
+/// 显式保存当前账号个性签名：固定路由、会话匹配、有界业务字段。
+#[tauri::command]
+async fn cloud_save_me_profile_signature(
+    cloud: State<'_, cloud::CloudState>,
+    secrets: State<'_, SharedSecretStore>,
+    request: cloud::CloudSaveSignatureRequest,
+) -> Result<cloud::CloudSaveSignatureResult, cloud::CloudError> {
+    cloud::cloud_save_me_profile_signature(&cloud, secrets.inner().as_ref(), request).await
+}
+
 /// 查询账号会话状态：signed-out / active / expired / unreachable。
 /// `expired` 表示服务端明确拒绝会话（本地凭据随之清除）；`unreachable` 只是
 /// 服务暂时联系不上，凭据保留。
@@ -1476,6 +1486,7 @@ pub fn run() {
             cloud_login_cancel,
             cloud_cached_account,
             cloud_me_profile,
+            cloud_save_me_profile_signature,
             cloud_auth_status,
             cloud_sign_out,
             cloud_online_status,

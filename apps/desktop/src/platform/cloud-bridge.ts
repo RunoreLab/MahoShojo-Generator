@@ -5,6 +5,8 @@ import {
   DesktopCloudLoginBeginResponseSchema,
   DesktopCloudLoginOutcomeSchema,
   DesktopCloudMeProfileSchema,
+  DesktopCloudSaveSignatureRequestSchema,
+  DesktopCloudSaveSignatureResultSchema,
   DesktopCloudOnlineStatusSchema,
   DesktopCloudSessionStatusSchema,
   DesktopCloudSignOutResultSchema,
@@ -19,6 +21,8 @@ import type {
   DesktopCloudLoginBeginResponse,
   DesktopCloudLoginOutcome,
   DesktopCloudMeProfile,
+  DesktopCloudSaveSignatureRequest,
+  DesktopCloudSaveSignatureResult,
   DesktopCloudOnlineStatus,
   DesktopCloudSessionStatus,
   DesktopCloudSignOutResult,
@@ -33,7 +37,7 @@ import { DesktopBridgeError } from './desktop-bridge';
 /**
  * 项目服务云通路的 renderer 侧薄桥（D5.0c，`DESK-090..094`）。
  *
- * 只暴露六条窄命令；所有返回都过 `desktop-cloud` 契约 schema——IPC 边界上的
+ * 只暴露固定窄命令；所有返回都过 `desktop-cloud` 契约 schema——IPC 边界上的
  * 非法载荷直接变成 `DesktopCloudError('invalid-response')`，而不是被 UI 信任。
  * 会话 cookie、grant code、PKCE verifier 从定义上就不存在于这些类型里。
  */
@@ -43,6 +47,7 @@ export const CLOUD_LOGIN_AWAIT_COMMAND = 'cloud_login_await' as const;
 export const CLOUD_LOGIN_CANCEL_COMMAND = 'cloud_login_cancel' as const;
 export const CLOUD_CACHED_ACCOUNT_COMMAND = 'cloud_cached_account' as const;
 export const CLOUD_ME_PROFILE_COMMAND = 'cloud_me_profile' as const;
+export const CLOUD_SAVE_ME_PROFILE_SIGNATURE_COMMAND = 'cloud_save_me_profile_signature' as const;
 export const CLOUD_AUTH_STATUS_COMMAND = 'cloud_auth_status' as const;
 export const CLOUD_SIGN_OUT_COMMAND = 'cloud_sign_out' as const;
 export const CLOUD_ONLINE_STATUS_COMMAND = 'cloud_online_status' as const;
@@ -191,6 +196,36 @@ export const readMyProfile = async (invoke: InvokeFn): Promise<DesktopCloudMePro
     throw toCloudError(CLOUD_ME_PROFILE_COMMAND, cause);
   }
   return parseResult(CLOUD_ME_PROFILE_COMMAND, DesktopCloudMeProfileSchema, raw);
+};
+
+/**
+ * 显式保存当前账号的个性签名。仅一次 invoke，不重试写入；成功只认服务端
+ * 确认的 signature，调用方仍须以账号 + 会话 epoch 屏蔽迟到结果。
+ */
+export const saveMyProfileSignature = async (
+  invoke: InvokeFn,
+  request: DesktopCloudSaveSignatureRequest,
+): Promise<DesktopCloudSaveSignatureResult> => {
+  const parsedRequest = DesktopCloudSaveSignatureRequestSchema.parse(request);
+  let raw: unknown;
+  try {
+    raw = await invoke(CLOUD_SAVE_ME_PROFILE_SIGNATURE_COMMAND, { request: parsedRequest });
+  } catch (cause) {
+    throw toCloudError(CLOUD_SAVE_ME_PROFILE_SIGNATURE_COMMAND, cause);
+  }
+  const result = parseResult(
+    CLOUD_SAVE_ME_PROFILE_SIGNATURE_COMMAND,
+    DesktopCloudSaveSignatureResultSchema,
+    raw,
+  );
+  if (result.userId !== parsedRequest.expectedUserId) {
+    throw new DesktopCloudError(
+      CLOUD_SAVE_ME_PROFILE_SIGNATURE_COMMAND,
+      'bridge-invalid',
+      'native 返回的个性签名不属于本次请求账号',
+    );
+  }
+  return result;
 };
 
 /** 查询账号会话状态（含服务端确认；unreachable 不代表已注销）。 */

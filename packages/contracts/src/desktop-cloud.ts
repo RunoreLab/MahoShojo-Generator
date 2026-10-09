@@ -263,6 +263,33 @@ export const DesktopCloudMeProfileSchema = z.object({
 }).strict();
 export type DesktopCloudMeProfile = z.infer<typeof DesktopCloudMeProfileSchema>;
 
+/** 个性签名写入只开放当前账号的有界文本，不开放头像/任意资料或 HTTP 参数。 */
+export const DESKTOP_PROFILE_SIGNATURE_MAX_LENGTH = 120;
+const DesktopProfileSignatureSchema = z.string()
+  .max(DESKTOP_PROFILE_SIGNATURE_MAX_LENGTH)
+  // Rust String 只接受 Unicode scalar；u 模式不会把合法 emoji 的代理对误判成孤立代理项。
+  .refine((value) => !/[\uD800-\uDFFF]/u.test(value), 'signature 包含不完整的 Unicode 字符');
+
+/**
+ * renderer 的账号身份是写入前置条件，native 必须与其凭据账号匹配后才能发送。
+ * CRLF 与 Web 一样转为 LF；越界值直接拒绝，不在 IPC 层静默截断。
+ */
+export const DesktopCloudSaveSignatureRequestSchema = z.object({
+  expectedUserId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  signature: z.string()
+    .max(DESKTOP_PROFILE_SIGNATURE_MAX_LENGTH * 2)
+    .transform((value) => value.replace(/\r\n/g, '\n'))
+    .pipe(DesktopProfileSignatureSchema),
+}).strict();
+export type DesktopCloudSaveSignatureRequest = z.infer<typeof DesktopCloudSaveSignatureRequestSchema>;
+
+/** 必填 signature 只能来自成功响应；userId 固定为发起时使用的凭据账号。 */
+export const DesktopCloudSaveSignatureResultSchema = z.object({
+  userId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  signature: DesktopProfileSignatureSchema,
+}).strict();
+export type DesktopCloudSaveSignatureResult = z.infer<typeof DesktopCloudSaveSignatureResultSchema>;
+
 /** 登出结果：本地凭据无条件删除，`revoked` 只反映服务端会话是否同步作废。 */
 export const DesktopCloudSignOutResultSchema = z.object({
   revoked: z.boolean(),

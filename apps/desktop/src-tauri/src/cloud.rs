@@ -355,7 +355,7 @@ fn clear_session(secrets: &dyn SecretStore) -> Result<(), CloudError> {
 
 /* ── HTTP 客户端与请求构造 ─────────────────────────────────────────────── */
 
-fn build_cloud_client() -> Result<reqwest::Client, CloudError> {
+fn cloud_client_builder() -> reqwest::ClientBuilder {
     reqwest::Client::builder()
         // 与 Direct 通路一致：不信任环境代理（凭据不经过第三方转发）。
         .no_proxy()
@@ -365,13 +365,15 @@ fn build_cloud_client() -> Result<reqwest::Client, CloudError> {
         // 的总 deadline——hosted SSE 超过它会被 reqwest 主动截断；短请求的
         // 总时限在各 RequestBuilder 上显式设置（SHORT_REQUEST_TIMEOUT）。
         .connect_timeout(SHORT_REQUEST_TIMEOUT)
-        .build()
-        .map_err(|error| {
-            CloudError::new(
-                CloudErrorCode::InternalError,
-                format!("cloud client 初始化失败：{error}"),
-            )
-        })
+}
+
+fn build_cloud_client() -> Result<reqwest::Client, CloudError> {
+    cloud_client_builder().build().map_err(|error| {
+        CloudError::new(
+            CloudErrorCode::InternalError,
+            format!("cloud client 初始化失败：{error}"),
+        )
+    })
 }
 
 fn base_request(
@@ -1082,6 +1084,116 @@ pub async fn cloud_me_profile(
         user_id: session.account.user_id,
         signature,
         avatar_data_url,
+    })
+}
+
+/// 与 TS 写入 DTO 一致：长度按 UTF-16 code unit 计（不是 Rust scalar 数）。
+const PROFILE_SIGNATURE_MAX_LENGTH: usize = 120;
+const MAX_SAFE_USER_ID: u64 = 9_007_199_254_740_991;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloudSaveSignatureRequest {
+    pub expected_user_id: u64,
+    pub signature: String,
+}
+
+impl CloudSaveSignatureRequest {
+    fn normalized_signature(&self) -> Result<String, CloudError> {
+        if self.expected_user_id == 0
+            || self.expected_user_id > MAX_SAFE_USER_ID
+            || self.signature.encode_utf16().count() > PROFILE_SIGNATURE_MAX_LENGTH * 2
+        {
+            return Err(CloudError::new(
+                CloudErrorCode::InvalidRequest,
+                "个性签名请求超出允许范围",
+            ));
+        }
+        let signature = self.signature.replace("\r\n", "\n");
+        if signature.encode_utf16().count() > PROFILE_SIGNATURE_MAX_LENGTH {
+            return Err(CloudError::new(
+                CloudErrorCode::InvalidRequest,
+                "个性签名不能超过 120 个 UTF-16 单位",
+            ));
+        }
+        Ok(signature)
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudSaveSignatureResult {
+    pub user_id: u64,
+    pub signature: String,
+}
+
+/// 只投影服务端明确确认的文本，不能用请求正文/缺省空字符串伪造保存结果。
+fn confirmed_signature(body: &serde_json::Value) -> Result<String, CloudError> {
+    if body.get("success") != Some(&serde_json::Value::Bool(true)) {
+        return Err(CloudError::invalid_response("个性签名保存"));
+    }
+    let signature = body
+        .get("profile")
+        .and_then(|profile| profile.get("signature"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|value| value.encode_utf16().count() <= PROFILE_SIGNATURE_MAX_LENGTH)
+        .ok_or_else(|| CloudError::invalid_response("个性签名保存"))?;
+    Ok(signature.to_string())
+}
+
+/// 固定 PUT `/api/me/profile`：只写 signature；无 URL/header/任意 profile 入口。
+/// expectedUserId 必须与发起时凭据账号匹配；迟到响应仍携带原账号 ID。
+/// 401 仅报告认证失败，不删除可能已切换的新会话。网络不确定时不自动重放。
+pub async fn cloud_save_me_profile_signature(
+    state: &CloudState,
+    secrets: &dyn SecretStore,
+    request: CloudSaveSignatureRequest,
+) -> Result<CloudSaveSignatureResult, CloudError> {
+    let signature = request.normalized_signature()?;
+    let session = load_session(secrets)?.ok_or_else(|| {
+        CloudError::new(CloudErrorCode::NotAuthenticated, "该操作需要登录云端账号")
+    })?;
+    if session.account.user_id != request.expected_user_id {
+        return Err(CloudError::new(
+            CloudErrorCode::NotAuthenticated,
+            "当前账号已改变，请重新确认个性签名的所属账号",
+        ));
+    }
+    // reqwest 默认可能重试协议 NACK；该写入独立禁用底层重试，不改变其它云通路。
+    let http = cloud_client_builder()
+        .retry(reqwest::retry::never())
+        .build()
+        .map_err(|_| CloudError::new(CloudErrorCode::InternalError, "签名保存客户端初始化失败"))?;
+    let response = authed_request(
+        &http,
+        reqwest::Method::PUT,
+        &state.origin,
+        ME_PROFILE_PATH,
+        &session,
+    )
+    .timeout(SHORT_REQUEST_TIMEOUT)
+    .json(&serde_json::json!({ "signature": signature }))
+    .send()
+    .await
+    .map_err(|error| CloudError::network("个性签名保存", &error))?;
+
+    let status = response.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return Err(CloudError::new(
+            CloudErrorCode::NotAuthenticated,
+            "会话已被服务端否认，请重新验证账号",
+        ));
+    }
+    if !status.is_success() {
+        return Err(CloudError::new(
+            CloudErrorCode::ServerUnavailable,
+            format!("个性签名保存返回 {status}"),
+        ));
+    }
+    let body = read_bounded_json(response, "个性签名保存", ME_PROFILE_RESPONSE_MAX_BYTES).await?;
+    Ok(CloudSaveSignatureResult {
+        user_id: session.account.user_id,
+        signature: confirmed_signature(&body)?,
     })
 }
 
@@ -2749,6 +2861,9 @@ mod tests {
         card_extra_headers: Mutex<Vec<(String, String)>>,
         /// 最近一次 `/api/me/profile` 请求的原始 head（断言 cookie 注入）。
         last_me_profile_head: Mutex<Option<String>>,
+        last_me_profile_body: Mutex<Option<serde_json::Value>>,
+        me_profile_count: std::sync::atomic::AtomicUsize,
+        me_profile_reply_gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
         /// `Some((status, body))` 时资料路由返回覆盖响应（测 401/越界分支）。
         me_profile_override: Mutex<Option<(u16, String)>>,
         shutdown: CancellationToken,
@@ -2771,6 +2886,9 @@ mod tests {
             card_response_override: Mutex::new(None),
             card_extra_headers: Mutex::new(Vec::new()),
             last_me_profile_head: Mutex::new(None),
+            last_me_profile_body: Mutex::new(None),
+            me_profile_count: std::sync::atomic::AtomicUsize::new(0),
+            me_profile_reply_gate: Mutex::new(None),
             me_profile_override: Mutex::new(None),
             shutdown: CancellationToken::new(),
         });
@@ -2906,16 +3024,23 @@ mod tests {
                 }
                 SIGN_OUT_PATH => json(serde_json::json!({"success": true})),
                 ME_PROFILE_PATH => {
+                    self.me_profile_count
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    *self.last_me_profile_body.lock().unwrap() = serde_json::from_slice(body).ok();
                     *self.last_me_profile_head.lock().unwrap() = Some(head.to_string());
+                    if let Some(gate) = self.me_profile_reply_gate.lock().unwrap().take() {
+                        gate.recv_timeout(Duration::from_secs(5))
+                            .expect("release profile response");
+                    }
                     if let Some((status, override_body)) =
                         self.me_profile_override.lock().unwrap().clone()
                     {
                         return MockResponse {
                             status,
-                            headers: vec![(
-                                "Content-Type".to_string(),
-                                "application/json".to_string(),
-                            )],
+                            headers: vec![
+                                ("Content-Type".to_string(), "application/json".to_string()),
+                                ("Location".to_string(), ME_PROFILE_PATH.to_string()),
+                            ],
                             body: override_body,
                         };
                     }
@@ -3329,6 +3454,258 @@ mod tests {
                 Some((200, "x".repeat(ME_PROFILE_RESPONSE_MAX_BYTES + 8)));
             let error = cloud_me_profile(&state, &secrets).await.unwrap_err();
             assert_eq!(error.code, CloudErrorCode::InvalidResponse);
+        });
+    }
+
+    fn signature_fixture() -> serde_json::Value {
+        serde_json::from_str(include_str!(
+            "../../../../packages/contracts/fixtures/desktop-profile-signature.json"
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn profile_signature_request_matches_shared_fixture() {
+        let fixture = signature_fixture();
+        assert_eq!(
+            fixture["maxLength"].as_u64(),
+            Some(PROFILE_SIGNATURE_MAX_LENGTH as u64)
+        );
+        for case in fixture["validRequests"].as_array().unwrap() {
+            let request: CloudSaveSignatureRequest =
+                serde_json::from_value(case["input"].clone()).unwrap();
+            assert_eq!(
+                request.normalized_signature().unwrap(),
+                case["normalizedSignature"].as_str().unwrap()
+            );
+        }
+        for encoded in fixture["invalidRequestJson"].as_array().unwrap() {
+            let encoded = encoded.as_str().unwrap();
+            let result = serde_json::from_str::<CloudSaveSignatureRequest>(encoded);
+            assert!(
+                result.is_err() || result.unwrap().normalized_signature().is_err(),
+                "{encoded}"
+            );
+        }
+    }
+
+    #[test]
+    fn profile_signature_confirmation_matches_shared_fixture() {
+        let fixture = signature_fixture();
+        for expected in fixture["validResults"].as_array().unwrap() {
+            let server_body = serde_json::json!({
+                "success": true,
+                "profile": { "signature": expected["signature"], "ignoredServerField": "not projected" }
+            });
+            let result = CloudSaveSignatureResult {
+                user_id: expected["userId"].as_u64().unwrap(),
+                signature: confirmed_signature(&server_body).unwrap(),
+            };
+            assert_eq!(serde_json::to_value(result).unwrap(), *expected);
+        }
+        for encoded in fixture["invalidServerResponseJson"].as_array().unwrap() {
+            let encoded = encoded.as_str().unwrap();
+            let result = serde_json::from_str::<serde_json::Value>(encoded);
+            assert!(
+                result.is_err() || confirmed_signature(&result.unwrap()).is_err(),
+                "{encoded}"
+            );
+        }
+    }
+
+    fn signature_request(signature: &str) -> CloudSaveSignatureRequest {
+        CloudSaveSignatureRequest {
+            expected_user_id: 7,
+            signature: signature.to_string(),
+        }
+    }
+
+    #[test]
+    fn profile_signature_put_is_fixed_authenticated_and_server_confirmed() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            store_session(&secrets, &stored_test_session()).unwrap();
+            for (input, normalized, canonical) in [
+                ("draft\r\nvalue", "draft\nvalue", "server canonical"),
+                ("", "", ""),
+            ] {
+                *server.me_profile_override.lock().unwrap() = Some((200, serde_json::json!({
+                    "success": true, "profile": { "signature": canonical, "cookie": "must not escape" }
+                }).to_string()));
+                let result = cloud_save_me_profile_signature(&state, &secrets, signature_request(input)).await.unwrap();
+                assert_eq!(serde_json::to_value(result).unwrap(), serde_json::json!({"userId": 7, "signature": canonical}));
+                let head = server.last_me_profile_head.lock().unwrap().clone().unwrap();
+                assert!(head.starts_with("PUT /api/me/profile HTTP/1.1"));
+                assert!(head.to_ascii_lowercase().contains("cookie: better-auth.session_token=native.tok"));
+                assert!(head.to_ascii_lowercase().contains("content-type: application/json"));
+                assert_eq!(*server.last_me_profile_body.lock().unwrap(), Some(serde_json::json!({"signature": normalized})));
+            }
+            assert_eq!(server.me_profile_count.load(std::sync::atomic::Ordering::SeqCst), 2);
+        });
+    }
+
+    #[test]
+    fn profile_signature_no_session_wrong_account_and_oversize_never_send() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            let error =
+                cloud_save_me_profile_signature(&state, &secrets, signature_request("draft"))
+                    .await
+                    .unwrap_err();
+            assert_eq!(error.code, CloudErrorCode::NotAuthenticated);
+            store_session(&secrets, &stored_test_session()).unwrap();
+            let mut wrong_account = signature_request("draft");
+            wrong_account.expected_user_id = 8;
+            let error = cloud_save_me_profile_signature(&state, &secrets, wrong_account)
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, CloudErrorCode::NotAuthenticated);
+            let error = cloud_save_me_profile_signature(
+                &state,
+                &secrets,
+                signature_request(&"😀".repeat(61)),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error.code, CloudErrorCode::InvalidRequest);
+            assert_eq!(
+                server
+                    .me_profile_count
+                    .load(std::sync::atomic::Ordering::SeqCst),
+                0
+            );
+        });
+    }
+
+    #[test]
+    fn profile_signature_errors_never_fake_success_retry_or_clear_credentials() {
+        rt().block_on(async {
+            let server = spawn_mock_server();
+            let state = CloudState::with_origin(&server.origin);
+            let secrets = MemorySecrets::new();
+            store_session(&secrets, &stored_test_session()).unwrap();
+            let cases = [
+                (401, "{}".to_string(), CloudErrorCode::NotAuthenticated),
+                (429, "{}".to_string(), CloudErrorCode::ServerUnavailable),
+                (503, "{}".to_string(), CloudErrorCode::ServerUnavailable),
+                (302, "{}".to_string(), CloudErrorCode::ServerUnavailable),
+                (
+                    200,
+                    r#"{"success":false,"profile":{"signature":"unsaved"}}"#.to_string(),
+                    CloudErrorCode::InvalidResponse,
+                ),
+                (
+                    200,
+                    r#"{"success":true,"profile":{}}"#.to_string(),
+                    CloudErrorCode::InvalidResponse,
+                ),
+                (
+                    200,
+                    r#"{"success":true,"profile":{"signature":null}}"#.to_string(),
+                    CloudErrorCode::InvalidResponse,
+                ),
+                (
+                    200,
+                    r#"{"success":true,"profile":{"signature":"\ud800"}}"#.to_string(),
+                    CloudErrorCode::InvalidResponse,
+                ),
+                (
+                    200,
+                    "x".repeat(ME_PROFILE_RESPONSE_MAX_BYTES + 1),
+                    CloudErrorCode::InvalidResponse,
+                ),
+            ];
+            for (index, (status, body, code)) in cases.into_iter().enumerate() {
+                *server.me_profile_override.lock().unwrap() = Some((status, body));
+                let error =
+                    cloud_save_me_profile_signature(&state, &secrets, signature_request("draft"))
+                        .await
+                        .unwrap_err();
+                assert_eq!(error.code, code, "status {status}");
+                assert_eq!(
+                    server
+                        .me_profile_count
+                        .load(std::sync::atomic::Ordering::SeqCst),
+                    index + 1,
+                    "no write retry or redirect"
+                );
+                assert_eq!(load_session(&secrets).unwrap().unwrap().account.user_id, 7);
+            }
+        });
+    }
+
+    #[test]
+    fn profile_signature_late_success_keeps_initiator_and_late_401_keeps_new_session() {
+        rt().block_on(async {
+            for status in [200, 401] {
+                let server = spawn_mock_server();
+                let state = CloudState::with_origin(&server.origin);
+                let secrets = MemorySecrets::new();
+                store_session(&secrets, &stored_test_session()).unwrap();
+                *server.me_profile_override.lock().unwrap() = Some((
+                    status,
+                    r#"{"success":true,"profile":{"signature":"A confirmed"}}"#.to_string(),
+                ));
+                let (release, wait) = std::sync::mpsc::channel();
+                *server.me_profile_reply_gate.lock().unwrap() = Some(wait);
+                let change_account = async {
+                    tokio::time::timeout(Duration::from_secs(3), async {
+                        while server.last_me_profile_head.lock().unwrap().is_none() {
+                            tokio::time::sleep(Duration::from_millis(5)).await;
+                        }
+                    })
+                    .await
+                    .expect("request should be in flight");
+                    let mut next = stored_test_session();
+                    next.account.user_id = 8;
+                    next.cookie = "better-auth.session_token=account-B".to_string();
+                    store_session(&secrets, &next).unwrap();
+                    release.send(()).unwrap();
+                };
+                let (result, ()) = tokio::join!(
+                    cloud_save_me_profile_signature(&state, &secrets, signature_request("A draft")),
+                    change_account,
+                );
+                if status == 200 {
+                    assert_eq!(
+                        serde_json::to_value(result.unwrap()).unwrap(),
+                        serde_json::json!({"userId": 7, "signature": "A confirmed"})
+                    );
+                } else {
+                    assert_eq!(result.unwrap_err().code, CloudErrorCode::NotAuthenticated);
+                }
+                let current = load_session(&secrets).unwrap().unwrap();
+                assert_eq!(current.account.user_id, 8);
+                assert_eq!(current.cookie, "better-auth.session_token=account-B");
+                assert_eq!(
+                    server
+                        .me_profile_count
+                        .load(std::sync::atomic::Ordering::SeqCst),
+                    1
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn profile_signature_network_error_preserves_session() {
+        rt().block_on(async {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let origin = format!("http://{}", listener.local_addr().unwrap());
+            drop(listener);
+            let state = CloudState::with_origin(&origin);
+            let secrets = MemorySecrets::new();
+            store_session(&secrets, &stored_test_session()).unwrap();
+            let error =
+                cloud_save_me_profile_signature(&state, &secrets, signature_request("draft"))
+                    .await
+                    .unwrap_err();
+            assert_eq!(error.code, CloudErrorCode::NetworkError);
+            assert_eq!(load_session(&secrets).unwrap().unwrap().account.user_id, 7);
         });
     }
 

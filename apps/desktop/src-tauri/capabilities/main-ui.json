@@ -48,6 +48,7 @@
     "allow-cloud-login-cancel",
     "allow-cloud-cached-account",
     "allow-cloud-me-profile",
+    "allow-cloud-save-me-profile-signature",
     "allow-cloud-auth-status",
     "allow-cloud-sign-out",
     "allow-cloud-online-status",
