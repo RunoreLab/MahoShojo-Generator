@@ -1,6 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
+import { ProfileSignatureField, useProfileSignatureEditor } from '@mahoshojo/ui-web/settings';
+
+import { useUnsavedPageGuard } from '@mahoshojo/ui-web/client';
 
 import { useMeProfile } from '@/components/me/useMeProfile';
 
@@ -17,7 +20,9 @@ export function ProfileSettingsPanel({ userId }: { userId: number | null }) {
     profile,
     error,
     saveSignature,
-    isSavingSignature,
+    loaded,
+    signatureScope,
+    refetch,
     uploadAvatar,
     isUploadingAvatar,
     clearAvatar,
@@ -28,23 +33,16 @@ export function ProfileSettingsPanel({ userId }: { userId: number | null }) {
     () => (profile.avatarDataUrl ? formatBytes(profile.avatarDataUrl.length) : null),
     [profile.avatarDataUrl],
   );
-  const [draftSignature, setDraftSignature] = useState('');
-  const [signatureHint, setSignatureHint] = useState<string | null>(null);
+  const editor = useProfileSignatureEditor({
+    scope: signatureScope ?? (userId === null ? null : `web:${userId}`),
+    signature: loaded ? profile.signature : undefined,
+    canSave: userId !== null,
+    save: async (signature) => (await saveSignature(signature)).profile.signature,
+  });
 
-  const dirty = draftSignature !== (profile.signature ?? '');
-  const count = draftSignature.length;
-
-  useEffect(() => {
-    if (!dirty) {
-      setDraftSignature(profile.signature ?? '');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile.signature]);
-
-  useEffect(() => {
-    if (isSavingSignature) setSignatureHint('保存中…');
-    else if (signatureHint === '保存中…') setSignatureHint('已保存');
-  }, [isSavingSignature, signatureHint]);
+  useUnsavedPageGuard(() => editor.dirty || editor.saving, editor.saving
+    ? '签名保存请求仍在进行，离开不会撤销请求，服务端仍可能保存。确认离开？'
+    : '个性签名尚未保存。确认放弃当前草稿并离开？', () => !editor.saving);
 
   if (!userId) {
     return (
@@ -104,49 +102,11 @@ export function ProfileSettingsPanel({ userId }: { userId: number | null }) {
           </div>
         </div>
 
-        <div>
-          <div className="flex items-center justify-between">
-            <div className="text-sm font-medium text-gray-900">个性签名</div>
-            <div className="text-xs text-gray-500">{count}/120</div>
-          </div>
-          <textarea
-            className="input-field mt-2 min-h-[90px] resize-y"
-            placeholder="写一句你想展示的话…（最多 120 字）"
-            value={draftSignature}
-            onChange={(e) => {
-              setDraftSignature(e.target.value);
-              setSignatureHint(null);
-            }}
-          />
-          <div className="mt-2 flex items-center justify-between gap-2">
-            <div className="text-xs text-gray-500">
-              提示：支持换行；{signatureHint ? signatureHint : dirty ? '未保存' : '已保存'}
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="rounded-lg border bg-white px-3 py-2 text-xs hover:bg-gray-50 disabled:opacity-50"
-                onClick={() => setDraftSignature('')}
-                disabled={!draftSignature || isSavingSignature}
-              >
-                清空
-              </button>
-              <button
-                type="button"
-                className="rounded-lg border bg-white px-3 py-2 text-xs hover:bg-gray-50 disabled:opacity-50"
-                onClick={() => {
-                  setSignatureHint('保存中…');
-                  saveSignature(draftSignature)
-                    .then(() => setSignatureHint('已保存'))
-                    .catch(() => {});
-                }}
-                disabled={!dirty || isSavingSignature}
-              >
-                保存
-              </button>
-            </div>
-          </div>
-        </div>
+        <ProfileSignatureField editor={editor} />
+        {(editor.error || (!loaded && error)) && <div className="text-xs text-gray-500">
+          请求中断时服务端仍可能已保存；可先读取线上签名核对，再决定是否重试。
+          <button type="button" className="ml-2 underline" disabled={editor.saving} onClick={() => void refetch()}>读取线上签名</button>
+        </div>}
       </div>
 
       {error ? (

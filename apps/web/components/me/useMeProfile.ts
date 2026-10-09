@@ -1,9 +1,11 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import { normalizeProfileSignature } from '@mahoshojo/ui-web/settings';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { authStorage } from '@/lib/auth';
+import { getAuthSnapshot, subscribeAuthSnapshot } from '@/lib/auth-client-store';
 import { dispatchMeProfileAvatarUpdated } from '@/lib/me-profile-events';
 
 export type MeProfile = {
@@ -16,7 +18,15 @@ type ProfileApiResponse = {
   profile: MeProfile;
 };
 
-const MAX_SIGNATURE_LENGTH = 120;
+function readProfileResponse(data: unknown, maxLength = 1024): ProfileApiResponse {
+  const result = data as Partial<ProfileApiResponse> | null;
+  if (result?.success !== true || typeof result.profile?.signature !== 'string'
+    || result.profile.signature.length > maxLength
+    || (result.profile.avatarDataUrl !== null && typeof result.profile.avatarDataUrl !== 'string')) {
+    throw new Error('服务端未确认个人资料，请刷新后重试');
+  }
+  return result as ProfileApiResponse;
+}
 const AVATAR_SIZE = 128;
 const AVATAR_WEBP_QUALITY = 0.82;
 const MAX_AVATAR_BASE64_LENGTH = 350_000;
@@ -85,30 +95,49 @@ async function compressAvatarToWebpBase64InBrowser(file: File) {
 
 export function useMeProfile(userId: number | null) {
   const queryClient = useQueryClient();
+  // user 对象在每次成功登录时更新（含同账号重登），徽章刷新保留它。
+  const authIdentity = useSyncExternalStore(subscribeAuthSnapshot, () => getAuthSnapshot().user, () => null);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const owner = useRef({ userId, authIdentity, epoch: 0 });
+  if (owner.current.userId !== userId || owner.current.authIdentity !== authIdentity) {
+    owner.current = { userId, authIdentity, epoch: owner.current.epoch + 1 };
+  }
+  const currentOwner = owner.current;
+  const isCurrentOwner = (initiatedBy: typeof currentOwner) => mounted.current && owner.current === initiatedBy
+    && getAuthSnapshot().user === initiatedBy.authIdentity;
   const queryKey = useMemo(() => ['me-profile', userId] as const, [userId]);
 
   const profileQuery = useQuery({
     queryKey,
     enabled: Boolean(userId),
-    queryFn: async () => {
-      const data = await authedFetch('/api/me/profile', { method: 'GET' });
-      return data as ProfileApiResponse;
+    queryFn: async ({ signal }) => {
+      const data = await authedFetch('/api/me/profile', { method: 'GET', signal });
+      if (!isCurrentOwner(currentOwner)) throw new Error('账号已变化，请重新载入资料');
+      return readProfileResponse(data);
     },
     staleTime: 5_000,
   });
 
   const saveSignatureMutation = useMutation({
-    mutationFn: async (signature: string) => {
-      const capped = signature.replace(/\r\n/g, '\n').slice(0, MAX_SIGNATURE_LENGTH);
-      const data = await authedFetch('/api/me/profile', {
+    // 不继承全局 mutation 重试策略：失败/未知结果只由用户显式重试。
+    retry: false,
+    mutationFn: async ({ signature, initiatedBy }: { signature: string; initiatedBy: typeof currentOwner }) => {
+      if (initiatedBy.userId === null || !isCurrentOwner(initiatedBy)) throw new Error('账号已变化，请重新载入资料');
+      const key = ['me-profile', initiatedBy.userId] as const;
+      await queryClient.cancelQueries({ queryKey: key, exact: true });
+      if (!isCurrentOwner(initiatedBy)) throw new Error('账号已变化，请重新载入资料');
+      const data = readProfileResponse(await authedFetch('/api/me/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ signature: capped }),
-      });
-      return data as ProfileApiResponse;
-    },
-    onSuccess: (data) => {
-      queryClient.setQueryData(queryKey, data);
+        body: JSON.stringify({ signature: normalizeProfileSignature(signature) }),
+      }), 120);
+      if (!isCurrentOwner(initiatedBy)) throw new Error('账号已变化，旧请求结果已忽略');
+      // 截住写入期间启动的 refetch，避免旧 GET 晚到覆盖已确认写入。
+      await queryClient.cancelQueries({ queryKey: key, exact: true });
+      if (!isCurrentOwner(initiatedBy)) throw new Error('账号已变化，旧请求结果已忽略');
+      queryClient.setQueryData(key, data);
+      return data;
     },
   });
 
@@ -152,25 +181,26 @@ export function useMeProfile(userId: number | null) {
   const profile: MeProfile = profileQuery.data?.profile ?? { signature: '', avatarDataUrl: null };
   const error =
     (profileQuery.error instanceof Error ? profileQuery.error.message : null) ||
-    (saveSignatureMutation.error instanceof Error ? saveSignatureMutation.error.message : null) ||
+    (saveSignatureMutation.variables?.initiatedBy === currentOwner && saveSignatureMutation.error instanceof Error ? saveSignatureMutation.error.message : null) ||
     (uploadAvatarMutation.error instanceof Error ? uploadAvatarMutation.error.message : null) ||
     (clearAvatarMutation.error instanceof Error ? clearAvatarMutation.error.message : null);
 
   return {
     profile,
-    loaded: profileQuery.isFetched,
+    loaded: profileQuery.data !== undefined,
+    signatureScope: userId === null ? null : `web:${userId}:${currentOwner.epoch}`,
     isLoading: profileQuery.isLoading,
     error,
 
     setSignatureOptimistic: (signature: string) => {
-      const capped = signature.replace(/\r\n/g, '\n').slice(0, MAX_SIGNATURE_LENGTH);
+      const capped = normalizeProfileSignature(signature);
       queryClient.setQueryData(queryKey, (prev: ProfileApiResponse | undefined) => {
         const prevProfile = prev?.profile ?? { signature: '', avatarDataUrl: null };
         return { success: true, profile: { ...prevProfile, signature: capped } };
       });
     },
-    saveSignature: (signature: string) => saveSignatureMutation.mutateAsync(signature),
-    isSavingSignature: saveSignatureMutation.isPending,
+    saveSignature: (signature: string) => saveSignatureMutation.mutateAsync({ signature, initiatedBy: currentOwner }),
+    isSavingSignature: saveSignatureMutation.variables?.initiatedBy === currentOwner && saveSignatureMutation.isPending,
 
     uploadAvatar: (file: File) => uploadAvatarMutation.mutateAsync(file),
     isUploadingAvatar: uploadAvatarMutation.isPending,

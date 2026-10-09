@@ -8,10 +8,12 @@ import { useCallback, useEffect, useRef } from 'react';
 export function useUnsavedPageGuard(
   isDirty: () => boolean,
   message = '当前内容尚未保存。确认放弃本页未保存的内容并离开？原有存档和已保存的数据卡不会删除。',
+  canConfirmLeave?: () => boolean,
 ): () => boolean {
-  const current = useRef({ isDirty, message });
-  current.current = { isDirty, message };
-  const confirmLeave = useCallback(() => !current.current.isDirty() || window.confirm(current.current.message), []);
+  const current = useRef({ isDirty, message, canConfirmLeave });
+  current.current = { isDirty, message, canConfirmLeave };
+  const confirmLeave = useCallback(() => !current.current.isDirty()
+    || ((current.current.canConfirmLeave?.() ?? true) && window.confirm(current.current.message)), []);
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
       if (!current.current.isDirty()) return;

@@ -45,3 +45,10 @@ export {
   type SettingsGroupSection,
   type SettingsPageProps,
 } from './SettingsPage';
+export {
+  ProfileSignatureField,
+  useProfileSignatureEditor,
+  normalizeProfileSignature,
+  PROFILE_SIGNATURE_MAX_LENGTH,
+  type ProfileSignatureEditorState,
+} from './profile-signature';
