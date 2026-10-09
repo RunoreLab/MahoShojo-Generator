@@ -1,3 +1,4 @@
+import { PrivateResultSave } from '../features/cloud-save/private-result-save';
 import { GenerationMarkdownPreview } from './generation-markdown-preview';
 import { generationActionClassNames, generationSubmitClassName } from '@mahoshojo/ui-web/generation-actions';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -174,6 +175,10 @@ const describeRegenerateConfirm = (kind: ConfirmRegenerateKind): { title: string
 
 function CreatorForm({ session, restored }: { session: CreatorSession; restored: boolean }) {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
+  const cloudSavingRef = useRef(false);
+  const [cloudSaving, setCloudSaving] = useState(false);
+  const onCloudSavingChange = useCallback((saving: boolean) => { cloudSavingRef.current = saving; setCloudSaving(saving); }, []);
+
   const router = useRouter();
   const { openFixed } = useExternalLinks();
   const { state: aiState, store: aiStore } = useDesktopAiConfig();
@@ -234,9 +239,11 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
     : (CREATOR_DRAFT_DEFAULT_RULE_IDS[0] ?? null);
   const allowMultiple = draft.allowMultipleQuestionnaires === true;
   const updateDraft = useCallback((patch: Partial<typeof draft>) => {
+    if (cloudSavingRef.current) return;
     session.updateDraft({ ...session.getSnapshot().draft, ...patch });
   }, [session]);
   const updateSelections = useCallback((next: QuestionnaireSelection[]) => {
+    if (cloudSavingRef.current) return;
     session.updateDraft({ ...session.getSnapshot().draft, questionnaireSelections: next });
   }, [session]);
 
@@ -539,7 +546,7 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
   useResultAutoScroll(resultSectionRef, Boolean(state.card), { restored: state.resultRestored });
 
   const mode = target.mode;
-  const busy = state.phase === 'generating' || state.saving || aiState.generationActive;
+  const busy = cloudSaving || state.phase === 'generating' || state.saving || aiState.generationActive;
   const showStreamPreview = state.phase === 'generating' && state.activeGenerationMode === 'stream';
   useEffect(() => () => aiStore.cancelPreparingGeneration(), [aiStore]);
   const blockedDraft = state.pendingRestore;
@@ -594,6 +601,7 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
     presetLoadControllersRef.current.clear();
   };
   const applySelection = (selection: QuestionnaireSelection, options?: { presetRequest?: boolean }) => {
+    if (cloudSavingRef.current) return;
     // 提交前读会话最新快照：异步回调不得用旧渲染闭包中的 selections
     // 覆盖较新的选择集（G3-r1-r1）。
     const draftNow = session.getSnapshot().draft;
@@ -759,12 +767,12 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
   };
 
   const guard = useLeaveGuard(
-    () => session.isBusy() || session.hasUnsavedDraft(),
+    () => cloudSavingRef.current || session.isBusy() || session.hasUnsavedDraft(),
     '生成或保存尚未完成，或当前草稿未能保存。请等待、取消生成或重试保存；也可以确认放弃本页未保存内容后离开。',
     '窗口关闭保护初始化失败，生成与保存暂不可用。请重新打开页面后重试。',
     () => {
       const current = session.getSnapshot();
-      if (current.saving || aiStore.isPreparingGeneration()) return false;
+      if (cloudSavingRef.current || current.saving || aiStore.isPreparingGeneration()) return false;
       if (current.phase !== 'generating') {
         return session.hasUnsavedDraft()
           && window.confirm('当前内容尚未保存到草稿。确认放弃本页未保存的内容并离开？已保存的本地卡和原草稿不受影响。');
@@ -789,7 +797,7 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
     && !(target.location === 'client' && !target.providerTarget);
 
   const generate = (discardUnsavedResult = false) => {
-    if (!canGenerateNow) return;
+    if (cloudSavingRef.current || !canGenerateNow) return;
     if (!discardUnsavedResult) {
       if (session.hasUnsavedResult()) { setConfirmRegenerate('unsaved'); return; }
       if (state.phase === 'uncertain') { setConfirmRegenerate('uncertain'); return; }
@@ -901,6 +909,7 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
   });
 
   const resolvedResultPayload = state.card;
+  const resultCardType = session.resultCardType();
   const resultSignatureLabel = session.resultSignatureKind() === 'official-signed'
     ? '官方签名'
     : session.resultSignatureKind() === 'signature-unverified'
@@ -1203,7 +1212,8 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
         />
       )}
       {resolvedResultPayload && <>
-        <button className={generationActionClassNames.primary} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => { if (guard.ready) void session.saveResult(); }}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>
+        {resultCardType && <PrivateResultSave data={resolvedResultPayload} cardType={resultCardType} onBusyChange={onCloudSavingChange} isBlocked={() => session.isBusy() || aiStore.isPreparingGeneration()} disabled={!guard.ready || busy} className={generationActionClassNames.primary} />}
+                  <button className={generationActionClassNames.primary} disabled={!guard.ready || busy || state.saveStatus === 'saved' || state.saveStatus === 'already-present'} onClick={() => { if (guard.ready) void session.saveResult(); }}>{state.saving ? '正在保存…' : '保存到本地卡库'}</button>
         {state.saveStatus === 'saved' && <p role="status">已保存到本地卡库。</p>}
         {state.saveStatus === 'already-present' && <p role="status">本地卡库已存在相同内容，原记录保持不变。</p>}
         {state.saveError && <p role="alert">{state.saveError}</p>}
@@ -1305,6 +1315,7 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
             {confirmClear && <div role="group" aria-label="确认清除草稿" className="mt-3 rounded border p-3">
               <p>确认清除本页回答、创作输入、生成结果和中断正文？已保存的本地卡不受影响。此操作无法撤销。</p>
               <button className={generationActionClassNames.destructive} disabled={busy} onClick={() => {
+                if (cloudSavingRef.current) return;
                 invalidatePresetLoads();
                 session.discardDraft();
                 if (session.getSnapshot().draftError) return;
