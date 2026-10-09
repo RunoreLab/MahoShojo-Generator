@@ -1,3 +1,5 @@
+import { AiProviderModelIdInput } from './model-id-input';
+import { ProviderModelIdSchema } from '@mahoshojo/contracts/provider-target';
 // 共源 AI Provider 选择器视图。
 //
 // 这是从 `apps/web/components/AiProviderSelector.tsx` 抽出的宿主无关组件：选择与
@@ -159,17 +161,11 @@ export const AiProviderSelectorView = ({
         activeProvider && isCustomModelSelected
           ? {
               input: (
-                <input
-                  className="input-field font-mono"
-                  type="text"
-                  placeholder="请输入该供应商支持的 modelId"
-                  value={customModelId}
-                  autoComplete="off"
-                  spellCheck={false}
-                  onChange={(event) => setCustomModelId(event.target.value)}
-                />
+                <AiProviderModelIdInput value={customModelId} onValueChange={setCustomModelId} />
               ),
-              hint: '仅切换模型名，端点仍固定为当前预置供应商。',
+              hint: customModelId && !ProviderModelIdSchema.safeParse(customModelId).success
+                ? '模型 ID 需非空、不超过 200 字符且不含控制字符。'
+                : '仅切换模型名，端点仍固定为当前预置供应商。',
             }
           : undefined
       }

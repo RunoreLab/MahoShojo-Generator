@@ -73,3 +73,5 @@ export {
   AI_DIRECT_UNSUPPORTED_REASON_TEXT,
   describeAiDirectUnsupportedReason,
 } from './direct-support';
+
+export { AiProviderModelIdInput } from './model-id-input';

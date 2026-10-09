@@ -1,3 +1,4 @@
+import { ProviderModelIdSchema, PROVIDER_MODEL_ID_MAX_LENGTH } from '@mahoshojo/contracts/provider-target';
 // constants.ts
 // 定义前端可选的 AI 供应商与模型映射，供配置组件展示使用。
 //
@@ -252,7 +253,7 @@ export const findAiProviderPreset = (providerId: string): AiProviderPreset | nul
     AI_PROVIDER_PRESETS.find((preset) => preset.id === providerId) ?? null;
 
 export const CUSTOM_AI_MODEL_OPTION_VALUE = '__custom_model_id__';
-export const MAX_CUSTOM_AI_MODEL_ID_LENGTH = 200;
+export const MAX_CUSTOM_AI_MODEL_ID_LENGTH = PROVIDER_MODEL_ID_MAX_LENGTH;
 
 export const CUSTOM_AI_MODEL_OPTION: AIModelOption = {
     value: CUSTOM_AI_MODEL_OPTION_VALUE,
@@ -271,12 +272,8 @@ export const canUseCustomModelId = (provider: AIProviderOption | null | undefine
 };
 
 const normalizeCustomModelId = (modelId: string): string | null => {
-    const normalized = modelId.trim();
-    if (!normalized) return null;
-    if (normalized === CUSTOM_AI_MODEL_OPTION_VALUE) return null;
-    if (normalized.length > MAX_CUSTOM_AI_MODEL_ID_LENGTH) return null;
-    if (/[\u0000-\u001f\u007f]/.test(normalized)) return null;
-    return normalized;
+    const parsed = ProviderModelIdSchema.safeParse(modelId);
+    return parsed.success && parsed.data !== CUSTOM_AI_MODEL_OPTION_VALUE ? parsed.data : null;
 };
 
 /** Case-insensitive legacy request aliases, shared with the generated native authority. */

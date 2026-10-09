@@ -1,3 +1,4 @@
+import { ProviderModelIdSchema } from '@mahoshojo/contracts/provider-target';
 import {
   MAX_CUSTOM_PROVIDER_OUTPUT_TOKENS,
   normalizeCustomProviderMaxOutputTokens,
@@ -56,10 +57,12 @@ export const buildCustomProviderPayload = (
       return undefined;
     }
   }
+  const parsedModel = ProviderModelIdSchema.safeParse(config.modelId);
+  if (!parsedModel.success) throw new Error('模型 ID 需非空、不超过 200 字符且不含控制字符');
   const maxOutputTokens = normalizeCustomProviderMaxOutputTokens(config.maxOutputTokens);
   return {
     providerId: config.providerId,
-    modelId: config.modelId,
+    modelId: parsedModel.data,
     apiKey: config.apiKey,
     ...(typeof maxOutputTokens === 'number' ? { maxOutputTokens } : {}),
     ...(config.generationOverrides ? { generationOverrides: config.generationOverrides } : {}),

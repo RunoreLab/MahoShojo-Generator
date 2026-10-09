@@ -17,6 +17,13 @@ const getProvider = (providerId: string) => {
 };
 
 describe('custom provider helpers', () => {
+  it('共源模型校验：trim 后直接使用，超长与控制字符不得退回系统默认请求', () => {
+    expect(buildCustomProviderPayload({ providerId: 'deepseek', modelId: '  custom-model  ', apiKey: 'test-only' })?.modelId).toBe('custom-model');
+    for (const modelId of ['x'.repeat(201), 'bad\u0000id', 'bad\u0085id']) {
+      expect(() => buildCustomProviderPayload({ providerId: 'deepseek', modelId, apiKey: 'test-only' })).toThrow('模型 ID');
+    }
+  });
+
   it('空配置不产生 payload', () => {
     expect(buildCustomProviderPayload(null)).toBeUndefined();
     expect(buildCustomProviderPayload(undefined)).toBeUndefined();
