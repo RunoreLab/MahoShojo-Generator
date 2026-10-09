@@ -9,7 +9,7 @@ const originalData = { name: '雾灯', codename: '星灯', content: '完整设�
   future_extension: { lore: '保留数据' } };
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 // Schema hashes retain the 99e3906 baseline; prompt hashes include the 2026-10-09
-// intentional readable-input and shared preservation-constraint revision.
+// intentional readable-input, preservation and technical-metadata prompt revisions.
 describe('Sublimation 生成核迁移与 Hosted 行为保真', () => {
   for (const targetTemplate of ['general', 'magical-girl', 'canshou'] as const)
     for (const enabled of [true, false])

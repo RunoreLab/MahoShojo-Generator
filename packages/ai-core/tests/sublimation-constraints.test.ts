@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { convertSublimationCharacterCard } from '@mahoshojo/domain/sublimation';
+import { buildFinalSublimationData, convertSublimationCharacterCard } from '@mahoshojo/domain/sublimation';
 import { buildSublimationStreamCore, createSublimationGenerationCore } from '../src/sublimation-generation';
+
+import { buildStreamedSublimationResultCard } from '@mahoshojo/domain/sublimation-stream-result';
 
 type CoreInput = Parameters<typeof createSublimationGenerationCore>[0];
 const baseInput = (): CoreInput => {
@@ -81,4 +83,41 @@ describe('升华共源语义约束', () => {
       }
     });
   }
+});
+
+
+describe('升华技术元数据与叙事扩展分离', () => {
+  it('两种提示明确技术元数据不入正文，仍提供真实自定义设定且不删扩展', () => {
+    const input = baseInput();
+    input.originalData._extension = { sentinel: ['opaque-storage-marker', 42], nested: { preserve: true } };
+    input.originalData.customLore = { tradition: '每年在海边点起回家的灯' };
+    input.baseOutputData = structuredClone(input.originalData);
+    const before = structuredClone(input);
+    const core = createSublimationGenerationCore(input);
+    const prompts = [core.promptBuilder(), buildSublimationStreamCore({ ...input, userGuidance: input.userGuidance ?? '', narrativeHistory: '', loreText: '', isDowngrade: false }).prompt];
+    for (const prompt of prompts) {
+      expect(prompt).toContain('技术元数据不是角色设定');
+      expect(prompt).toContain('无法判断的扩展不要自行写进剧情');
+      expect(prompt).toContain('原始扩展由程序保留，无需在正文重复');
+      expect(prompt).toContain('opaque-storage-marker');
+      expect(prompt).toContain('每年在海边点起回家的灯');
+    }
+    const parsed = core.schema.parse({ updatedCharacterData: { content: '学会与伙伴配合', _extension: { sentinel: 'model-change' } }, sublimationEvent: { title: '合作', impact: '保持有限体力' } });
+    expect(parsed.updatedCharacterData).toEqual({ content: '学会与伙伴配合' });
+    const structured = buildFinalSublimationData({
+      originalCharacterData: input.originalData, baseOutputData: input.baseOutputData,
+      updatedDataFromAI: parsed.updatedCharacterData, targetTemplate: 'general', sourceTemplate: 'general',
+      allowReshapeNames: false, writeArenaHistory: false, writeCurrentState: false,
+      arenaHistoryRetentionStrategy: 'keep-all', sublimationEvent: parsed.sublimationEvent,
+      finalUserGuidance: input.userGuidance, hasNarrativeHistory: false, hasQuestionnaireLore: false,
+      hasNonNativeQuestionnaireLore: false, questionnaireSelectionCount: 0, isNative: false,
+    });
+    const stream = buildStreamedSublimationResultCard({ markdown: '# 角色\n\n学会与伙伴配合', originalCharacterData: input.originalData,
+      defaultName: '角色', writeArenaHistory: false, retentionStrategy: 'keep-all' });
+    for (const card of [structured, stream]) {
+      expect(card._extension).toEqual(input.originalData._extension);
+      expect(card.customLore).toEqual(input.originalData.customLore);
+    }
+    expect(input).toEqual(before);
+  });
 });
