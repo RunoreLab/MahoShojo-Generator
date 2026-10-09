@@ -229,7 +229,8 @@
     "./tavern-card/limits": "./src/tavern-card/limits.ts",
     "./tavern-card/recommend": "./src/tavern-card/recommend.ts",
     "./team-merge": "./src/team-merge.ts",
-    "./team-input": "./src/team-input.ts"
+    "./team-input": "./src/team-input.ts",
+    "./questionnaire-editor": "./src/questionnaire-editor.ts"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",
