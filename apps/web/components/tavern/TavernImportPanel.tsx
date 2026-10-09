@@ -342,7 +342,7 @@ const buildTavernMeta = (parseResult: TavernParseResult, candidate: TavernCardCa
 type TavernAttachment = { meta: TavernImportMeta; raw?: unknown };
 type WithTavern<T> = T & { _tavern: TavernAttachment };
 
-export function TavernImportPanel() {
+export function TavernImportPanel({ onBusyChange }: { onBusyChange?: (busy: boolean) => void } = {}) {
   const router = useAppRouterAdapter();
   const [state, dispatch] = useReducer(reducer, initialState);
   const { user } = useAuth();
@@ -929,6 +929,8 @@ export function TavernImportPanel() {
       : state.targetTemplate;
 
   const previewDataCard = outputDataCard ?? streamedGeneralCardForDisplay;
+  useEffect(() => { onBusyChange?.(state.step === 'parsing' || state.step === 'converting'); return () => onBusyChange?.(false); }, [state.step, onBusyChange]);
+
   const isPreviewStreaming = state.convertMode === 'ai' && generationMode === 'stream' && state.step === 'converting';
 
   const scenarioPreview = useMemo(() => {

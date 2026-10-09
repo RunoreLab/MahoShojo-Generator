@@ -7,4 +7,6 @@ export * from './local-sources';
 export * from './source-selection';
 export * from './export-fields';
 export * from './default-base';
+export * from './tabs';
 export * from './export-file';
+export * from './local-export';

@@ -39,7 +39,7 @@ describe('shared Tavern original journey controls', () => {
   });
   it('ignores an earlier delayed library read after a newer file intent and discloses unreadable rows', async () => {
     let resolve!: (item: unknown) => void;
-    const item = { id: 'card-a', title: 'Card A', data: { _tavern: { raw: candidate.parsed } } };
+    const item = { id: 'card-a', cardType: 'character', title: 'Card A', data: { _tavern: { raw: candidate.parsed } } };
     const repository = { list: async () => ({ items: [item], unreadable: ['broken'], nextCursor: undefined }), get: () => new Promise((done) => { resolve = done; }) } as unknown as CardRepository;
     const onSource = vi.fn();
     function Harness() { const selection = useTavernSourceSelection(); return <><button onClick={() => { selection.begin(); onSource('file-b'); }}>New file</button><TavernLocalSources repository={repository} selection={selection} onSource={onSource} /></>; }

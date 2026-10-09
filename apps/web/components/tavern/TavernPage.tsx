@@ -1,16 +1,19 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 
 import Footer from '@/components/Footer';
 import { TavernExportPanel } from '@/components/tavern/TavernExportPanel';
 import { TavernHeroBanner } from '@/components/tavern/TavernHeroBanner';
 import { TavernImportPanel } from '@/components/tavern/TavernImportPanel';
 
-type TavernTab = 'import' | 'export';
+import { TavernTabs, TavernTabPanels, type TavernTab } from '@mahoshojo/ui-web/tavern';
 
 export function TavernPage() {
+  const idPrefix = useId();
+  const [importBusy, setImportBusy] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
   const [tab, setTab] = useState<TavernTab>('import');
 
   return (
@@ -45,40 +48,17 @@ export function TavernPage() {
                       打开 SillyTavern 文档（使用说明）
                     </a>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      className={`rounded-xl border px-4 py-2 text-sm font-semibold transition-colors ${
-                        tab === 'import'
-                          ? 'border-pink-300 bg-pink-100 text-pink-800'
-                          : 'border-pink-100 bg-white/70 text-gray-700 hover:bg-pink-50'
-                      }`}
-                      onClick={() => setTab('import')}
-                    >
-                      导入
-                    </button>
-                    <button
-                      type="button"
-                      className={`rounded-xl border px-4 py-2 text-sm font-semibold transition-colors ${
-                        tab === 'export'
-                          ? 'border-pink-300 bg-pink-100 text-pink-800'
-                          : 'border-pink-100 bg-white/70 text-gray-700 hover:bg-pink-50'
-                      }`}
-                      onClick={() => setTab('export')}
-                    >
-                      导出
-                    </button>
-                  </div>
+                  <TavernTabs idPrefix={idPrefix} tab={tab} onChange={setTab} disabled={importBusy || exportBusy} />
                 </div>
               )}
             />
 
             <div className="p-6">
               <div className="text-center text-xs text-gray-600">
-                提示：本页默认只在浏览器本地解析/写入 PNG 元数据；只有选择 AI 相关功能时才会发起网络请求。
+                提示：本地 PNG 解析/写入无需上传；在线档案馆、来源验证、AI/立绘等功能会联网。
               </div>
 
-              {tab === 'import' ? <TavernImportPanel /> : <TavernExportPanel />}
+              <TavernTabPanels idPrefix={idPrefix} tab={tab} importPanel={<TavernImportPanel onBusyChange={setImportBusy} />} exportPanel={<TavernExportPanel onBusyChange={setExportBusy} />} />
 
               <Footer className="footer mt-8" />
             </div>

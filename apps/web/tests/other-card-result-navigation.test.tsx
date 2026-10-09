@@ -119,7 +119,7 @@ describe('real card generation pages use request-bound result navigation', () =>
   });
   it('a pending earlier library selection cannot replace the source when Web AI conversion starts', async () => {
     await tavernSetup();
-    const item = { id: 'library-a', title: 'Library A', data: { templateId: '通用角色', name: 'Library A', content: 'A', _tavern: { raw: { name: 'Late A', description: 'Should not replace Test' } } } };
+    const item = { id: 'library-a', title: 'Library A', cardType: 'character', data: { templateId: '通用角色', name: 'Library A', content: 'A', _tavern: { raw: { name: 'Late A', description: 'Should not replace Test' } } } };
     library.list.mockResolvedValue({ items: [item] });
     let finishLibrary!: (value: unknown) => void;
     library.get.mockImplementation(() => new Promise((done) => { finishLibrary = done; }));

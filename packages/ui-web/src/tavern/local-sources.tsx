@@ -12,9 +12,10 @@ const hasOriginal = (item: LocalCardRecordV1): boolean => {
 };
 
 /** Local-only, explicitly opened selector; it never queries a cloud library. */
-export function TavernLocalSources({ repository, disabled, onSource, selection }: {
-  repository: CardRepository; selection: TavernSourceSelection; disabled?: boolean; onSource: (file: TavernInputFile) => void;
+export function TavernLocalSources({ repository, disabled, onSource, selection, mode = 'original' }: {
+  mode?: 'original' | 'character'; repository: CardRepository; selection: TavernSourceSelection; disabled?: boolean; onSource: (file: TavernInputFile) => void;
 }) {
+  const accepts = (item: LocalCardRecordV1) => item.cardType === 'character' && (mode === 'character' || hasOriginal(item));
   const [items, setItems] = useState<LocalCardRecordV1[]>([]);
   const [cursor, setCursor] = useState<string>();
   const [opened, setOpened] = useState(false);
@@ -33,7 +34,7 @@ export function TavernLocalSources({ repository, disabled, onSource, selection }
       if (!alive.current) return;
       const unreadable = 'unreadable' in page && Array.isArray(page.unreadable) ? page.unreadable.length : 0;
       setUnreadableCount((previous) => (more ? previous : 0) + unreadable);
-      setItems((previous) => more ? [...previous, ...page.items.filter(hasOriginal)] : page.items.filter(hasOriginal));
+      setItems((previous) => more ? [...previous, ...page.items.filter(accepts)] : page.items.filter(accepts));
       setCursor(page.nextCursor); setOpened(true);
     } catch { if (alive.current) setError('本地库读取失败，可重试。'); }
     finally { lock.current = false; if (alive.current) setBusy(false); }
@@ -45,17 +46,17 @@ export function TavernLocalSources({ repository, disabled, onSource, selection }
     try {
       const item = await repository.get(id);
       if (!selection.isCurrent(token) || !alive.current || disabledRef.current) return;
-      if (!item || item.deletedAt !== undefined || !hasOriginal(item)) throw new Error('unavailable');
+      if (!item || item.deletedAt !== undefined || !accepts(item)) throw new Error('unavailable');
       const bytes = new TextEncoder().encode(JSON.stringify(item.data));
       if (alive.current) onSource({ name: `${item.title}.json`, size: bytes.length, arrayBuffer: async () => bytes.buffer });
     } catch { if (alive.current && selection.isCurrent(token)) setError('该本地原件已不可用，请刷新列表。'); }
     finally { lock.current = false; if (alive.current) setBusy(false); }
   }
   return <div className="mt-4 rounded-xl border border-pink-200 bg-white/70 p-4">
-    <button type="button" disabled={disabled || busy} className="text-sm font-semibold text-pink-700 disabled:opacity-50" onClick={() => void load(false)}>{opened ? '刷新本地酒馆原件' : '从本地卡库读取酒馆原件'}</button>
+    <button type="button" disabled={disabled || busy} className="text-sm font-semibold text-pink-700 disabled:opacity-50" onClick={() => void load(false)}>{mode === 'character' ? (opened ? '刷新本地角色卡' : '从本地卡库读取角色卡') : (opened ? '刷新本地酒馆原件' : '从本地卡库读取酒馆原件')}</button>
     {opened ? <div className="mt-2 grid gap-2">
       {items.map((item) => <button key={item.id} type="button" disabled={disabled || busy} className="rounded-lg border border-pink-100 p-2 text-left text-sm disabled:opacity-50" onClick={() => void select(item.id)}>{item.title}</button>)}
-      {items.length === 0 ? <p className="text-xs text-gray-600">本页暂无保留 _tavern.raw 的角色卡。</p> : null}
+      {items.length === 0 ? <p className="text-xs text-gray-600">{mode === 'character' ? '本页暂无角色卡。' : '本页暂无保留 _tavern.raw 的角色卡。'}</p> : null}
       {cursor ? <button type="button" disabled={disabled || busy} className="text-sm text-pink-700" onClick={() => void load(true)}>继续查找下一页</button> : null}
     </div> : null}
     {unreadableCount > 0 ? <p role="status" className="mt-2 text-xs text-amber-800">{unreadableCount} 条本地记录暂不可读，已显示可读子集；原始数据未修改。</p> : null}

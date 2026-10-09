@@ -1,3 +1,4 @@
+import { renderTavernDefaultBase } from '@mahoshojo/ui-web/tavern';
 import { saveImportedUnsignedCharacter } from '@mahoshojo/local-library/imported-unsigned-card';
 import type { CardRepository } from '@mahoshojo/local-library/repository';
 import type { TavernExportFile, TavernGeneralProjection } from '@mahoshojo/ui-web/tavern';
@@ -13,4 +14,14 @@ export function exportTavernFile({ name, bytes, mimeType }: TavernExportFile): v
 
 export function saveDesktopTavernCard(repository: CardRepository, data: TavernGeneralProjection) {
   return saveImportedUnsignedCharacter(repository, data, data.name);
+}
+
+let defaultBase: Promise<Uint8Array> | undefined;
+/** Fixed packaged asset only; never a user-selected remote URL. */
+export function getDesktopTavernBase(): Promise<Uint8Array> {
+  return defaultBase ??= renderTavernDefaultBase(async () => {
+    const response = await fetch('/logo.svg');
+    if (!response.ok) throw new Error('默认 Logo 获取失败');
+    return response.text();
+  });
 }
