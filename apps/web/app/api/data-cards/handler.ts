@@ -1,3 +1,4 @@
+import { replaceOwnedDataCardAtomically, type OwnedReplacementSnapshot } from '@/lib/db/repositories/data-card-owned-replacement';
 import { OnlineDataCardTypeSchema } from '@mahoshojo/contracts/data-cards';
 import { normalizeOnlineDataCardVisibilityCompat } from '@/lib/data-card-visibility';
 import { getRequestUrl } from '@/lib/request-url';
@@ -5,10 +6,10 @@ import { readDataCardListPage } from '@/lib/data-card-list-page';
 import { readDataCardSummaryQuery } from '@/lib/data-card-summary-query';
 import { listDataCardSummaries } from '@/lib/db/repositories/data-card-summaries';
 import { listUserDataCards } from '@/lib/db/repositories/data-cards-core';
-import { 
-  createDataCardWithAuthor, 
-  getUserDataCards, 
-  updateDataCard, 
+import {
+  createDataCardWithAuthor,
+  getUserDataCards,
+  updateDataCard,
   deleteDataCard,
   pruneUserRecycleBin,
   upsertDataCardUpdate,
@@ -239,79 +240,26 @@ export async function createDataCardForUser(
   }
 }
 
-async function handler(req: Request): Promise<Response> {
-  const auth = await requireAuthUser(req);
-  if ('response' in auth) return auth.response;
-  const user = auth.user;
-  const db = getDrizzleDbFromRuntime();
 
+export const targetChangedResponse = () => Response.json({ error: 'TARGET_CHANGED' }, { status: 409 });
+const ownedAcknowledgement = (ownerUserId: number, id: string, pendingReview: boolean) => ({
+  id, ownerUserId, accountFenceVersion: 1, replacementVersion: 1, pendingReview,
+});
+
+// Legacy and fenced replacement share all quota/moderation/questionnaire rules.
+export async function updateDataCardForUser(
+  req: Request, user: Readonly<AuthenticatedUser>,
+  payload: { id?: any; name?: any; description?: any; isPublic?: unknown; data?: any },
+  fence?: { snapshot: OwnedReplacementSnapshot },
+): Promise<Response> {
   const userId = user.id;
-
-  const makePayloadTooLargeResponse = (sizeBytes: number) =>
-    new Response(
-      JSON.stringify({
-        error: `数据卡内容过大，最大允许 ${MAX_DATA_CARD_BYTES / 1024}KB，当前大小 ${formatKilobytes(sizeBytes)}KB`
-      }),
-      {
-        status: 413, // Payload Too Large
-        headers: { 'Content-Type': 'application/json' }
-      }
-    );
-
-  switch (req.method) {
-    case 'GET':
-      // 有界分页，避免一次读取所有正文耗尽 Worker 内存。
+  const db = getDrizzleDbFromRuntime();
+  if (fence && !db) return Response.json({ error: '数据卡存储不可用' }, { status: 503 });
+  const makePayloadTooLargeResponse = (sizeBytes: number) => Response.json({
+    error: `数据卡内容过大，最大允许 ${MAX_DATA_CARD_BYTES / 1024}KB，当前大小 ${formatKilobytes(sizeBytes)}KB`,
+  }, { status: 413 });
       try {
-        const url = getRequestUrl(req);
-        if (url.searchParams.has('id')) {
-          const id = url.searchParams.get('id')?.trim();
-          if (!id || id.length > 200) return Response.json({ error: '无效的数据卡 ID' }, { status: 400 });
-          if (!db) throw new Error('数据卡存储不可用');
-          const [card] = await listUserDataCards(db, { userId, id, limit: 1, offset: 0 });
-          return Response.json(card ? { success: true, card } : { error: '数据卡不存在或无权访问' }, {
-            status: card ? 200 : 404, headers: { 'Cache-Control': 'private, no-store' },
-          });
-        }
-        if (url.searchParams.get('view') === 'summary') {
-          const query = readDataCardSummaryQuery(url.searchParams);
-          if (!query) return Response.json({ error: '无效的列表查询参数' }, { status: 400 });
-          if (!db) throw new Error('数据卡存储不可用');
-          const started = Date.now();
-          const result = await listDataCardSummaries(db, userId, 'my', query);
-          console.info('data-card-list', { source: 'my', summary: true, limit: query.limit, offset: query.offset, count: result.cards.length, durationMs: Date.now() - started, status: 200 });
-          return Response.json(result, { headers: { 'Cache-Control': 'private, no-store' } });
-        }
-        const page = readDataCardListPage(url.searchParams);
-        if (!page) return Response.json({ error: '无效的分页参数' }, { status: 400 });
-        const search = url.searchParams.get('search'); // 搜索关键词
-        const sortBy = url.searchParams.get('sortBy') as 'likes' | 'usage' | 'favorites' | 'created_at' | null; // 排序方式
-        
-        const rows = await getUserDataCards(userId, search || undefined, sortBy || undefined, { ...page, limit: page.limit + 1 });
-        const cards = rows.slice(0, page.limit);
-        const nextOffset = rows.length > page.limit ? page.offset + page.limit : null;
-        return new Response(JSON.stringify({ success: true, cards, nextOffset }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'private, no-store' }
-        });
-      } catch (error) {
-        console.error('data-card-list-failed', { source: 'my', status: 500, category: error instanceof Error ? error.name : 'unknown' });
-        return new Response(JSON.stringify({ error: '获取数据卡失败' }), {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' }
-        });
-      }
-
-    case 'POST':
-      // legacy：不提供账号围栏，但仍只鉴权一次并共用业务检查。
-      try {
-        return await createDataCardForUser(req, Object.freeze({ ...user }), await req.json());
-      } catch {
-        return Response.json({ error: '创建数据卡失败' }, { status: 500 });
-      }
-
-    case 'PUT': {
-      try {
-        const { id, name, description, isPublic, data } = await req.json();
+        const { id, name, description, isPublic, data } = payload;
 
         if (!id) {
           return new Response(JSON.stringify({ error: '缺少数据卡ID' }), {
@@ -333,7 +281,7 @@ async function handler(req: Request): Promise<Response> {
         }
 
         // 读取当前卡片
-        const currentCard = await getDataCardById(id, false);
+        const currentCard = fence?.snapshot ?? await getDataCardById(id, false);
         if (!currentCard || currentCard.user_id !== userId) {
           return new Response(JSON.stringify({ error: '数据卡不存在或无权访问' }), {
             status: 404,
@@ -404,7 +352,7 @@ async function handler(req: Request): Promise<Response> {
         const textToCheck = `${name || ''} ${description || ''} ${dataString ?? ''}`;
         const sensitiveWordResult = await quickCheck(textToCheck);
         if (sensitiveWordResult.hasSensitiveWords) {
-          return new Response(JSON.stringify({ 
+          return new Response(JSON.stringify({
             error: 'SENSITIVE_WORD_DETECTED',
             redirect: '/arrested'
           }), {
@@ -428,14 +376,11 @@ async function handler(req: Request): Promise<Response> {
 
         // 如果不需要审核（pending/rejected 或 豁免 / 管理员），直接更新主表
         if (isPendingOrRejected || isExempt || isAdmin) {
-          const success = await updateDataCard(
-            id,
-            userId,
-            name ?? currentCard.name,
-            description ?? currentCard.description,
-            normalizedPublicInput,
-            currentCard.review_status
-          );
+          const success = fence
+            ? await replaceOwnedDataCardAtomically(db!, fence.snapshot, dataString!, false)
+            : await updateDataCard(id, userId, name ?? currentCard.name,
+                description ?? currentCard.description, normalizedPublicInput, currentCard.review_status);
+          if (fence && !success) return targetChangedResponse();
 
           if (!success) {
             return new Response(JSON.stringify({ error: '数据卡不存在或无权访问' }), {
@@ -446,7 +391,9 @@ async function handler(req: Request): Promise<Response> {
 
           // 如果带 data，一并更新
           if (dataChanged) {
-            if (db) {
+            if (fence) {
+              // Metadata and content were written together by the CAS above.
+            } else if (db) {
               await updateDataCardContentByIdAndUserOrm(db, id, userId, dataString!);
             } else {
               const updatedByLegacy = await updateDataCardContentByIdAndUserLegacy(id, userId, dataString!);
@@ -486,7 +433,7 @@ async function handler(req: Request): Promise<Response> {
             }
           }
 
-          return new Response(JSON.stringify({ success: true, message: '数据卡更新成功' }), {
+          return new Response(JSON.stringify({ success: true, message: '数据卡更新成功', ...(fence ? ownedAcknowledgement(userId, id, false) : {}) }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' }
           });
@@ -499,7 +446,10 @@ async function handler(req: Request): Promise<Response> {
             description: description ?? currentCard.description,
             data: dataString!
           };
-          const ok = await upsertDataCardUpdate(id, userId, payload);
+          const ok = fence
+            ? await replaceOwnedDataCardAtomically(db!, fence.snapshot, dataString!, true)
+            : await upsertDataCardUpdate(id, userId, payload);
+          if (fence && !ok) return targetChangedResponse();
           if (!ok) {
             return new Response(JSON.stringify({ error: '提交更新失败' }), {
               status: 500,
@@ -519,7 +469,7 @@ async function handler(req: Request): Promise<Response> {
             }
           }
 
-          return new Response(JSON.stringify({ success: true, pendingReview: true, message: '更新已提交，待审核' }), {
+          return new Response(JSON.stringify({ success: true, pendingReview: true, message: '更新已提交，待审核', ...(fence ? ownedAcknowledgement(userId, id, true) : {}) }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' }
           });
@@ -539,7 +489,7 @@ async function handler(req: Request): Promise<Response> {
             headers: { 'Content-Type': 'application/json' }
           });
         }
-        return new Response(JSON.stringify({ success: true, message: '数据卡更新成功' }), {
+        return new Response(JSON.stringify({ success: true, message: '数据卡更新成功', ...(fence ? ownedAcknowledgement(userId, id, false) : {}) }), {
           status: 200,
           headers: { 'Content-Type': 'application/json' }
         });
@@ -550,7 +500,70 @@ async function handler(req: Request): Promise<Response> {
           headers: { 'Content-Type': 'application/json' }
         });
       }
-    }
+}
+
+async function handler(req: Request): Promise<Response> {
+  const auth = await requireAuthUser(req);
+  if ('response' in auth) return auth.response;
+  const user = auth.user;
+  const db = getDrizzleDbFromRuntime();
+
+  const userId = user.id;
+
+  switch (req.method) {
+    case 'GET':
+      // 有界分页，避免一次读取所有正文耗尽 Worker 内存。
+      try {
+        const url = getRequestUrl(req);
+        if (url.searchParams.has('id')) {
+          const id = url.searchParams.get('id')?.trim();
+          if (!id || id.length > 200) return Response.json({ error: '无效的数据卡 ID' }, { status: 400 });
+          if (!db) throw new Error('数据卡存储不可用');
+          const [card] = await listUserDataCards(db, { userId, id, limit: 1, offset: 0 });
+          return Response.json(card ? { success: true, card } : { error: '数据卡不存在或无权访问' }, {
+            status: card ? 200 : 404, headers: { 'Cache-Control': 'private, no-store' },
+          });
+        }
+        if (url.searchParams.get('view') === 'summary') {
+          const query = readDataCardSummaryQuery(url.searchParams);
+          if (!query) return Response.json({ error: '无效的列表查询参数' }, { status: 400 });
+          if (!db) throw new Error('数据卡存储不可用');
+          const started = Date.now();
+          const result = await listDataCardSummaries(db, userId, 'my', query);
+          console.info('data-card-list', { source: 'my', summary: true, limit: query.limit, offset: query.offset, count: result.cards.length, durationMs: Date.now() - started, status: 200 });
+          return Response.json(result, { headers: { 'Cache-Control': 'private, no-store' } });
+        }
+        const page = readDataCardListPage(url.searchParams);
+        if (!page) return Response.json({ error: '无效的分页参数' }, { status: 400 });
+        const search = url.searchParams.get('search'); // 搜索关键词
+        const sortBy = url.searchParams.get('sortBy') as 'likes' | 'usage' | 'favorites' | 'created_at' | null; // 排序方式
+
+        const rows = await getUserDataCards(userId, search || undefined, sortBy || undefined, { ...page, limit: page.limit + 1 });
+        const cards = rows.slice(0, page.limit);
+        const nextOffset = rows.length > page.limit ? page.offset + page.limit : null;
+        return new Response(JSON.stringify({ success: true, cards, nextOffset }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', 'Cache-Control': 'private, no-store' }
+        });
+      } catch (error) {
+        console.error('data-card-list-failed', { source: 'my', status: 500, category: error instanceof Error ? error.name : 'unknown' });
+        return new Response(JSON.stringify({ error: '获取数据卡失败' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+    case 'POST':
+      // legacy：不提供账号围栏，但仍只鉴权一次并共用业务检查。
+      try {
+        return await createDataCardForUser(req, Object.freeze({ ...user }), await req.json());
+      } catch {
+        return Response.json({ error: '创建数据卡失败' }, { status: 500 });
+      }
+
+    case 'PUT':
+      try { return await updateDataCardForUser(req, Object.freeze({ ...user }), await req.json()); }
+      catch { return Response.json({ error: '更新数据卡失败' }, { status: 500 }); }
 
     case 'DELETE':
       // 删除数据卡

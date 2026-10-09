@@ -1,4 +1,5 @@
 import { z } from './zod';
+import { SafeJsonValueSchema } from './json-value';
 
 export const ONLINE_DATA_CARD_TYPES = [
   'character',
@@ -82,4 +83,35 @@ export const OwnedDataCardCreateAcknowledgementSchema = z.object({
   id: z.string().trim().min(1).max(200),
   accountFenceVersion: z.literal(1),
   ownerUserId: DataCardExpectedOwnerSchema,
+});
+
+// 内容替换始终保留已选目标的名称、描述和可见性；元信息编辑是独立操作。
+export const OwnedDataCardReplacementVersionSchema = z.string().regex(/^[a-f0-9]{64}$/);
+export const OwnedDataCardReplacementTargetSchema = z.object({
+  id: z.string().trim().min(1).max(200),
+  type: OnlineDataCardTypeSchema,
+  name: z.string(),
+  description: z.string().nullable(),
+  isPublic: OnlineDataCardVisibilitySchema,
+  reviewStatus: DataCardReviewStatusSchema.nullable(),
+  hasPendingUpdate: z.boolean(),
+  version: OwnedDataCardReplacementVersionSchema,
+});
+export type OwnedDataCardReplacementTarget = z.infer<typeof OwnedDataCardReplacementTargetSchema>;
+export const OwnedDataCardReplaceRequestSchema = z.object({
+  expectedUserId: DataCardExpectedOwnerSchema,
+  id: z.string().trim().min(1).max(200),
+  type: OnlineDataCardTypeSchema,
+  expectedVersion: OwnedDataCardReplacementVersionSchema,
+  data: SafeJsonValueSchema,
+}).strict();
+export const OwnedDataCardReplaceAcknowledgementSchema = OwnedDataCardCreateAcknowledgementSchema.extend({
+  replacementVersion: z.literal(1),
+  pendingReview: z.boolean(),
+});
+export const OwnedDataCardReplacementTargetResponseSchema = z.object({
+  success: z.literal(true),
+  accountFenceVersion: z.literal(1),
+  ownerUserId: DataCardExpectedOwnerSchema,
+  target: OwnedDataCardReplacementTargetSchema,
 });

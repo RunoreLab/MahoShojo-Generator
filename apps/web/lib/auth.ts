@@ -1,4 +1,4 @@
-import { OwnedDataCardCreateAcknowledgementSchema, type OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
+import { OwnedDataCardCreateAcknowledgementSchema, OwnedDataCardReplaceAcknowledgementSchema, OwnedDataCardReplacementTargetResponseSchema, type OwnedDataCardReplacementTarget, type OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
 import type { UserBadge } from '@/types/badge';
 import { signOutBetterAuthSession } from '@/lib/auth/logout';
 import { fetchJsonWithBoundedRetry, throwIfAborted, type BoundedJsonFailure } from '@/lib/bounded-fetch';
@@ -492,6 +492,20 @@ export const authApi = {
   }
 };
 
+export interface OwnedDataCardWriteGuard {
+  expectedUserId: number;
+  expectedAuth: AuthData | null;
+  isCurrent: () => boolean;
+}
+const matchesOwnedWriteGuard = async (guard: OwnedDataCardWriteGuard) => {
+  const current = await authStorage.getAuth();
+  return guard.isCurrent() && current?.userId === guard.expectedUserId && JSON.stringify(current) === JSON.stringify(guard.expectedAuth);
+};
+const ownedWriteHeaders = (guard: OwnedDataCardWriteGuard) => {
+  const authorization = readStoredAuthHeader(guard.expectedAuth);
+  return { 'Content-Type': 'application/json', ...(authorization ? { Authorization: authorization } : {}) };
+};
+
 // 数据卡 API
 export const dataCardApi = {
   async getCardsDetailed(
@@ -591,6 +605,57 @@ export const dataCardApi = {
     } finally {
       clearTimeout(timeout);
     }
+  },
+
+  async readOwnedReplacementTarget(id: string, guard: OwnedDataCardWriteGuard): Promise<{
+    success: boolean; target?: OwnedDataCardReplacementTarget; error?: string;
+  }> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    try {
+      if (!await matchesOwnedWriteGuard(guard)) return { success: false, error: '登录状态已改变，请重新选择替换目标。' };
+      const response = await fetch(`/api/data-cards/replace-owned?${new URLSearchParams({ id, expectedUserId: String(guard.expectedUserId) })}`, {
+        headers: ownedWriteHeaders(guard), credentials: 'same-origin', redirect: 'error', signal: controller.signal,
+      });
+      const body = await response.json().catch(() => null);
+      const parsed = OwnedDataCardReplacementTargetResponseSchema.safeParse(body);
+      if (response.status === 200 && parsed.success && parsed.data.ownerUserId === guard.expectedUserId && parsed.data.target.id === id && await matchesOwnedWriteGuard(guard)) {
+        return { success: true, target: parsed.data.target };
+      }
+      return { success: false, error: [404, 405].includes(response.status)
+        ? '目标不存在或服务端暂不支持安全替换，请保留草稿。'
+        : '无法确认当前账号的替换目标，请重新选择；输入已保留。' };
+    } catch { return { success: false, error: '读取替换目标失败，请重试；输入已保留。' }; }
+    finally { clearTimeout(timeout); }
+  },
+
+  async replaceOwnedCard(target: OwnedDataCardReplacementTarget, data: unknown, guard: OwnedDataCardWriteGuard): Promise<{
+    success: boolean; pendingReview?: boolean; error?: string; uncertain?: boolean; conflict?: boolean;
+  }> {
+    const unknownResult = { success: false, uncertain: true, error: '替换结果不确定，服务器可能已更新数据卡。请检查我的云端卡及待审版本，不要直接重发。' };
+    let sent = false;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const body = JSON.stringify({ id: target.id, type: target.type, expectedVersion: target.version, data, expectedUserId: guard.expectedUserId });
+      if (!await matchesOwnedWriteGuard(guard) || controller.signal.aborted) return { success: false, error: '登录状态已改变或准备超时，请重新选择目标；输入已保留。' };
+      sent = true;
+      const response = await fetch('/api/data-cards/replace-owned', {
+        method: 'PUT', headers: ownedWriteHeaders(guard), credentials: 'same-origin', redirect: 'error', body, signal: controller.signal,
+      });
+      const result = await response.json().catch(() => null);
+      const ack = OwnedDataCardReplaceAcknowledgementSchema.safeParse(result);
+      if (response.status === 200 && ack.success && ack.data.ownerUserId === guard.expectedUserId && ack.data.id === target.id) {
+        return await matchesOwnedWriteGuard(guard) ? { success: true, pendingReview: ack.data.pendingReview } : unknownResult;
+      }
+      if (response.status === 409 && ['TARGET_CHANGED', 'ACCOUNT_MISMATCH'].includes(result?.error)) {
+        return { success: false, conflict: true, error: '账号或目标数据卡已变化，本次未替换。请重新选择并确认目标；输入已保留。' };
+      }
+      if ([404, 405].includes(response.status)) return { success: false, error: '目标不存在或服务端暂不支持安全替换，请保留草稿。' };
+      if ([400, 401, 403, 413, 429].includes(response.status)) return { success: false, error: typeof result?.error === 'string' ? result.error : '替换被拒绝，输入已保留。' };
+      return unknownResult;
+    } catch { return sent ? unknownResult : { success: false, error: '准备替换失败，尚未发送请求；输入已保留。' }; }
+    finally { clearTimeout(timeout); }
   },
 
   // 更新数据卡
