@@ -74,3 +74,42 @@ describe('create-card strict response and non-replay', () => {
     expect(clear).not.toHaveBeenCalled();
   });
 });
+
+
+describe('guarded create-owned strict acknowledgement and mixed deployment', () => {
+  const guarded = () => dataCardApi.createCard('character', 'name', '', {}, 1, { expectedUserId: 7, expectedAuth: auth, isCurrent: () => true });
+  it.each([
+    [201, { success: true, id: 'created', accountFenceVersion: 1, ownerUserId: 7 }, true, false],
+    [200, { success: true, id: 'created', accountFenceVersion: 1, ownerUserId: 7 }, false, true],
+    [201, { success: true, id: 'created' }, false, true],
+    [201, { success: true, id: 'created', accountFenceVersion: 1, ownerUserId: 8 }, false, true],
+    [201, { success: true, id: 'created', accountFenceVersion: 2, ownerUserId: 7 }, false, true],
+    [201, { success: true, id: ' ', accountFenceVersion: 1, ownerUserId: 7 }, false, true],
+    [201, { success: true, id: 'x'.repeat(201), accountFenceVersion: 1, ownerUserId: 7 }, false, true],
+    [400, {}, false, false], [401, {}, false, false], [403, {}, false, false],
+    [413, {}, false, false], [429, {}, false, false],
+    [201, { success: true, id: 'created', accountFenceVersion: 1, ownerUserId: '7' }, false, true],
+    [404, {}, false, false], [405, {}, false, false],
+    [409, { error: 'ACCOUNT_MISMATCH' }, false, false],
+    [409, { error: 'duplicate' }, false, true],
+    [503, {}, false, true],
+  ])('HTTP %s rejects old/mixed/rollback servers without legacy fallback', async (status, payload, success, uncertain) => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify(payload), { status }));
+    vi.stubGlobal('fetch', fetcher);
+    const result = await guarded();
+    expect(result.success).toBe(success);
+    expect(Boolean(result.uncertain)).toBe(uncertain);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0][0]).toBe('/api/data-cards/create-owned');
+    expect(fetcher.mock.calls[0][1].redirect).toBe('error');
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toMatchObject({ expectedUserId: 7, isPublic: 1 });
+  });
+  it('禁止307/308保留POST跳转到旧端点，并保留传输不确定结果', async () => {
+    const fetcher = vi.fn().mockRejectedValue(new TypeError('redirect prohibited'));
+    vi.stubGlobal('fetch', fetcher);
+    expect((await guarded()).uncertain).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0][1].redirect).toBe('error');
+  });
+
+});

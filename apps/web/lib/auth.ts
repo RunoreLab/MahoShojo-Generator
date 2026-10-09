@@ -1,4 +1,4 @@
-import type { OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
+import { OwnedDataCardCreateAcknowledgementSchema, type OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
 import type { UserBadge } from '@/types/badge';
 import { signOutBetterAuthSession } from '@/lib/auth/logout';
 import { fetchJsonWithBoundedRetry, throwIfAborted, type BoundedJsonFailure } from '@/lib/bounded-fetch';
@@ -545,7 +545,8 @@ export const dataCardApi = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...(frozenHeader ? { Authorization: frozenHeader } : {}) },
         credentials: 'same-origin',
-        body: JSON.stringify({ type, name, description, data, isPublic }),
+        ...(guard ? { redirect: 'error' as const } : {}),
+        body: JSON.stringify({ type, name, description, data, isPublic, ...(guard ? { expectedUserId: guard.expectedUserId } : {}) }),
         signal: controller.signal,
       };
       // Guarded callers already resolved their authenticated owner. Do not bootstrap a
@@ -561,10 +562,18 @@ export const dataCardApi = {
       if (controller.signal.aborted) return { success: false, error: '准备保存超时，请重新打开保存窗口。' };
       sent = true;
       // 故意不走带重试的 GET helper。
-      const response = await fetch('/api/data-cards', init);
+      const response = await fetch(guard ? '/api/data-cards/create-owned' : '/api/data-cards', init);
       const result = await response.json().catch(() => null);
-      if (response.ok && result?.success === true && typeof result.id === 'string' && result.id.trim()) {
-        return { success: true, id: result.id };
+      const acknowledgement = guard ? OwnedDataCardCreateAcknowledgementSchema.safeParse(result) : null;
+      const acknowledged = guard
+        ? response.status === 201 && acknowledgement?.success && acknowledgement.data.ownerUserId === guard.expectedUserId
+        : response.ok && result?.success === true && typeof result.id === 'string' && result.id.trim();
+      if (acknowledged) return { success: true, id: result.id };
+      if (guard && [404, 405].includes(response.status)) {
+        return { success: false, error: '服务端暂不支持安全账号保存，请保留草稿并等待服务更新。' };
+      }
+      if (guard && response.status === 409 && result?.error === 'ACCOUNT_MISMATCH') {
+        return { success: false, error: '登录账号已改变，尚未创建数据卡。请重新打开保存窗口。' };
       }
       if ([400, 401, 403, 413, 429].includes(response.status)) {
         return {
