@@ -10,7 +10,7 @@
  * ## 抽的是哪个消费闭包
  *
  * `.container`/`.card`/`.title`/`.subtitle`、`.magic-background*`、`.footer`、`.error-message`、
- * `.theme-image-*`、`.feature-*`、渐变按钮、`body.announcement-visible` 与公告滚动动画、
+ * `.theme-image-*`、`.feature-*`、渐变按钮、公告栏占位与公告滚动动画、
  * `@layer utilities` 暗色 remap——共享组件（AppShell/HomeView/ProductFooter/公告中心/
  * ErrorMessageBox/CardLibraryModal）渲染出的 class 在这里有且只有一处权威定义。
  * `.generate-button`/`.result-card`/`.save-button` 同样在本闭包：共享的 character-card、
@@ -118,12 +118,6 @@
   -webkit-text-fill-color: transparent;
   background-clip: text;
   margin-bottom: 30px;
-}
-
-/* 当公告栏显示时，为页面主体增加底部内边距，防止遮挡 */
-body.announcement-visible {
-  padding-bottom: 50px;
-  /* 这个值约等于公告栏的高度 */
 }
 
 /* 原生表单控件跟随产品主题（暗色）：共享 ai-provider/设置页直接渲染原生
@@ -876,6 +870,34 @@ body.announcement-visible {
 
 /* ==================== 公告栏 ==================== */
 
+.announcement-spacer {
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.announcement-ticker {
+  padding-top: 0.25rem;
+  padding-right: max(1rem, env(safe-area-inset-right, 0px));
+  padding-bottom: calc(0.25rem + env(safe-area-inset-bottom, 0px));
+  padding-left: max(1rem, env(safe-area-inset-left, 0px));
+}
+
+.announcement-trigger,
+.announcement-dismiss {
+  min-height: 2.75rem;
+  cursor: pointer;
+}
+
+.announcement-dismiss {
+  min-width: 2.75rem;
+}
+
+.announcement-trigger:focus-visible,
+.announcement-dismiss:focus-visible {
+  outline: 2px solid #f9a8d4;
+  outline-offset: -2px;
+}
+
 @keyframes announcement-scroll-left {
   0% {
     transform: translateX(100vw);
@@ -922,6 +944,7 @@ body.announcement-visible {
 }
 
 .announcement-pause-on-hover:hover .announcement-scroll,
+.announcement-pause-on-hover:focus-within .announcement-scroll,
 .announcement-pause-on-hover .announcement-scroll:hover {
   animation-play-state: paused;
 }
@@ -931,6 +954,11 @@ body.announcement-visible {
   .announcement-fade,
   .announcement-rise {
     animation: none;
+    will-change: auto;
+  }
+
+  .announcement-dismiss {
+    transition: none;
   }
 }
 
@@ -938,6 +966,11 @@ body.announcement-visible {
 :root[data-motion='reduce'] .announcement-fade,
 :root[data-motion='reduce'] .announcement-rise {
   animation: none;
+  will-change: auto;
+}
+
+:root[data-motion='reduce'] .announcement-dismiss {
+  transition: none;
 }
 
 @layer utilities {

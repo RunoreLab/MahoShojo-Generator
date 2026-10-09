@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 import type { Announcement } from '@mahoshojo/contracts/announcements';
 import { interpolateWithQQGroups } from '../community/index';
@@ -6,6 +7,9 @@ import { MarkdownBlock } from '../markdown/MarkdownBlock';
 import type { ExternalMediaPolicy } from '../markdown/text/index';
 import { DENY_EXTERNAL_MEDIA } from '../markdown/text/index';
 import type { ExternalLinkRenderProps } from '../markdown/MarkdownBlock';
+import { useBaseModalAccessibility } from '../modal/BaseModal';
+
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
 /**
  * 公告「已读」的宿主存储。
@@ -53,7 +57,8 @@ export const sortAnnouncements = (list: readonly Announcement[]): Announcement[]
 /**
  * 共源公告栏（D5.1-P1 自 `apps/web/components/Announcement/AnnouncementTicker.tsx` 上移）。
  *
- * 结构、滚动条与详情弹窗逐字复刻 Web 形态；变化只有三条：
+ * 滚动条与详情弹窗沿用 Web 形态，公告固定定位与底部占位由共享层一并维护。
+ * 宿主差异通过以下边界注入：
  *
  * 1. 数据注入——Web 自己在 effect 里 `fetch('/announcements.json')`，那是宿主决定，
  *    共享层不内置任何请求；宿主的获取节奏按 `DESK-PARITY-003` 策略注入
@@ -77,7 +82,10 @@ export function AnnouncementCenter({
   const [isVisible, setIsVisible] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null);
-  const tickerContentRef = useRef<HTMLParagraphElement | null>(null);
+  const tickerRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const tickerContentRef = useRef<HTMLSpanElement | null>(null);
+  const [tickerHeight, setTickerHeight] = useState(0);
   const [scrollDurationSeconds, setScrollDurationSeconds] = useState(15);
 
   const sortedAnnouncements = useMemo(() => sortAnnouncements(announcements), [announcements]);
@@ -93,30 +101,31 @@ export function AnnouncementCenter({
   useEffect(() => {
     if (sortedAnnouncements.length === 0) {
       setIsVisible(false);
-      document.body.classList.remove('announcement-visible');
       return;
     }
 
     const latestId = sortedAnnouncements[0].id;
     if (dismissal.isDismissed(latestId)) {
       setIsVisible(false);
-      document.body.classList.remove('announcement-visible');
       return;
     }
 
     setIsVisible(true);
-    document.body.classList.add('announcement-visible');
-    return () => {
-      document.body.classList.remove('announcement-visible');
-    };
   }, [sortedAnnouncements, dismissal]);
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     if (!isVisible || tickerAnnouncements.length === 0) return;
 
-    const measureAndUpdateDuration = () => {
-      const tickerContent = tickerContentRef.current;
-      if (!tickerContent) return;
+    const ticker = tickerRef.current;
+    const tickerContent = tickerContentRef.current;
+    if (!ticker || !tickerContent) return;
+
+    let active = true;
+    const measure = () => {
+      if (!active) return;
+
+      // border-box 已包含边框、缩放后的文本与移动端安全区；向上取整避免不足 1px 的遮挡。
+      setTickerHeight(Math.ceil(ticker.getBoundingClientRect().height));
 
       const contentWidth = tickerContent.scrollWidth;
       const viewportWidth = window.innerWidth;
@@ -126,14 +135,26 @@ export function AnnouncementCenter({
       setScrollDurationSeconds(duration);
     };
 
-    measureAndUpdateDuration();
-    window.addEventListener('resize', measureAndUpdateDuration);
-    return () => window.removeEventListener('resize', measureAndUpdateDuration);
+    measure();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(ticker, { box: 'border-box' });
+    observer?.observe(tickerContent);
+    window.addEventListener('resize', measure);
+
+    const fonts = document.fonts;
+    void fonts?.ready.then(measure);
+    fonts?.addEventListener('loadingdone', measure);
+
+    return () => {
+      active = false;
+      observer?.disconnect();
+      window.removeEventListener('resize', measure);
+      fonts?.removeEventListener('loadingdone', measure);
+    };
   }, [isVisible, tickerAnnouncements]);
 
   const handleDismiss = () => {
     setIsVisible(false);
-    document.body.classList.remove('announcement-visible');
     if (sortedAnnouncements.length > 0) {
       dismissal.markDismissed(sortedAnnouncements[0].id);
     }
@@ -144,26 +165,48 @@ export function AnnouncementCenter({
     setSelectedAnnouncement(null);
   };
 
+  const { dialogRef, initialFocusRef: closeButtonRef, titleId } = useBaseModalAccessibility({
+    isOpen: isVisible && isModalOpen && sortedAnnouncements.length > 0,
+    onClose: handleCloseModal,
+    fallbackFocusRef: triggerRef,
+  });
+
   if (!isVisible || sortedAnnouncements.length === 0) {
     return null;
   }
 
   return (
     <>
+      {/* Desktop 在页面内容之前挂载公告，因此占位必须位于文档末尾，不能挤到页面顶部。
+          只管理自有节点，不覆盖宿主原有 body padding，也无需全局 class 的清理/恢复。 */}
+      {createPortal(
+        <div className="announcement-spacer" aria-hidden="true" style={{ height: tickerHeight }} />,
+        document.body,
+      )}
       {/* 公告栏主体 */}
       <div
-        className="announcement-ticker announcement-pause-on-hover fixed bottom-0 left-0 right-0 w-full bg-gray-900/90 backdrop-blur-lg text-gray-200 px-4 py-2.5 flex items-center justify-between border-t border-white/10 shadow-lg z-[1000] cursor-pointer transition-all duration-300 hover:bg-gray-900/95"
-        onClick={() => {
-          setIsModalOpen(true);
-          setSelectedAnnouncement(null);
-        }}
+        ref={tickerRef}
+        className="announcement-ticker announcement-pause-on-hover fixed bottom-0 left-0 right-0 w-full bg-gray-900/90 backdrop-blur-lg text-gray-200 flex items-center justify-between border-t border-white/10 shadow-lg z-[1000]"
       >
-        <div className="flex items-center flex-grow overflow-hidden">
+        <button
+          ref={triggerRef}
+          type="button"
+          className="announcement-trigger flex min-w-0 flex-1 items-center overflow-hidden rounded-md text-left"
+          aria-label={`查看公告：${tickerAnnouncements.map((announcement) => announcement.title).join('；')}`}
+          aria-haspopup="dialog"
+          aria-expanded={isModalOpen}
+          onClick={() => {
+            // 点击按钮不一定在所有 WebView 中移焦点，显式记住可返回的公告入口。
+            triggerRef.current?.focus();
+            setIsModalOpen(true);
+            setSelectedAnnouncement(null);
+          }}
+        >
           <span className="bg-pink-500 text-white px-2 py-1 rounded text-xs font-semibold tracking-wider mr-3 flex-shrink-0">
             公告
           </span>
-          <div className="flex-grow whitespace-nowrap overflow-hidden">
-            <p
+          <span className="min-w-0 flex-grow whitespace-nowrap overflow-hidden">
+            <span
               ref={tickerContentRef}
               className="inline-block announcement-scroll"
               style={{ animationDuration: `${scrollDurationSeconds}s` }}
@@ -177,15 +220,13 @@ export function AnnouncementCenter({
                   )}
                 </span>
               ))}
-            </p>
-          </div>
-        </div>
+            </span>
+          </span>
+        </button>
         <button
-          onClick={(event) => {
-            event.stopPropagation();
-            handleDismiss();
-          }}
-          className="text-gray-500 hover:text-white text-2xl leading-none px-1 transition-colors duration-200"
+          type="button"
+          onClick={handleDismiss}
+          className="announcement-dismiss ml-2 shrink-0 rounded-md text-gray-400 hover:text-white text-2xl leading-none transition-colors duration-200"
           aria-label="关闭公告"
         >
           ×
@@ -199,17 +240,24 @@ export function AnnouncementCenter({
           onClick={handleCloseModal}
         >
           <div
+            ref={dialogRef}
             className="bg-white rounded-xl max-w-2xl w-[90%] max-h-[80vh] flex flex-col shadow-2xl announcement-rise"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
+            tabIndex={-1}
             onClick={(event) => event.stopPropagation()}
           >
             {selectedAnnouncement ? (
               <>
                 <div className="flex justify-between items-center p-6 border-b border-gray-200">
-                  <h2 className="text-xl font-semibold text-gray-900">
+                  <h2 id={titleId} className="text-xl font-semibold text-gray-900">
                     {selectedAnnouncement.pinned && '📌 '}
                     {selectedAnnouncement.title}
                   </h2>
                   <button
+                    ref={closeButtonRef}
+                    type="button"
                     onClick={handleCloseModal}
                     className="text-gray-400 hover:text-gray-900 text-3xl leading-none transition-colors"
                     aria-label="关闭详情"
@@ -235,7 +283,11 @@ export function AnnouncementCenter({
                 </div>
                 <div className="px-6 py-4 border-t border-gray-200 flex justify-start">
                   <button
-                    onClick={() => setSelectedAnnouncement(null)}
+                    type="button"
+                    onClick={() => {
+                      setSelectedAnnouncement(null);
+                      closeButtonRef.current?.focus();
+                    }}
                     className="bg-pink-500 hover:bg-pink-600 cursor-pointer text-white px-5 py-2 rounded-md text-sm font-medium transition-all duration-200 hover:-translate-x-0.5"
                   >
                     ← 返回列表
@@ -245,8 +297,10 @@ export function AnnouncementCenter({
             ) : (
               <>
                 <div className="flex justify-between items-center p-6 border-b border-gray-200">
-                  <h2 className="text-xl font-semibold text-gray-900">公告</h2>
+                  <h2 id={titleId} className="text-xl font-semibold text-gray-900">公告</h2>
                   <button
+                    ref={closeButtonRef}
+                    type="button"
                     onClick={handleCloseModal}
                     className="text-gray-400 hover:text-gray-900 text-3xl leading-none transition-colors"
                     aria-label="关闭详情"
@@ -277,8 +331,12 @@ export function AnnouncementCenter({
                       </p>
                       <div className="flex justify-end">
                         <button
+                          type="button"
                           className="bg-pink-500 hover:bg-pink-600 cursor-pointer text-white px-4 py-2 rounded-md text-sm font-medium transition-all duration-200 hover:translate-x-0.5 hover:shadow-md"
-                          onClick={() => setSelectedAnnouncement(announcement)}
+                          onClick={() => {
+                            setSelectedAnnouncement(announcement);
+                            closeButtonRef.current?.focus();
+                          }}
                         >
                           查看详情 →
                         </button>
