@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { zlibSync } from 'fflate';
-import { convertTavernToGeneralCard, decodeBase64ToBytes, getPlaceholderPngBytes, MAX_TAVERN_FILE_BYTES, MAX_TAVERN_TEXT_BYTES, MAX_TAVERN_PNG_TEXT_BYTES, encodeBytesToBase64, replacePngTextChunks, parsePngChunkRanges, readTavernLocalDocument, writeTavernCardToPngBytes, crc32Concat } from '../src/tavern-card';
+import { convertTavernToGeneralCard, decodeBase64ToBytes, getPlaceholderPngBytes, MAX_TAVERN_FILE_BYTES, MAX_TAVERN_TEXT_BYTES, MAX_TAVERN_PNG_TEXT_BYTES, encodeBytesToBase64, replacePngTextChunks, parsePngChunkRanges, readTavernLocalDocument, writeTavernCardToPngBytes, crc32Concat, extractPngTextChunks } from '../src/tavern-card';
 const encoder = new TextEncoder();
 const card = { spec: 'chara_card_v3', spec_version: '3.0', data: { name: '测试', description: '角色', extensions: { custom: { deep: [1, '未知'] } }, character_book: { entries: [{ content: '设定' }] } }, signature: 'not-verified' };
-function withCompressedChunk(text: string, kind: 'zTXt' | 'iTXt') {
+function withCompressedChunk(text: string, kind: 'zTXt' | 'iTXt', keyword = 'ccv3') {
   const base = getPlaceholderPngBytes();
-  const prefix = kind === 'zTXt' ? [99, 99, 118, 51, 0, 0] : [99, 99, 118, 51, 0, 1, 0, 0, 0];
+  const prefix = [...encoder.encode(keyword), ...(kind === 'zTXt' ? [0, 0] : [0, 1, 0, 0, 0])];
   const compressed = zlibSync(encoder.encode(text));
   const data = new Uint8Array(prefix.length + compressed.length); data.set(prefix); data.set(compressed, prefix.length);
   const type = encoder.encode(kind); const chunk = new Uint8Array(12 + data.length); const view = new DataView(chunk.buffer);
@@ -14,6 +14,18 @@ function withCompressedChunk(text: string, kind: 'zTXt' | 'iTXt') {
   const out = new Uint8Array(base.length + chunk.length); out.set(base.subarray(0, iend.start)); out.set(chunk, iend.start); out.set(base.subarray(iend.start), iend.start + chunk.length); return out;
 }
 describe('Tavern local journey', () => {
+  it('checks final retained compressed text plus new chunks, without silently deleting ancillary data', () => {
+    const base = withCompressedChunk('a'.repeat(MAX_TAVERN_PNG_TEXT_BYTES - 100), 'zTXt', 'Comment');
+    const original = base.slice();
+    expect(extractPngTextChunks(base)).toHaveLength(1);
+    expect(() => writeTavernCardToPngBytes(base, card)).toThrow('TAVERN_LIMIT_EXCEEDED');
+    expect(() => writeTavernCardToPngBytes(base, card, { overwriteExisting: false })).toThrow('TAVERN_LIMIT_EXCEEDED');
+    expect(base).toEqual(original);
+    const small = { name: 'x', description: 'y' };
+    const single = writeTavernCardToPngBytes(base, small, { includeCharaChunk: false });
+    expect(readTavernLocalDocument(single, 'png').candidates[0].parsed).toEqual(small);
+    expect(extractPngTextChunks(single).some((chunk) => chunk.keyword === 'Comment')).toBe(true);
+  });
   it('PNG → unsigned projection → JSON reopen → PNG preserves the complete inert original', () => {
     const original = writeTavernCardToPngBytes(getPlaceholderPngBytes(), card);
     const parsed = readTavernLocalDocument(original, 'png');

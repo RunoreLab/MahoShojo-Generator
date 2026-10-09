@@ -1,5 +1,5 @@
 import { encodeBytesToBase64, decodeBase64ToBytes } from './base64';
-import { replacePngTextChunks } from './png';
+import { extractPngTextChunks, replacePngTextChunks } from './png';
 import type { TavernCardV3, TavernCardV3Data, TavernWriteOptions } from './types';
 
 const DEFAULT_CREATOR = 'github.com/RunoreLab/MahoShojo-Generator';
@@ -77,7 +77,11 @@ export function writeTavernCardToPngBytes(
   const replacements: Array<{ keyword: string; text: string }> = [];
   if (includeCcv3Chunk) replacements.push({ keyword: 'ccv3', text: base64 });
   if (includeCharaChunk) replacements.push({ keyword: 'chara', text: base64 });
-  return replacePngTextChunks(basePngBytes, replacements, { overwriteExisting });
+  const output = replacePngTextChunks(basePngBytes, replacements, { overwriteExisting });
+  // Retained ancillary text also consumes the reader budget, including compressed chunks.
+  // Validate the final aggregate rather than emitting a PNG our own importer must reject.
+  extractPngTextChunks(output);
+  return output;
 }
 
 const PLACEHOLDER_PNG_BASE64 =
