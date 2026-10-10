@@ -122,43 +122,7 @@ const PATH_SEGMENT_ENCODE_SET: &AsciiSet = &NON_ALPHANUMERIC
 /// 对同一条路径给出同一结论。JS 的 `.length` 数 UTF-16 code unit，BMP 外字符（emoji
 /// 等）占 2；Rust 的 `chars().count()` 数 scalar 只占 1——用 `encode_utf16().count()`
 /// 对齐，否则一条 513-code-unit 的路径会被 TS 拒、被 Rust 收，边界不一致本身就是缺陷。
-pub fn is_valid_package_path(path: &str) -> bool {
-    let length = path.encode_utf16().count();
-    if length == 0 || length > 512 || path.starts_with('/') {
-        return false;
-    }
-    if path.chars().any(|c| {
-        matches!(
-            c,
-            '\u{0}'..='\u{1f}' | '\u{7f}' | '<' | '>' | ':' | '"' | '|' | '?' | '*' | '%' | '\\'
-        )
-    }) {
-        return false;
-    }
-    for segment in path.split('/') {
-        if segment.is_empty()
-            || segment == "."
-            || segment == ".."
-            || segment.ends_with('.')
-            || segment.ends_with(' ')
-            || is_reserved_file_stem(segment)
-        {
-            return false;
-        }
-    }
-    true
-}
-
-/// `con|prn|aux|nul|com[1-9]|lpt[1-9]`（可带扩展名），大小写不敏感。
-fn is_reserved_file_stem(segment: &str) -> bool {
-    let stem = segment.split('.').next().unwrap_or_default();
-    let lower = stem.to_ascii_lowercase();
-    matches!(lower.as_str(), "con" | "prn" | "aux" | "nul")
-        || (lower.len() == 4
-            && (lower.starts_with("com") || lower.starts_with("lpt"))
-            && lower.as_bytes()[3].is_ascii_digit()
-            && lower.as_bytes()[3] != b'0')
-}
+pub use crate::package_path::is_valid_package_path;
 
 /// media type 形状（`MediaTypeSchema` 的 Rust 镜像）：`token/token`，小写字符集。
 ///

@@ -16,6 +16,7 @@
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -353,6 +354,40 @@ fn clear_session(secrets: &dyn SecretStore) -> Result<(), CloudError> {
         .map_err(|error| CloudError::from_secret_store(&error))
 }
 
+/// Arena freezes the actual protected account and detects logout/login generations.
+/// This internal type and accessor are never exposed through IPC.
+pub(crate) struct ArenaAccountSnapshot {
+    pub user_id: Option<u64>,
+    pub cookie: Option<String>,
+    pub fingerprint: String,
+}
+
+pub(crate) fn arena_account_snapshot(
+    state: &CloudState,
+    secrets: &dyn SecretStore,
+) -> Result<ArenaAccountSnapshot, CloudError> {
+    let raw = secrets
+        .resolve(ACCOUNT_SESSION_REF)
+        .map_err(|_| CloudError::new(CloudErrorCode::StorageUnavailable, "账号凭据存储不可用"))?;
+    let epoch = state.account_epoch.load(Ordering::SeqCst);
+    let fingerprint = format!(
+        "{epoch}:{:x}",
+        Sha256::digest(raw.as_deref().unwrap_or_default().as_bytes())
+    );
+    let session = raw
+        .as_deref()
+        .map(serde_json::from_str::<StoredSession>)
+        .transpose()
+        .map_err(|_| {
+            CloudError::new(CloudErrorCode::NotAuthenticated, "账号凭据损坏，请重新登录")
+        })?;
+    Ok(ArenaAccountSnapshot {
+        user_id: session.as_ref().map(|s| s.account.user_id),
+        cookie: session.map(|s| s.cookie),
+        fingerprint,
+    })
+}
+
 /* ── HTTP 客户端与请求构造 ─────────────────────────────────────────────── */
 
 fn cloud_client_builder() -> reqwest::ClientBuilder {
@@ -595,6 +630,7 @@ struct LoginFlow {
 
 /// 云通路的 managed state：HTTP client、origin 与进行中的登录流程表。
 pub struct CloudState {
+    account_epoch: AtomicU64,
     http: reqwest::Client,
     origin: String,
     flows: Mutex<HashMap<String, Arc<LoginFlow>>>,
@@ -606,6 +642,7 @@ impl CloudState {
             http: build_cloud_client()?,
             origin: cloud_origin(),
             flows: Mutex::new(HashMap::new()),
+            account_epoch: AtomicU64::new(0),
         })
     }
 
@@ -616,6 +653,7 @@ impl CloudState {
             http: build_cloud_client().expect("test cloud client"),
             origin: origin.to_string(),
             flows: Mutex::new(HashMap::new()),
+            account_epoch: AtomicU64::new(0),
         }
     }
 
@@ -861,6 +899,7 @@ pub async fn cloud_login_await(
         }?;
 
         store_session(secrets, &session)?;
+        state.account_epoch.fetch_add(1, Ordering::SeqCst);
         Ok(session)
     }
     .await;
@@ -1202,6 +1241,7 @@ pub async fn cloud_sign_out(
     state: &CloudState,
     secrets: &dyn SecretStore,
 ) -> Result<CloudSignOutResult, CloudError> {
+    state.account_epoch.fetch_add(1, Ordering::SeqCst);
     let session = load_session(secrets)?;
     let mut revoked = false;
     if let Some(session) = session {
@@ -1431,7 +1471,7 @@ where
 /// hosted「使用系统默认配置」通道的非秘密偏好（D5.1-AIP-r1）。
 /// 不含任何凭据字段：`providerId`/`apiKey`/`secretRef` 之类由
 /// `deny_unknown_fields` 直接拒绝——它们不是可选，是不存在。
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CloudHostedSystemConfig {
     /// 系统通道模型 ID（'default' = 服务器默认顺序）。
@@ -1444,7 +1484,7 @@ pub struct CloudHostedSystemConfig {
 }
 
 /// 服务器 BYOK 的公开选择。固定目录身份，不接受 URL 或秘密引用。
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CloudHostedPresetConfig {
     pub provider_id: String,
@@ -1720,6 +1760,27 @@ fn inject_hosted_preset(
     }
     body["customProvider"] = provider;
     Ok(())
+}
+
+/// Arena-only internal reuse of the existing AIP catalog and key injection.
+/// Business body and Arena budgets are validated by arena_hosted, not these six routes.
+pub(crate) fn arena_provider_config(
+    system_config: Option<CloudHostedSystemConfig>,
+    preset_config: Option<CloudHostedPresetConfig>,
+    secrets: &dyn SecretStore,
+) -> Result<Option<serde_json::Value>, CloudError> {
+    let request = CloudHostedGenerateRequest {
+        request_id: String::new(),
+        route_id: HOSTED_ROUTE_DETAILS_STREAM.to_string(),
+        body: serde_json::json!({}),
+        system_config,
+        preset_config,
+    };
+    let mut body = build_hosted_request_body(&request)?;
+    inject_hosted_preset(&mut body, request.preset_config.as_ref(), secrets)?;
+    Ok(body
+        .as_object_mut()
+        .and_then(|body| body.remove("customProvider")))
 }
 
 /// 增量 SSE 帧解析器：按 `\n\n` 或 `\r\n\r\n` 切帧，每帧取 `event:`/`data:` 行。

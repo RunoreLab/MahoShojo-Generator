@@ -15,6 +15,7 @@ mod ai_contract_tests;
 #[cfg(test)]
 mod ai_e2e_tests;
 mod announcements;
+mod arena_hosted;
 mod audit;
 mod backup;
 mod blob;
@@ -30,6 +31,7 @@ mod local_card_contract_tests;
 mod maintenance;
 #[cfg(test)]
 mod maintenance_contract_tests;
+mod package_path;
 mod provider_profile;
 #[cfg(test)]
 mod provider_profile_ipc_contract_tests;
@@ -1084,6 +1086,47 @@ async fn stream_hosted_ai(
     .await
 }
 
+/// Arena fixed-primary, actor-fenced streaming. Package windows have no permission.
+#[tauri::command]
+async fn arena_hosted_stream(
+    arena: State<'_, arena_hosted::ArenaState>,
+    cloud: State<'_, cloud::CloudState>,
+    secrets: State<'_, SharedSecretStore>,
+    request: arena_hosted::ArenaRequest,
+    on_event: tauri::ipc::Channel<arena_hosted::ChannelEvent>,
+) -> Result<(), arena_hosted::ArenaError> {
+    arena_hosted::stream(&arena, &cloud, secrets.inner().as_ref(), request, &on_event).await
+}
+
+#[tauri::command]
+async fn arena_hosted_control(
+    arena: State<'_, arena_hosted::ArenaState>,
+    cloud: State<'_, cloud::CloudState>,
+    secrets: State<'_, SharedSecretStore>,
+    request: arena_hosted::ArenaRequest,
+) -> Result<arena_hosted::ControlResponse, arena_hosted::ArenaError> {
+    arena_hosted::control(&arena, &cloud, secrets.inner().as_ref(), request).await
+}
+
+#[tauri::command]
+fn arena_hosted_detach(
+    arena: State<'_, arena_hosted::ArenaState>,
+    request: arena_hosted::DetachRequest,
+) -> Result<bool, arena_hosted::ArenaError> {
+    arena_hosted::detach(&arena, request)
+}
+
+/// Only the fixed product's public recovery identity; no secret disclosure or mutation.
+#[tauri::command]
+fn arena_hosted_recovery_hint(
+    arena: State<'_, arena_hosted::ArenaState>,
+    cloud: State<'_, cloud::CloudState>,
+    secrets: State<'_, SharedSecretStore>,
+    request: arena_hosted::RecoveryHintRequest,
+) -> arena_hosted::RecoveryHint {
+    arena_hosted::recovery_hint(&arena, &cloud, secrets.inner().as_ref(), request)
+}
+
 /// hosted 非流式 JSON 生成：与 `stream_hosted_ai` 同一套窄边界的请求/响应形态
 /// （D5.1a，`/details` 双执行的服务器非流式通路）。native 返回「HTTP 状态 +
 /// JSON 正文」透传；`{data, aiMeta}` 解包与错误诊断在 renderer 适配层完成。
@@ -1436,6 +1479,7 @@ pub fn run() {
             // D5.1-K1：公开持久缓存与正式本地库共用同一数据目录，但独立
             // SQLite 文件、独立连接、独立 schema 版本——损坏/未知版本只让
             // 缓存停用，绝不拖垮启动。惰性打开：首个公开读取才建文件。
+            app.manage(arena_hosted::ArenaState::new().map_err(|error| std::io::Error::other(error.message))?);
             app.manage(public_cache::PublicReadCache::at(&data_root));
 
             app.manage(instance);
@@ -1491,6 +1535,10 @@ pub fn run() {
             cloud_sign_out,
             cloud_online_status,
             stream_hosted_ai,
+            arena_hosted_stream,
+            arena_hosted_control,
+            arena_hosted_detach,
+            arena_hosted_recovery_hint,
             hosted_ai_request,
             cloud_card_library_request,
             cloud_messages_request,
