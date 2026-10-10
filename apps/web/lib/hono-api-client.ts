@@ -1,3 +1,4 @@
+import { isGenerationApiRoutePin, type GenerationApiRoutePin } from '@mahoshojo/hosted-api/arena-generation/client';
 import { authStorage } from '@/lib/auth';
 import { INFRASTRUCTURE_ERROR_MESSAGES } from '@/lib/client/apiError';
 import { honoApiConfig } from '@/config/hono-api';
@@ -31,18 +32,8 @@ export type GenerationApiClientErrorCode =
   | 'AMBIGUOUS_OPERATION_OUTCOME'
   | 'GENERATION_INTENT_ALREADY_DISPATCHED';
 
-export type GenerationApiRoutePin = Readonly<{
-  placement: 'hono-primary' | 'next-dr';
-}>;
-
-export const isGenerationApiRoutePin = (value: unknown): value is GenerationApiRoutePin => {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  if (Object.keys(value).length !== 1 || !Object.prototype.hasOwnProperty.call(value, 'placement')) {
-    return false;
-  }
-  const placement = (value as { placement?: unknown }).placement;
-  return placement === 'hono-primary' || placement === 'next-dr';
-};
+export { isGenerationApiRoutePin };
+export type { GenerationApiRoutePin };
 
 export class GenerationApiClientError extends Error {
   readonly code: GenerationApiClientErrorCode;

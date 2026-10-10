@@ -83,6 +83,11 @@
       "types": "./src/regular-generation.ts",
       "import": "./src/regular-generation.ts",
       "default": "./src/regular-generation.ts"
+    },
+    "./arena-generation/client": {
+      "types": "./src/arena-generation/client.ts",
+      "import": "./src/arena-generation/client.ts",
+      "default": "./src/arena-generation/client.ts"
     }
   },
   "scripts": {
