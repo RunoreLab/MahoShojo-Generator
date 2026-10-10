@@ -3,7 +3,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-import { appendNarrativeHistoryEntry, normalizeNarrativeHistoryTitleFallback } from '@mahoshojo/domain/narrative-history-operations';
+import { appendNarrativeHistoryEntry, updateNarrativeHistoryEntry } from '@mahoshojo/domain/narrative-history-operations';
 
 import { randomUUID } from '@/lib/crypto';
 import {
@@ -76,21 +76,10 @@ export const useNarrativeHistoryStore = create<NarrativeHistoryStoreState>()(
 
       updateEntry: (id, patch) => {
         if (!id) return;
-        const nextTitle = patch.title === undefined ? undefined : patch.title.toString().trim().slice(0, 120);
-        const nextContent = patch.content === undefined ? undefined : patch.content.toString();
-        set((state) => {
-          const nextEntries = state.entries.map((entry) => {
-            if (entry.id !== id) return entry;
-            const updatedAt = nowIso();
-            return {
-              ...entry,
-              ...(nextTitle !== undefined ? { title: nextTitle || normalizeNarrativeHistoryTitleFallback(entry.content) } : {}),
-              ...(nextContent !== undefined ? { content: nextContent } : {}),
-              updatedAt,
-            };
-          });
-          return { entries: nextEntries, lastUpdatedAt: nowIso() };
-        });
+        set((state) => ({
+          entries: updateNarrativeHistoryEntry(state.entries, id, patch, { now: nowIso }),
+          lastUpdatedAt: nowIso(),
+        }));
       },
 
       moveEntry: (id, direction) => {

@@ -1,4 +1,4 @@
-import type { NarrativeHistoryEntry } from './arena-types';
+import type { NarrativeHistoryDataCardV1, NarrativeHistoryEntry } from './arena-types';
 
 export type NarrativeHistorySort = 'prompt_order' | 'updated_desc' | 'updated_asc' | 'created_desc' | 'created_asc';
 
@@ -326,5 +326,95 @@ export const materializeArenaNarrativeHistoryForRequest = (
       createdAt: entry.createdAt,
       updatedAt: entry.updatedAt,
     }))),
+  });
+};
+
+
+const parseImportedNarrativeHistoryTime = (value: unknown): string | null => {
+  if (typeof value !== 'string') return null;
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) return null;
+  return new Date(time).toISOString();
+};
+
+/**
+ * Web 活动历史导入的既有规范投影。保留旧卡封套/日期字段兼容，但只读取已知
+ * entry 字段；不是原件无损导入。原始 JSON 及未知扩展由宿主另行保存。
+ * 多卡先经 extractNarrativeHistoryImportEntries 提取，重复 ID 由 merge 处理。
+ */
+export const normalizeImportedNarrativeHistoryEntries = (
+  input: unknown,
+  context: Readonly<{ createId: () => string }>,
+): NarrativeHistoryEntry[] => {
+  const extractEntries = (payload: unknown): unknown[] => {
+    if (Array.isArray(payload)) return payload;
+    if (!payload || typeof payload !== 'object') return [];
+    const obj = payload as Record<string, unknown>;
+    if (Array.isArray(obj.entries)) return obj.entries;
+    if (obj.templateId === 'narrative-history' && obj.data && typeof obj.data === 'object') {
+      const data = obj.data as Record<string, unknown>;
+      if (Array.isArray(data.entries)) return data.entries;
+    }
+    return [];
+  };
+
+  return extractEntries(input)
+    .map((raw): NarrativeHistoryEntry | null => {
+      if (!raw || typeof raw !== 'object') return null;
+      const record = raw as Record<string, unknown>;
+      const title = typeof record.title === 'string' ? record.title.trim() : '';
+      const content = typeof record.content === 'string' ? record.content.trim() : '';
+      if (!content) return null;
+      const createdAt = parseImportedNarrativeHistoryTime(record.createdAt)
+        ?? parseImportedNarrativeHistoryTime(record.created_at)
+        ?? new Date(0).toISOString();
+      const updatedAt = parseImportedNarrativeHistoryTime(record.updatedAt)
+        ?? parseImportedNarrativeHistoryTime(record.updated_at)
+        ?? createdAt;
+      return {
+        id: typeof record.id === 'string' ? record.id : context.createId(),
+        title: (title || '未命名战报').slice(0, 120),
+        content,
+        createdAt,
+        updatedAt,
+      };
+    })
+    .filter((item): item is NarrativeHistoryEntry => Boolean(item));
+};
+
+/** 包装活动历史的既有 V1 卡；不排序、不重新分配 entry ID，也不写存储。 */
+export const buildNarrativeHistoryCardPayload = (
+  entries: readonly NarrativeHistoryEntry[],
+  lastUpdatedAt: string | null,
+  context: Readonly<{ now: () => string }>,
+): NarrativeHistoryDataCardV1 => ({
+  templateId: 'narrative-history',
+  version: 1,
+  title: '叙事历史',
+  updatedAt: lastUpdatedAt ?? context.now(),
+  entries: [...entries],
+});
+
+/**
+ * 活动历史不可变编辑。空标题沿 Web 从编辑前正文取 fallback；同一次修改正文
+ * 不改变此旧规则。现有 entry 的未知扩展保持，调用方持有最后更新时间和存储。
+ */
+export const updateNarrativeHistoryEntry = <T extends NarrativeHistoryEntry>(
+  entries: T[],
+  id: string,
+  patch: Readonly<{ title?: string; content?: string }>,
+  context: Readonly<{ now: () => string }>,
+): T[] => {
+  if (!id) return entries;
+  const nextTitle = patch.title === undefined ? undefined : patch.title.toString().trim().slice(0, 120);
+  const nextContent = patch.content === undefined ? undefined : patch.content.toString();
+  return entries.map((entry) => {
+    if (entry.id !== id) return entry;
+    return {
+      ...entry,
+      ...(nextTitle !== undefined ? { title: nextTitle || normalizeNarrativeHistoryTitleFallback(entry.content) } : {}),
+      ...(nextContent !== undefined ? { content: nextContent } : {}),
+      updatedAt: context.now(),
+    };
   });
 };
