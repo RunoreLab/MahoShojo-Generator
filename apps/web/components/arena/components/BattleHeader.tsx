@@ -4,26 +4,15 @@ import Link from 'next/link';
 
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { ThemeImage } from '@/components/shared/ThemeImage';
-import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
+import { AdvancedArenaHeaderView } from '@mahoshojo/ui-web/arena';
 
 export function BattleHeader() {
   return (
-    <>
-      <div className="text-center mb-4">
-        <ThemeImage lightSrc="/arena-black.svg" darkSrc="/arena-white.svg" width={320} height={90} alt="魔法少女竞技场" />
-        <p className="subtitle" style={{ marginBottom: '1rem', marginTop: '1rem' }}>
-          能亲眼见到强者之战，这下就算死也会值回票价呀！
-        </p>
-      </div>
-
-      <CollapsibleSection
-        title="📰 使用须知"
-        description="熟悉流程后可收起，减少滚动"
-        defaultOpen
-        storageKey="arena.section.guide.open"
-        className="mb-6"
-        contentClassName="text-sm"
-      >
+    <AdvancedArenaHeaderView
+      logo={<ThemeImage lightSrc="/arena-black.svg" darkSrc="/arena-white.svg" width={320} height={90} alt="魔法少女竞技场" />}
+      description="能亲眼见到强者之战，这下就算死也会值回票价呀！"
+      guideStorageKey="arena.section.guide.open"
+      guideChildren={<>
         <ol className="list-decimal list-inside space-y-1">
           <li>
             本页是完整版竞技场，如需更简洁或怀旧的体验，可前往
@@ -54,7 +43,7 @@ export function BattleHeader() {
           ]}
           linkClassName="text-blue-700 hover:underline"
         />
-      </CollapsibleSection>
-    </>
+      </>}
+    />
   );
 }

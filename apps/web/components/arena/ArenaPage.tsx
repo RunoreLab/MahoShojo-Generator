@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
+import { AdvancedArenaPageView } from '@mahoshojo/ui-web/arena';
 
 import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
@@ -196,33 +197,18 @@ export function ArenaPage({ multiplayer }: ArenaPageProps = {}) {
 
   const page = (
     <>
-      <div className="magic-background-white">
-        <div className="arena-page-shell mx-auto w-full max-w-[1380px] px-4 pb-8 pt-6 sm:px-6 lg:px-8">
-          <div
-            className="rounded-[28px] border p-5 sm:p-6 xl:p-8"
-            style={{
-              borderColor: 'var(--app-border-strong)',
-              background: 'var(--app-surface-90)',
-              boxShadow: 'var(--app-card-shadow)',
-              backdropFilter: 'blur(10px)',
-            }}
-          >
-            <BattleHeader />
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-sm">
-              <ArenaRankingLinks onOpenRankingModal={() => setShowRankingModal(true)} />
-              <ArenaPageLinks variant="full" />
-            </div>
-
-            {multiplayer?.enabled ? (
-              <ArenaMultiplayerPanel
-                enabled
-                origin={multiplayer.origin}
-                authLoading={authLoading}
-                isAuthenticated={isAuthenticated}
-                displayName={user?.username ?? '玩家'}
-              />
-            ) : null}
-
+      <AdvancedArenaPageView
+        header={<BattleHeader />}
+        links={<><ArenaRankingLinks onOpenRankingModal={() => setShowRankingModal(true)} /><ArenaPageLinks variant="full" /></>}
+        beforeWorkspace={multiplayer?.enabled ? <ArenaMultiplayerPanel enabled origin={multiplayer.origin} authLoading={authLoading} isAuthenticated={isAuthenticated} displayName={user?.username ?? '玩家'} /> : null}
+        result={<>
+          {multiplayer?.enabled ? <ArenaMultiplayerResult onSaveImage={handleSaveImage} /> : null}
+          <BattleResult onSaveImage={handleSaveImage} />
+          <BattleStorySessionPanel onSaveImage={handleSaveImage} />
+        </>}
+        homeLink={<button onClick={() => window.location.assign('/')} className="footer-link">返回首页</button>}
+        footer={<Footer />}
+      >
             <ArenaEditorWorkspaceBoundary>
               <ArenaEditorWorkspaceLayout
                 disabled={isGenerating}
@@ -362,23 +348,7 @@ export function ArenaPage({ multiplayer }: ArenaPageProps = {}) {
                 ]}
               />
             </ArenaEditorWorkspaceBoundary>
-          </div>
-
-          {multiplayer?.enabled ? (
-            <ArenaMultiplayerResult onSaveImage={handleSaveImage} />
-          ) : null}
-          <BattleResult onSaveImage={handleSaveImage} />
-          <BattleStorySessionPanel onSaveImage={handleSaveImage} />
-
-          <div className="text-center" style={{ marginTop: '2rem' }}>
-            <button onClick={() => window.location.assign('/')} className="footer-link">
-              返回首页
-            </button>
-          </div>
-
-          <Footer />
-        </div>
-      </div>
+      </AdvancedArenaPageView>
 
       {showImageModal && savedImageUrl ? (
         <ArenaRoomDialog

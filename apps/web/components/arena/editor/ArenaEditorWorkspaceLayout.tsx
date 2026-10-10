@@ -1,8 +1,5 @@
 'use client';
-
-import type { ReactNode } from 'react';
-
-import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
+import { ArenaEditorWorkspaceLayout as SharedArenaEditorWorkspaceLayout, type ArenaEditorWorkspaceSection as SharedSection } from '@mahoshojo/ui-web/arena';
 
 export type ArenaEditorSectionKind =
   | 'presetCharacters'
@@ -19,16 +16,7 @@ export type ArenaEditorSectionKind =
   | 'generationActions'
   | 'community';
 
-export type ArenaEditorWorkspaceSection = {
-  readonly kind: ArenaEditorSectionKind;
-  readonly content: ReactNode;
-  readonly description: ReactNode;
-  readonly defaultOpen?: boolean;
-  readonly autoOpen?: boolean;
-  readonly disabled?: boolean;
-  readonly keepMounted?: boolean;
-  readonly collapsible?: boolean;
-};
+export type ArenaEditorWorkspaceSection = Omit<SharedSection, 'title' | 'column' | 'storageKey' | 'kind'> & { readonly kind: ArenaEditorSectionKind };
 
 const SECTION_META: Record<
   ArenaEditorSectionKind,
@@ -101,51 +89,6 @@ const SECTION_META: Record<
   },
 };
 
-const ArenaEditorSection = ({
-  section,
-  globallyDisabled,
-}: {
-  readonly section: ArenaEditorWorkspaceSection;
-  readonly globallyDisabled: boolean;
-}) => {
-  const meta = SECTION_META[section.kind];
-  return (
-    <CollapsibleSection
-      title={meta.title}
-      description={section.description}
-      defaultOpen={section.defaultOpen}
-      autoOpen={section.autoOpen}
-      disabled={section.disabled ?? globallyDisabled}
-      keepMounted={section.keepMounted}
-      collapsible={section.collapsible}
-      storageKey={meta.storageKey}
-    >
-      {section.content}
-    </CollapsibleSection>
-  );
-};
-
-export function ArenaEditorWorkspaceLayout({
-  sections,
-  disabled = false,
-}: {
-  readonly sections: readonly ArenaEditorWorkspaceSection[];
-  readonly disabled?: boolean;
-}) {
-  const left = sections.filter((section) => SECTION_META[section.kind].column === 'left');
-  const right = sections.filter((section) => SECTION_META[section.kind].column === 'right');
-  return (
-    <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(320px,420px)_minmax(0,1fr)] 2xl:grid-cols-[minmax(340px,440px)_minmax(0,1fr)] xl:items-start">
-      <div className="min-w-0 space-y-4">
-        {left.map((section) => (
-          <ArenaEditorSection key={section.kind} section={section} globallyDisabled={disabled} />
-        ))}
-      </div>
-      <div className="min-w-0 space-y-4">
-        {right.map((section) => (
-          <ArenaEditorSection key={section.kind} section={section} globallyDisabled={disabled} />
-        ))}
-      </div>
-    </div>
-  );
+export function ArenaEditorWorkspaceLayout({ sections, disabled = false }: { readonly sections: readonly ArenaEditorWorkspaceSection[]; readonly disabled?: boolean }) {
+  return <SharedArenaEditorWorkspaceLayout disabled={disabled} sections={sections.map((section) => ({ ...SECTION_META[section.kind], ...section }))} />;
 }

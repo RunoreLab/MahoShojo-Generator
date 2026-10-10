@@ -12,6 +12,9 @@ type CollapsibleSectionProps = {
   description?: ReactNode;
   headerRight?: ReactNode;
   defaultOpen?: boolean;
+  /** Controlled hosts own persistence. Keep controlled/uncontrolled mode fixed per mount. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   autoOpen?: boolean;
   collapsible?: boolean;
   disabled?: boolean;
@@ -50,6 +53,8 @@ export function CollapsibleSection({
   description,
   headerRight,
   defaultOpen = true,
+  open: controlledOpen,
+  onOpenChange,
   autoOpen = false,
   collapsible = true,
   disabled = false,
@@ -68,27 +73,27 @@ export function CollapsibleSection({
   const [open, setOpen] = useState(defaultOpen);
 
   useEffect(() => {
-    if (!storageKey) return;
+    if (controlledOpen !== undefined || !storageKey) return;
     const stored = readStoredOpenState(storageKey);
     if (typeof stored === 'boolean') {
       setOpen(stored);
     }
     setRestored(true);
-  }, [storageKey]);
+  }, [storageKey, controlledOpen]);
 
   useEffect(() => {
-    if (!autoOpen) return;
+    if (controlledOpen !== undefined || !autoOpen) return;
     setOpen(true);
-  }, [autoOpen]);
+  }, [autoOpen, controlledOpen]);
 
   useEffect(() => {
-    if (!storageKey) return;
+    if (controlledOpen !== undefined || !storageKey) return;
     if (!restored) return;
     writeStoredOpenState(storageKey, open);
-  }, [storageKey, open, restored]);
+  }, [storageKey, open, restored, controlledOpen]);
 
   const isCollapsible = collapsible && !disabled;
-  const isOpen = collapsible ? open : true;
+  const isOpen = collapsible ? (controlledOpen ?? open) : true;
   const rootClassName =
     variant === 'panel'
       ? [
@@ -146,7 +151,8 @@ export function CollapsibleSection({
           disabled={!isCollapsible}
           onClick={() => {
             if (!isCollapsible) return;
-            setOpen((v) => !v);
+            if (controlledOpen === undefined) setOpen((v) => !v);
+            onOpenChange?.(!isOpen);
           }}
         >
           {collapsible ? (

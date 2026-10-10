@@ -21,3 +21,9 @@ export { ArenaDataSettingsPanel, type ArenaDataSettingsValue, type ArenaDataSett
 export { NarrativeHistorySettings, type NarrativeHistorySettingsValue, type NarrativeHistorySettingsProps } from './NarrativeHistorySettings';
 export { SharedBattleSettingsControl, type SharedBattleSettingsValue, type SharedBattleSettingsControlProps } from './presentation/SharedBattleSettingsControl';
 export type { ArenaInputLifecyclePorts } from './input-lifecycle';
+
+export { AdvancedArenaPageView, type AdvancedArenaPageViewProps } from './AdvancedArenaPageView';
+export { ArenaEditorWorkspaceLayout, type ArenaEditorWorkspaceSection } from './ArenaEditorWorkspaceLayout';
+export { AdjudicatorSettingsPanel, type AdjudicatorSettingsPanelProps } from './AdjudicatorSettingsPanel';
+export { QuestionnaireLorePanel, type QuestionnaireLorePanelProps, type QuestionnaireLoreActionResult } from './QuestionnaireLorePanel';
+export { AdvancedArenaHeaderView, type AdvancedArenaHeaderViewProps } from './AdvancedArenaHeaderView';
