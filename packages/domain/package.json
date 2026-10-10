@@ -236,7 +236,9 @@
     "./game-card-image-crop": "./src/game-card-image-crop.ts",
     "./game-card-presentation": "./src/game-card-presentation.ts",
     "./presets": "./src/presets.ts",
-    "./scenario-presets": "./src/scenario-presets.ts"
+    "./scenario-presets": "./src/scenario-presets.ts",
+    "./arena-post-battle": "./src/arena-post-battle.ts",
+    "./arena-post-battle-candidates": "./src/arena-post-battle-candidates.ts"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",

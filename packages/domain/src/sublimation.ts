@@ -1,3 +1,4 @@
+import { stripDerivedCharacterAuthority as stripSublimationAuthority } from './character-authority';
 import {
   GENERAL_CHARACTER_TEMPLATE_ID,
   GENERAL_SCENARIO_TEMPLATE_ID,
@@ -608,25 +609,6 @@ export const convertDataCard = (
     case 'scenario':
       return convertToScenario(sanitized, sourceTemplate);
   }
-};
-
-// Only these card-level fields represent trust, persistence identity or generation
-// bookkeeping. An opaque user extension may itself contain e.g. `signature` or
-// `templateId`; those nested keys are data and must not be recursively erased.
-const SUBLIMATION_AUTHORITY_FIELDS = new Set([
-  'signature', 'isNative', 'isPreset', 'isValid', 'isVerified', 'verificationStatus',
-  'sourceDataCardId', 'sourceDataCardUpdatedAt', 'arenaRoomKey', 'adjudicationSourceKey',
-  'permissions', 'generation_id', 'generationId', 'base_revision_hash',
-  'created_at', 'updated_at', 'createdAt', 'updatedAt', 'generated_at', 'generatedAt',
-]);
-
-const stripSublimationAuthority = (source: Record<string, unknown>): Record<string, unknown> => {
-  const result = cloneJson(source);
-  for (const key of SUBLIMATION_AUTHORITY_FIELDS) delete result[key];
-  if (isObject(result.metadata)) {
-    for (const key of SUBLIMATION_AUTHORITY_FIELDS) delete result.metadata[key];
-  }
-  return result;
 };
 
 const GENERAL_CHARACTER_META: Record<string, FieldMeta> = {

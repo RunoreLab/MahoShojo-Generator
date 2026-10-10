@@ -56,6 +56,29 @@ const subscription = (events: GenerationStreamEvent[]): ArenaGenerationSubscript
 });
 
 describe('Arena companion service', () => {
+  it.each(['cancelled', 'failed', 'not-ok', 'eof'])(
+    '%s never reaches the post-battle projector', async (terminal) => {
+      const projectUpdatedCombatants = vi.fn(async () => []);
+      const events: GenerationStreamEvent[] = [
+        { id: '1-0', type: 'markdown', data: { chunk: '# 尚未完成' } },
+      ];
+      if (terminal !== 'eof') events.push({
+        id: '2-0', type: 'done',
+        data: terminal === 'not-ok' ? { ok: false, status: 'completed' } : { status: terminal },
+      });
+      const service = createArenaCompanionService({
+        generationService: generationService(async () => subscription(events)),
+        createGenerationRequestId: () => 'request-12345678', projectUpdatedCombatants,
+      });
+      const result = await service.generate(new Request('https://example.test/api/arena/generate', {
+        method: 'POST', body: '{}',
+      }));
+      expect(result.status).toBe(502);
+      expect(projectUpdatedCombatants).not.toHaveBeenCalled();
+      expect(await result.json()).not.toHaveProperty('updatedCombatants');
+    },
+  );
+
   it('preserves the strict PVP payload signature through non-stream request rebuild', async () => {
     const env = { SIGNATURE_SECRET_KEY: 'test-only-companion-pvp-purpose-secret' };
     const signatures = createEnvSignatureService({ env });

@@ -1,3 +1,4 @@
+import type { ArenaPostBattleImpact, ArenaPostBattleProjectionInput } from '@mahoshojo/domain/arena-post-battle';
 import {
   MAX_ARENA_CREATE_BODY_BYTES,
   type ArenaGenerationService,
@@ -35,23 +36,8 @@ export const withArenaCompanionResponseMarkers = (
   });
 };
 
-export type ArenaCompanionImpact = {
-  characterName: string;
-  impact?: string;
-  currentStateSummary?: string;
-};
-
-export type ArenaCompanionProjectInput = {
-  combatants: readonly unknown[];
-  report: Record<string, unknown>;
-  impacts: readonly ArenaCompanionImpact[];
-  userGuidance: string | null;
-  scenario: Record<string, unknown> | null;
-  writeArenaHistory: boolean;
-  writeCurrentState: boolean;
-  generationId: string;
-  occurredAt: string;
-};
+export type ArenaCompanionImpact = ArenaPostBattleImpact;
+export type ArenaCompanionProjectInput = ArenaPostBattleProjectionInput;
 
 export type ArenaCompanionServiceOptions = {
   generationService: ArenaGenerationService;
