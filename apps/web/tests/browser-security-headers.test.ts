@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest';
+import { buildWebPageContentSecurityPolicy } from '@mahoshojo/web-package/execution-policy';
 
 import {
   buildContentSecurityPolicy,
@@ -10,6 +11,10 @@ import {
 } from '@/lib/security/browser-headers';
 
 describe('browser security headers', () => {
+  test('主站与自由 srcdoc 实际消费共享 composer，环境选择仍归 Web', () => {
+    expect(buildContentSecurityPolicy).toBe(buildWebPageContentSecurityPolicy);
+  });
+
   test('密码恢复路由收紧 Referrer-Policy，防止 URL token 经 Referer 泄漏', () => {
     // OWASP 密码重置指引：恢复页自身的同源子请求与外链不得携带 token。
     expect(PASSWORD_RECOVERY_ROUTE_HEADERS).toContainEqual({

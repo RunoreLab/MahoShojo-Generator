@@ -1,13 +1,8 @@
-/** 静态同域运行页；仅此路径放行本地模块物化所需的 data/blob，主站 CSP 不变。 */
-export const WEB_PACKAGE_RUNNER_PATH = '/__web-package__/runner';
-export const WEB_PACKAGE_RUNNER_POLICY = [
-  "default-src 'none'", "base-uri https://web-package.invalid", "frame-ancestors 'self'",
-  "script-src 'unsafe-inline' blob: data: https:", "script-src-attr 'unsafe-inline'",
-  "style-src 'unsafe-inline' data: blob: https:", "img-src data: blob: https:",
-  "font-src data: blob: https:", "media-src data: blob: https:",
-  "connect-src https: wss: data: blob:", "frame-src 'none'", "object-src 'none'",
-  "worker-src 'none'", "form-action 'none'", "manifest-src 'none'",
-].join('; ');
+import { WEB_PACKAGE_RUNNER_POLICY } from '@mahoshojo/web-package/runner-policy';
+
+export { WEB_PACKAGE_RUNNER_POLICY };
+
+export { WEB_PACKAGE_RUNNER_PATH } from './runner-client';
 export const WEB_PACKAGE_RUNNER_HEADERS = [
   { key: 'Content-Security-Policy', value: WEB_PACKAGE_RUNNER_POLICY },
   { key: 'X-Frame-Options', value: 'SAMEORIGIN' },

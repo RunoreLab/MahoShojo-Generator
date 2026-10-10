@@ -19,7 +19,17 @@
       "import": "./src/security.ts",
       "default": "./src/security.ts"
     },
-    "./testing/fixtures": "./tests/helpers/generic-package.ts"
+    "./testing/fixtures": "./tests/helpers/generic-package.ts",
+    "./execution-policy": {
+      "types": "./src/execution-policy.ts",
+      "import": "./src/execution-policy.ts",
+      "default": "./src/execution-policy.ts"
+    },
+    "./runner-policy": {
+      "types": "./src/runner-policy.ts",
+      "import": "./src/runner-policy.ts",
+      "default": "./src/runner-policy.ts"
+    }
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",

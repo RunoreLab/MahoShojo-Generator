@@ -3,10 +3,12 @@ import { readFileSync } from 'node:fs';
 import { GET } from '@/app/%5F%5Fweb-package__/runner/route';
 import { WEB_PACKAGE_RUNNER_HEADERS, WEB_PACKAGE_RUNNER_POLICY } from '@/lib/web-package/runner';
 import { buildContentSecurityPolicy } from '@/lib/security/browser-headers';
+import { WEB_PACKAGE_RUNNER_POLICY as sharedRunnerPolicy } from '@mahoshojo/web-package/runner-policy';
 
 describe('Web 包静态运行页策略',()=>{
   it('serves fixed bootstrap without accepting or embedding user bytes',async()=>{
     const response=GET();expect(response.status).toBe(200);
+    expect(response.headers.get('content-security-policy')).toBe(sharedRunnerPolicy);
     expect(response.headers.get('content-type')).toContain('text/html');
     expect(response.headers.get('cache-control')).toBe('no-store');
     expect(response.headers.get('x-frame-options')).toBe('SAMEORIGIN');

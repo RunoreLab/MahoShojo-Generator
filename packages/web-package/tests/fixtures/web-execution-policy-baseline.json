@@ -1,0 +1,167 @@
+{
+  "baseline": "6219048b11391e272d2cc4dd3db15d549560020b",
+  "provenance": "Unmodified Web browser-headers.ts composer and runner.ts fixed policy, before shared extraction",
+  "cases": [
+    {
+      "options": {
+        "isProduction": false,
+        "allowTurnstile": false,
+        "allowCloudflareInsights": false,
+        "allowGoogleAnalytics": false
+      },
+      "sha256": "1c5e9e88b0ebd2c05b5011f9c0dd613dcf80e05e426849507d0052abb715e306",
+      "policy": "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss: http: ws:; media-src 'self' data: blob: https:; frame-src 'self'; manifest-src 'self'; worker-src 'self' blob:"
+    },
+    {
+      "options": {
+        "isProduction": false,
+        "allowTurnstile": false,
+        "allowCloudflareInsights": false,
+        "allowGoogleAnalytics": true
+      },
+      "sha256": "a4124e92d0d9886c422c4dc9f9fb86b6b65fb2e1946980ff6783a4f743c53533",
+      "policy": "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.googletagmanager.com; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss: http: ws: https://www.google-analytics.com https://region1.google-analytics.com; media-src 'self' data: blob: https:; frame-src 'self'; manifest-src 'self'; worker-src 'self' blob:"
+    },
+    {
+      "options": {
+        "isProduction": false,
+        "allowTurnstile": false,
+        "allowCloudflareInsights": true,
+        "allowGoogleAnalytics": false
+      },
+      "sha256": "5e221a125a541bddc4304f5b400526d547f0a450360d1420eadb8ff054e0798e",
+      "policy": "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss: http: ws:; media-src 'self' data: blob: https:; frame-src 'self'; manifest-src 'self'; worker-src 'self' blob:"
+    },
+    {
+      "options": {
+        "isProduction": false,
+        "allowTurnstile": false,
+        "allowCloudflareInsights": true,
+        "allowGoogleAnalytics": true
+      },
+      "sha256": "21f369bb96503c6088ecd56b14bc5eb1d363c2f1b2d19b9d18a13de0ea5c93ce",
+      "policy": "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://static.cloudflareinsights.com https://www.googletagmanager.com; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss: http: ws: https://www.google-analytics.com https://region1.google-analytics.com; media-src 'self' data: blob: https:; frame-src 'self'; manifest-src 'self'; worker-src 'self' blob:"
+    },
+    {
+      "options": {
+        "isProduction": false,
+        "allowTurnstile": true,
+        "allowCloudflareInsights": false,
+        "allowGoogleAnalytics": false
+      },
+      "sha256": "24f2db6bbf3afcf9ed1dcbbbdd9e8e7f78fc016619448e78787e35b5bb8235d0",
+      "policy": "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss: http: ws:; media-src 'self' data: blob: https:; frame-src 'self' https://challenges.cloudflare.com; manifest-src 'self'; worker-src 'self' blob:"
+    },
+    {
+      "options": {
+        "isProduction": false,
+        "allowTurnstile": true,
+        "allowCloudflareInsights": false,
+        "allowGoogleAnalytics": true
+      },
+      "sha256": "ab8cdfe9feff3a5ee1f767b97c76bbb52f277443d72e16284d33fb7062a45d8c",
+      "policy": "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com https://www.googletagmanager.com; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss: http: ws: https://www.google-analytics.com https://region1.google-analytics.com; media-src 'self' data: blob: https:; frame-src 'self' https://challenges.cloudflare.com; manifest-src 'self'; worker-src 'self' blob:"
+    },
+    {
+      "options": {
+        "isProduction": false,
+        "allowTurnstile": true,
+        "allowCloudflareInsights": true,
+        "allowGoogleAnalytics": false
+      },
+      "sha256": "34366fc204cd8c07b89602bc9b32d5e0344e8c205bf317ef4ad87bc81586b749",
+      "policy": "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com https://static.cloudflareinsights.com; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss: http: ws:; media-src 'self' data: blob: https:; frame-src 'self' https://challenges.cloudflare.com; manifest-src 'self'; worker-src 'self' blob:"
+    },
+    {
+      "options": {
+        "isProduction": false,
+        "allowTurnstile": true,
+        "allowCloudflareInsights": true,
+        "allowGoogleAnalytics": true
+      },
+      "sha256": "620b4a5b4fd90c7b5a5f3578d4c66d1b0e17df440e43712f6a91689df5527a04",
+      "policy": "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com https://static.cloudflareinsights.com https://www.googletagmanager.com; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss: http: ws: https://www.google-analytics.com https://region1.google-analytics.com; media-src 'self' data: blob: https:; frame-src 'self' https://challenges.cloudflare.com; manifest-src 'self'; worker-src 'self' blob:"
+    },
+    {
+      "options": {
+        "isProduction": true,
+        "allowTurnstile": false,
+        "allowCloudflareInsights": false,
+        "allowGoogleAnalytics": false
+      },
+      "sha256": "55e8934315116f5217b65f2e403f2cdf7f04ad9b01d29ad1d3b082c42a2d7e0d",
+      "policy": "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; script-src 'self' 'unsafe-inline'; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; media-src 'self' data: blob: https:; frame-src 'self'; manifest-src 'self'; worker-src 'self' blob:; upgrade-insecure-requests"
+    },
+    {
+      "options": {
+        "isProduction": true,
+        "allowTurnstile": false,
+        "allowCloudflareInsights": false,
+        "allowGoogleAnalytics": true
+      },
+      "sha256": "3136af39d32f5b2ad036109532d9ddcc5c8b12f81a0226cd4d47d6859377d86b",
+      "policy": "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss: https://www.google-analytics.com https://region1.google-analytics.com; media-src 'self' data: blob: https:; frame-src 'self'; manifest-src 'self'; worker-src 'self' blob:; upgrade-insecure-requests"
+    },
+    {
+      "options": {
+        "isProduction": true,
+        "allowTurnstile": false,
+        "allowCloudflareInsights": true,
+        "allowGoogleAnalytics": false
+      },
+      "sha256": "5722645e63b9898b209a9e58f17420cef2466035fd8c2811b6f5da4df9ba206f",
+      "policy": "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; media-src 'self' data: blob: https:; frame-src 'self'; manifest-src 'self'; worker-src 'self' blob:; upgrade-insecure-requests"
+    },
+    {
+      "options": {
+        "isProduction": true,
+        "allowTurnstile": false,
+        "allowCloudflareInsights": true,
+        "allowGoogleAnalytics": true
+      },
+      "sha256": "565fde18bd60466d494b795837dae4ca3347c90e79cf4353d8a44bc5dfb4fca0",
+      "policy": "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' https://static.cloudflareinsights.com https://www.googletagmanager.com; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss: https://www.google-analytics.com https://region1.google-analytics.com; media-src 'self' data: blob: https:; frame-src 'self'; manifest-src 'self'; worker-src 'self' blob:; upgrade-insecure-requests"
+    },
+    {
+      "options": {
+        "isProduction": true,
+        "allowTurnstile": true,
+        "allowCloudflareInsights": false,
+        "allowGoogleAnalytics": false
+      },
+      "sha256": "affd64e665674f451699300ed0eb97deab797de243d3e877f00daaef5cf60fe3",
+      "policy": "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; media-src 'self' data: blob: https:; frame-src 'self' https://challenges.cloudflare.com; manifest-src 'self'; worker-src 'self' blob:; upgrade-insecure-requests"
+    },
+    {
+      "options": {
+        "isProduction": true,
+        "allowTurnstile": true,
+        "allowCloudflareInsights": false,
+        "allowGoogleAnalytics": true
+      },
+      "sha256": "e63b9489b1fc87ac3e35e589cd78f889fd8f7eb5af9596bd12fa29f612a617e4",
+      "policy": "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://www.googletagmanager.com; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss: https://www.google-analytics.com https://region1.google-analytics.com; media-src 'self' data: blob: https:; frame-src 'self' https://challenges.cloudflare.com; manifest-src 'self'; worker-src 'self' blob:; upgrade-insecure-requests"
+    },
+    {
+      "options": {
+        "isProduction": true,
+        "allowTurnstile": true,
+        "allowCloudflareInsights": true,
+        "allowGoogleAnalytics": false
+      },
+      "sha256": "6b365d92c92acb83a16db13a91d5a5b6daeba541a8652934f5258e23bc68019d",
+      "policy": "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://static.cloudflareinsights.com; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss:; media-src 'self' data: blob: https:; frame-src 'self' https://challenges.cloudflare.com; manifest-src 'self'; worker-src 'self' blob:; upgrade-insecure-requests"
+    },
+    {
+      "options": {
+        "isProduction": true,
+        "allowTurnstile": true,
+        "allowCloudflareInsights": true,
+        "allowGoogleAnalytics": true
+      },
+      "sha256": "bb486e6832a0bb40651e1d450a34fe349c3712142526a3ea3831235b69307697",
+      "policy": "default-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://static.cloudflareinsights.com https://www.googletagmanager.com; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https: wss: https://www.google-analytics.com https://region1.google-analytics.com; media-src 'self' data: blob: https:; frame-src 'self' https://challenges.cloudflare.com; manifest-src 'self'; worker-src 'self' blob:; upgrade-insecure-requests"
+    }
+  ],
+  "packageRunner": "default-src 'none'; base-uri https://web-package.invalid; frame-ancestors 'self'; script-src 'unsafe-inline' blob: data: https:; script-src-attr 'unsafe-inline'; style-src 'unsafe-inline' data: blob: https:; img-src data: blob: https:; font-src data: blob: https:; media-src data: blob: https:; connect-src https: wss: data: blob:; frame-src 'none'; object-src 'none'; worker-src 'none'; form-action 'none'; manifest-src 'none'"
+}

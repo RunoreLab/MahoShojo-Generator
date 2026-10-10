@@ -1,14 +1,11 @@
+import { buildWebPageContentSecurityPolicy, type WebPageContentSecurityPolicyOptions } from '@mahoshojo/web-package/execution-policy';
+
 type StaticHeader = {
   key: string;
   value: string;
 };
 
-type BrowserSecurityHeaderOptions = {
-  allowCloudflareInsights?: boolean;
-  allowGoogleAnalytics?: boolean;
-  allowTurnstile?: boolean;
-  isProduction: boolean;
-};
+type BrowserSecurityHeaderOptions = WebPageContentSecurityPolicyOptions;
 
 const LOCAL_HOSTNAMES = new Set([
   '127.0.0.1',
@@ -40,54 +37,7 @@ export function buildPermissionsPolicy(): string {
   ].join(', ');
 }
 
-export function buildContentSecurityPolicy(options: BrowserSecurityHeaderOptions): string {
-  const scriptSources = [`'self'`, `'unsafe-inline'`];
-  const connectSources = [`'self'`, 'https:', 'wss:'];
-  const frameSources = [`'self'`];
-
-  if (!options.isProduction) {
-    scriptSources.push(`'unsafe-eval'`);
-    connectSources.push('http:', 'ws:');
-  }
-
-  if (options.allowTurnstile) {
-    scriptSources.push('https://challenges.cloudflare.com');
-    frameSources.push('https://challenges.cloudflare.com');
-  }
-
-  if (options.allowCloudflareInsights) {
-    scriptSources.push('https://static.cloudflareinsights.com');
-  }
-
-  if (options.allowGoogleAnalytics) {
-    scriptSources.push('https://www.googletagmanager.com');
-    connectSources.push('https://www.google-analytics.com', 'https://region1.google-analytics.com');
-  }
-
-  const directives = [
-    `default-src 'self'`,
-    `base-uri 'self'`,
-    `frame-ancestors 'none'`,
-    `form-action 'self'`,
-    `object-src 'none'`,
-    `script-src ${Array.from(new Set(scriptSources)).join(' ')}`,
-    `script-src-attr 'none'`,
-    `style-src 'self' 'unsafe-inline'`,
-    `img-src 'self' data: blob: https:`,
-    `font-src 'self' data:`,
-    `connect-src ${Array.from(new Set(connectSources)).join(' ')}`,
-    `media-src 'self' data: blob: https:`,
-    `frame-src ${Array.from(new Set(frameSources)).join(' ')}`,
-    `manifest-src 'self'`,
-    `worker-src 'self' blob:`,
-  ];
-
-  if (options.isProduction) {
-    directives.push('upgrade-insecure-requests');
-  }
-
-  return directives.join('; ');
-}
+export const buildContentSecurityPolicy = buildWebPageContentSecurityPolicy;
 
 export function buildStaticBrowserSecurityHeaders(options: BrowserSecurityHeaderOptions): StaticHeader[] {
   return [

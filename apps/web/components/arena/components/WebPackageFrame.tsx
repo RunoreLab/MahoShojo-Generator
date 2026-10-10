@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { WEB_PACKAGE_RUNNER_PATH } from '@/lib/web-package/runner';
+import { WEB_PACKAGE_RUNNER_PATH } from '@/lib/web-package/runner-client';
 
 export const WEB_PACKAGE_FRAME_ALLOW = "camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'; payment 'none'; usb 'none'; serial 'none'; display-capture 'none'";
 
