@@ -9,7 +9,7 @@ import { parseCombatantsFromText } from '@mahoshojo/domain/arena-file-parser';
 import { buildArenaMaterialState, type ArenaMaterialState } from '@mahoshojo/domain/arena-materials';
 import type { NarrativeHistorySort } from '@mahoshojo/domain/narrative-history-operations';
 import { AdvancedArenaHeaderView, AdvancedArenaPageView, ArenaEditorWorkspaceLayout, BattleLitePageView, BattleLiteHeaderView, ArenaRosterSection, ArenaRosterImportPanel, ArenaMaterialSection, ArenaScenarioSection, BattleModeSelector, StoryOptionsPanel, PresetGridPicker, ArenaDataSettingsPanel, NarrativeHistorySettings, type ArenaRosterSectionModel, type ArenaScenarioSectionModel, type StoryLengthOption } from '@mahoshojo/ui-web/arena';
-import { BattleReportCard, StreamingBattleReportCard } from '@mahoshojo/ui-web/arena-report';
+import { ArenaReportFormatSelectorView, BattleReportCard, StreamingBattleReportCard } from '@mahoshojo/ui-web/arena-report';
 import { CardLibraryModal, type CardLibrarySelectionContext } from '@mahoshojo/ui-web/card-library';
 import { NarrativeHistoryPicker } from '@mahoshojo/ui-web/narrative-history';
 import { AiReasoningPanel, GenerationModeSwitcher, useResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
@@ -30,6 +30,9 @@ import { useDesktopCloudSession } from '../features/account/use-desktop-cloud-se
 import { useExternalLinks } from '../features/external-links/external-links-provider';
 import { useDesktopCardLibraryHost } from '../platform/card-library-host';
 import { IpcLocalCardRepository } from '../platform/local-card-bridge';
+import { DesktopArenaWebPackages } from '../features/arena/web-packages';
+import { DesktopArenaWebPackageControls, DesktopArenaWebResult } from '../features/arena/web-controls';
+import { IpcWebPackageRepository } from '../platform/web-package-bridge';
 import { downloadTextFile } from '../platform/download-text-file';
 import { navigateByProductHref, resolveInternalHrefForHashHistory } from './hash-history-fragment';
 import { useLeaveGuard } from './useLeaveGuard';
@@ -39,9 +42,18 @@ const limits = ARENA_CANONICAL_CAPABILITIES;
 type LibraryPurpose = 'character' | 'scenario' | 'auxScenario' | 'material';
 const reject = () => { throw new Error('当前页面未开放此能力。'); };
 
+const createWebPackages = () => {
+  const repository = new IpcWebPackageRepository((command, args) => invoke(command, args as never));
+  return new DesktopArenaWebPackages({ repository, confirmRestore: (title) => window.confirm(`「${title}」已在回收站。确认恢复并导入这份包？`),
+    write: async (record, archive) => ({ repaired: (await repository.putWithOutcome(record, archive)).blobOutcome === 'repaired' }) });
+};
+
 /** Desktop owns session/IO only. The actual Web controls, layout and report are shared. */
-export function DesktopBattleForm({ session, repository, product = 'battle' }: { session: DesktopArenaSession; repository: IpcLocalCardRepository; product?: DesktopArenaProduct }) {
+export function DesktopBattleForm({ session, repository, product = 'battle', webPackages }: { session: DesktopArenaSession; repository: IpcLocalCardRepository; product?: DesktopArenaProduct; webPackages?: DesktopArenaWebPackages }) {
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot);
+  const packageOwner = useMemo(() => webPackages ?? createWebPackages(), [webPackages]);
+  const packageState = useSyncExternalStore(packageOwner.subscribe, packageOwner.getSnapshot);
+  useEffect(() => () => { if (!webPackages) packageOwner.dispose(); }, [packageOwner, webPackages]);
   const { state: aiState, store: aiStore } = useDesktopAiConfig();
   const { state: cloudState, store: cloudStore } = useDesktopCloudSession();
   const target = resolveDesktopAiTarget(aiState.selection, aiState.profiles, aiState.generationOverrides, aiState.modelsByProfileId, aiState.presetsByProviderId);
@@ -74,19 +86,19 @@ export function DesktopBattleForm({ session, repository, product = 'battle' }: {
   // Do not include credential presence probes or preparing-state changes: they do not change target identity.
   const scope = JSON.stringify({ account: cloudState.account?.userId ?? null, selection: aiState.selection,
     profiles: aiState.profiles, models: aiState.modelsByProfileId, presets: aiState.presetsByProviderId, overrides: aiState.generationOverrides });
-  useLayoutEffect(() => { ownerEpoch.current += 1; session.setScope(scope); aiStore.cancelPreparingGeneration(); setError(null); setImportWarnings([]); }, [scope, session, aiStore]);
+  useLayoutEffect(() => { ownerEpoch.current += 1; session.setScope(scope); packageOwner.setScope(scope); aiStore.cancelPreparingGeneration(); setError(null); setImportWarnings([]); }, [scope, session, aiStore, packageOwner]);
   useEffect(() => () => { ownerEpoch.current += 1; aiStore.cancelPreparingGeneration(); }, [aiStore]);
   const guard = useLeaveGuard(
-    () => session.isBusy() || preparing.current || aiStore.isPreparingGeneration() || aiStore.getSnapshot().savingConnection || aiStore.getSnapshot().savingCredential || aiStore.getSnapshot().deletingConnection || historyLoading.current || advancedBusyRef.current || session.hasUnsavedDraft() || Object.values(dirtyControls.current).some(Boolean),
+    () => session.isBusy() || packageOwner.isBusy() || preparing.current || aiStore.isPreparingGeneration() || aiStore.getSnapshot().savingConnection || aiStore.getSnapshot().savingCredential || aiStore.getSnapshot().deletingConnection || historyLoading.current || advancedBusyRef.current || packageOwner.getSnapshot().temporary.length > 0 || session.hasUnsavedDraft() || Object.values(dirtyControls.current).some(Boolean),
     '当前生成、读取或保存尚未完成，或仍有未保存的内容。',
     '窗口关闭保护初始化失败，生成、导入与保存暂不可用，请重新打开页面。',
     () => {
-      if (session.getSnapshot().saving || session.getSnapshot().importing || preparing.current || aiStore.isPreparingGeneration() || aiStore.getSnapshot().savingConnection || aiStore.getSnapshot().savingCredential || aiStore.getSnapshot().deletingConnection || historyLoading.current || advancedBusyRef.current) return false;
+      if (packageOwner.isBusy() || session.getSnapshot().saving || session.getSnapshot().importing || preparing.current || aiStore.isPreparingGeneration() || aiStore.getSnapshot().savingConnection || aiStore.getSnapshot().savingCredential || aiStore.getSnapshot().deletingConnection || historyLoading.current || advancedBusyRef.current) return false;
       if (!window.confirm('确认离开？正在生成的请求会取消，未保存的输入或原文可能丢失。')) return false;
       session.cancel(); return true;
     },
   );
-  const busy = state.phase === 'generating' || state.saving || state.importing || aiState.generationActive || advancedBusy;
+  const busy = state.phase === 'generating' || state.saving || state.importing || aiState.generationActive || advancedBusy || packageState.busy;
   const disabled = !guard.ready || busy || state.pendingRestore;
   const update = (patch: Partial<ArenaDraft>) => { if (!disabled) session.updateDraft({ ...session.getSnapshot().draft, ...patch }); };
   const resultRef = useRef<HTMLDivElement>(null);
@@ -106,7 +118,7 @@ export function DesktopBattleForm({ session, repository, product = 'battle' }: {
   }, [historyOpen, historyRevision, repository, scope]);
   const reportError = (cause: unknown) => { setError(cause instanceof Error ? cause.message : '操作失败，原输入仍保留。'); };
   const performImport = async (load: Parameters<DesktopArenaSession['importInput']>[0]) => {
-    if (!guard.ready || preparing.current || aiState.generationActive) throw new Error('请等待当前操作完成。');
+    if (!guard.ready || preparing.current || aiState.generationActive || packageOwner.isBusy()) throw new Error('请等待当前操作完成。');
     const epoch = ownerEpoch.current; setError(null); try { await session.importInput(load); } catch (cause) { if (epoch === ownerEpoch.current) reportError(cause); throw cause; }
   };
   const parseCharacters = async (text: string, warnings: string[]) => {
@@ -186,7 +198,7 @@ export function DesktopBattleForm({ session, repository, product = 'battle' }: {
       openAuxModal: () => openLibrary('auxScenario'), randomMatchAux: reject, uploadAux: uploadAuxScenarios, pasteAux: (text) => loadScenario(async () => text, null, true), moveAux: (from, to) => update({ auxScenarios: moveArenaItem(draft.auxScenarios, from, to) }), removeAux: (key) => update(removeAdvancedAuxScenarios(draft, [Number(key)])), clearAux: () => update(removeAdvancedAuxScenarios(draft, draft.auxScenarios.map((_, index) => index))) },
   };
   const generate = () => {
-    if (disabled || preparing.current || session.isBusy()) return;
+    if (disabled || preparing.current || session.isBusy() || packageOwner.isBusy()) return;
     if (target.location !== 'client' || !target.mode || !target.modelId || !target.providerTarget || target.unavailableReason) { setError('此页面的服务器生成暂不可用，请选择受支持的客户端连接。'); return; }
     if (state.rawText && !window.confirm('开始新生成将替换当前结果，请先保存或完整导出。继续？')) return;
     const snapshot = structuredClone(session.getSnapshot().draft); const frozen = { ...snapshot, customStoryLength: normalizeCustomStoryLength(snapshot.customStoryLength) };
@@ -203,9 +215,9 @@ export function DesktopBattleForm({ session, repository, product = 'battle' }: {
   const download = (filename: string, text: string, mimeType: string) => { try { downloadTextFile(filename, text, mimeType); } catch (cause) { reportError(cause); } };
   const exportAll = () => download('arena-complete.json', session.exportDocument(), 'application/json');
   const result = (state.rawText || state.reasoning || state.report) ? <section ref={resultRef} className="mt-6 space-y-4" aria-label="战报结果">
-    {state.report && state.activeGenerationMode !== 'stream' ? <BattleReportCard report={{ ...state.report, aiReasoning: reasoning }} mode={state.report.mode} ports={{ mediaPolicy: DENY_EXTERNAL_MEDIA, onNavigateExternal: openContent, downloadMarkdown: (text: string, filename: string) => download(filename, text, 'text/markdown;charset=utf-8') }} />
+    {state.resultFormat === 'web' ? <><DesktopArenaWebResult key={`${scope}:${state.generation?.intent.requestId ?? 'restored'}`} state={state} owner={packageOwner} disabled={disabled} />{reasoning ? <AiReasoningPanel reasoning={reasoning} /> : null}</> : state.report && state.activeGenerationMode !== 'stream' ? <BattleReportCard report={{ ...state.report, aiReasoning: reasoning }} mode={state.report.mode} ports={{ mediaPolicy: DENY_EXTERNAL_MEDIA, onNavigateExternal: openContent, downloadMarkdown: (text: string, filename: string) => download(filename, text, 'text/markdown;charset=utf-8') }} />
       : state.markdown && state.activeGenerationMode === 'stream' ? <StreamingBattleReportCard aiReasoning={reasoning} reporterInfo={state.report?.reporterInfo} adjudicationResults={state.generation?.adjudicationResults} content={state.markdown} mode={state.generation?.input.battleMode ?? draft.battleMode} isStreaming={state.phase === 'generating'} onStopGeneration={() => session.cancel()} ports={{ mediaPolicy: DENY_EXTERNAL_MEDIA, onNavigateExternal: openContent, downloadMarkdown: (text: string, filename: string) => download(filename, text, 'text/markdown;charset=utf-8') }} /> : null}
-    {!(state.markdown && state.activeGenerationMode === 'stream') && !state.report && reasoning ? <AiReasoningPanel reasoning={reasoning} /> : null}
+    {state.resultFormat !== 'web' && !(state.markdown && state.activeGenerationMode === 'stream') && !state.report && reasoning ? <AiReasoningPanel reasoning={reasoning} /> : null}
     <details><summary>完整原始输出（含元数据）</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap break-all">{state.rawText}</pre></details>
     <div className="flex flex-wrap gap-3">
       <button className={secondary} type="button" onClick={() => { void exportAll(); }}>完整导出 JSON</button>
@@ -245,11 +257,15 @@ export function DesktopBattleForm({ session, repository, product = 'battle' }: {
           <fieldset disabled={!guard.ready} className="min-w-0"><DesktopAiProviderPanel generationMode={draft.generationMode} onDirtyChange={onAiDirty} showConnectionTest={false} copy={{ serverOutput: { stream: '', nonStream: '' }, emptyProfilesHint: '请配置客户端连接。', serverFootnote: '服务器生成暂不可用。', payloadNoun: '角色与故事设定' }} /></fieldset>
           {target.location === 'server' ? <p role="status">此页面的服务器生成暂不可用。请选择客户端及受支持的预设或自定义连接。</p> : null}
         </>,
-        generationMode: <GenerationModeSwitcher value={draft.generationMode} disabled={disabled} onChange={(generationMode) => update({ generationMode })} helper="非流式输出结构化战报；流式逐步显示 Markdown。" />,
+        generationMode: <>
+          <ArenaReportFormatSelectorView value={draft.reportFormat} disabled={disabled} onChange={(reportFormat) => update({ reportFormat })} webDescription="生成网页或包目标源码；本片仅验证、保存与导出，隔离运行待 D4 验收。" />
+          {draft.reportFormat === 'web' ? <DesktopArenaWebPackageControls key={`${product}:${scope}`} owner={packageOwner} selectedRef={draft.webPackageRef} disabled={disabled} onSelect={(webPackageRef) => { const next = { ...session.getSnapshot().draft, webPackageRef }; delete next.webPackagePromptProjection; session.updateDraft(next); }} /> : null}
+          <GenerationModeSwitcher value={draft.generationMode} disabled={disabled} onChange={(generationMode) => update({ generationMode })} helper={draft.reportFormat === 'web' ? '两种方式都生成相同 Web 目标；流式期间只显示安全源码，不执行内容。' : '非流式输出结构化战报；流式逐步显示 Markdown。'} />
+        </>,
         actions: <>
           {state.pendingRestore ? <p role="status">发现本机草稿。<button type="button" className={secondary} onClick={() => session.restoreDraft()}>恢复草稿</button><button type="button" className={secondary} onClick={() => { if (window.confirm('清除旧草稿？此操作不会删除本地库。')) session.discardDraft(); }}>清除草稿</button></p> : null}
           <button type="button" className={generationSubmitClassName} disabled={disabled || target.location !== 'client' || !!target.unavailableReason || !!readinessMessage} onClick={generate}>生成战报</button>
-          {busy ? <button type="button" className={secondary} disabled={state.saving} onClick={() => { aiStore.cancelPreparingGeneration(); ownerEpoch.current += 1; session.cancel(); }}>取消生成</button> : null}
+          {busy ? <button type="button" className={secondary} disabled={state.saving || packageState.busy} onClick={() => { aiStore.cancelPreparingGeneration(); ownerEpoch.current += 1; session.cancel(); }}>取消生成</button> : null}
           <button type="button" className={secondary} onClick={() => { void exportAll(); }}>导出当前会话</button>
           {state.draftError ? <p role="alert">{state.draftError}<button type="button" disabled={busy} onClick={() => session.retryDraftSave()}>重试保存草稿</button><button type="button" disabled={busy} onClick={() => { if (window.confirm('清除旧草稿及当前页面内容？请先导出。')) session.discardDraft(); }}>清除草稿</button></p> : null}
           {readinessMessage ? <p>{readinessMessage}</p> : null}
@@ -262,7 +278,7 @@ export function DesktopBattleForm({ session, repository, product = 'battle' }: {
         footer: <ProductFooter assetSource={{ baseUrl: '/' }} onNavigateInternal={(href) => navigateByProductHref(router, href)} resolveInternalHref={resolveInternalHrefForHashHistory} onNavigateExternal={openFixed} />,
   };
   return <>
-    {product === 'arena' ? <AdvancedArenaPageView header={<AdvancedArenaHeaderView logo={<ThemeImage lightSrc="/arena-black.svg" darkSrc="/arena-white.svg" width={320} height={90} alt="魔法少女竞技场" />} description="桌面高级单次 · 角色、主辅情景与故事设定" guideChildren={<p>配置输入后生成单次战报。此页使用独立本机草稿，支持客户端 Direct；Web 格式、连续故事、插图和服务器能力尚未开放。<button className="footer-link" type="button" onClick={() => navigateByProductHref(router, '/battle')}>前往简洁版</button></p>} />} result={result} homeLink={slots.homeLink} footer={slots.footer}>
+    {product === 'arena' ? <AdvancedArenaPageView header={<AdvancedArenaHeaderView logo={<ThemeImage lightSrc="/arena-black.svg" darkSrc="/arena-white.svg" width={320} height={90} alt="魔法少女竞技场" />} description="桌面高级单次 · 角色、主辅情景与故事设定" guideChildren={<p>配置输入后生成单次战报。此页使用独立本机草稿，支持客户端 Direct 与 Web 源码生成/验证/导出；隔离运行、连续故事、插图和服务器能力尚未开放。<button className="footer-link" type="button" onClick={() => navigateByProductHref(router, '/battle')}>前往简洁版</button></p>} />} result={result} homeLink={slots.homeLink} footer={slots.footer}>
       <ArenaEditorWorkspaceLayout disabled={disabled} sections={[
         { kind: 'presets', title: '🎴 预设角色', column: 'left', description: '选择内置角色', defaultOpen: true, content: slots.presets },
         { kind: 'database', title: '📚 角色库', column: 'left', description: '本地、公开或缓存副本', defaultOpen: true, content: slots.database },
@@ -273,7 +289,7 @@ export function DesktopBattleForm({ session, repository, product = 'battle' }: {
         { kind: 'materials', title: '📎 素材注入', column: 'right', description: `参考项 ${referenceCount}/256`, defaultOpen: false, keepMounted: true, content: slots.materials },
         { kind: 'settings', title: '⚙️ 读写设置', column: 'right', description: '角色工作副本与叙事历史', defaultOpen: false, keepMounted: true, content: settings },
         { kind: 'story', title: '🧠 故事引导 / 判定 / AI 模型', column: 'right', description: '辅助设定、活动历史编辑与客户端 AI', defaultOpen: true, keepMounted: true, content: slots.storyOptions },
-        { kind: 'generation', title: '⚡ 生成方式', column: 'right', description: '结构化或 Markdown 流式', defaultOpen: true, content: slots.generationMode },
+        { kind: 'generation', title: '⚡ 生成方式', column: 'right', description: 'Markdown 或 Web 源码；流式/非流式', defaultOpen: true, content: slots.generationMode },
         { kind: 'actions', title: '🚀 开始生成', column: 'right', description: '一次冻结，一个请求', collapsible: false, content: slots.actions },
       ]} />
     </AdvancedArenaPageView> : <BattleLitePageView isGenerating={disabled} presetCountLabel={String(draft.combatants.filter((item) => item.isPreset).length)} combatantCountLabel={`${draft.combatants.length}/${limits.maxCombatants}`}
@@ -289,9 +305,9 @@ export function DesktopBattleForm({ session, repository, product = 'battle' }: {
 
 function DesktopArenaHost({ product }: { product: DesktopArenaProduct }) {
   const repository = useMemo(() => new IpcLocalCardRepository((command, args) => invoke(command, args as never)), []);
-  const [session, setSession] = useState<DesktopArenaSession | null>(null);
-  useEffect(() => { const owner = new DesktopArenaSession({ product, repository, storage: window.localStorage }); setSession(owner); return () => owner.dispose(); }, [repository, product]);
-  return session ? <DesktopBattleForm session={session} repository={repository} product={product} /> : <p role="status">正在读取本机草稿…</p>;
+  const [owners, setOwners] = useState<{ session: DesktopArenaSession; packages: DesktopArenaWebPackages } | null>(null);
+  useEffect(() => { const packages = createWebPackages(); const session = new DesktopArenaSession({ product, repository, storage: window.localStorage, resolveWebPackage: packages.resolveExact }); setOwners({ session, packages }); return () => { session.dispose(); packages.dispose(); }; }, [repository, product]);
+  return owners ? <DesktopBattleForm session={owners.session} webPackages={owners.packages} repository={repository} product={product} /> : <p role="status">正在读取本机草稿…</p>;
 }
 
 export function DesktopBattle() { return <DesktopArenaHost product="battle" />; }

@@ -12,7 +12,7 @@ const input = (mode: 'classic' | 'kizuna' | 'daily' | 'scenario' = 'classic') =>
   scenario: { content: mode === 'scenario' ? { title: '车站', content: '等候' } : null, fileName: null } });
 const intent = (generationMode: 'stream' | 'non-stream' = 'stream'): ArenaDirectIntent => ({ requestId: 'web-run', mode: 'direct-local', generationMode, modelId: 'local-model' });
 const host = (base?: ResolvedWebPackage): ArenaDirectHostContext => ({ scopeKey: 'one', reporterInfo: { name: '记者', publication: '报刊' }, adjudicationResults: [], ...(base ? { resolveWebPackage: async () => base } : {}) });
-const native = (content: string, finishReason = 'stop') => {
+const native = (content: string, finishReason: 'stop' | 'length' = 'stop', chunkSize = 19) => {
   let request: AiExecutionRequest | undefined;
   const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
     if (command === 'cancel_direct_ai') return;
@@ -23,7 +23,7 @@ const native = (content: string, finishReason = 'stop') => {
     let sequence = 0;
     emit({ ...identity, type: 'started', sequence: sequence++ });
     emit({ ...identity, type: 'reasoning-delta', sequence: sequence++, delta: '独立推理' });
-    for (let offset = 0; offset < content.length; offset += 19) emit({ ...identity, type: 'text-delta', sequence: sequence++, delta: content.slice(offset, offset + 19) });
+    for (let offset = 0; offset < content.length; offset += chunkSize) emit({ ...identity, type: 'text-delta', sequence: sequence++, delta: content.slice(offset, offset + chunkSize) });
     emit({ ...identity, type: 'result', sequence, result: { ...identity, status: 'completed', output: { text: content, reasoning: '独立推理' }, finishReason } });
   });
   return { invoke, options: { invoke, profileId: 'profile', createChannel: () => ({}) }, get request() { return request; } };
@@ -84,4 +84,32 @@ describe('Arena Web Direct protocol', () => {
     const result = await executeArenaDirect(transport.options, input(), intent(), host(), new AbortController().signal);
     expect(result.status).toBe('invalid-output'); expect(result.rawText).toBe(html + trailer); expect(result).not.toHaveProperty('renderSnapshot');
   });
+  it('freezes the selected package and input before the resolver awaits, and rejects mismatched identity', async () => {
+    const base = await jsonPackage(), transport = native('{"value":1}\n' + trailer);
+    let release!: (base: ResolvedWebPackage) => void;
+    const wait = new Promise<ResolvedWebPackage>((resolve) => { release = resolve; });
+    const value = { ...input(), webPackageRef: { ...base.ref } };
+    const executing = executeArenaDirect(transport.options, value, intent(), { ...host(), resolveWebPackage: () => wait }, new AbortController().signal);
+    value.webPackageRef.version = 'later'; value.combatants[0]!.data.name = '后来的角色'; release(base);
+    const result = await executing; expect(result.status).toBe('completed');
+    const payload = JSON.parse(transport.request!.arenaInputJson!); expect(payload.webPackageRef).toEqual(base.ref); expect(payload.combatants[0].data.name).toBe('甲');
+    const invalidTransport = native('{"value":1}\n' + trailer);
+    expect((await executeArenaDirect(invalidTransport.options, { ...input(), webPackageRef: { ...base.ref, version: 'wrong' } }, intent(), host(base), new AbortController().signal)).status).toBe('failed');
+    expect(invalidTransport.invoke).not.toHaveBeenCalled();
+  });
+
+  it('keeps the full shared 4 MiB content-plus-reasoning boundary for Web output', async () => {
+    const frame = '<!doctype html><html><body></body></html>\n' + trailer;
+    const budget = 4 * 1024 * 1024;
+    const body = 'x'.repeat(budget - new TextEncoder().encode(frame + '独立推理').byteLength);
+    const raw = frame.replace('</body>', body + '</body>');
+    const atLimit = native(raw, 'stop', 60_000);
+    const accepted = await executeArenaDirect(atLimit.options, input(), intent(), host(), new AbortController().signal);
+    expect(accepted.status).toBe('completed'); expect(accepted.rawText).toBe(raw);
+    const overLimit = native(raw + 'x', 'stop', 60_000);
+    const rejected = await executeArenaDirect(overLimit.options, input(), intent(), host(), new AbortController().signal);
+    expect(rejected.status).not.toBe('completed'); expect(rejected).not.toHaveProperty('renderSnapshot');
+    expect(atLimit.invoke).toHaveBeenCalledOnce(); expect(overLimit.invoke).toHaveBeenCalledOnce();
+  });
+
 });

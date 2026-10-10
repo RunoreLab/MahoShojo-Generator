@@ -4,7 +4,7 @@ import { nextLocalTimestamp } from '@mahoshojo/local-library/record';
 import { deriveLocalWebPackageId, LocalWebPackageRecordV1Schema, type LocalWebPackageRecordV1, type WebPackageRepository } from '@mahoshojo/local-library/web-package-record';
 import {
   BUILTIN_WEB_PACKAGE_PRESETS, builtinWebPackageSource, findBuiltinWebPackagePreset,
-  importWebPackageArchive, packWebPackageZip, unpackWebPackageZip,
+  importWebPackageArchive, packWebPackageZip, unpackWebPackageZip, WebPackageImportError,
   type ResolvedWebPackage,
 } from '@mahoshojo/web-package';
 
@@ -46,6 +46,8 @@ export class DesktopArenaWebPackages {
   getSnapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   isBusy = () => this.locked;
+  /** Capture at the host effect boundary; an awaited result cannot select or download in a newer scope. */
+  captureScope = () => { const epoch = this.epoch; return () => this.current(epoch); };
   setScope(scope: string) {
     if (scope === this.scope) return;
     this.scope = scope; this.epoch += 1;
@@ -81,7 +83,7 @@ export class DesktopArenaWebPackages {
     this.publish({ busy: true, error: null, diagnostics: [] });
     try { return await action(epoch); }
     catch (error) {
-      if (this.current(epoch)) this.publish({ error: error instanceof Error ? error.message : '本地 Web 包操作失败。' });
+      if (this.current(epoch)) this.publish({ error: error instanceof WebPackageImportError ? `${error.message} ${error.hint}` : error instanceof Error ? error.message : '本地 Web 包操作失败。' });
       return null;
     } finally {
       this.locked = false;

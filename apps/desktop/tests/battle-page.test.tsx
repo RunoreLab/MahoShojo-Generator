@@ -9,29 +9,36 @@ import { resolve } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AiExecutionRequest } from '@mahoshojo/contracts/ai-execution';
 import type { AiStreamEvent } from '@mahoshojo/ai-core/stream-events';
+import { builtinWebPackageSource, BUILTIN_WEB_PACKAGE_PRESETS, packWebPackageZip, unpackWebPackageZip } from '@mahoshojo/web-package';
+import type { LocalWebPackageRecordV1 } from '@mahoshojo/local-library/web-package-record';
 import type { LocalCardRecordV1 } from '@mahoshojo/local-library/record';
 import { ADVANCED_ARENA_DRAFT_KEY, ARENA_DRAFT_KEY, createInitialArenaDraft, type ArenaDraft } from '../src/features/arena/session';
 import { DESKTOP_AI_CONFIG_STORAGE_KEY } from '../src/features/ai-config/desktop-ai-config-store';
 import { getDesktopAiConfigStore, resetDesktopAiConfigStoreForTests } from '../src/features/ai-config/use-desktop-ai-config';
+import { arenaWebPackageFixture, wrappedArenaWebPackageFile } from './fixtures/arena-web-package';
 import { createDesktopRouter } from '../src/app/router';
-const mocks = vi.hoisted(() => ({ invoke: vi.fn(), listen: vi.fn(), download: vi.fn(), profile: vi.fn() }));
+const mocks = vi.hoisted(() => ({ invoke: vi.fn(), listen: vi.fn(), download: vi.fn(), downloadBinary: vi.fn(), profile: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.invoke, isTauri: () => true, Channel: class { onmessage?: (value: unknown) => void; } }));
 vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ onCloseRequested: mocks.listen }) }));
-vi.mock('../src/platform/download-text-file', () => ({ downloadTextFile: mocks.download }));
+vi.mock('../src/platform/download-text-file', () => ({ downloadTextFile: mocks.download, downloadBinaryFile: mocks.downloadBinary }));
 vi.mock('../src/platform/provider-profile-bridge', () => ({ listProviderProfileIds: async () => ['loopback'], getProviderProfile: mocks.profile }));
 let root: Root, container: HTMLDivElement, server: Server, endpoint: string;
 let activeCloseHandles = 0;
 let markdownSuffix = '';
+let webTextOverride: string | null = null;
+let packageDocs: Map<string, LocalWebPackageRecordV1>, packageBytes: Map<string, Uint8Array>;
 let docs: Map<string, LocalCardRecordV1>, received: AiExecutionRequest[], hold: boolean, release: (() => void) | undefined, failSave: boolean, eof: boolean;
 const nativeFetch = globalThis.fetch;
 const text = '甲与乙共同守护车站。';
+const webHtml = '<!doctype html><html><head><title>本地网页</title></head><body><script>globalThis.webShouldNotRun=true</script><img src="https://untrusted.invalid/tracker.png"/>甲乙的网页故事</body></html>';
+const webTrailer = '<!-- MAHOSHOJO_ARENA_META {"version":1,"report":{"headline":"网页重逢","winner":"甲"},"impacts":[{"characterName":"甲","impact":"建立信任"}]} -->';
 const rendered = (stream: boolean) => stream ? `# 车站重逢\n\n${text}${markdownSuffix}\n<!-- MAHOSHOJO_ARENA_META {"version":1,"report":{"headline":"车站重逢","winner":"甲"},"impacts":[{"characterName":"甲","impact":"学会信任","currentStateSummary":"安心"}]} -->`
   : JSON.stringify({ headline: '车站重逢', article: { body: text + markdownSuffix, analysis: '彼此扶持' }, officialReport: { winner: '甲', conclusion: '合作' }, impacts: [{ characterName: '甲', impact: '学会信任', currentStateSummary: '安心' }] });
 beforeAll(async () => {
   server = createServer((req, res) => { let body = ''; req.on('data', (part) => { body += part; }); req.on('end', () => {
     const request = JSON.parse(body) as AiExecutionRequest; received.push(request);
     const stream = request.messages.length === 1;
-    res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ text: rendered(stream), reasoning: '独立的推理' }));
+    res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ text: JSON.parse(request.arenaInputJson!).reportFormat === 'web' ? webTextOverride ?? `${webHtml}\n${webTrailer}` : rendered(stream), reasoning: '独立的推理' }));
   }); });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   endpoint = `http://127.0.0.1:${(server.address() as { port: number }).port}/v1/chat/completions`;
@@ -40,12 +47,20 @@ afterAll(async () => { await new Promise<void>((resolve) => server.close(() => r
 const button = (text: string, scope: ParentNode = document) => [...scope.querySelectorAll('button')].find((entry) => entry.textContent?.trim() === text)!;
 const settle = async () => { await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); }); };
 const click = async (text: string, scope?: ParentNode) => { expect(button(text, scope), text).toBeTruthy(); await act(async () => button(text, scope).click()); await settle(); };
+const openGenerationOptions = async () => {
+  const section = [...document.querySelectorAll<HTMLButtonElement>('button[aria-expanded]')].find((item) => item.textContent?.includes('⚡ 生成方式'));
+  if (section?.getAttribute('aria-expanded') === 'false') { await act(async () => section.click()); await settle(); }
+};
 const change = async (selector: string, value: string) => {
   const input = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector)!; expect(input, selector).toBeTruthy();
   await act(async () => { Object.getOwnPropertyDescriptor(input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); });
 };
 const mount = async () => { const router = createDesktopRouter(); await router.load(); await act(async () => root.render(<StrictMode><RouterProvider router={router} /></StrictMode>));
   await vi.waitFor(() => expect(container.textContent).toContain('生成战报')); await settle(); return router; };
+const uploadWebZip = async (file: File) => {
+  const picker = document.querySelector<HTMLInputElement>('input[type="file"][accept*="zip"]')!; expect(picker).toBeTruthy(); Object.defineProperty(picker, 'files', { configurable: true, value: [file] });
+  await act(async () => picker.dispatchEvent(new Event('change', { bubbles: true }))); await settle();
+};
 const draft = (mode: ArenaDraft['battleMode'], output: ArenaDraft['generationMode']): ArenaDraft => ({ ...createInitialArenaDraft(), battleMode: mode, generationMode: output,
   combatants: ['甲', '乙'].map((name) => ({ type: 'general-character', data: { templateId: '通用角色', name, content: '完整设定', signature: 'old-source-signature' }, isValid: false, isPreset: false, filename: name })),
   scenario: { content: mode === 'scenario' ? { templateId: '通用情景', title: '车站', content: '雨中重逢' } : null, fileName: null },
@@ -56,7 +71,7 @@ const calls = () => mocks.invoke.mock.calls.filter(([cmd]) => ['stream_direct_ai
 const scopeClose = () => { const args = mocks.listen.mock.calls.at(-1)!; const event = { preventDefault: vi.fn() }; args[0](event); return event; };
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  vi.clearAllMocks(); localStorage.clear(); received = []; docs = new Map(); hold = false; failSave = false; eof = false; release = undefined; activeCloseHandles = 0; markdownSuffix = '';
+  vi.clearAllMocks(); localStorage.clear(); received = []; docs = new Map(); hold = false; failSave = false; eof = false; release = undefined; activeCloseHandles = 0; markdownSuffix = ''; webTextOverride = null; packageDocs = new Map(); packageBytes = new Map();
   localStorage.setItem(DESKTOP_AI_CONFIG_STORAGE_KEY, JSON.stringify({ version: 2, selection: { executionPreference: 'client', clientConnectionId: 'loopback' }, hiddenPresetIds: [] }));
   resetDesktopAiConfigStoreForTests();
   mocks.profile.mockResolvedValue({ id: 'loopback', name: 'Loopback', adapter: 'openai-compatible', baseUrl: endpoint.replace('/chat/completions', ''), modelId: 'fixture-model' });
@@ -65,6 +80,17 @@ beforeEach(() => {
     if (command === 'list_local_cards') { const request = args!.request as { cardTypes: string[] }; return { documents: [...docs.values()].filter((card) => !request.cardTypes.length || request.cardTypes.includes(card.cardType)).map((card) => JSON.stringify(card)) }; }
     if (command === 'get_local_card') return docs.has(args!.id as string) ? JSON.stringify(docs.get(args!.id as string)) : null;
     if (command === 'save_local_card') { if (failSave) throw new Error('disk-failed'); const request = args!.request as { document: string; writeMode: string }; expect(request.writeMode).toBe('insert-if-absent'); const card = JSON.parse(request.document) as LocalCardRecordV1; const alreadyPresent = docs.has(card.id); if (!alreadyPresent) docs.set(card.id, card); return { id: card.id, alreadyPresent }; }
+    if (command === 'list_web_packages') return { documents: [...packageDocs.values()].filter((record) => !record.deletedAt).map((record) => JSON.stringify(record)) };
+    if (command === 'get_web_package') return packageDocs.has(args!.id as string) ? JSON.stringify(packageDocs.get(args!.id as string)) : null;
+    if (command === 'read_web_package_archive') { const bytes = packageBytes.get(args!.contentDigest as string); if (!bytes) throw { code: 'blob-not-found', message: 'missing' }; return bytes.slice().buffer; }
+    if (command === 'save_web_package') {
+      if (failSave) throw new Error('disk-failed');
+      const request = args!.request as { document: string; archive: { b64: string; len: number } };
+      const record = JSON.parse(request.document) as LocalWebPackageRecordV1;
+      const bytes = Uint8Array.from(atob(request.archive.b64), (char) => char.charCodeAt(0)); expect(bytes.byteLength).toBe(request.archive.len);
+      packageDocs.set(record.id, record); packageBytes.set(record.ref.digest, bytes); return { id: record.id, blobOutcome: 'stored', alreadyPresent: false };
+    }
+    if (command === 'delete_web_package' || command === 'restore_web_package') { const request = args!.request as { document: string }; const record = JSON.parse(request.document) as LocalWebPackageRecordV1; packageDocs.set(record.id, record); return; }
     if (command === 'stream_target_ai' || command === 'stream_direct_ai') {
       const request = args!.request as AiExecutionRequest; const channel = args!.onEvent as { onmessage(event: AiStreamEvent): void };
       const response = await nativeFetch(endpoint, { method: 'POST', body: JSON.stringify(request) }); const output = await response.json() as { text: string; reasoning: string };
@@ -340,6 +366,148 @@ describe('Desktop /battle journey against loopback fixture', () => {
     const request = JSON.parse(received.at(-1)!.arenaInputJson!); expect(request.questionnaires).toHaveLength(2); expect(request.questionnaires[0].id).toBe('girl-band-taiban-war-1.1'); expect(request.questionnaires[1].useLore).toBe(false);
     expect(received.at(-1)!.messages.map((message) => message.content).join('')).not.toContain('本地岛屿');
     expect(request.adjudicationResults).toMatchObject([{ description: '手动天空判定' }]); expect(docs.get(local.id)).toEqual(local);
+  });
+
+});
+
+
+describe('Desktop Web source journey with execution closed', () => {
+  it.each((['battle', 'arena'] as const).flatMap((product) => (['classic', 'kizuna', 'daily', 'scenario'] as const).map((mode) => ({ product, mode }))))('$product $mode × both delivery modes generates/saves/reopens without mounting content', async ({ product, mode }) => {
+    for (const output of ['stream', 'non-stream'] as const) {
+      const key = product === 'arena' ? ADVANCED_ARENA_DRAFT_KEY : ARENA_DRAFT_KEY;
+      localStorage.setItem(key, JSON.stringify({ version: 1, draft: { ...draft(mode, output), reportFormat: 'web' } }));
+      window.location.hash = `#/${product}`;
+      const router = await mount(); await click('恢复草稿'); await settle(); await click('生成战报');
+      await vi.waitFor(() => expect(container.textContent).toContain('生成完成。'));
+      expect(container.querySelector('[aria-label="Web 战报源码（安全文本）"]')?.textContent).toContain('webShouldNotRun');
+      expect(container.querySelector('iframe, script, img[src*="untrusted.invalid"]')).toBeNull();
+      expect((globalThis as { webShouldNotRun?: boolean }).webShouldNotRun).toBeUndefined();
+      expect(button('运行 Web 战报').disabled).toBe(true);
+      expect(mocks.invoke.mock.calls.some(([command]) => /^(begin_web_package_instance|append_web_package_resource|open_web_package_instance)$/.test(command))).toBe(false);
+      expect(JSON.parse(received.at(-1)!.arenaInputJson!).reportFormat).toBe('web');
+      await click('完整导出 JSON'); const exported = JSON.parse(mocks.download.mock.calls.at(-1)![1]);
+      expect(exported.result.renderSnapshot.reportFormat).toBe('web'); expect(exported.result.rawText).toContain('MAHOSHOJO_ARENA_META'); expect(exported.result.markdown).not.toContain('MAHOSHOJO_ARENA_META');
+      await click('保存叙事历史到本地库'); expect([...docs.values()].some((record) => record.cardType === 'history')).toBe(true);
+      await act(async () => router.navigate({ to: '/local-library' })); await settle();
+      await act(async () => router.navigate({ to: `/${product}` })); await settle(); await click('恢复草稿');
+      expect(container.querySelector('[aria-label="Web 战报源码（安全文本）"]')?.textContent).toContain('webShouldNotRun'); expect(button('运行 Web 战报').disabled).toBe(true);
+      await act(async () => root.unmount()); root = createRoot(container); docs.clear();
+    }
+  });
+  it.each((['battle', 'arena'] as const).flatMap((product) => (['classic', 'kizuna', 'daily', 'scenario'] as const).map((mode) => ({ product, mode }))))('$product $mode package target × both delivery modes uses the real preset and frozen artifact', async ({ product, mode }) => {
+    for (const output of ['stream', 'non-stream'] as const) {
+      const key = product === 'arena' ? ADVANCED_ARENA_DRAFT_KEY : ARENA_DRAFT_KEY;
+      localStorage.setItem(key, JSON.stringify({ version: 1, draft: { ...draft(mode, output), reportFormat: 'web' } })); window.location.hash = `#/${product}`;
+      await mount(); await click('恢复草稿'); await settle(); await openGenerationOptions(); await click('选择 Web 包');
+      const preset = document.querySelector<HTMLButtonElement>('[aria-label="选择 Web 包：竞技场新闻"]');
+      expect(preset, document.body.textContent ?? '').toBeTruthy(); await act(async () => preset!.click()); await settle();
+      await click('生成战报'); await vi.waitFor(() => expect(container.textContent).toContain('生成完成。'));
+      expect(JSON.parse(received.at(-1)!.arenaInputJson!).webPackageRef).toEqual(BUILTIN_WEB_PACKAGE_PRESETS[0]!.packageRef);
+      await click('完整导出 JSON'); const exported = JSON.parse(mocks.download.mock.calls.at(-1)![1]);
+      expect(exported.result.renderSnapshot.webPackage.targetPath).toBe('index.html'); expect(exported.result.markdown).toBe(webHtml + '\n');
+      expect(button('运行 Web 战报').disabled).toBe(true); expect(activeCloseHandles).toBe(1);
+      expect(mocks.invoke.mock.calls.some(([command]) => /^(begin_web_package_instance|append_web_package_resource|open_web_package_instance)$/.test(command))).toBe(false);
+      await act(async () => root.unmount()); root = createRoot(container);
+    }
+  });
+  it('imports ZIP with explicit local saving, reopens its exact record, and downloads original bytes', async () => {
+    const base = await builtinWebPackageSource.resolve(BUILTIN_WEB_PACKAGE_PRESETS[0]!.packageRef), archive = await packWebPackageZip(base);
+    saveDraft({ ...draft('daily', 'stream'), reportFormat: 'web' }); await mount(); await click('恢复草稿'); await settle(); await openGenerationOptions(); await click('选择 Web 包');
+    const localTab = [...document.querySelectorAll<HTMLButtonElement>('button')].find((entry) => entry.textContent?.trim().startsWith('本地库'))!; await act(async () => localTab.click()); await settle();
+    const checkbox = [...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].find((entry) => entry.closest('label')?.textContent?.includes('导入时保存到本地库'))!;
+    expect(checkbox).toBeTruthy(); expect(checkbox.checked).toBe(false); await act(async () => checkbox.click());
+    const file = new File([archive.slice().buffer], 'original.zip', { type: 'application/zip' }); Object.defineProperty(file, 'arrayBuffer', { value: async () => archive.slice().buffer });
+    const picker = document.querySelector<HTMLInputElement>('input[type="file"][accept*="zip"]')!; expect(picker).toBeTruthy(); Object.defineProperty(picker, 'files', { configurable: true, value: [file] });
+    await act(async () => picker.dispatchEvent(new Event('change', { bubbles: true }))); await vi.waitFor(() => expect(packageDocs.size).toBe(1)); await settle();
+    expect(mocks.invoke.mock.calls.filter(([command]) => command === 'save_web_package')).toHaveLength(1);
+    expect(localStorage.getItem(ARENA_DRAFT_KEY)).toContain(base.ref.digest);
+    await act(async () => root.unmount()); root = createRoot(container); await mount(); await click('恢复草稿'); await settle(); await openGenerationOptions(); await click('更换 Web 包');
+    const tab = [...document.querySelectorAll<HTMLButtonElement>('button')].find((entry) => entry.textContent?.trim().startsWith('本地库'))!; await act(async () => tab.click()); await settle();
+    const download = document.querySelector<HTMLButtonElement>('[aria-label="下载 Web 包 ZIP：竞技场新闻"]'); expect(download, document.body.textContent ?? '').toBeTruthy(); await act(async () => download!.click());
+    await vi.waitFor(() => expect(mocks.downloadBinary).toHaveBeenCalled()); expect(mocks.downloadBinary.mock.calls.at(-1)![1]).toEqual(archive);
+    expect(mocks.invoke.mock.calls.some(([command]) => command === 'open_web_package_instance')).toBe(false);
+  });
+  it.each([
+    { mediaType: 'application/json', generated: '```json\n{"value":7}\n```', normalized: '{"value":7}' },
+    { mediaType: 'text/javascript', generated: 'globalThis.generatedMustNotRun = true;', normalized: 'globalThis.generatedMustNotRun = true;\n' },
+    { mediaType: 'text/css', generated: 'body { background: url(https://untrusted.invalid/background); }', normalized: 'body { background: url(https://untrusted.invalid/background); }\n' },
+  ])('imports and validates $mediaType without evaluating or dropping opaque base resources', async ({ mediaType, generated, normalized }) => {
+    const { file, base } = await arenaWebPackageFixture({ mediaType }); webTextOverride = generated + '\n' + webTrailer;
+    saveDraft({ ...draft('daily', 'stream'), reportFormat: 'web' }); await mount(); await click('恢复草稿'); await openGenerationOptions(); await click('选择 Web 包');
+    const tab = [...document.querySelectorAll<HTMLButtonElement>('button')].find((entry) => entry.textContent?.trim().startsWith('本地库'))!; await act(async () => tab.click()); await settle();
+    const picker = document.querySelector<HTMLInputElement>('input[type="file"][accept*="zip"]')!; Object.defineProperty(picker, 'files', { configurable: true, value: [file] });
+    await act(async () => picker.dispatchEvent(new Event('change', { bubbles: true }))); await vi.waitFor(() => expect(localStorage.getItem(ARENA_DRAFT_KEY)).toContain(base.ref.digest)); await settle();
+    expect(packageDocs.size).toBe(0); await click('生成战报'); await vi.waitFor(() => expect(container.textContent).toContain('生成完成。'));
+    await click('完整导出 JSON'); const exported = JSON.parse(mocks.download.mock.calls.at(-1)![1]);
+    expect(exported.result.markdown).toBe(normalized); expect(exported.result.rawText).toBe(webTextOverride);
+    expect(exported.result.renderSnapshot.webPackage).toMatchObject({ packageRef: base.ref, targetPath: base.manifest.generation.target, targetMediaType: mediaType });
+    expect(container.querySelector('iframe,script,style')).toBeNull(); expect((globalThis as { generatedMustNotRun?: boolean }).generatedMustNotRun).toBeUndefined();
+    expect(button('运行 Web 战报').disabled).toBe(true); expect(activeCloseHandles).toBe(1);
+    await act(async () => { expect(scopeClose().preventDefault).toHaveBeenCalledOnce(); }); expect(window.confirm).toHaveBeenCalled();
+    await click('下载生成目标');
+    if (mediaType !== 'application/json') { expect(mocks.download.mock.calls.at(-1)![0]).toBe('arena-complete.json'); vi.mocked(window.confirm).mockReturnValue(true); await click('下载生成目标'); }
+    expect(mocks.download.mock.calls.at(-1)![1]).toBe(normalized);
+    await vi.waitFor(() => expect(button('下载精确 Base ZIP（不含生成目标）').disabled).toBe(false)); await click('下载精确 Base ZIP（不含生成目标）');
+    const exportedBase = await unpackWebPackageZip(mocks.downloadBinary.mock.calls.at(-1)![1]); expect(exportedBase.ref).toEqual(base.ref);
+    expect(exportedBase.readFile('unknown.bin')).toEqual(new Uint8Array([0, 255, 11, 42])); expect(exportedBase.readFile(base.manifest.generation.target)).toBeUndefined();
+  });
+
+  it('keeps a failed package save exportable and fences a late file read after target change', async () => {
+    const { file, archive, base } = await arenaWebPackageFixture();
+    saveDraft({ ...draft('daily', 'stream'), reportFormat: 'web' }); await mount(); await click('恢复草稿'); await openGenerationOptions(); await click('选择 Web 包');
+    const tab = [...document.querySelectorAll<HTMLButtonElement>('button')].find((entry) => entry.textContent?.trim().startsWith('本地库'))!; await act(async () => tab.click()); await settle();
+    const checkbox = [...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].find((entry) => entry.closest('label')?.textContent?.includes('导入时保存到本地库'))!; await act(async () => checkbox.click()); failSave = true;
+    await uploadWebZip(file); await vi.waitFor(() => expect(document.body.textContent).toContain('保存失败')); expect(packageDocs.size).toBe(0);
+    const download = document.querySelector<HTMLButtonElement>('[aria-label="下载 Web 包 ZIP：本地 json 包"]')!; expect(download).toBeTruthy(); await act(async () => download.click());
+    await vi.waitFor(() => expect(mocks.downloadBinary).toHaveBeenCalled()); expect(mocks.downloadBinary.mock.calls.at(-1)![1]).toEqual(archive);
+    let finish!: (buffer: ArrayBuffer) => void; const pending = new Promise<ArrayBuffer>((resolve) => { finish = resolve; });
+    const late = new File(['pending'], 'late.zip'); Object.defineProperty(late, 'arrayBuffer', { value: () => pending });
+    await uploadWebZip(late); const writes = mocks.invoke.mock.calls.filter(([command]) => command === 'save_web_package').length;
+    await act(async () => { expect(scopeClose().preventDefault).toHaveBeenCalledOnce(); }); expect(activeCloseHandles).toBe(1);
+    await act(async () => getDesktopAiConfigStore().selectExecutionLocation('server')); await settle(); finish(archive.slice().buffer); await settle();
+    expect(mocks.invoke.mock.calls.filter(([command]) => command === 'save_web_package')).toHaveLength(writes); expect(packageDocs.size).toBe(0);
+    expect(JSON.parse(localStorage.getItem(ARENA_DRAFT_KEY)!).draft.webPackageRef).toEqual(base.ref);
+    expect(document.body.textContent).toContain('服务器生成暂不可用'); expect(mocks.invoke.mock.calls.some(([command]) => command === 'open_web_package_instance')).toBe(false);
+  });
+
+  it.each(['cancel', 'EOF', 'target'] as const)('Web package %s retains partial source with no success artifact, history or duplicate execution', async (ending) => {
+    hold = ending !== 'EOF'; eof = ending === 'EOF';
+    saveDraft({ ...draft('daily', 'stream'), reportFormat: 'web', webPackageRef: BUILTIN_WEB_PACKAGE_PRESETS[0]!.packageRef });
+    await mount(); await click('恢复草稿'); await act(async () => { button('生成战报').click(); button('生成战报').click(); });
+    await vi.waitFor(() => expect(calls()).toHaveLength(1)); await settle();
+    if (ending === 'cancel') { await click('取消生成'); release?.(); }
+    if (ending === 'target') { expect(() => getDesktopAiConfigStore().selectExecutionLocation('server')).toThrow('生成期间'); await click('取消生成'); release?.(); await vi.waitFor(() => expect(getDesktopAiConfigStore().getSnapshot().generationActive).toBe(false)); await act(async () => getDesktopAiConfigStore().selectExecutionLocation('server')); await settle(); }
+    await vi.waitFor(() => expect(button('取消生成')).toBeUndefined());
+    await click('完整导出 JSON'); const exported = JSON.parse(mocks.download.mock.calls.at(-1)![1]);
+    expect(exported.result.rawText).toContain('webShouldNotRun'); expect(exported.result.phase).not.toBe('completed'); expect(exported.result.renderSnapshot).toBeNull(); expect(exported.candidates).toBeNull();
+    expect(exported.draft.narrativeHistoryEntries).toEqual([]); expect(docs.size).toBe(0); expect(calls()).toHaveLength(1);
+    expect(container.querySelector('iframe,script,img[src*="untrusted.invalid"]')).toBeNull(); expect(button('运行 Web 战报').disabled).toBe(true);
+  });
+
+  it('restores missing exact packages, requires explicit candidate selection, and preserves historical provenance through compatibility', async () => {
+    const original = await arenaWebPackageFixture({ version: '1.0.0' }), second = await arenaWebPackageFixture({ version: '2.0.0' }), third = await arenaWebPackageFixture({ version: '3.0.0' });
+    webTextOverride = '{"value":3}\n' + webTrailer;
+    saveDraft({ ...draft('daily', 'stream'), reportFormat: 'web' }); await mount(); await click('恢复草稿'); await openGenerationOptions(); await click('选择 Web 包');
+    const tab = [...document.querySelectorAll<HTMLButtonElement>('button')].find((entry) => entry.textContent?.trim().startsWith('本地库'))!; await act(async () => tab.click()); await settle();
+    await uploadWebZip(original.file); await click('生成战报'); await vi.waitFor(() => expect(container.textContent).toContain('生成完成。'));
+    await act(async () => root.unmount()); root = createRoot(container); await mount(); await click('恢复草稿');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('revision 不可用'));
+    const replayImport = async (file: File) => { const picker = document.querySelector<HTMLInputElement>('[data-testid="arena-web-replay-controls"] input[type="file"]')!; expect(picker).toBeTruthy(); Object.defineProperty(picker, 'files', { configurable: true, value: [file] }); await act(async () => picker.dispatchEvent(new Event('change', { bubbles: true }))); await settle(); };
+    await replayImport(wrappedArenaWebPackageFile()); await vi.waitFor(() => expect(document.body.textContent).toContain('可用候选 2.0.0'));
+    expect(document.querySelector('[data-testid="arena-web-replay-controls"]')?.textContent).toContain('synthetic-wrapper/');
+    expect(document.querySelector('[data-testid="arena-web-replay-controls"]')?.textContent).toContain(second.base.ref.digest);
+    expect(document.body.textContent).not.toContain('当前使用的是不同版本');
+    await replayImport(third.file); await vi.waitFor(() => expect(document.querySelector('[data-testid="arena-web-replay-controls"] select')) .toBeTruthy());
+    expect(button('确认兼容校验此版本').disabled).toBe(true);
+    const select = document.querySelector<HTMLSelectElement>('[data-testid="arena-web-replay-controls"] select')!;
+    await act(async () => { select.value = third.base.ref.digest; select.dispatchEvent(new Event('change', { bubbles: true })); }); await click('确认兼容校验此版本');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('当前使用的是不同版本'));
+    await click('完整导出 JSON'); let exported = JSON.parse(mocks.download.mock.calls.at(-1)![1]); expect(exported.result.renderSnapshot.webPackage.packageRef).toEqual(original.base.ref);
+    expect(button('运行 Web 战报').disabled).toBe(true); expect(button('下载精确 Base ZIP（不含生成目标）').disabled).toBe(true);
+    await openGenerationOptions(); await click('更换 Web 包'); const local = [...document.querySelectorAll<HTMLButtonElement>('button')].find((entry) => entry.textContent?.trim().startsWith('本地库'))!; await act(async () => local.click()); await settle(); await uploadWebZip(original.file);
+    await vi.waitFor(() => expect(document.body.textContent).toContain('已验证精确包与生成目标'));
+    await click('完整导出 JSON'); exported = JSON.parse(mocks.download.mock.calls.at(-1)![1]); expect(exported.result.renderSnapshot.webPackage.packageRef).toEqual(original.base.ref);
+    expect(packageDocs.size).toBe(0); expect(mocks.invoke.mock.calls.some(([command]) => command === 'open_web_package_instance')).toBe(false);
   });
 
 });

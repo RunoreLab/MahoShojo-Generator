@@ -31,7 +31,7 @@ it('uses one WebView2 download and retains the URL for the full 60 seconds', () 
 });
 
 it('exports opaque ZIP bytes through the same delayed browser download without mutating the caller', async () => {
-  const schedule = vi.spyOn(window, 'setTimeout').mockReturnValue(1);
+  const schedule = vi.spyOn(window, 'setTimeout').mockReturnValue(1 as unknown as ReturnType<typeof window.setTimeout>);
   const createObjectURL = vi.fn<(blob: Blob) => string>(() => 'blob:https://desktop.example/archive');
   const revokeObjectURL = vi.fn();
   vi.stubGlobal('URL', { createObjectURL, revokeObjectURL });

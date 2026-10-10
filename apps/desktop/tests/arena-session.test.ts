@@ -229,3 +229,17 @@ it('keeps completed Web source and narrative history without inventing character
   expect(restored.getSnapshot().draft.reportFormat).toBe('markdown'); expect(restored.getSnapshot().resultFormat).toBe('web');
   expect(restored.getSnapshot().markdown).toBe(source); expect(restored.getSnapshot().candidates).toBeNull(); restored.dispose();
 });
+
+it.each([
+  { reportFormat: ['web'] },
+  { reportFormat: 'web', renderSnapshot: { version: 2, reportFormat: 'web' } },
+  { reportFormat: 'markdown', renderSnapshot: { version: 1, reportFormat: 'web' } },
+  { reportFormat: 'web', renderSnapshot: { version: 1, reportFormat: 'web', webPackage: { packageRef: 'fake' } } },
+])('protects malformed Web result drafts without overwriting the original bytes: %j', (output) => {
+  const storage = memory(), { port } = repository();
+  const raw = JSON.stringify({ version: 1, draft: makeDraft(), output: { phase: 'completed', rawText: '<html>source', markdown: '<html>source', reasoning: '', ...output } });
+  storage.setItem(ARENA_DRAFT_KEY, raw);
+  const session = new DesktopArenaSession({ repository: port, storage });
+  expect(session.getSnapshot().pendingRestore).toBe(false); expect(session.getSnapshot().draftError).toBeTruthy();
+  session.updateDraft(makeDraft()); expect(storage.getItem(ARENA_DRAFT_KEY)).toBe(raw); expect(port.putIfAbsent).not.toHaveBeenCalled(); session.dispose();
+});

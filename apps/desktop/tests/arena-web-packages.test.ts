@@ -34,6 +34,16 @@ const host = (repo: WebPackageRepository, confirmRestore: () => boolean | Promis
 };
 
 describe('Arena main-UI Web package library', () => {
+  it('lets consumer effects recheck their original scope after an awaited controller result', () => {
+    const { repo } = repository(), store = host(repo), original = store.captureScope(); expect(original()).toBe(true);
+    store.setScope('other'); expect(original()).toBe(false); const replacement = store.captureScope(); expect(replacement()).toBe(true);
+    store.dispose(); expect(replacement()).toBe(false);
+  });
+  it('keeps canonical import repair guidance visible on an invalid ZIP', async () => {
+    const { repo } = repository(), store = host(repo);
+    expect(await store.importFile({ arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer }, false)).toEqual({ failed: true });
+    expect(store.getSnapshot().error).toContain('请确认选择的是 Web 包 ZIP'); expect(repo.put).not.toHaveBeenCalled();
+  });
   it('imports into this host only by default, preserves raw ZIP and never runs or globally stages scripts', async () => {
     const { repo } = repository(), store = host(repo), { file, archive, base } = await fixture();
     expect(await store.importFile(file, false)).toEqual({ ref: base.ref, saved: false });
