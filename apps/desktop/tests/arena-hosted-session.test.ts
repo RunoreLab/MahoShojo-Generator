@@ -12,7 +12,7 @@ const actor = { kind: 'anonymous' as const };
 const body = '# 服务器故事\n\n完整正文';
 const draft = (): ArenaDraft => ({ ...createInitialArenaDraft(), generationMode: 'stream', battleMode: 'daily',
   combatants: [{ type: 'general-character', filename: '甲.json', isValid: false, isPreset: false, data: { name: '甲', content: '源设定', signature: 'source-authority', adjudicationEvents: [{ type: 'binary', description: '源判定', probability: 50 }] } }],
-  settings: { ...createInitialArenaDraft().settings, writeNarrativeHistory: true } });
+  settings: { ...createInitialArenaDraft().settings, writeNarrativeHistory: true, writeArenaHistory: false, writeCurrentState: false } });
 function storage() {
   const data = new Map<string, string>(); let fail = false;
   return { data, fail: () => { fail = true; }, recover: () => { fail = false; }, getItem: (key: string) => data.get(key) ?? null,

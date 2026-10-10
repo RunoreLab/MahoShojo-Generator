@@ -75,8 +75,8 @@ describe('real complete companion bridge and C0 recovery adapter', () => {
         const result = await executeArenaHosted({ invoke: n.invoke }, input(mode, format), { ...intent, systemConfig: undefined, ...funding }, c.host, new AbortController().signal);
         expect(result).toMatchObject({ status: 'completed', generationId, canAppendHistory: true,
           hosted: { delivery: 'non-stream', companionState: 'complete', terminal: null, metadataState: 'available', companion: envelope(mode, format) } });
-        expect(n.operations).toHaveLength(1); expect(n.operations[0]).toMatchObject({ operation: 'create-json', body: { writeArenaHistory: false, writeCurrentState: false } });
-        expect(c.host.recovery.getSnapshot().pointer).toMatchObject({ version: 2, delivery: 'non-stream', generationId, state: 'completed' });
+        expect(n.operations).toHaveLength(1); expect(n.operations[0]).toMatchObject({ operation: 'create-json', reconciliationVersion: 'arena-reconciliation-v1', body: { writeArenaHistory: true, writeCurrentState: true } });
+        expect(c.host.recovery.getSnapshot().pointer).toMatchObject({ version: 3, delivery: 'non-stream', generationId, state: 'completed' });
         if (result.status === 'completed') { expect(result.report.userGuidance).toBe('\ud800'); expect(result.report.aiUsage?.completionTokens).toBe(18014398509481982); }
       }
   });

@@ -31,6 +31,8 @@ export class ArenaHostedBridgeError extends Error {
   constructor(readonly code: DesktopArenaHostedError['code'] | 'protocol' | 'transport', readonly dispatchState: 'not-dispatched' | 'unknown' = 'unknown', readonly intentOwnership: DesktopArenaHostedError['intentOwnership'] = 'unknown') {
     const messages: Partial<Record<DesktopArenaHostedError['code'] | 'protocol' | 'transport', string>> = {
       'capability-unavailable': '服务器尚未声明所选生成方式及身份保护所需协议，未开始生成。',
+      'reconciliation-capability-unavailable': '角色更新服务尚未提供受支持的协议；可关闭角色写入后生成报告，已完成报告与原卡仍保留。',
+      'reconciliation-output-too-large': '角色更新超过 16 MiB 接收上限；已完成报告与原卡仍保留。',
       'storage-unavailable': '原生恢复凭据无法保存或读取，请检查本机安全存储。',
       'scope-changed': '账号或当前请求身份已变化，原操作已停止。',
       'create-already-attempted': '该请求已尝试创建，请查找或续流，不重复创建。',

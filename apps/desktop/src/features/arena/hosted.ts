@@ -125,7 +125,7 @@ export const executeArenaHosted = async (
   const frozen = structuredClone({ input, intent, actor: context.actor });
   const now = context.now ?? (() => new Date().toISOString());
   const snapshot = buildArenaGenerationInputSnapshot({ ...frozen.input, arenaFreeRankingEnabled: false,
-    settings: { ...frozen.input.settings, writeArenaHistory: false, writeCurrentState: false } });
+    settings: { ...frozen.input.settings } });
   let base: ResolvedWebPackage | undefined;
   if (frozen.input.reportFormat === 'web' && frozen.input.webPackageRef) {
     if (!context.resolveWebPackage) throw new Error('Web 包的精确版本不可用，请重新导入。');
@@ -136,11 +136,12 @@ export const executeArenaHosted = async (
   // JSON serialization is the actual wire projection: undefined properties are absent.
   const nonStream = frozen.intent.generationMode === 'non-stream';
   const create = (nonStream ? DesktopArenaHostedJsonCreateRequestSchema : DesktopArenaHostedCreateRequestSchema).parse({ operation: nonStream ? 'create-json' : 'create-stream', product: context.product,
-    requestId: frozen.intent.requestId, actor: frozen.actor, body: JSON.parse(JSON.stringify(snapshot)),
+    requestId: frozen.intent.requestId, actor: frozen.actor, reconciliationVersion: 'arena-reconciliation-v1', body: JSON.parse(JSON.stringify(snapshot)),
     systemConfig: frozen.intent.systemConfig, presetConfig: frozen.intent.presetConfig, replaceRequestId: context.replaceRequestId });
   const bodyHash = await digest({ body: create.body, systemConfig: create.systemConfig, presetConfig: create.presetConfig }); signal.throwIfAborted();
   if (context.isCurrent?.() === false) throw new ArenaHostedBridgeError('scope-changed', 'not-dispatched');
-  const pointer = DesktopArenaHostedRecoveryPointerSchema.parse({ ...(nonStream ? { version: 2, delivery: 'non-stream', protocolVersion: ARENA_COMPANION_PROTOCOL_VERSION } : { version: 1, protocolVersion: DESKTOP_ARENA_HOSTED_PROTOCOL_VERSION }),
+  const pointer = DesktopArenaHostedRecoveryPointerSchema.parse({ version: 3, delivery: nonStream ? 'non-stream' : 'stream', protocolVersion: nonStream ? ARENA_COMPANION_PROTOCOL_VERSION : DESKTOP_ARENA_HOSTED_PROTOCOL_VERSION,
+    reconciliationVersion: 'arena-reconciliation-v1', writeArenaHistory: snapshot.writeArenaHistory, writeCurrentState: snapshot.writeCurrentState,
     product: context.product, requestId: frozen.intent.requestId, bodyHash, actor: frozen.actor,
     format: frozen.input.reportFormat, battleMode: frozen.input.battleMode, webPackageRef: frozen.input.webPackageRef ?? undefined,
     state: 'prepared', updatedAt: now() });
@@ -163,7 +164,7 @@ const runHosted = async (
 ): Promise<ArenaHostedOutcome> => {
   context = { ...context };
   let explicitRestoreLookup = !create && !automaticRecovery;
-  const nonStream = pointer.version === 2 && pointer.delivery === 'non-stream';
+  const nonStream = pointer.version !== 1 && pointer.delivery === 'non-stream';
   const scope = { product: pointer.product, requestId: pointer.requestId, actor: pointer.actor };
   let markdown = '', reasoning = '', generationId = pointer.generationId ?? null;
   let usage: AiExecutionUsage | undefined;

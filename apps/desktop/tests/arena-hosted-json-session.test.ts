@@ -18,7 +18,7 @@ function fixture(values = new Map<string, string>(), value = full) {
   const session = new DesktopArenaSession({ storage, repository, requestId: () => requestId, now: () => now,
     hostedTestPorts: { createChannel: () => ({ onmessage: () => undefined }), wait: async () => undefined, maxReconnectAttempts: 0 } }); session.setScope('A');
   const initial = createInitialArenaDraft(); const draft = { ...initial, battleMode: 'daily' as const, generationMode: 'non-stream' as const,
-    settings: { ...initial.settings, writeNarrativeHistory: true }, combatants: [{ type: 'general-character' as const, isValid: true, isPreset: false, filename: '甲.json', data: { name: '甲', content: '原角色', signature: 'original-signature' } }] };
+    settings: { ...initial.settings, writeNarrativeHistory: true, writeArenaHistory: false, writeCurrentState: false }, combatants: [{ type: 'general-character' as const, isValid: true, isPreset: false, filename: '甲.json', data: { name: '甲', content: '原角色', signature: 'original-signature' } }] };
   const operations: Record<string, unknown>[] = [];
   const invoke = vi.fn(async (command: string, args?: Record<string, unknown>) => {
     if (command === 'arena_hosted_detach') return;
@@ -57,7 +57,7 @@ describe('complete JSON in the shared Arena session', () => {
     f.setFail(true); expect(await f.session.save('history')).toBe(false); expect(f.session.getSnapshot()).toMatchObject({ phase: 'completed', saveStatus: 'failed', hosted: { companion: full } });
     f.setFail(false); expect(await f.session.save('history')).toBe(true); expect(f.records.size).toBe(1); expect(f.operations).toHaveLength(1); f.session.dispose();
   });
-  it('reopens v2 without another create, parses structured replay, preserves missing-full-JSON state and does not auto-append', async () => {
+  it('reopens the new pointer without another create, parses structured replay, preserves missing-full-JSON state and does not auto-append', async () => {
     const f = fixture(); f.session.updateDraft(f.draft); await f.session.generateHosted({ invoke: f.invoke }, f.draft, task, actor); f.session.dispose();
     const reopened = fixture(f.values); reopened.session.restoreDraft();
     expect(reopened.session.canAppendHostedHistory()).toBe(false); expect(reopened.session.getSnapshot().hosted?.companion).toEqual(full);

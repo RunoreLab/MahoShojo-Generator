@@ -132,7 +132,7 @@ describe('Desktop Hosted adapter through real C0 and Native bridge', () => {
         report: { officialReport: { winner: '' }, reporterInfo: { name: '', publication: '' } } });
       expect(value).toEqual(original); expect(h.streamRequests).toHaveLength(1); expect(h.controlRequests).toHaveLength(0);
       expect(h.streamRequests[0]).toMatchObject({ operation: 'create-stream', product, actor,
-        body: JSON.parse(JSON.stringify(buildArenaGenerationInputSnapshot({ ...original, settings: { ...original.settings, writeArenaHistory: false, writeCurrentState: false } }))),
+        body: JSON.parse(JSON.stringify(buildArenaGenerationInputSnapshot({ ...original, settings: { ...original.settings } }))),
         ...(funding === 'system' ? { systemConfig: intent().systemConfig } : { presetConfig: intent('preset').presetConfig }) });
       expect(h.streamRequests[0]).not.toHaveProperty('body.adjudicationResults');
       for (const field of ['updatedCombatants', 'impacts', 'signature']) expect(result).not.toHaveProperty(field);

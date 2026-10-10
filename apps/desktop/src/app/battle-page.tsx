@@ -12,12 +12,12 @@ import { parseCombatantsFromText } from '@mahoshojo/domain/arena-file-parser';
 import { buildArenaMaterialState, type ArenaMaterialState } from '@mahoshojo/domain/arena-materials';
 import type { NarrativeHistorySort } from '@mahoshojo/domain/narrative-history-operations';
 import { AdvancedArenaHeaderView, AdvancedArenaPageView, ArenaEditorWorkspaceLayout, BattleLitePageView, BattleLiteHeaderView, ArenaRosterSection, ArenaRosterImportPanel, ArenaMaterialSection, ArenaScenarioSection, BattleModeSelector, StoryOptionsPanel, PresetGridPicker, ArenaDataSettingsPanel, NarrativeHistorySettings, type ArenaRosterSectionModel, type ArenaScenarioSectionModel, type StoryLengthOption } from '@mahoshojo/ui-web/arena';
-import { ArenaReportFormatSelectorView, BattleReportCard, StreamingBattleReportCard } from '@mahoshojo/ui-web/arena-report';
+import { ArenaReportFormatSelectorView, BattleReportCard, StreamingBattleReportCard, CombatantUpdatesPresentation } from '@mahoshojo/ui-web/arena-report';
 import { CardLibraryModal, type CardLibrarySelectionContext } from '@mahoshojo/ui-web/card-library';
 import { NarrativeHistoryPicker } from '@mahoshojo/ui-web/narrative-history';
 import { AiReasoningPanel, GenerationModeSwitcher, useResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
 import { ThemeImage } from '@mahoshojo/ui-web/media';
-import { DENY_EXTERNAL_MEDIA } from '@mahoshojo/ui-web/markdown';
+import { DENY_EXTERNAL_MEDIA, MarkdownBlock } from '@mahoshojo/ui-web/markdown';
 import { BackHomeLink, ProductFooter } from '@mahoshojo/ui-web/shell';
 import { generationActionClassNames, generationSubmitClassName } from '@mahoshojo/ui-web/generation-actions';
 import { DesktopArenaSession, arenaReadinessMessage, arenaReferenceCount, inheritedArenaAdjudication, type ArenaDraft, type DesktopArenaProduct } from '../features/arena/session';
@@ -107,7 +107,7 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
       session.detach(); return true;
     },
   );
-  const busy = diagnosing || state.phase === 'generating' || state.saving || state.importing || aiState.generationActive || advancedBusy || packageState.busy;
+  const busy = diagnosing || state.roleUpdates.status === 'updating' || state.phase === 'generating' || state.saving || state.importing || aiState.generationActive || advancedBusy || packageState.busy;
   const disabled = !guard.ready || busy || state.pendingRestore;
   const update = (patch: Partial<ArenaDraft>) => { if (!disabled) session.updateDraft({ ...session.getSnapshot().draft, ...patch }); };
   const resultRef = useRef<HTMLDivElement>(null);
@@ -252,7 +252,7 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
     const pointer = session.hostedRecovery.getSnapshot().pointer;
     if (!pointer || disabled || diagnosisFlight.current || preparing.current || session.isBusy() || !cloudState.bootstrapped) return;
     if (pointer.actor.kind === 'account' && cloudState.account?.userId !== pointer.actor.expectedUserId) { setError('请先登录原生成账号，再显式恢复。不会切换到当前账号或匿名身份。'); return; }
-    if (!window.confirm(`${pointer.actor.kind === 'anonymous' ? '以原匿名身份' : '以原账号'}恢复服务器请求？不会重新创建或携带供应商 Key；当前结果将被恢复正文替换。${pointer.version === 2 && pointer.delivery === 'non-stream' ? ' 原完整非流式 JSON 及附加信息可能无法重新取得，建议先完整导出。' : ''}`)) return;
+    if (!window.confirm(`${pointer.actor.kind === 'anonymous' ? '以原匿名身份' : '以原账号'}恢复服务器请求？不会重新创建或携带供应商 Key；当前结果将被恢复正文替换。${pointer.version !== 1 && pointer.delivery === 'non-stream' ? ' 原完整非流式 JSON 及附加信息可能无法重新取得，建议先完整导出。' : ''}`)) return;
     void session.restoreHosted({ invoke }, pointer.requestId);
   };
   const reasoning = state.hosted?.delivery === 'non-stream' && state.report?.aiReasoning ? state.report.aiReasoning : state.reasoning ? { status: state.phase === 'generating' ? 'thinking' as const : 'done' as const, source: 'provider' as const, text: state.reasoning } : null;
@@ -265,24 +265,44 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
     {state.resultFormat !== 'web' && !(state.markdown && state.activeGenerationMode === 'stream') && !state.report && reasoning ? <AiReasoningPanel reasoning={reasoning} /> : null}
     <details><summary>{state.hosted ? '服务器收到的正文（控制元数据单独保留）' : '完整原始输出（含元数据）'}</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap break-all">{state.rawText}</pre></details>
     {state.hosted ? <div className="space-y-2" aria-label="服务器生成状态">
-      <p role="status">连接：{state.hosted.connectionState}；{state.hosted.terminal?.event === 'done' || (state.hosted.companionState === 'complete' && state.hosted.serverStatus === 'completed') ? '服务器任务终态' : '最近服务响应状态'}：{state.hosted.serverStatus ?? '尚未确认'}。角色签名更新尚未接入；连接或恢复错误不表示任务已取消。</p>
+      <p role="status">连接：{state.hosted.connectionState}；{state.hosted.terminal?.event === 'done' || (state.hosted.companionState === 'complete' && state.hosted.serverStatus === 'completed') ? '服务器任务终态' : '最近服务响应状态'}：{state.hosted.serverStatus ?? '尚未确认'}。连接或恢复错误不表示任务已取消。</p>
       {state.hosted.metadataState !== 'available' ? <p role="status">本次判定、记者等附加元数据未取得；服务器可能已经执行判定，恢复时不会在本机重掷。</p> : null}
       {state.hosted.recoveryCredentialState === 'memory-only' ? <p role="alert">匿名恢复凭据保存失败，当前任务可继续；关闭应用后可能无法恢复，请完整导出。</p> : null}
       {state.hosted.validationMessage ? <p role="status">{state.hosted.validationMessage}</p> : null}
       {state.hosted.companionState === 'complete' ? <p role="status">完整非流式报告与附加元数据已保留；服务端判定 {state.hosted.companion?.metadata?.adjudicationResults?.length ?? 0} 条。完整导出包含全部原字段，状态面板不重复展开大体积 JSON。</p> : null}
       <details><summary>服务器公开元数据与终态</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap break-all">{JSON.stringify(state.hosted.delivery === 'non-stream' ? hostedSummary : state.hosted, null, 2)}</pre></details>
     </div> : null}
+    {state.hosted && state.phase === 'completed' ? <CombatantUpdatesPresentation
+      title="角色更新" description={`可下载/保存本次更新的角色设定（共 ${state.roleUpdates.items.length} 个）`}
+      defaultOpen itemDefaultOpen={false}
+      emptyMessage="本次尚未产生可展示的角色更新。你可以点击“重试角色更新”，重试应用本次服务器已生成的历战记录/当前状态摘要。"
+      renderMarkdown={content => <MarkdownBlock content={content} variant="light" externalMediaPolicy={DENY_EXTERNAL_MEDIA} onNavigateExternal={openContent} />}
+      headerRight={<button type="button" disabled={disabled || !session.canRetryHostedRoleUpdates()}
+        title="重试应用本次服务器已生成的角色更新"
+        className="px-3 py-1.5 text-xs font-semibold text-white bg-purple-500 rounded-lg hover:bg-purple-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed shrink-0"
+        onClick={() => { void session.retryHostedRoleUpdates({ invoke }); }}>{state.roleUpdates.status === 'updating' ? '重试中...' : '重试角色更新'}</button>}
+      items={state.roleUpdates.items.map(item => {
+        const history = item.data.arena_history as { entries?: { impact?: unknown }[] } | undefined;
+        const impact = Array.isArray(history?.entries) ? history.entries.at(-1)?.impact : null;
+        const summary = (item.data.current_state as { summary?: unknown } | undefined)?.summary;
+        return { key: String(item.combatantIndex), displayName: arenaItemName(item.data),
+          typeLabel: typeof item.data.signature === 'string' ? item.isNative && state.roleUpdates.status !== 'restored' ? '官方签名（服务器更新）' : '含签名字段（本机未验证）' : '未签名',
+          impact: typeof impact === 'string' ? impact : null, currentStateSummary: typeof summary === 'string' ? summary : null };
+      })}
+      renderBeforeItems={state.roleUpdates.message ? <p role="status">{state.roleUpdates.message}</p> : null}
+      renderFooter={state.roleUpdates.status === 'updating' ? <button className={secondary} type="button" onClick={() => session.cancel()}>停止本机角色同步</button> : null}
+    /> : null}
     <div className="flex flex-wrap gap-3">
       {session.canAppendHostedHistory() ? <button className={secondary} type="button" disabled={disabled} onClick={() => session.appendHostedHistory()}>将本次正文加入活动历史</button> : null}
       <button className={secondary} type="button" onClick={() => { void exportAll(); }}>完整导出 JSON</button>
-      {state.candidates?.characterEffects.length ? <button className={secondary} type="button" disabled={disabled} onClick={() => { void session.save('characters'); }}>另存战后角色副本</button> : null}
+      {(state.candidates?.characterEffects.length || session.hasHostedCharacterCopies()) ? <button className={secondary} type="button" disabled={disabled} onClick={() => { void session.save('characters'); }}>另存战后角色副本</button> : null}
       {draft.narrativeHistoryEntries.length ? <button className={secondary} type="button" disabled={disabled} onClick={() => { void session.save('history'); }}>保存叙事历史到本地库</button> : null}
     </div>
     {state.saveStatus === 'saved' ? <p role="status">已保存到本地库，可在卡库重新打开。</p> : null}
     {state.saveError ? <p role="alert">{state.saveError}</p> : null}
   </section> : null;
   const settings = <>
-          <ArenaDataSettingsPanel value={hostedTarget ? { ...draft.settings, writeArenaHistory: false, writeCurrentState: false } : draft.settings} writeDisabledReason={hostedTarget ? '服务器签名角色更新尚未接入，本次不会写入角色历史或当前状态；客户端偏好保持不变。' : undefined} onChange={(patch) => update({ settings: { ...draft.settings, ...patch } })} disabled={disabled} footerNote={<p className="text-xs">设置与角色工作副本保存在本机草稿；原始库卡保持不变。</p>} />
+          <ArenaDataSettingsPanel value={draft.settings} onChange={(patch) => update({ settings: { ...draft.settings, ...patch } })} disabled={disabled} footerNote={<p className="text-xs">设置与角色工作副本保存在本机草稿；原始库卡保持不变。</p>} />
           <NarrativeHistorySettings value={draft.settings} onChange={(patch) => update({ settings: { ...draft.settings, ...patch } })} disabled={disabled} persistenceNote="完成后追加到本机活动草稿；保存到本地库需单独操作。超限或写入失败时请完整导出。" readingNote="引用本地历史仅用于提示词，不改写原卡。" />
           <button type="button" className={secondary} disabled={disabled} onClick={() => setHistoryOpen(true)}>引用本地叙事历史</button>
           <p className="text-xs">已引用 {draft.historyReferences.length} 条；活动历史 {draft.narrativeHistoryEntries.length} 条</p>
@@ -308,7 +328,7 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
           {product === 'battle' ? settings : null}
           <p className="text-xs">{product === 'arena' ? '手动及角色、主辅情景' : '角色与主情景继承'} {inheritedAdjudication.events.length} {hostedTarget ? '个随机判定由服务器在创建时执行，本机不会重掷；素材内判定不执行。' : '个随机判定每次生成只在本机掷骰一次，非服务器权威；素材内判定不执行。'}</p>
           {inheritedAdjudication.skippedLegacy ? <p role="status">{inheritedAdjudication.skippedLegacy} 个旧版随机事件格式不受支持，保留原字段但不执行。</p> : null}
-          <fieldset disabled={!guard.ready} className="min-w-0"><DesktopAiProviderPanel generationMode={draft.generationMode} onDirtyChange={onAiDirty} showConnectionTest={false} copy={{ serverOutput: { stream: '', nonStream: '' }, emptyProfilesHint: '请配置客户端连接。', serverFootnote: 'Arena 服务器支持流式或完整非流式报告；恢复与停止沿原请求，角色签名更新尚未接入。', payloadNoun: '角色与故事设定' }} /></fieldset>
+          <fieldset disabled={!guard.ready} className="min-w-0"><DesktopAiProviderPanel generationMode={draft.generationMode} onDirtyChange={onAiDirty} showConnectionTest={false} copy={{ serverOutput: { stream: '', nonStream: '' }, emptyProfilesHint: '请配置客户端连接。', serverFootnote: 'Arena 服务器支持流式或完整非流式报告；恢复与停止沿原请求，角色更新使用本次创建时冻结的选择。', payloadNoun: '角色与故事设定' }} /></fieldset>
           {hostedTarget ? <p role="status">官方服务器生成。创建前验证所选交付协议与原账号；不会自动改为客户端执行。</p> : null}
         </>,
         generationMode: <>
@@ -342,7 +362,7 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
         footer: <ProductFooter assetSource={{ baseUrl: '/' }} onNavigateInternal={(href) => navigateByProductHref(router, href)} resolveInternalHref={resolveInternalHrefForHashHistory} onNavigateExternal={openFixed} />,
   };
   return <>
-    {product === 'arena' ? <AdvancedArenaPageView header={<AdvancedArenaHeaderView logo={<ThemeImage lightSrc="/arena-black.svg" darkSrc="/arena-white.svg" width={320} height={90} alt="魔法少女竞技场" />} description="桌面高级单次 · 角色、主辅情景与故事设定" guideChildren={<p>配置输入后生成单次战报。此页使用独立本机草稿，支持客户端 Direct、官方服务器流式/非流式报告与 Web 源码生成/验证/导出；隔离运行、连续故事、插图和服务器角色签名更新尚未开放。<button className="footer-link" type="button" onClick={() => navigateByProductHref(router, '/battle')}>前往简洁版</button></p>} />} result={result} homeLink={slots.homeLink} footer={slots.footer}>
+    {product === 'arena' ? <AdvancedArenaPageView header={<AdvancedArenaHeaderView logo={<ThemeImage lightSrc="/arena-black.svg" darkSrc="/arena-white.svg" width={320} height={90} alt="魔法少女竞技场" />} description="桌面高级单次 · 角色、主辅情景与故事设定" guideChildren={<p>配置输入后生成单次战报。此页使用独立本机草稿，支持客户端 Direct、官方服务器流式/非流式报告与 Web 源码生成/验证/导出；角色更新遵循服务器冻结权限；隔离运行、连续故事和插图尚未开放。<button className="footer-link" type="button" onClick={() => navigateByProductHref(router, '/battle')}>前往简洁版</button></p>} />} result={result} homeLink={slots.homeLink} footer={slots.footer}>
       <ArenaEditorWorkspaceLayout disabled={disabled} sections={[
         { kind: 'presets', title: '🎴 预设角色', column: 'left', description: '选择内置角色', defaultOpen: true, content: slots.presets },
         { kind: 'database', title: '📚 角色库', column: 'left', description: '本地、公开或缓存副本', defaultOpen: true, content: slots.database },

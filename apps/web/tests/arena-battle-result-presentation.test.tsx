@@ -51,7 +51,7 @@ vi.mock('@/components/BattleReportCard', () => ({
   ),
 }));
 
-vi.mock('@/components/shared/CollapsibleSection', () => ({
+vi.mock('@mahoshojo/ui-web/creator', () => ({
   CollapsibleSection: (props: { title: React.ReactNode; children: React.ReactNode }) => (
     <section>
       <h2>{props.title}</h2>
