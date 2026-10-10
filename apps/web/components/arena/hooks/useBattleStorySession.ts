@@ -1,6 +1,7 @@
 'use client';
 
 import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
+import { createBattleStorySessionReader, type BattleStorySessionReader } from '@mahoshojo/ui-web/arena-story-session-read';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -359,6 +360,7 @@ export function useBattleStorySession() {
   const activeSessionRef = useRef<BattleStorySessionRecord | null>(null);
   const chaptersRef = useRef<BattleStoryChapterRecord[]>([]);
   const checkpointsRef = useRef<BattleStoryCheckpointRecord[]>([]);
+  const sessionReaderRef = useRef<BattleStorySessionReader<BattleStorySessionRecord> | null>(null);
   const summaryRetryAtRef = useRef<Record<string, number>>({});
   const generationAbortControllerRef = useRef<AbortController | null>(null);
 
@@ -598,84 +600,41 @@ export function useBattleStorySession() {
     []
   );
 
-  const refreshSessionList = useCallback(async (): Promise<BattleStorySessionRecord[]> => {
-    const nextSessions = await listBattleStorySessions({
-      limit: 100,
-      direction: 'prev',
-    });
-    setSessions(nextSessions);
-    return nextSessions;
+  const refreshSessionList = useCallback(async () => {
+    return sessionReaderRef.current?.refreshList() ?? null;
   }, []);
 
-  const loadSession = useCallback(
-    async (sessionId: string | null): Promise<void> => {
-      if (!sessionId) {
-        setActiveSession(null);
-        setChapters([]);
-        setCheckpoints([]);
-        setSelectedChapterId(null);
-        writeLocalStorageString(ACTIVE_SESSION_STORAGE_KEY, null);
-        return;
-      }
-
-      const [sessionRecord, chapterRecords, checkpointRecords] = await Promise.all([
-        getBattleStorySession(sessionId),
-        listBattleStoryChaptersBySession(sessionId, {
-          direction: 'next',
-          limit: 200,
-          includeSuperseded: false,
-        }),
-        listBattleStoryCheckpointsBySession(sessionId, {
-          direction: 'next',
-          limit: 400,
-        }),
-      ]);
-
-      if (!sessionRecord) {
-        setActiveSession(null);
-        setChapters([]);
-        setCheckpoints([]);
-        setSelectedChapterId(null);
-        writeLocalStorageString(ACTIVE_SESSION_STORAGE_KEY, null);
-        return;
-      }
-
-      const sortedChapters = sortBattleStoryChapters(chapterRecords);
-      const sortedCheckpoints = sortBattleStoryCheckpoints(checkpointRecords);
-      setActiveSession(sessionRecord);
-      setChapters(sortedChapters);
-      setCheckpoints(sortedCheckpoints);
-      setSelectedChapterId(sessionRecord.lastChapterId ?? sortedChapters[sortedChapters.length - 1]?.id ?? null);
-      writeLocalStorageString(ACTIVE_SESSION_STORAGE_KEY, sessionRecord.id);
-    },
-    []
-  );
+  const loadSession = useCallback(async (sessionId: string | null, onError?: (error: unknown) => void) => {
+    await sessionReaderRef.current?.select(sessionId, onError);
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-
-    void (async () => {
-      try {
-        const nextSessions = await refreshSessionList();
-        if (cancelled) return;
-
-        const preferredId = readLocalStorageString(ACTIVE_SESSION_STORAGE_KEY);
-        const fallbackId = nextSessions[0]?.id ?? null;
-        await loadSession(preferredId ?? fallbackId);
-      } catch (error) {
-        if (cancelled) return;
-        setStorageError(normalizeErrorMessage(error, '读取本地连续战报会话失败。'));
-      } finally {
-        if (!cancelled) {
-          setIsReady(true);
-        }
-      }
-    })();
-
+    const reader = createBattleStorySessionReader({
+      listSessions: listBattleStorySessions,
+      getSession: getBattleStorySession,
+      listChapters: listBattleStoryChaptersBySession,
+      listCheckpoints: listBattleStoryCheckpointsBySession,
+      readPreferredId: () => readLocalStorageString(ACTIVE_SESSION_STORAGE_KEY),
+      writePreferredId: (id) => writeLocalStorageString(ACTIVE_SESSION_STORAGE_KEY, id),
+    }, {
+      list: setSessions,
+      selection: (snapshot) => {
+        setActiveSession(snapshot.session);
+        setChapters(snapshot.chapters);
+        setCheckpoints(snapshot.checkpoints);
+        setSelectedChapterId(snapshot.selectedChapterId);
+      },
+    });
+    sessionReaderRef.current = reader;
+    void reader.restore({
+      onError: (error) => setStorageError(normalizeErrorMessage(error, '读取本地连续战报会话失败。')),
+      onReady: () => setIsReady(true),
+    });
     return () => {
-      cancelled = true;
+      reader.dispose();
+      sessionReaderRef.current = null;
     };
-  }, [loadSession, refreshSessionList]);
+  }, []);
 
   const refreshSummaryIfNeeded = useCallback(
     async (sessionRecord: BattleStorySessionRecord, chapterRecords: BattleStoryChapterRecord[]) => {
@@ -1722,6 +1681,7 @@ export function useBattleStorySession() {
   }, [handleRewriteChapter, selectedChapterId]);
 
   const handleDeleteSelectedChapter = useCallback(async () => {
+    const reloadSelection = sessionReaderRef.current?.captureSelection();
     const sessionRecord = activeSessionRef.current;
     const activeChapters = getActiveBattleStoryChapters(chaptersRef.current);
     const checkpointRecords = sortBattleStoryCheckpoints(checkpointsRef.current);
@@ -1751,7 +1711,7 @@ export function useBattleStorySession() {
         await deleteBattleStorySession(sessionRecord.id);
         delete summaryRetryAtRef.current[sessionRecord.id];
         const nextSessions = await refreshSessionList();
-        await loadSession(nextSessions[0]?.id ?? null);
+        if (nextSessions) await reloadSelection?.(nextSessions[0]?.id ?? null);
         setNotice(`已删除连续战报会话《${sessionRecord.title || '未命名连续战报'}》。`);
       } catch (error) {
         setActionError(normalizeErrorMessage(error, '删除连续战报会话失败。'));
@@ -1816,7 +1776,7 @@ export function useBattleStorySession() {
       const nextChapters = activeChapters.filter((chapter) => chapter.index < targetChapter.index);
       delete summaryRetryAtRef.current[sessionRecord.id];
       await refreshSessionList();
-      await loadSession(sessionRecord.id);
+      await reloadSelection?.(sessionRecord.id);
       setNotice(
         targetChapter.id === latestChapter.id
           ? `已删除第 ${targetChapter.index} 章，当前会话回退到第 ${previousChapter.index} 章。`
@@ -1828,23 +1788,22 @@ export function useBattleStorySession() {
     } finally {
       setIsDeletingSession(false);
     }
-  }, [loadSession, refreshSessionList, refreshSummaryIfNeeded, selectedChapterId]);
+  }, [refreshSessionList, refreshSummaryIfNeeded, selectedChapterId]);
 
   const handleSelectSession = useCallback(
     async (sessionId: string) => {
       setActionError(null);
       setNotice(null);
-      try {
-        await loadSession(sessionId);
-      } catch (error) {
+      await loadSession(sessionId, (error) => {
         setActionError(normalizeErrorMessage(error, '加载连续战报会话失败。'));
-      }
+      });
     },
     [loadSession]
   );
 
   const handleDeleteSession = useCallback(
     async (sessionId?: string) => {
+      const reloadSelection = sessionReaderRef.current?.captureSelection();
       const targetId =
         typeof sessionId === 'string' && sessionId.trim()
           ? sessionId.trim()
@@ -1874,8 +1833,8 @@ export function useBattleStorySession() {
         delete summaryRetryAtRef.current[targetId];
 
         const nextSessions = await refreshSessionList();
-        if (activeSessionRef.current?.id === targetId) {
-          await loadSession(nextSessions[0]?.id ?? null);
+        if (nextSessions && activeSessionRef.current?.id === targetId) {
+          await reloadSelection?.(nextSessions[0]?.id ?? null);
         }
 
         setNotice(`已删除连续战报会话《${targetTitle}》。`);
@@ -1885,7 +1844,7 @@ export function useBattleStorySession() {
         setIsDeletingSession(false);
       }
     },
-    [loadSession, refreshSessionList, sessions]
+    [refreshSessionList, sessions]
   );
 
   const handleExportMarkdown = useCallback(() => {

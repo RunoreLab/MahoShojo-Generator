@@ -75,3 +75,8 @@ D5.1b b1-A 前置：`ai-core/arena-generation` 持有 Arena 纯 Prompt/schema、
 Hosted 原生产链与 Web `/battle`、`/arena` 的实际 hook 共同回用；不携带 Provider/secret、
 随机执行、资格或签名能力。`domain/narrative-history-operations` 复用条目构造/去重/读取投影，
 Web 旧 key、migration、hydration 和实际写入仍留宿主。此片不开放 Desktop Arena 页面或 Hosted route。
+
+连续故事读取前置：`ui-web/arena-story-session-read` 提供 feature 专用的读取/选择协调器，
+由 Web 两页共用的 `useBattleStorySession` 真实装配；只注入四个读取端口、恢复偏好与快照发布，
+不定义完整存储 schema、不序列化/裁剪记录、不拥有生成或多实体写事务。列表刷新与详情选择
+各自排序，恢复意图及卸载隔离共源；后继 Desktop 仍需自己的持久化与完整旅程接线。
