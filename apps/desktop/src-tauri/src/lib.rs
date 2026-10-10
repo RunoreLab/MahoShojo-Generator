@@ -851,6 +851,92 @@ fn webpkg_header(
         .ok_or(webpkg_instance::WebpkgError::Invalid)
 }
 
+// Storage-only Hosted pending seam. These commands grant no network operation.
+#[tauri::command(async)]
+fn begin_arena_story_pending(
+    library: State<'_, LocalLibrary>,
+    manifest: arena_story::pending::PendingManifest,
+) -> Result<arena_story::BeginOutcome, arena_story::StoryError> {
+    library.stories().pending_begin(manifest)
+}
+#[tauri::command(async)]
+fn append_arena_story_pending_part(
+    request: tauri::ipc::Request,
+    library: State<'_, LocalLibrary>,
+) -> Result<arena_story::pending::PendingAppend, arena_story::StoryError> {
+    let header = |name| request.headers().get(name).and_then(|v| v.to_str().ok());
+    let token = arena_story::ipc::token(header(arena_story::ipc::TOKEN_HEADER))?;
+    let kind = arena_story::pending::PendingKind::parse(
+        header(arena_story::ipc::PART_HEADER).ok_or(arena_story::StoryError::Invalid)?,
+    )?;
+    let offset = arena_story::ipc::offset(header(arena_story::ipc::OFFSET_HEADER))?;
+    let bytes = match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => bytes,
+        tauri::ipc::InvokeBody::Json(_) => return Err(arena_story::StoryError::Invalid),
+    };
+    library.stories().pending_append(token, kind, offset, bytes)
+}
+#[tauri::command(async)]
+fn query_arena_story_pending_upload(
+    library: State<'_, LocalLibrary>,
+    token: String,
+) -> Result<arena_story::pending::PendingUpload, arena_story::StoryError> {
+    library.stories().pending_upload(&token)
+}
+#[tauri::command(async)]
+fn seal_arena_story_pending(
+    library: State<'_, LocalLibrary>,
+    token: String,
+) -> Result<arena_story::pending::PendingSnapshot, arena_story::StoryError> {
+    library.stories().pending_seal(&token)
+}
+#[tauri::command(async)]
+fn abort_arena_story_pending_upload(
+    library: State<'_, LocalLibrary>,
+    token: String,
+) -> Result<(), arena_story::StoryError> {
+    library.stories().pending_abort(&token)
+}
+#[tauri::command(async)]
+fn describe_arena_story_pending(
+    library: State<'_, LocalLibrary>,
+    product: arena_story::pending::Product,
+) -> Result<Option<arena_story::pending::PendingSnapshot>, arena_story::StoryError> {
+    library.stories().pending_describe(product)
+}
+#[tauri::command(async)]
+fn read_arena_story_pending_chunk(
+    library: State<'_, LocalLibrary>,
+    key: arena_story::pending::PendingKey,
+    kind: arena_story::pending::PendingKind,
+    offset: u64,
+    length: usize,
+) -> Result<tauri::ipc::Response, arena_story::StoryError> {
+    library
+        .stories()
+        .pending_read(&key, kind, offset, length)
+        .map(tauri::ipc::Response::new)
+}
+#[tauri::command(async)]
+fn prepare_arena_story_pending_save(
+    library: State<'_, LocalLibrary>,
+    key: arena_story::pending::PendingKey,
+    wire_digest: String,
+) -> Result<arena_story::pending::SavePreparation, arena_story::StoryError> {
+    library.stories().pending_prepare_save(&key, &wire_digest)
+}
+#[tauri::command(async)]
+fn save_arena_story_pending(
+    library: State<'_, LocalLibrary>,
+    key: arena_story::pending::PendingKey,
+    wire_digest: String,
+    attempt_id: String,
+) -> Result<arena_story::StoryReceipt, arena_story::StoryError> {
+    library
+        .stories()
+        .pending_save(&key, &wire_digest, &attempt_id)
+}
+
 // Dedicated story commands. All disk/connection waits run off the UI thread. The
 // app manifest grants these exact operations only to the main-ui webview.
 #[tauri::command(async)]
@@ -1704,6 +1790,15 @@ pub fn run() {
             begin_web_package_instance,
             append_web_package_resource,
             open_web_package_instance,
+            begin_arena_story_pending,
+            append_arena_story_pending_part,
+            query_arena_story_pending_upload,
+            seal_arena_story_pending,
+            abort_arena_story_pending_upload,
+            describe_arena_story_pending,
+            read_arena_story_pending_chunk,
+            prepare_arena_story_pending_save,
+            save_arena_story_pending,
             begin_arena_story_commit,
             append_arena_story_part,
             end_arena_story_commit,

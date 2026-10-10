@@ -77,6 +77,7 @@ pub enum StoryError {
     Incomplete,
     Conflict,
     OperationMismatch,
+    OriginalsUncovered,
     Missing,
     Maintenance,
     Io,
@@ -84,6 +85,16 @@ pub enum StoryError {
     Corrupt,
     /// COMMIT failed without a receipt: never claim that disk state is known.
     CommitUnknown,
+    /// The shared connection still contains an unresolved transaction.
+    ConnectionUnresolved,
+}
+impl StoryError {
+    fn from_store(error: crate::store::StoreError) -> Self {
+        match error {
+            crate::store::StoreError::TransactionUnresolved => Self::ConnectionUnresolved,
+            _ => Self::Io,
+        }
+    }
 }
 impl Serialize for StoryError {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -96,18 +107,23 @@ impl Serialize for StoryError {
             Self::Incomplete => "story-incomplete",
             Self::Conflict => "story-conflict",
             Self::OperationMismatch => "story-operation-mismatch",
+            Self::OriginalsUncovered => "story-originals-uncovered",
             Self::Missing => "story-missing",
             Self::Maintenance => "maintenance-busy",
             Self::Io => "story-io",
             Self::ExportNoSpace => "story-export-no-space",
             Self::Corrupt => "story-corrupt",
-            Self::CommitUnknown => "story-commit-unknown",
+            Self::CommitUnknown | Self::ConnectionUnresolved => "story-commit-unknown",
         };
         let mut result = serializer.serialize_struct("StoryError", 3)?;
         result.serialize_field("code", code)?;
         result.serialize_field(
             "message",
-            if matches!(self, Self::ExportNoSpace) {
+            if matches!(self, Self::ConnectionUnresolved) {
+                "本地连接事务未恢复；请重启应用后仅查询原精确回执，勿重复保存"
+            } else if matches!(self, Self::OriginalsUncovered) {
+                "保存包未完整覆盖必要作品内容；已保留未保存原件"
+            } else if matches!(self, Self::ExportNoSpace) {
                 "可用磁盘空间不足，完整故事未导出；原记录未修改"
             } else {
                 "Local story operation did not complete; retain the unsaved result"
@@ -115,7 +131,7 @@ impl Serialize for StoryError {
         )?;
         result.serialize_field(
             "writeEvidence",
-            if matches!(self, Self::CommitUnknown) {
+            if matches!(self, Self::CommitUnknown | Self::ConnectionUnresolved) {
                 "unknown"
             } else {
                 "not-written"
@@ -198,6 +214,8 @@ pub struct StoryStore {
     gate: Arc<MaintenanceGate>,
     staging_root: PathBuf,
     stages: Mutex<HashMap<String, Stage>>,
+    pending_attempts: Mutex<HashMap<String, String>>,
+    pending_inputs: Mutex<HashMap<(String, pending::PendingKind), Vec<u8>>>,
     markdown_export: markdown_export::StoryMarkdownExport,
     /// Every process/restore generation has a new identity; descriptors cannot cross it.
     pub(super) instance: String,
@@ -340,6 +358,7 @@ impl StoryStore {
                 fs::remove_file(entry.path()).map_err(|_| StoryError::Io)?;
             }
         }
+        pending::recover_uploads(&*lock_connection(&connection).map_err(StoryError::from_store)?)?;
         Ok(Self {
             connection,
             gate,
@@ -348,6 +367,8 @@ impl StoryStore {
                 crate::export::ExportPaths::under(root),
             )?,
             stages: Mutex::new(HashMap::new()),
+            pending_attempts: Mutex::new(HashMap::new()),
+            pending_inputs: Mutex::new(HashMap::new()),
             instance: random_id()?,
         })
     }
@@ -360,7 +381,11 @@ impl StoryStore {
         let mut stages = self.stages.lock().map_err(|_| StoryError::Io)?;
         stages.retain(|_, stage| now.saturating_duration_since(stage.created_at) < STAGE_LIFETIME);
         let reserved: u64 = stages.values().map(|stage| stage.total).sum();
-        if stages.len() >= MAX_STAGES || total > STAGING_BYTES.saturating_sub(reserved) {
+        let connection = lock_connection(&self.connection).map_err(StoryError::from_store)?;
+        let (pending_count, pending_bytes) = pending::upload_reservations(&connection)?;
+        if stages.len() + pending_count >= MAX_STAGES
+            || total > STAGING_BYTES.saturating_sub(reserved + pending_bytes)
+        {
             return Err(StoryError::Busy);
         }
         let mut parts = Vec::new();
@@ -446,7 +471,7 @@ impl StoryStore {
         if !valid_id(session_id) || !valid_id(operation_id) {
             return Err(StoryError::Invalid);
         }
-        let connection = lock_connection(&self.connection).map_err(|_| StoryError::Io)?;
+        let connection = lock_connection(&self.connection).map_err(StoryError::from_store)?;
         read_receipt(&connection, session_id, operation_id)
     }
     pub fn end(&self, token: &str, now: Instant) -> Result<StoryReceipt, StoryError> {
@@ -472,7 +497,7 @@ impl StoryStore {
             .gate
             .enter_write()
             .map_err(|_| StoryError::Maintenance)?;
-        let mut connection = lock_connection(&self.connection).map_err(|_| StoryError::Io)?;
+        let mut connection = lock_connection(&self.connection).map_err(StoryError::from_store)?;
         let transaction = connection.transaction().map_err(|_| StoryError::Io)?;
         // Exact replay precedes stale CAS, but compares native-computed wire identity.
         if let Some(receipt) = read_receipt(
@@ -487,21 +512,7 @@ impl StoryStore {
             stages.remove(token);
             return Ok(receipt);
         }
-        let current = transaction.query_row(
-            "SELECT revision,last_chapter_id,chapter_count,working_checkpoint_id,created_at,updated_at FROM arena_story_session WHERE id=?1",
-            [&stage.manifest.session_id], |row| Ok((row.get::<_,u64>(0)?,row.get::<_,String>(1)?,row.get::<_,u64>(2)?,row.get::<_,String>(3)?,row.get::<_,u64>(4)?,row.get::<_,u64>(5)?))
-        ).optional().map_err(|_| StoryError::Io)?;
-        match current {
-            None if stage.manifest.expected_revision == 0 => {}
-            Some((revision, head, count, checkpoint, created, updated))
-                if revision == stage.manifest.expected_revision
-                    && Some(&head) == stage.manifest.expected_last_chapter_id.as_ref()
-                    && count.checked_add(1) == Some(validated.session.chapter_count)
-                    && checkpoint == validated.session.last_input_checkpoint_id
-                    && created == validated.session.created_at
-                    && updated <= validated.session.updated_at => {}
-            _ => return Err(StoryError::Conflict),
-        }
+        check_cas(&transaction, &stage.manifest, &validated)?;
         hook("cas")?;
         write_stage(&transaction, stage, &validated, hook)?;
         hook("before-commit")?;
@@ -512,6 +523,29 @@ impl StoryStore {
         stages.remove(token);
         Ok(receipt)
     }
+}
+
+fn check_cas(
+    connection: &Connection,
+    manifest: &CommitManifest,
+    validated: &Validated,
+) -> Result<(), StoryError> {
+    let current = connection.query_row(
+            "SELECT revision,last_chapter_id,chapter_count,working_checkpoint_id,created_at,updated_at FROM arena_story_session WHERE id=?1",
+            [&manifest.session_id], |row| Ok((row.get::<_,u64>(0)?,row.get::<_,String>(1)?,row.get::<_,u64>(2)?,row.get::<_,String>(3)?,row.get::<_,u64>(4)?,row.get::<_,u64>(5)?))
+        ).optional().map_err(|_| StoryError::Io)?;
+    match current {
+        None if manifest.expected_revision == 0 => {}
+        Some((revision, head, count, checkpoint, created, updated))
+            if revision == manifest.expected_revision
+                && Some(&head) == manifest.expected_last_chapter_id.as_ref()
+                && count.checked_add(1) == Some(validated.session.chapter_count)
+                && checkpoint == validated.session.last_input_checkpoint_id
+                && created == validated.session.created_at
+                && updated <= validated.session.updated_at => {}
+        _ => return Err(StoryError::Conflict),
+    }
+    Ok(())
 }
 
 fn read_receipt(
@@ -644,19 +678,39 @@ fn preview_valid(preview: &str) -> bool {
     preview.len() <= 192
 }
 fn validate_stage(stage: &mut Stage) -> Result<Validated, StoryError> {
-    let mut session = None;
-    let mut chapter = None;
-    let mut checkpoints = Vec::new();
-    for part in &mut stage.parts {
+    for part in &stage.parts {
         if part.received != part.declaration.byte_length
             || format!("sha256:{:x}", part.hash.clone().finalize()) != part.declaration.digest
         {
             return Err(StoryError::Corrupt);
         }
-        let document = read_part(part)?;
+    }
+    validate_documents(&stage.manifest, &mut |kind| {
+        read_part(
+            stage
+                .parts
+                .iter_mut()
+                .find(|p| p.declaration.kind == kind)
+                .ok_or(StoryError::Invalid)?,
+        )
+    })
+}
+fn validate_documents(
+    manifest: &CommitManifest,
+    read: &mut impl FnMut(PartKind) -> Result<String, StoryError>,
+) -> Result<Validated, StoryError> {
+    manifest.validate()?;
+    let mut session = None;
+    let mut chapter = None;
+    let mut checkpoints = Vec::new();
+    for part in &manifest.parts {
+        let document = read(part.kind)?;
+        if document.len() as u64 != part.byte_length || digest(document.as_bytes()) != part.digest {
+            return Err(StoryError::Corrupt);
+        }
         // Validate JSON carrier shapes while borrowing the raw values. Business
         // schemas/effects remain TS-owned and unknown JSON fields remain byte-exact.
-        match part.declaration.kind {
+        match part.kind {
             PartKind::Chapter => {
                 #[derive(Deserialize)]
                 #[serde(rename_all = "camelCase")]
@@ -691,12 +745,12 @@ fn validate_stage(stage: &mut Stage) -> Result<Validated, StoryError> {
             }
             _ => {}
         }
-        match part.declaration.kind {
+        match part.kind {
             PartKind::Session => {
                 let value: SessionIndex =
                     serde_json::from_str(&document).map_err(|_| StoryError::Invalid)?;
-                if value.id != stage.manifest.session_id
-                    || value.revision != stage.manifest.expected_revision + 1
+                if value.id != manifest.session_id
+                    || value.revision != manifest.expected_revision + 1
                     || !valid_id(&value.last_chapter_id)
                     || !valid_id(&value.working_checkpoint_id)
                     || !valid_id(&value.last_input_checkpoint_id)
@@ -719,17 +773,17 @@ fn validate_stage(stage: &mut Stage) -> Result<Validated, StoryError> {
             PartKind::Chapter => {
                 let value: ChapterIndex =
                     serde_json::from_str(&document).map_err(|_| StoryError::Invalid)?;
-                if value.id != stage.manifest.operation_id
-                    || value.session_id != stage.manifest.session_id
+                if value.id != manifest.operation_id
+                    || value.session_id != manifest.session_id
                     || value.status != "active"
                     || !preview_valid(&value.title_preview)
                     || value.index == 0
                     || value.index > MAX_SAFE_INTEGER
                     || value.created_at > MAX_SAFE_INTEGER
                     || value.markdown_byte_length > MAX_SAFE_INTEGER
-                    || value.source_chapter_id != stage.manifest.expected_last_chapter_id
+                    || value.source_chapter_id != manifest.expected_last_chapter_id
                     || value.action
-                        != if stage.manifest.expected_revision == 0 {
+                        != if manifest.expected_revision == 0 {
                             "start"
                         } else {
                             "continue"
@@ -743,9 +797,9 @@ fn validate_stage(stage: &mut Stage) -> Result<Validated, StoryError> {
                 let value: CheckpointIndex =
                     serde_json::from_str(&document).map_err(|_| StoryError::Invalid)?;
                 if !valid_id(&value.id)
-                    || value.session_id != stage.manifest.session_id
+                    || value.session_id != manifest.session_id
                     || value.boundary_index > MAX_SAFE_INTEGER
-                    || (part.declaration.kind == PartKind::Checkpoint0
+                    || (part.kind == PartKind::Checkpoint0
                         && (value.boundary_index != 0 || value.chapter_id.is_some()))
                 {
                     return Err(StoryError::Invalid);
@@ -775,7 +829,7 @@ fn validate_stage(stage: &mut Stage) -> Result<Validated, StoryError> {
         || session.working_checkpoint_id != output.id
         || output.boundary_index != chapter.index
         || output.chapter_id.as_ref() != Some(&chapter.id)
-        || (stage.manifest.expected_revision == 0
+        || (manifest.expected_revision == 0
             && (chapter.index != 1
                 || session.last_input_checkpoint_id != checkpoints[0].id
                 || checkpoints[0].id == output.id))
@@ -784,14 +838,14 @@ fn validate_stage(stage: &mut Stage) -> Result<Validated, StoryError> {
     }
     let receipt = StoryReceipt {
         version: 1,
-        operation_id: stage.manifest.operation_id.clone(),
+        operation_id: manifest.operation_id.clone(),
         session_id: session.id.clone(),
         chapter_id: chapter.id.clone(),
         chapter_index: chapter.index,
         revision: session.revision,
         chapter_count: session.chapter_count,
         checkpoint_ids: checkpoints.iter().map(|c| c.id.clone()).collect(),
-        wire_digest: stage.manifest.wire_digest()?,
+        wire_digest: manifest.wire_digest()?,
     };
     Ok(Validated {
         session,
@@ -806,20 +860,43 @@ fn write_stage(
     validated: &Validated,
     hook: &mut impl FnMut(&str) -> Result<(), StoryError>,
 ) -> Result<(), StoryError> {
+    write_documents(
+        connection,
+        &stage.manifest,
+        validated,
+        &mut |kind| {
+            read_part(
+                stage
+                    .parts
+                    .iter_mut()
+                    .find(|p| p.declaration.kind == kind)
+                    .ok_or(StoryError::Invalid)?,
+            )
+        },
+        hook,
+    )
+}
+fn write_documents(
+    connection: &Connection,
+    manifest: &CommitManifest,
+    validated: &Validated,
+    read: &mut impl FnMut(PartKind) -> Result<String, StoryError>,
+    hook: &mut impl FnMut(&str) -> Result<(), StoryError>,
+) -> Result<(), StoryError> {
     let s = &validated.session;
     let c = &validated.chapter;
-    for part in &mut stage.parts {
-        let document = read_part(part)?;
-        let bytes = part.declaration.byte_length;
-        let digest = &part.declaration.digest;
-        match part.declaration.kind {
+    for part in &manifest.parts {
+        let document = read(part.kind)?;
+        let bytes = part.byte_length;
+        let digest = &part.digest;
+        match part.kind {
             PartKind::Session => {
-                if stage.manifest.expected_revision == 0 {
+                if manifest.expected_revision == 0 {
                     connection.execute("INSERT INTO arena_story_session (id,document,document_bytes,document_digest,seed_document,seed_bytes,seed_digest,revision,title_preview,title_truncated,mode,chapter_plan,created_at,updated_at,chapter_count,last_chapter_id,working_checkpoint_id,last_input_checkpoint_id) VALUES (?1,?2,?3,?4,'',0,'',?5,?6,?7,?8,?15,?9,?10,?11,?12,?13,?14)",
                         params![s.id,document,bytes,digest,s.revision,s.title_preview,s.title_truncated,s.mode,s.created_at,s.updated_at,s.chapter_count,s.last_chapter_id,s.working_checkpoint_id,s.last_input_checkpoint_id,s.chapter_plan.as_ref().map(serde_json::to_string).transpose().map_err(|_|StoryError::Invalid)?]).map_err(|_| StoryError::Io)?;
                 } else {
                     let changed = connection.execute("UPDATE arena_story_session SET document=?2,document_bytes=?3,document_digest=?4,revision=?5,title_preview=?6,title_truncated=?7,mode=?8,chapter_plan=?16,updated_at=?9,chapter_count=?10,last_chapter_id=?11,working_checkpoint_id=?12,last_input_checkpoint_id=?13 WHERE id=?1 AND revision=?14 AND last_chapter_id=?15",
-                        params![s.id,document,bytes,digest,s.revision,s.title_preview,s.title_truncated,s.mode,s.updated_at,s.chapter_count,s.last_chapter_id,s.working_checkpoint_id,s.last_input_checkpoint_id,stage.manifest.expected_revision,stage.manifest.expected_last_chapter_id,s.chapter_plan.as_ref().map(serde_json::to_string).transpose().map_err(|_|StoryError::Invalid)?]).map_err(|_| StoryError::Io)?;
+                        params![s.id,document,bytes,digest,s.revision,s.title_preview,s.title_truncated,s.mode,s.updated_at,s.chapter_count,s.last_chapter_id,s.working_checkpoint_id,s.last_input_checkpoint_id,manifest.expected_revision,manifest.expected_last_chapter_id,s.chapter_plan.as_ref().map(serde_json::to_string).transpose().map_err(|_|StoryError::Invalid)?]).map_err(|_| StoryError::Io)?;
                     if changed != 1 {
                         return Err(StoryError::Conflict);
                     }
@@ -842,14 +919,14 @@ fn write_stage(
                 hook("chapter")?;
             }
             PartKind::Checkpoint0 | PartKind::Checkpoint1 => {
-                let checkpoint = if part.declaration.kind == PartKind::Checkpoint0 {
+                let checkpoint = if part.kind == PartKind::Checkpoint0 {
                     &validated.checkpoints[0]
                 } else {
                     validated.checkpoints.last().ok_or(StoryError::Invalid)?
                 };
                 connection.execute("INSERT INTO arena_story_checkpoint (id,session_id,boundary_index,chapter_id,document,document_bytes,document_digest) VALUES (?1,?2,?3,?4,?5,?6,?7)",
                     params![checkpoint.id,checkpoint.session_id,checkpoint.boundary_index,checkpoint.chapter_id,document,bytes,digest]).map_err(|_| StoryError::Io)?;
-                hook(if part.declaration.kind == PartKind::Checkpoint0 {
+                hook(if part.kind == PartKind::Checkpoint0 {
                     "checkpoint0"
                 } else {
                     "checkpoint1"
@@ -1000,3 +1077,6 @@ mod tests;
 pub mod ipc;
 #[path = "arena_story_export.rs"]
 pub mod markdown_export;
+
+#[path = "arena_story_pending.rs"]
+pub mod pending;

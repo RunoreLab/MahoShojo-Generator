@@ -223,6 +223,7 @@ fn recover_pending_with_hook(
     // A committed marker is the durable boundary. Once present, never reapply the
     // snapshot: the user may already have opened the new library and made later writes.
     if marker_matches(data_root, &intent, "committed")? {
+        fence_story_pending(data_root, &intent, hook)?;
         clear_intent_after_commit(data_root, hook)?;
         return Ok(());
     }
@@ -323,7 +324,27 @@ fn recover_pending_with_hook(
     verify_restore_payload(data_root, &journal, &intent, &stage)?;
     ensure_marker(data_root, &journal, &intent, "verified", hook)?;
     ensure_marker(data_root, &journal, &intent, "committed", hook)?;
+    fence_story_pending(data_root, &intent, hook)?;
     clear_intent_after_commit(data_root, hook)
+}
+
+fn fence_story_pending(
+    data_root: &Path,
+    intent: &RestoreIntent,
+    hook: &mut impl FnMut(RecoveryEvent) -> Result<(), RestoreError>,
+) -> Result<(), RestoreError> {
+    if !marker_matches(data_root, intent, "pending-fenced")? {
+        crate::arena_story::pending::fence_restored_database(&data_root.join(SQLITE_FILE))
+            .map_err(|_| RestoreError::Failed)?;
+        ensure_marker(
+            data_root,
+            &journal_path(data_root, &intent.restore_id),
+            intent,
+            "pending-fenced",
+            hook,
+        )?;
+    }
+    Ok(())
 }
 
 fn validate_intent(intent: &RestoreIntent) -> Result<(), RestoreError> {

@@ -220,7 +220,7 @@ impl StoryStore {
         {
             return Err(StoryError::Invalid);
         }
-        let connection = lock_connection(&self.connection).map_err(|_| StoryError::Io)?;
+        let connection = lock_connection(&self.connection).map_err(StoryError::from_store)?;
         let mut statement = connection.prepare("SELECT id,revision,title_preview,title_truncated,mode,created_at,updated_at,chapter_count,last_chapter_id,chapter_plan FROM arena_story_session WHERE (?1 IS NULL OR updated_at < ?1 OR (updated_at=?1 AND id<?2)) ORDER BY updated_at DESC,id DESC LIMIT ?3").map_err(|_| StoryError::Io)?;
         let mut rows = statement
             .query_map(
@@ -260,7 +260,7 @@ impl StoryStore {
         {
             return Err(StoryError::Invalid);
         }
-        let connection = lock_connection(&self.connection).map_err(|_| StoryError::Io)?;
+        let connection = lock_connection(&self.connection).map_err(StoryError::from_store)?;
         assert_revision(&connection, session_id, revision)?;
         let mut statement = connection.prepare("SELECT id,chapter_index,action,title_preview,title_truncated,created_at,markdown_bytes FROM arena_story_chapter WHERE session_id=?1 AND (?2 IS NULL OR chapter_index>?2 OR (chapter_index=?2 AND id>?3)) ORDER BY chapter_index ASC,id ASC LIMIT ?4").map_err(|_| StoryError::Io)?;
         let mut rows = statement
@@ -313,7 +313,7 @@ impl StoryStore {
         if !valid_id(session_id) || !valid_id(record_id) {
             return Err(StoryError::Invalid);
         }
-        let connection = lock_connection(&self.connection).map_err(|_| StoryError::Io)?;
+        let connection = lock_connection(&self.connection).map_err(StoryError::from_store)?;
         assert_revision(&connection, session_id, revision)?;
         let (_, byte_length, digest) = record_metadata(&connection, session_id, record_id, kind)?;
         Ok(RecordDescriptor {
@@ -344,7 +344,7 @@ impl StoryStore {
         if length == 0 || length > CANDIDATE_FRAME_BYTES || offset >= descriptor.byte_length {
             return Err(StoryError::Invalid);
         }
-        let connection = lock_connection(&self.connection).map_err(|_| StoryError::Io)?;
+        let connection = lock_connection(&self.connection).map_err(StoryError::from_store)?;
         assert_revision(&connection, &descriptor.session_id, descriptor.revision)?;
         let (rowid, byte_length, digest) = record_metadata(
             &connection,
@@ -380,7 +380,7 @@ impl StoryStore {
         if !valid_id(session_id) || !valid_id(expected_head) {
             return Err(StoryError::Invalid);
         }
-        let connection = lock_connection(&self.connection).map_err(|_| StoryError::Io)?;
+        let connection = lock_connection(&self.connection).map_err(StoryError::from_store)?;
         assert_revision(&connection, session_id, revision)?;
         let head = connection.query_row("SELECT id,revision,title_preview,title_truncated,mode,created_at,updated_at,chapter_count,last_chapter_id,chapter_plan FROM arena_story_session WHERE id=?1",[session_id],session_head).map_err(|_| StoryError::Io)?;
         if head.last_chapter_id != expected_head {

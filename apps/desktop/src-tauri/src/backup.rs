@@ -379,6 +379,24 @@ fn build_backup(
     // The connection lock serializes this snapshot with every SQL operation as well.
     {
         let connection = lock_connection(library.connection()).map_err(|_| BackupError::Failed)?;
+        let page_count: u64 = connection
+            .query_row("PRAGMA page_count", [], |row| row.get(0))
+            .map_err(|_| BackupError::Failed)?;
+        let page_size: u64 = connection
+            .query_row("PRAGMA page_size", [], |row| row.get(0))
+            .map_err(|_| BackupError::Failed)?;
+        let blob_bytes = read_blob_rows(&connection)?
+            .iter()
+            .try_fold(0_u64, |sum, row| {
+                sum.checked_add(row.byte_length).ok_or(BackupError::Failed)
+            })?;
+        let minimum = page_count
+            .checked_mul(page_size)
+            .and_then(|n| n.checked_add(blob_bytes))
+            .ok_or(BackupError::Failed)?;
+        if fs4::available_space(directory).map_err(|_| BackupError::SourceUnavailable)? < minimum {
+            return Err(BackupError::SourceUnavailable);
+        }
         let path = database_temp_path.to_str().ok_or(BackupError::Failed)?;
         connection
             .execute("VACUUM INTO ?1", rusqlite::params![path])
@@ -568,6 +586,8 @@ fn verify_sqlite(connection: &Connection) -> Result<i64, BackupError> {
         (5, "arena_story_session", "id, document, document_bytes, document_digest, seed_document, seed_bytes, seed_digest, revision, title_preview, title_truncated, mode, chapter_plan, created_at, updated_at, chapter_count, last_chapter_id, working_checkpoint_id, last_input_checkpoint_id"),
         (5, "arena_story_chapter", "id, session_id, chapter_index, action, source_chapter_id, title_preview, title_truncated, created_at, markdown_bytes, document, document_bytes, document_digest, operation_id, operation_digest, receipt"),
         (5, "arena_story_checkpoint", "id, session_id, boundary_index, chapter_id, document, document_bytes, document_digest"),
+        (6, "arena_story_pending", "token,product,request_id,revision,active,metadata,total_bytes,save_attempt,restored"),
+        (6, "arena_story_pending_part", "id,token,kind,byte_length,received_bytes,digest,payload"),
     ] {
         if version >= introduced {
             let is_table: bool = connection.query_row(
@@ -600,6 +620,9 @@ fn verify_sqlite(connection: &Connection) -> Result<i64, BackupError> {
     }
     if version >= 5 {
         crate::arena_story::audit_relations(connection).map_err(|_| BackupError::Corrupt)?;
+    }
+    if version >= 6 {
+        crate::arena_story::pending::audit(connection).map_err(|_| BackupError::Corrupt)?;
     }
     Ok(version)
 }

@@ -56,7 +56,14 @@ pub fn open_in_memory_connection() -> Result<SharedConnection, StoreError> {
 pub fn lock_connection(
     connection: &SharedConnection,
 ) -> Result<MutexGuard<'_, Connection>, StoreError> {
-    connection.lock().map_err(|_| StoreError::Failure)
+    let connection = connection.lock().map_err(|_| StoreError::Failure)?;
+    // Public operations never inherit a transaction from a previous mutex owner.
+    // A failed rollback must not expose an uncommitted receipt as durable evidence,
+    // or let unrelated stores accidentally append writes to that transaction.
+    if !connection.is_autocommit() {
+        return Err(StoreError::TransactionUnresolved);
+    }
+    Ok(connection)
 }
 
 /// 把 `query_map` 的结果**完整**收集成 `Vec`，任一行出错即整体失败。
@@ -95,7 +102,7 @@ pub fn scalar_i64(connection: &Connection, sql: &str) -> Result<i64, StoreError>
 /// D1 引入 `provider_profile`（版本 1）；D2.0 在**同一个库**上增加本地卡（版本 2）；
 /// D2.1 增加内容寻址 blob 与 Web 包记录（版本 3、4）。刻意不新开数据库文件：Profile、
 /// 本地卡、Web 包与 blob 同属一台设备上的用户资产，分库会让备份、迁移与"重开应用"各自多一套路径。
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 6;
 
 /// 单条文档的 UTF-8 字节上限。
 ///
@@ -122,6 +129,8 @@ pub enum StoreError {
     InvalidQuery,
     /// 本地库正处于维护窗口，写入被拒（`DESK-065`）。**不是**数据损坏：调用方应当重试。
     MaintenanceBusy,
+    /// A prior transaction did not end. Fail closed until this library is reopened.
+    TransactionUnresolved,
     Failure,
 }
 
@@ -153,7 +162,7 @@ impl StoreError {
             StoreError::NonMonotonicTimestamp => "non-monotonic-timestamp",
             StoreError::InvalidQuery => "invalid-query",
             StoreError::MaintenanceBusy => "maintenance-busy",
-            StoreError::Failure => "store-failure",
+            StoreError::TransactionUnresolved | StoreError::Failure => "store-failure",
         }
     }
 
@@ -171,6 +180,7 @@ impl StoreError {
             StoreError::NonMonotonicTimestamp => "local store refuses a backwards timestamp",
             StoreError::InvalidQuery => "local store rejected the query",
             StoreError::MaintenanceBusy => "the local library is being maintained; retry shortly",
+            StoreError::TransactionUnresolved => "local store transaction is unresolved; restart the application before reading or writing",
             StoreError::Failure => "local store operation failed",
         }
     }
@@ -242,6 +252,10 @@ const MIGRATION_STEPS: &[MigrationStep] = &[
     MigrationStep {
         version: 5,
         sql: crate::arena_story::MIGRATION_5,
+    },
+    MigrationStep {
+        version: 6,
+        sql: crate::arena_story::pending::MIGRATION_6,
     },
 ];
 
@@ -630,7 +644,7 @@ mod tests {
 
         let versions = applied_migrations(&store.connection.lock().expect("lock"))
             .expect("migration journal must be readable");
-        assert_eq!(versions, vec![1, 2, 3, 4, 5]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]);
 
         // 重复打开同一个库不会重复执行迁移。
         let reopened = LocalStore::open_in_memory().expect("reopen");
@@ -679,7 +693,7 @@ mod tests {
         );
         let versions = applied_migrations(&store.connection.lock().expect("lock"))
             .expect("migration journal must be readable");
-        assert_eq!(versions, vec![1, 2, 3, 4, 5]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]);
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -773,7 +787,7 @@ mod tests {
             assert_eq!(store.schema_version().expect("version"), SCHEMA_VERSION);
             let versions = applied_migrations(&store.connection.lock().expect("lock"))
                 .expect("journal must be readable");
-            assert_eq!(versions, vec![1, 2, 3, 4, 5]);
+            assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]);
         }
 
         // 第三次打开：全部已完成，不重复执行。
@@ -781,7 +795,7 @@ mod tests {
             let store = LocalStore::open(&LocalStorePaths::under(&root)).expect("third open");
             assert_eq!(
                 applied_migrations(&store.connection.lock().expect("lock")).expect("journal"),
-                vec![1, 2, 3, 4, 5]
+                vec![1, 2, 3, 4, 5, 6]
             );
         }
 

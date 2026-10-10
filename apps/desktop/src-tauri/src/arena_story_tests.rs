@@ -8,7 +8,7 @@ fn library() -> (tempfile::TempDir, LocalLibrary) {
     let library = LocalLibrary::open(root.path()).unwrap();
     (root, library)
 }
-fn fixture(session: &str, index: u64) -> Vec<(PartKind, String)> {
+pub(super) fn fixture(session: &str, index: u64) -> Vec<(PartKind, String)> {
     let chapter = format!("{session}-chapter-{index}");
     let checkpoint = format!("{session}-checkpoint-{index}");
     let previous = format!("{session}-chapter-{}", index - 1);
@@ -34,7 +34,7 @@ fn fixture(session: &str, index: u64) -> Vec<(PartKind, String)> {
     result.push((PartKind::Checkpoint1,json!({"id":checkpoint,"sessionId":session,"boundaryIndex":index,"chapterId":chapter,"combatants":combatants,"createdAt":99+index}).to_string()));
     result
 }
-fn manifest(session: &str, index: u64, parts: &[(PartKind, String)]) -> CommitManifest {
+pub(super) fn manifest(session: &str, index: u64, parts: &[(PartKind, String)]) -> CommitManifest {
     CommitManifest {
         version: 1,
         operation_id: format!("{session}-chapter-{index}"),

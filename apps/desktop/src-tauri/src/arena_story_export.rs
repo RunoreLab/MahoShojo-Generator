@@ -269,7 +269,7 @@ impl StoryStore {
         if session.is_some() {
             return Err(StoryError::Busy);
         }
-        let connection = lock_connection(&self.connection).map_err(|_| StoryError::Io)?;
+        let connection = lock_connection(&self.connection).map_err(StoryError::from_store)?;
         if manifest.expected_byte_length > derived_byte_bound(&connection, &manifest)? {
             return Err(StoryError::TooLarge);
         }
@@ -458,7 +458,7 @@ impl StoryStore {
             .gate
             .enter_write()
             .map_err(|_| StoryError::Maintenance)?;
-        let connection = lock_connection(&self.connection).map_err(|_| StoryError::Io)?;
+        let connection = lock_connection(&self.connection).map_err(StoryError::from_store)?;
         if let Err(error) = assert_scope(&connection, &session.manifest) {
             guard.take();
             return Err(error);

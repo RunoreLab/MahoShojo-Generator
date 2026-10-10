@@ -275,6 +275,80 @@ export const captureBattleStoryCommitExpected = (input: {
   };
 };
 
+/** Already-checked public content, expressed structurally to avoid a Desktop dependency. */
+export type HostedStoryPendingContentInput = {
+  inputUserGuidance?: string;
+  reasoning: string;
+  meta?: {
+    event: 'meta' | 'meta_error';
+    data: { parseOk: boolean; meta?: Record<string, unknown>; error?: string; raw?: string; rawTruncated?: boolean };
+  };
+  header?: {
+    reporterInfo?: object; userGuidance?: string; characterGuidances?: readonly unknown[];
+    adjudicationResults?: readonly unknown[]; narrativeHistoryReadCount?: number; scenarioDisplayName?: string;
+  };
+  workingCombatants: readonly object[];
+  roleState: 'not-requested' | 'accepted' | 'old-roles';
+  roleResponse?: {
+    updatedCombatants: readonly { combatantIndex: number; data: Record<string, unknown>; isNative: boolean }[];
+    warnings: readonly { code: string; message: string; combatantIndex?: number; rosterIndex?: number; characterName?: string | null }[];
+  };
+  fallbackReason?: 'http-failure' | 'user-kept-original';
+};
+
+/**
+ * Project only content consumed by completed chapter/checkpoint records. The caller
+ * owns and validates originals before this pure step, then feeds this result into
+ * buildCompletedBattleStoryRecords and freezes the resulting owned graph. Preserve
+ * all report extensions and original roster positions without duplicating carriers.
+ */
+export const projectHostedStoryPendingContent = (input: HostedStoryPendingContentInput) => {
+  if (!['not-requested', 'accepted', 'old-roles'].includes(input.roleState)
+    || (input.roleState === 'accepted') !== (input.roleResponse !== undefined)
+    || (input.roleState === 'old-roles'
+      ? !['http-failure', 'user-kept-original'].includes(input.fallbackReason ?? '')
+      : input.fallbackReason !== undefined)) {
+    throw new Error('故事角色同步结果尚未确定或降级原因无效，不能冻结本章。');
+  }
+  const nextWorkingCombatants = [...input.workingCombatants];
+  const updatedIndexes = new Set<number>();
+  for (const update of input.roleResponse?.updatedCombatants ?? []) {
+    const index = update.combatantIndex;
+    if (!Number.isSafeInteger(index) || index < 0 || index >= nextWorkingCombatants.length
+      || updatedIndexes.has(index)) {
+      throw new RangeError('故事角色同步索引越界或重复，不能冻结本章。');
+    }
+    updatedIndexes.add(index);
+    nextWorkingCombatants[index] = { ...input.workingCombatants[index], data: update.data, isNative: update.isNative };
+  }
+  const { header, meta } = input;
+  const userGuidance = header?.userGuidance ?? input.inputUserGuidance;
+  const cardSnapshot = {
+    aiReasoning: { status: 'done' as const, source: 'provider' as const, text: input.reasoning },
+    ...(header?.reporterInfo !== undefined ? { reporterInfo: header.reporterInfo } : {}),
+    ...(userGuidance !== undefined ? { userGuidance } : {}),
+    ...(header?.characterGuidances !== undefined ? { characterGuidances: header.characterGuidances } : {}),
+    ...(header?.adjudicationResults !== undefined ? { adjudicationResults: header.adjudicationResults } : {}),
+    ...(header?.narrativeHistoryReadCount !== undefined ? { narrativeHistoryReadCount: header.narrativeHistoryReadCount } : {}),
+    ...(header?.scenarioDisplayName !== undefined ? { scenarioDisplayName: header.scenarioDisplayName } : {}),
+    ...(meta ? { streamUpdateMetaDebug: {
+      source: 'sse' as const, parseOk: meta.data.parseOk,
+      ...(meta.data.error !== undefined ? { error: meta.data.error } : {}),
+      ...(meta.data.raw !== undefined ? { raw: meta.data.raw } : {}),
+      ...(meta.data.rawTruncated !== undefined ? { rawTruncated: meta.data.rawTruncated } : {}),
+    } } : {}),
+    storyRoleSync: {
+      version: 1 as const, state: input.roleState, warnings: input.roleResponse?.warnings ?? [],
+      ...(input.roleState === 'old-roles' ? { reason: input.fallbackReason! } : {}),
+    },
+  };
+  return {
+    reportJson: meta?.event === 'meta' && meta.data.parseOk ? meta.data.meta ?? {} : {},
+    cardSnapshot,
+    nextWorkingCombatants,
+  };
+};
+
 export type BuildCompletedBattleStoryRecordsInput<S extends BattleStoryCommitSession = BattleStoryCommitSession, CardSnapshot = object> = {
   action: 'start' | 'continue'; session: S;
   operationId: string; checkpointId: string; initialCheckpointId?: string; now: number;

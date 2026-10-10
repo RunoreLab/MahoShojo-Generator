@@ -1,0 +1,1839 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "accepted-partial",
+      "originals": {
+        "input": {
+          "version": 1,
+          "sessionId": "session_content_0",
+          "generationRequestId": "story_content_request_0",
+          "action": "start",
+          "chapterIndex": 1,
+          "chapterContext": {
+            "recentWindow": [],
+            "workingCombatants": [
+              {
+                "type": "magical-girl",
+                "data": {
+                  "name": "双生",
+                  "current_state": {
+                    "summary": "旧状态甲"
+                  },
+                  "extension": {
+                    "token": "fictional lore"
+                  }
+                },
+                "isNative": false,
+                "roomCombatantKey": "one",
+                "selected": true
+              },
+              {
+                "type": "magical-girl",
+                "data": {
+                  "name": "双生",
+                  "current_state": {
+                    "summary": "旧状态乙"
+                  }
+                },
+                "isNative": false,
+                "roomCombatantKey": "two",
+                "unknownEnvelope": {
+                  "retained": true
+                }
+              },
+              {
+                "type": "canshou",
+                "data": {
+                  "core": {
+                    "unnamed": true
+                  }
+                },
+                "isNative": true,
+                "roomCombatantKey": "three"
+              }
+            ]
+          },
+          "seed": {
+            "combatants": [
+              {
+                "type": "magical-girl",
+                "data": {
+                  "name": "双生",
+                  "current_state": {
+                    "summary": "旧状态甲"
+                  },
+                  "extension": {
+                    "token": "fictional lore"
+                  }
+                },
+                "isNative": false,
+                "roomCombatantKey": "one",
+                "selected": true
+              },
+              {
+                "type": "magical-girl",
+                "data": {
+                  "name": "双生",
+                  "current_state": {
+                    "summary": "旧状态乙"
+                  }
+                },
+                "isNative": false,
+                "roomCombatantKey": "two",
+                "unknownEnvelope": {
+                  "retained": true
+                }
+              },
+              {
+                "type": "canshou",
+                "data": {
+                  "core": {
+                    "unnamed": true
+                  }
+                },
+                "isNative": true,
+                "roomCombatantKey": "three"
+              }
+            ],
+            "mode": "daily",
+            "storyLength": "default",
+            "language": "zh-CN",
+            "settings": {
+              "readArenaHistory": false,
+              "writeArenaHistory": false,
+              "readCurrentState": true,
+              "writeCurrentState": true,
+              "readNarrativeHistory": false,
+              "writeNarrativeHistory": false
+            }
+          },
+          "userGuidance": "输入指导\n保留空格  🪄"
+        },
+        "markdown": "# 潮汐回声\n\n正文：雪与星 🪄\r\n最后一行\u0000",
+        "reasoning": "先想一想\n第二行\r\n𐐀与🪄\t  原样 ",
+        "meta": {
+          "id": "4-0",
+          "event": "meta",
+          "data": {
+            "parseOk": true,
+            "meta": {
+              "report": {
+                "title": "潮汐回声",
+                "winner": "双生",
+                "conclusion": "一起归来"
+              },
+              "impacts": [
+                {
+                  "characterName": "双生",
+                  "impact": "理解彼此",
+                  "extension": [
+                    null,
+                    false,
+                    "𐐀"
+                  ]
+                }
+              ],
+              "unknownExtension": {
+                "nested": {
+                  "raw": "不是调试正文\n",
+                  "token": "fictional-only"
+                }
+              }
+            },
+            "raw": "{\n  \"report\": \"完整原文另在 reportJson\"\n}",
+            "rawTruncated": false
+          }
+        },
+        "header": {
+          "reportFormat": "markdown",
+          "outputContract": "stream-markdown",
+          "mode": "daily",
+          "language": "zh-CN",
+          "storyLength": "default",
+          "reporterInfo": {
+            "name": "记者雪",
+            "extension": {
+              "untouched": [
+                "🪄",
+                1
+              ]
+            }
+          },
+          "userGuidance": "响应指导优先\n原样  ",
+          "characterGuidances": [
+            {
+              "combatantIndex": 2,
+              "guidance": "别丢无名角色\n"
+            }
+          ],
+          "adjudicationResults": [
+            {
+              "name": "抉择",
+              "result": false,
+              "extension": {
+                "count": 0
+              }
+            }
+          ],
+          "narrativeHistoryReadCount": 0,
+          "scenarioDisplayName": "  废站\n𐐀 "
+        },
+        "roleResponse": {
+          "version": "arena-reconciliation-v1",
+          "generationId": "generation_content_0",
+          "success": true,
+          "updatedCombatants": [
+            {
+              "combatantIndex": 2,
+              "data": {
+                "core": {
+                  "unnamed": true
+                },
+                "newField": "最后角色先返回"
+              },
+              "isNative": false
+            },
+            {
+              "combatantIndex": 0,
+              "data": {
+                "name": "双生",
+                "signature": "fresh-server-signature",
+                "current_state": {
+                  "summary": "新状态甲\n"
+                },
+                "extension": {
+                  "apiKey": "fictional card text"
+                }
+              },
+              "isNative": true
+            }
+          ],
+          "warnings": [
+            {
+              "combatantIndex": 1,
+              "code": "ARENA_RECONCILIATION_COMBATANT_UNMATCHED",
+              "message": "保留第二个同名角色\n"
+            },
+            {
+              "rosterIndex": 2,
+              "characterName": null,
+              "code": "ARENA_RECONCILIATION_ROSTER_COMBATANT_MISSING",
+              "message": "无名快照提示"
+            },
+            {
+              "characterName": "双生",
+              "code": "ARENA_RECONCILIATION_IMPACT_AMBIGUOUS",
+              "message": "同名影响未归并"
+            }
+          ]
+        }
+      },
+      "roleState": "accepted",
+      "assembly": {
+        "session": {
+          "id": "session_content_0",
+          "title": "未命名连续战报",
+          "createdAt": 1,
+          "updatedAt": 1,
+          "source": {
+            "mode": "daily",
+            "language": "zh-CN",
+            "storyLength": "default",
+            "generationMode": "stream"
+          },
+          "seed": {
+            "combatants": [
+              {
+                "type": "magical-girl",
+                "data": {
+                  "name": "双生",
+                  "current_state": {
+                    "summary": "旧状态甲"
+                  },
+                  "extension": {
+                    "token": "fictional lore"
+                  }
+                },
+                "isNative": false,
+                "roomCombatantKey": "one",
+                "selected": true
+              },
+              {
+                "type": "magical-girl",
+                "data": {
+                  "name": "双生",
+                  "current_state": {
+                    "summary": "旧状态乙"
+                  }
+                },
+                "isNative": false,
+                "roomCombatantKey": "two",
+                "unknownEnvelope": {
+                  "retained": true
+                }
+              },
+              {
+                "type": "canshou",
+                "data": {
+                  "core": {
+                    "unnamed": true
+                  }
+                },
+                "isNative": true,
+                "roomCombatantKey": "three"
+              }
+            ],
+            "mode": "daily",
+            "storyLength": "default",
+            "language": "zh-CN",
+            "settings": {
+              "readArenaHistory": false,
+              "writeArenaHistory": false,
+              "readCurrentState": true,
+              "writeCurrentState": true,
+              "readNarrativeHistory": false,
+              "writeNarrativeHistory": false
+            }
+          },
+          "workingCombatants": [
+            {
+              "type": "magical-girl",
+              "data": {
+                "name": "双生",
+                "current_state": {
+                  "summary": "旧状态甲"
+                },
+                "extension": {
+                  "token": "fictional lore"
+                }
+              },
+              "isNative": false,
+              "roomCombatantKey": "one",
+              "selected": true
+            },
+            {
+              "type": "magical-girl",
+              "data": {
+                "name": "双生",
+                "current_state": {
+                  "summary": "旧状态乙"
+                }
+              },
+              "isNative": false,
+              "roomCombatantKey": "two",
+              "unknownEnvelope": {
+                "retained": true
+              }
+            },
+            {
+              "type": "canshou",
+              "data": {
+                "core": {
+                  "unnamed": true
+                }
+              },
+              "isNative": true,
+              "roomCombatantKey": "three"
+            }
+          ],
+          "chapterCount": 0,
+          "lastChapterId": null
+        },
+        "operationId": "chapter_content_0",
+        "checkpointId": "checkpoint_after_0",
+        "initialCheckpointId": "checkpoint_before_0",
+        "now": 2,
+        "source": {
+          "mode": "daily",
+          "language": "zh-CN",
+          "storyLength": "default",
+          "generationMode": "stream"
+        },
+        "generated": {
+          "chapterIndex": 1,
+          "digest": {
+            "chapterTitle": "潮汐回声",
+            "bodyExcerpt": "正文：雪与星 🪄"
+          },
+          "generationId": "generation_content_0"
+        }
+      },
+      "expected": {
+        "chapter": {
+          "action": "start",
+          "cardSnapshot": {
+            "adjudicationResults": [
+              {
+                "extension": {
+                  "count": 0
+                },
+                "name": "抉择",
+                "result": false
+              }
+            ],
+            "aiReasoning": {
+              "source": "provider",
+              "status": "done",
+              "text": "先想一想\n第二行\r\n𐐀与🪄\t  原样 "
+            },
+            "characterGuidances": [
+              {
+                "combatantIndex": 2,
+                "guidance": "别丢无名角色\n"
+              }
+            ],
+            "narrativeHistoryReadCount": 0,
+            "reporterInfo": {
+              "extension": {
+                "untouched": [
+                  "🪄",
+                  1
+                ]
+              },
+              "name": "记者雪"
+            },
+            "scenarioDisplayName": "  废站\n𐐀 ",
+            "storyRoleSync": {
+              "state": "accepted",
+              "version": 1,
+              "warnings": [
+                {
+                  "code": "ARENA_RECONCILIATION_COMBATANT_UNMATCHED",
+                  "combatantIndex": 1,
+                  "message": "保留第二个同名角色\n"
+                },
+                {
+                  "characterName": null,
+                  "code": "ARENA_RECONCILIATION_ROSTER_COMBATANT_MISSING",
+                  "message": "无名快照提示",
+                  "rosterIndex": 2
+                },
+                {
+                  "characterName": "双生",
+                  "code": "ARENA_RECONCILIATION_IMPACT_AMBIGUOUS",
+                  "message": "同名影响未归并"
+                }
+              ]
+            },
+            "streamUpdateMetaDebug": {
+              "parseOk": true,
+              "raw": "{\n  \"report\": \"完整原文另在 reportJson\"\n}",
+              "rawTruncated": false,
+              "source": "sse"
+            },
+            "userGuidance": "响应指导优先\n原样  "
+          },
+          "createdAt": 2,
+          "deterministicDigest": {
+            "bodyExcerpt": "正文：雪与星 🪄",
+            "chapterTitle": "潮汐回声"
+          },
+          "generationId": "generation_content_0",
+          "id": "chapter_content_0",
+          "index": 1,
+          "markdown": "# 潮汐回声\n\n正文：雪与星 🪄\r\n最后一行\u0000",
+          "reportJson": {
+            "impacts": [
+              {
+                "characterName": "双生",
+                "extension": [
+                  null,
+                  false,
+                  "𐐀"
+                ],
+                "impact": "理解彼此"
+              }
+            ],
+            "report": {
+              "conclusion": "一起归来",
+              "title": "潮汐回声",
+              "winner": "双生"
+            },
+            "unknownExtension": {
+              "nested": {
+                "raw": "不是调试正文\n",
+                "token": "fictional-only"
+              }
+            }
+          },
+          "sessionId": "session_content_0",
+          "status": "active",
+          "title": "潮汐回声"
+        },
+        "checkpoints": [
+          {
+            "boundaryIndex": 0,
+            "combatants": [
+              {
+                "data": {
+                  "current_state": {
+                    "summary": "旧状态甲"
+                  },
+                  "extension": {
+                    "token": "fictional lore"
+                  },
+                  "name": "双生"
+                },
+                "isNative": false,
+                "roomCombatantKey": "one",
+                "selected": true,
+                "type": "magical-girl"
+              },
+              {
+                "data": {
+                  "current_state": {
+                    "summary": "旧状态乙"
+                  },
+                  "name": "双生"
+                },
+                "isNative": false,
+                "roomCombatantKey": "two",
+                "type": "magical-girl",
+                "unknownEnvelope": {
+                  "retained": true
+                }
+              },
+              {
+                "data": {
+                  "core": {
+                    "unnamed": true
+                  }
+                },
+                "isNative": true,
+                "roomCombatantKey": "three",
+                "type": "canshou"
+              }
+            ],
+            "createdAt": 2,
+            "id": "checkpoint_before_0",
+            "sessionId": "session_content_0"
+          },
+          {
+            "boundaryIndex": 1,
+            "chapterId": "chapter_content_0",
+            "combatants": [
+              {
+                "data": {
+                  "current_state": {
+                    "summary": "新状态甲\n"
+                  },
+                  "extension": {
+                    "apiKey": "fictional card text"
+                  },
+                  "name": "双生",
+                  "signature": "fresh-server-signature"
+                },
+                "isNative": true,
+                "roomCombatantKey": "one",
+                "selected": true,
+                "type": "magical-girl"
+              },
+              {
+                "data": {
+                  "current_state": {
+                    "summary": "旧状态乙"
+                  },
+                  "name": "双生"
+                },
+                "isNative": false,
+                "roomCombatantKey": "two",
+                "type": "magical-girl",
+                "unknownEnvelope": {
+                  "retained": true
+                }
+              },
+              {
+                "data": {
+                  "core": {
+                    "unnamed": true
+                  },
+                  "newField": "最后角色先返回"
+                },
+                "isNative": false,
+                "roomCombatantKey": "three",
+                "type": "canshou"
+              }
+            ],
+            "createdAt": 2,
+            "id": "checkpoint_after_0",
+            "sessionId": "session_content_0"
+          }
+        ],
+        "session": {
+          "chapterCount": 1,
+          "createdAt": 1,
+          "id": "session_content_0",
+          "lastChapterId": "chapter_content_0",
+          "lastChapterInputCombatants": [
+            {
+              "data": {
+                "current_state": {
+                  "summary": "旧状态甲"
+                },
+                "extension": {
+                  "token": "fictional lore"
+                },
+                "name": "双生"
+              },
+              "isNative": false,
+              "roomCombatantKey": "one",
+              "selected": true,
+              "type": "magical-girl"
+            },
+            {
+              "data": {
+                "current_state": {
+                  "summary": "旧状态乙"
+                },
+                "name": "双生"
+              },
+              "isNative": false,
+              "roomCombatantKey": "two",
+              "type": "magical-girl",
+              "unknownEnvelope": {
+                "retained": true
+              }
+            },
+            {
+              "data": {
+                "core": {
+                  "unnamed": true
+                }
+              },
+              "isNative": true,
+              "roomCombatantKey": "three",
+              "type": "canshou"
+            }
+          ],
+          "seed": {
+            "combatants": [
+              {
+                "data": {
+                  "current_state": {
+                    "summary": "旧状态甲"
+                  },
+                  "extension": {
+                    "token": "fictional lore"
+                  },
+                  "name": "双生"
+                },
+                "isNative": false,
+                "roomCombatantKey": "one",
+                "selected": true,
+                "type": "magical-girl"
+              },
+              {
+                "data": {
+                  "current_state": {
+                    "summary": "旧状态乙"
+                  },
+                  "name": "双生"
+                },
+                "isNative": false,
+                "roomCombatantKey": "two",
+                "type": "magical-girl",
+                "unknownEnvelope": {
+                  "retained": true
+                }
+              },
+              {
+                "data": {
+                  "core": {
+                    "unnamed": true
+                  }
+                },
+                "isNative": true,
+                "roomCombatantKey": "three",
+                "type": "canshou"
+              }
+            ],
+            "language": "zh-CN",
+            "mode": "daily",
+            "settings": {
+              "readArenaHistory": false,
+              "readCurrentState": true,
+              "readNarrativeHistory": false,
+              "writeArenaHistory": false,
+              "writeCurrentState": true,
+              "writeNarrativeHistory": false
+            },
+            "storyLength": "default"
+          },
+          "source": {
+            "generationMode": "stream",
+            "language": "zh-CN",
+            "mode": "daily",
+            "storyLength": "default"
+          },
+          "title": "潮汐回声",
+          "updatedAt": 2,
+          "workingCombatants": [
+            {
+              "data": {
+                "current_state": {
+                  "summary": "新状态甲\n"
+                },
+                "extension": {
+                  "apiKey": "fictional card text"
+                },
+                "name": "双生",
+                "signature": "fresh-server-signature"
+              },
+              "isNative": true,
+              "roomCombatantKey": "one",
+              "selected": true,
+              "type": "magical-girl"
+            },
+            {
+              "data": {
+                "current_state": {
+                  "summary": "旧状态乙"
+                },
+                "name": "双生"
+              },
+              "isNative": false,
+              "roomCombatantKey": "two",
+              "type": "magical-girl",
+              "unknownEnvelope": {
+                "retained": true
+              }
+            },
+            {
+              "data": {
+                "core": {
+                  "unnamed": true
+                },
+                "newField": "最后角色先返回"
+              },
+              "isNative": false,
+              "roomCombatantKey": "three",
+              "type": "canshou"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "old-roles-meta-error",
+      "originals": {
+        "input": {
+          "version": 1,
+          "sessionId": "session_content_1",
+          "generationRequestId": "story_content_request_1",
+          "action": "start",
+          "chapterIndex": 1,
+          "chapterContext": {
+            "recentWindow": [],
+            "workingCombatants": [
+              {
+                "type": "magical-girl",
+                "data": {
+                  "name": "双生",
+                  "current_state": {
+                    "summary": "旧状态甲"
+                  },
+                  "extension": {
+                    "token": "fictional lore"
+                  }
+                },
+                "isNative": false,
+                "roomCombatantKey": "one",
+                "selected": true
+              },
+              {
+                "type": "magical-girl",
+                "data": {
+                  "name": "双生",
+                  "current_state": {
+                    "summary": "旧状态乙"
+                  }
+                },
+                "isNative": false,
+                "roomCombatantKey": "two",
+                "unknownEnvelope": {
+                  "retained": true
+                }
+              },
+              {
+                "type": "canshou",
+                "data": {
+                  "core": {
+                    "unnamed": true
+                  }
+                },
+                "isNative": true,
+                "roomCombatantKey": "three"
+              }
+            ]
+          },
+          "seed": {
+            "combatants": [
+              {
+                "type": "magical-girl",
+                "data": {
+                  "name": "双生",
+                  "current_state": {
+                    "summary": "旧状态甲"
+                  },
+                  "extension": {
+                    "token": "fictional lore"
+                  }
+                },
+                "isNative": false,
+                "roomCombatantKey": "one",
+                "selected": true
+              },
+              {
+                "type": "magical-girl",
+                "data": {
+                  "name": "双生",
+                  "current_state": {
+                    "summary": "旧状态乙"
+                  }
+                },
+                "isNative": false,
+                "roomCombatantKey": "two",
+                "unknownEnvelope": {
+                  "retained": true
+                }
+              },
+              {
+                "type": "canshou",
+                "data": {
+                  "core": {
+                    "unnamed": true
+                  }
+                },
+                "isNative": true,
+                "roomCombatantKey": "three"
+              }
+            ],
+            "mode": "daily",
+            "storyLength": "default",
+            "language": "zh-CN",
+            "settings": {
+              "readArenaHistory": false,
+              "writeArenaHistory": false,
+              "readCurrentState": true,
+              "writeCurrentState": true,
+              "readNarrativeHistory": false,
+              "writeNarrativeHistory": false
+            }
+          },
+          "userGuidance": "输入指导\n保留空格  🪄"
+        },
+        "markdown": "# 潮汐回声\n\n正文：雪与星 🪄\r\n最后一行\u0000",
+        "reasoning": "先想一想\n第二行\r\n𐐀与🪄\t  原样 ",
+        "meta": {
+          "id": "5-0",
+          "event": "meta_error",
+          "data": {
+            "parseOk": false,
+            "error": "无法解析\n附加信息",
+            "raw": "{invalid 🪄",
+            "rawTruncated": true
+          }
+        },
+        "header": {
+          "reportFormat": "markdown",
+          "reporterInfo": {
+            "name": "记者雪"
+          },
+          "characterGuidances": [],
+          "adjudicationResults": [],
+          "narrativeHistoryReadCount": 0,
+          "scenarioDisplayName": ""
+        }
+      },
+      "roleState": "old-roles",
+      "fallbackReason": "http-failure",
+      "assembly": {
+        "session": {
+          "id": "session_content_1",
+          "title": "未命名连续战报",
+          "createdAt": 1,
+          "updatedAt": 1,
+          "source": {
+            "mode": "daily",
+            "language": "zh-CN",
+            "storyLength": "default",
+            "generationMode": "stream"
+          },
+          "seed": {
+            "combatants": [
+              {
+                "type": "magical-girl",
+                "data": {
+                  "name": "双生",
+                  "current_state": {
+                    "summary": "旧状态甲"
+                  },
+                  "extension": {
+                    "token": "fictional lore"
+                  }
+                },
+                "isNative": false,
+                "roomCombatantKey": "one",
+                "selected": true
+              },
+              {
+                "type": "magical-girl",
+                "data": {
+                  "name": "双生",
+                  "current_state": {
+                    "summary": "旧状态乙"
+                  }
+                },
+                "isNative": false,
+                "roomCombatantKey": "two",
+                "unknownEnvelope": {
+                  "retained": true
+                }
+              },
+              {
+                "type": "canshou",
+                "data": {
+                  "core": {
+                    "unnamed": true
+                  }
+                },
+                "isNative": true,
+                "roomCombatantKey": "three"
+              }
+            ],
+            "mode": "daily",
+            "storyLength": "default",
+            "language": "zh-CN",
+            "settings": {
+              "readArenaHistory": false,
+              "writeArenaHistory": false,
+              "readCurrentState": true,
+              "writeCurrentState": true,
+              "readNarrativeHistory": false,
+              "writeNarrativeHistory": false
+            }
+          },
+          "workingCombatants": [
+            {
+              "type": "magical-girl",
+              "data": {
+                "name": "双生",
+                "current_state": {
+                  "summary": "旧状态甲"
+                },
+                "extension": {
+                  "token": "fictional lore"
+                }
+              },
+              "isNative": false,
+              "roomCombatantKey": "one",
+              "selected": true
+            },
+            {
+              "type": "magical-girl",
+              "data": {
+                "name": "双生",
+                "current_state": {
+                  "summary": "旧状态乙"
+                }
+              },
+              "isNative": false,
+              "roomCombatantKey": "two",
+              "unknownEnvelope": {
+                "retained": true
+              }
+            },
+            {
+              "type": "canshou",
+              "data": {
+                "core": {
+                  "unnamed": true
+                }
+              },
+              "isNative": true,
+              "roomCombatantKey": "three"
+            }
+          ],
+          "chapterCount": 0,
+          "lastChapterId": null
+        },
+        "operationId": "chapter_content_1",
+        "checkpointId": "checkpoint_after_1",
+        "initialCheckpointId": "checkpoint_before_1",
+        "now": 2,
+        "source": {
+          "mode": "daily",
+          "language": "zh-CN",
+          "storyLength": "default",
+          "generationMode": "stream"
+        },
+        "generated": {
+          "chapterIndex": 1,
+          "digest": {
+            "chapterTitle": "潮汐回声",
+            "bodyExcerpt": "正文：雪与星 🪄"
+          },
+          "generationId": "generation_content_1"
+        }
+      },
+      "expected": {
+        "chapter": {
+          "action": "start",
+          "cardSnapshot": {
+            "adjudicationResults": [],
+            "aiReasoning": {
+              "source": "provider",
+              "status": "done",
+              "text": "先想一想\n第二行\r\n𐐀与🪄\t  原样 "
+            },
+            "characterGuidances": [],
+            "narrativeHistoryReadCount": 0,
+            "reporterInfo": {
+              "name": "记者雪"
+            },
+            "scenarioDisplayName": "",
+            "storyRoleSync": {
+              "reason": "http-failure",
+              "state": "old-roles",
+              "version": 1,
+              "warnings": []
+            },
+            "streamUpdateMetaDebug": {
+              "error": "无法解析\n附加信息",
+              "parseOk": false,
+              "raw": "{invalid 🪄",
+              "rawTruncated": true,
+              "source": "sse"
+            },
+            "userGuidance": "输入指导\n保留空格  🪄"
+          },
+          "createdAt": 2,
+          "deterministicDigest": {
+            "bodyExcerpt": "正文：雪与星 🪄",
+            "chapterTitle": "潮汐回声"
+          },
+          "generationId": "generation_content_1",
+          "id": "chapter_content_1",
+          "index": 1,
+          "markdown": "# 潮汐回声\n\n正文：雪与星 🪄\r\n最后一行\u0000",
+          "reportJson": {},
+          "sessionId": "session_content_1",
+          "status": "active",
+          "title": "潮汐回声"
+        },
+        "checkpoints": [
+          {
+            "boundaryIndex": 0,
+            "combatants": [
+              {
+                "data": {
+                  "current_state": {
+                    "summary": "旧状态甲"
+                  },
+                  "extension": {
+                    "token": "fictional lore"
+                  },
+                  "name": "双生"
+                },
+                "isNative": false,
+                "roomCombatantKey": "one",
+                "selected": true,
+                "type": "magical-girl"
+              },
+              {
+                "data": {
+                  "current_state": {
+                    "summary": "旧状态乙"
+                  },
+                  "name": "双生"
+                },
+                "isNative": false,
+                "roomCombatantKey": "two",
+                "type": "magical-girl",
+                "unknownEnvelope": {
+                  "retained": true
+                }
+              },
+              {
+                "data": {
+                  "core": {
+                    "unnamed": true
+                  }
+                },
+                "isNative": true,
+                "roomCombatantKey": "three",
+                "type": "canshou"
+              }
+            ],
+            "createdAt": 2,
+            "id": "checkpoint_before_1",
+            "sessionId": "session_content_1"
+          },
+          {
+            "boundaryIndex": 1,
+            "chapterId": "chapter_content_1",
+            "combatants": [
+              {
+                "data": {
+                  "current_state": {
+                    "summary": "旧状态甲"
+                  },
+                  "extension": {
+                    "token": "fictional lore"
+                  },
+                  "name": "双生"
+                },
+                "isNative": false,
+                "roomCombatantKey": "one",
+                "selected": true,
+                "type": "magical-girl"
+              },
+              {
+                "data": {
+                  "current_state": {
+                    "summary": "旧状态乙"
+                  },
+                  "name": "双生"
+                },
+                "isNative": false,
+                "roomCombatantKey": "two",
+                "type": "magical-girl",
+                "unknownEnvelope": {
+                  "retained": true
+                }
+              },
+              {
+                "data": {
+                  "core": {
+                    "unnamed": true
+                  }
+                },
+                "isNative": true,
+                "roomCombatantKey": "three",
+                "type": "canshou"
+              }
+            ],
+            "createdAt": 2,
+            "id": "checkpoint_after_1",
+            "sessionId": "session_content_1"
+          }
+        ],
+        "session": {
+          "chapterCount": 1,
+          "createdAt": 1,
+          "id": "session_content_1",
+          "lastChapterId": "chapter_content_1",
+          "lastChapterInputCombatants": [
+            {
+              "data": {
+                "current_state": {
+                  "summary": "旧状态甲"
+                },
+                "extension": {
+                  "token": "fictional lore"
+                },
+                "name": "双生"
+              },
+              "isNative": false,
+              "roomCombatantKey": "one",
+              "selected": true,
+              "type": "magical-girl"
+            },
+            {
+              "data": {
+                "current_state": {
+                  "summary": "旧状态乙"
+                },
+                "name": "双生"
+              },
+              "isNative": false,
+              "roomCombatantKey": "two",
+              "type": "magical-girl",
+              "unknownEnvelope": {
+                "retained": true
+              }
+            },
+            {
+              "data": {
+                "core": {
+                  "unnamed": true
+                }
+              },
+              "isNative": true,
+              "roomCombatantKey": "three",
+              "type": "canshou"
+            }
+          ],
+          "seed": {
+            "combatants": [
+              {
+                "data": {
+                  "current_state": {
+                    "summary": "旧状态甲"
+                  },
+                  "extension": {
+                    "token": "fictional lore"
+                  },
+                  "name": "双生"
+                },
+                "isNative": false,
+                "roomCombatantKey": "one",
+                "selected": true,
+                "type": "magical-girl"
+              },
+              {
+                "data": {
+                  "current_state": {
+                    "summary": "旧状态乙"
+                  },
+                  "name": "双生"
+                },
+                "isNative": false,
+                "roomCombatantKey": "two",
+                "type": "magical-girl",
+                "unknownEnvelope": {
+                  "retained": true
+                }
+              },
+              {
+                "data": {
+                  "core": {
+                    "unnamed": true
+                  }
+                },
+                "isNative": true,
+                "roomCombatantKey": "three",
+                "type": "canshou"
+              }
+            ],
+            "language": "zh-CN",
+            "mode": "daily",
+            "settings": {
+              "readArenaHistory": false,
+              "readCurrentState": true,
+              "readNarrativeHistory": false,
+              "writeArenaHistory": false,
+              "writeCurrentState": true,
+              "writeNarrativeHistory": false
+            },
+            "storyLength": "default"
+          },
+          "source": {
+            "generationMode": "stream",
+            "language": "zh-CN",
+            "mode": "daily",
+            "storyLength": "default"
+          },
+          "title": "潮汐回声",
+          "updatedAt": 2,
+          "workingCombatants": [
+            {
+              "data": {
+                "current_state": {
+                  "summary": "旧状态甲"
+                },
+                "extension": {
+                  "token": "fictional lore"
+                },
+                "name": "双生"
+              },
+              "isNative": false,
+              "roomCombatantKey": "one",
+              "selected": true,
+              "type": "magical-girl"
+            },
+            {
+              "data": {
+                "current_state": {
+                  "summary": "旧状态乙"
+                },
+                "name": "双生"
+              },
+              "isNative": false,
+              "roomCombatantKey": "two",
+              "type": "magical-girl",
+              "unknownEnvelope": {
+                "retained": true
+              }
+            },
+            {
+              "data": {
+                "core": {
+                  "unnamed": true
+                }
+              },
+              "isNative": true,
+              "roomCombatantKey": "three",
+              "type": "canshou"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "not-requested",
+      "originals": {
+        "input": {
+          "version": 1,
+          "sessionId": "session_content_2",
+          "generationRequestId": "story_content_request_2",
+          "action": "start",
+          "chapterIndex": 1,
+          "chapterContext": {
+            "recentWindow": [],
+            "workingCombatants": [
+              {
+                "type": "magical-girl",
+                "data": {
+                  "name": "双生",
+                  "current_state": {
+                    "summary": "旧状态甲"
+                  },
+                  "extension": {
+                    "token": "fictional lore"
+                  }
+                },
+                "isNative": false,
+                "roomCombatantKey": "one",
+                "selected": true
+              },
+              {
+                "type": "magical-girl",
+                "data": {
+                  "name": "双生",
+                  "current_state": {
+                    "summary": "旧状态乙"
+                  }
+                },
+                "isNative": false,
+                "roomCombatantKey": "two",
+                "unknownEnvelope": {
+                  "retained": true
+                }
+              },
+              {
+                "type": "canshou",
+                "data": {
+                  "core": {
+                    "unnamed": true
+                  }
+                },
+                "isNative": true,
+                "roomCombatantKey": "three"
+              }
+            ]
+          },
+          "seed": {
+            "combatants": [
+              {
+                "type": "magical-girl",
+                "data": {
+                  "name": "双生",
+                  "current_state": {
+                    "summary": "旧状态甲"
+                  },
+                  "extension": {
+                    "token": "fictional lore"
+                  }
+                },
+                "isNative": false,
+                "roomCombatantKey": "one",
+                "selected": true
+              },
+              {
+                "type": "magical-girl",
+                "data": {
+                  "name": "双生",
+                  "current_state": {
+                    "summary": "旧状态乙"
+                  }
+                },
+                "isNative": false,
+                "roomCombatantKey": "two",
+                "unknownEnvelope": {
+                  "retained": true
+                }
+              },
+              {
+                "type": "canshou",
+                "data": {
+                  "core": {
+                    "unnamed": true
+                  }
+                },
+                "isNative": true,
+                "roomCombatantKey": "three"
+              }
+            ],
+            "mode": "daily",
+            "storyLength": "default",
+            "language": "zh-CN",
+            "settings": {
+              "readArenaHistory": false,
+              "writeArenaHistory": false,
+              "readCurrentState": true,
+              "writeCurrentState": true,
+              "readNarrativeHistory": false,
+              "writeNarrativeHistory": false
+            }
+          },
+          "userGuidance": "输入指导\n保留空格  🪄"
+        },
+        "markdown": "# 潮汐回声\n\n正文：雪与星 🪄\r\n最后一行\u0000",
+        "reasoning": ""
+      },
+      "roleState": "not-requested",
+      "assembly": {
+        "session": {
+          "id": "session_content_2",
+          "title": "未命名连续战报",
+          "createdAt": 1,
+          "updatedAt": 1,
+          "source": {
+            "mode": "daily",
+            "language": "zh-CN",
+            "storyLength": "default",
+            "generationMode": "stream"
+          },
+          "seed": {
+            "combatants": [
+              {
+                "type": "magical-girl",
+                "data": {
+                  "name": "双生",
+                  "current_state": {
+                    "summary": "旧状态甲"
+                  },
+                  "extension": {
+                    "token": "fictional lore"
+                  }
+                },
+                "isNative": false,
+                "roomCombatantKey": "one",
+                "selected": true
+              },
+              {
+                "type": "magical-girl",
+                "data": {
+                  "name": "双生",
+                  "current_state": {
+                    "summary": "旧状态乙"
+                  }
+                },
+                "isNative": false,
+                "roomCombatantKey": "two",
+                "unknownEnvelope": {
+                  "retained": true
+                }
+              },
+              {
+                "type": "canshou",
+                "data": {
+                  "core": {
+                    "unnamed": true
+                  }
+                },
+                "isNative": true,
+                "roomCombatantKey": "three"
+              }
+            ],
+            "mode": "daily",
+            "storyLength": "default",
+            "language": "zh-CN",
+            "settings": {
+              "readArenaHistory": false,
+              "writeArenaHistory": false,
+              "readCurrentState": true,
+              "writeCurrentState": true,
+              "readNarrativeHistory": false,
+              "writeNarrativeHistory": false
+            }
+          },
+          "workingCombatants": [
+            {
+              "type": "magical-girl",
+              "data": {
+                "name": "双生",
+                "current_state": {
+                  "summary": "旧状态甲"
+                },
+                "extension": {
+                  "token": "fictional lore"
+                }
+              },
+              "isNative": false,
+              "roomCombatantKey": "one",
+              "selected": true
+            },
+            {
+              "type": "magical-girl",
+              "data": {
+                "name": "双生",
+                "current_state": {
+                  "summary": "旧状态乙"
+                }
+              },
+              "isNative": false,
+              "roomCombatantKey": "two",
+              "unknownEnvelope": {
+                "retained": true
+              }
+            },
+            {
+              "type": "canshou",
+              "data": {
+                "core": {
+                  "unnamed": true
+                }
+              },
+              "isNative": true,
+              "roomCombatantKey": "three"
+            }
+          ],
+          "chapterCount": 0,
+          "lastChapterId": null
+        },
+        "operationId": "chapter_content_2",
+        "checkpointId": "checkpoint_after_2",
+        "initialCheckpointId": "checkpoint_before_2",
+        "now": 2,
+        "source": {
+          "mode": "daily",
+          "language": "zh-CN",
+          "storyLength": "default",
+          "generationMode": "stream"
+        },
+        "generated": {
+          "chapterIndex": 1,
+          "digest": {
+            "chapterTitle": "潮汐回声",
+            "bodyExcerpt": "正文：雪与星 🪄"
+          },
+          "generationId": "generation_content_2"
+        }
+      },
+      "expected": {
+        "chapter": {
+          "action": "start",
+          "cardSnapshot": {
+            "aiReasoning": {
+              "source": "provider",
+              "status": "done",
+              "text": ""
+            },
+            "storyRoleSync": {
+              "state": "not-requested",
+              "version": 1,
+              "warnings": []
+            },
+            "userGuidance": "输入指导\n保留空格  🪄"
+          },
+          "createdAt": 2,
+          "deterministicDigest": {
+            "bodyExcerpt": "正文：雪与星 🪄",
+            "chapterTitle": "潮汐回声"
+          },
+          "generationId": "generation_content_2",
+          "id": "chapter_content_2",
+          "index": 1,
+          "markdown": "# 潮汐回声\n\n正文：雪与星 🪄\r\n最后一行\u0000",
+          "reportJson": {},
+          "sessionId": "session_content_2",
+          "status": "active",
+          "title": "潮汐回声"
+        },
+        "checkpoints": [
+          {
+            "boundaryIndex": 0,
+            "combatants": [
+              {
+                "data": {
+                  "current_state": {
+                    "summary": "旧状态甲"
+                  },
+                  "extension": {
+                    "token": "fictional lore"
+                  },
+                  "name": "双生"
+                },
+                "isNative": false,
+                "roomCombatantKey": "one",
+                "selected": true,
+                "type": "magical-girl"
+              },
+              {
+                "data": {
+                  "current_state": {
+                    "summary": "旧状态乙"
+                  },
+                  "name": "双生"
+                },
+                "isNative": false,
+                "roomCombatantKey": "two",
+                "type": "magical-girl",
+                "unknownEnvelope": {
+                  "retained": true
+                }
+              },
+              {
+                "data": {
+                  "core": {
+                    "unnamed": true
+                  }
+                },
+                "isNative": true,
+                "roomCombatantKey": "three",
+                "type": "canshou"
+              }
+            ],
+            "createdAt": 2,
+            "id": "checkpoint_before_2",
+            "sessionId": "session_content_2"
+          },
+          {
+            "boundaryIndex": 1,
+            "chapterId": "chapter_content_2",
+            "combatants": [
+              {
+                "data": {
+                  "current_state": {
+                    "summary": "旧状态甲"
+                  },
+                  "extension": {
+                    "token": "fictional lore"
+                  },
+                  "name": "双生"
+                },
+                "isNative": false,
+                "roomCombatantKey": "one",
+                "selected": true,
+                "type": "magical-girl"
+              },
+              {
+                "data": {
+                  "current_state": {
+                    "summary": "旧状态乙"
+                  },
+                  "name": "双生"
+                },
+                "isNative": false,
+                "roomCombatantKey": "two",
+                "type": "magical-girl",
+                "unknownEnvelope": {
+                  "retained": true
+                }
+              },
+              {
+                "data": {
+                  "core": {
+                    "unnamed": true
+                  }
+                },
+                "isNative": true,
+                "roomCombatantKey": "three",
+                "type": "canshou"
+              }
+            ],
+            "createdAt": 2,
+            "id": "checkpoint_after_2",
+            "sessionId": "session_content_2"
+          }
+        ],
+        "session": {
+          "chapterCount": 1,
+          "createdAt": 1,
+          "id": "session_content_2",
+          "lastChapterId": "chapter_content_2",
+          "lastChapterInputCombatants": [
+            {
+              "data": {
+                "current_state": {
+                  "summary": "旧状态甲"
+                },
+                "extension": {
+                  "token": "fictional lore"
+                },
+                "name": "双生"
+              },
+              "isNative": false,
+              "roomCombatantKey": "one",
+              "selected": true,
+              "type": "magical-girl"
+            },
+            {
+              "data": {
+                "current_state": {
+                  "summary": "旧状态乙"
+                },
+                "name": "双生"
+              },
+              "isNative": false,
+              "roomCombatantKey": "two",
+              "type": "magical-girl",
+              "unknownEnvelope": {
+                "retained": true
+              }
+            },
+            {
+              "data": {
+                "core": {
+                  "unnamed": true
+                }
+              },
+              "isNative": true,
+              "roomCombatantKey": "three",
+              "type": "canshou"
+            }
+          ],
+          "seed": {
+            "combatants": [
+              {
+                "data": {
+                  "current_state": {
+                    "summary": "旧状态甲"
+                  },
+                  "extension": {
+                    "token": "fictional lore"
+                  },
+                  "name": "双生"
+                },
+                "isNative": false,
+                "roomCombatantKey": "one",
+                "selected": true,
+                "type": "magical-girl"
+              },
+              {
+                "data": {
+                  "current_state": {
+                    "summary": "旧状态乙"
+                  },
+                  "name": "双生"
+                },
+                "isNative": false,
+                "roomCombatantKey": "two",
+                "type": "magical-girl",
+                "unknownEnvelope": {
+                  "retained": true
+                }
+              },
+              {
+                "data": {
+                  "core": {
+                    "unnamed": true
+                  }
+                },
+                "isNative": true,
+                "roomCombatantKey": "three",
+                "type": "canshou"
+              }
+            ],
+            "language": "zh-CN",
+            "mode": "daily",
+            "settings": {
+              "readArenaHistory": false,
+              "readCurrentState": true,
+              "readNarrativeHistory": false,
+              "writeArenaHistory": false,
+              "writeCurrentState": true,
+              "writeNarrativeHistory": false
+            },
+            "storyLength": "default"
+          },
+          "source": {
+            "generationMode": "stream",
+            "language": "zh-CN",
+            "mode": "daily",
+            "storyLength": "default"
+          },
+          "title": "潮汐回声",
+          "updatedAt": 2,
+          "workingCombatants": [
+            {
+              "data": {
+                "current_state": {
+                  "summary": "旧状态甲"
+                },
+                "extension": {
+                  "token": "fictional lore"
+                },
+                "name": "双生"
+              },
+              "isNative": false,
+              "roomCombatantKey": "one",
+              "selected": true,
+              "type": "magical-girl"
+            },
+            {
+              "data": {
+                "current_state": {
+                  "summary": "旧状态乙"
+                },
+                "name": "双生"
+              },
+              "isNative": false,
+              "roomCombatantKey": "two",
+              "type": "magical-girl",
+              "unknownEnvelope": {
+                "retained": true
+              }
+            },
+            {
+              "data": {
+                "core": {
+                  "unnamed": true
+                }
+              },
+              "isNative": true,
+              "roomCombatantKey": "three",
+              "type": "canshou"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "invalidRawCarriers": [
+    {
+      "name": "input-seed",
+      "kind": "input",
+      "document": "{\"seed\":{\"Authorization\":\"SECRET_DUPLICATE_CARRIER\"},\"version\":1,\"sessionId\":\"session_content_0\",\"generationRequestId\":\"story_content_request_0\",\"action\":\"start\",\"chapterIndex\":1,\"chapterContext\":{\"recentWindow\":[],\"workingCombatants\":[{\"type\":\"magical-girl\",\"data\":{\"name\":\"双生\",\"current_state\":{\"summary\":\"旧状态甲\"},\"extension\":{\"token\":\"fictional lore\"}},\"isNative\":false,\"roomCombatantKey\":\"one\",\"selected\":true},{\"type\":\"magical-girl\",\"data\":{\"name\":\"双生\",\"current_state\":{\"summary\":\"旧状态乙\"}},\"isNative\":false,\"roomCombatantKey\":\"two\",\"unknownEnvelope\":{\"retained\":true}},{\"type\":\"canshou\",\"data\":{\"core\":{\"unnamed\":true}},\"isNative\":true,\"roomCombatantKey\":\"three\"}]},\"seed\":{\"combatants\":[{\"type\":\"magical-girl\",\"data\":{\"name\":\"双生\",\"current_state\":{\"summary\":\"旧状态甲\"},\"extension\":{\"token\":\"fictional lore\"}},\"isNative\":false,\"roomCombatantKey\":\"one\",\"selected\":true},{\"type\":\"magical-girl\",\"data\":{\"name\":\"双生\",\"current_state\":{\"summary\":\"旧状态乙\"}},\"isNative\":false,\"roomCombatantKey\":\"two\",\"unknownEnvelope\":{\"retained\":true}},{\"type\":\"canshou\",\"data\":{\"core\":{\"unnamed\":true}},\"isNative\":true,\"roomCombatantKey\":\"three\"}],\"mode\":\"daily\",\"storyLength\":\"default\",\"language\":\"zh-CN\",\"settings\":{\"readArenaHistory\":false,\"writeArenaHistory\":false,\"readCurrentState\":true,\"writeCurrentState\":true,\"readNarrativeHistory\":false,\"writeNarrativeHistory\":false}},\"userGuidance\":\"输入指导\\n保留空格  🪄\"}"
+    },
+    {
+      "name": "input-escaped-seed",
+      "kind": "input",
+      "document": "{\"\\u0073eed\":{\"Authorization\":\"SECRET_DUPLICATE_CARRIER\"},\"version\":1,\"sessionId\":\"session_content_0\",\"generationRequestId\":\"story_content_request_0\",\"action\":\"start\",\"chapterIndex\":1,\"chapterContext\":{\"recentWindow\":[],\"workingCombatants\":[{\"type\":\"magical-girl\",\"data\":{\"name\":\"双生\",\"current_state\":{\"summary\":\"旧状态甲\"},\"extension\":{\"token\":\"fictional lore\"}},\"isNative\":false,\"roomCombatantKey\":\"one\",\"selected\":true},{\"type\":\"magical-girl\",\"data\":{\"name\":\"双生\",\"current_state\":{\"summary\":\"旧状态乙\"}},\"isNative\":false,\"roomCombatantKey\":\"two\",\"unknownEnvelope\":{\"retained\":true}},{\"type\":\"canshou\",\"data\":{\"core\":{\"unnamed\":true}},\"isNative\":true,\"roomCombatantKey\":\"three\"}]},\"seed\":{\"combatants\":[{\"type\":\"magical-girl\",\"data\":{\"name\":\"双生\",\"current_state\":{\"summary\":\"旧状态甲\"},\"extension\":{\"token\":\"fictional lore\"}},\"isNative\":false,\"roomCombatantKey\":\"one\",\"selected\":true},{\"type\":\"magical-girl\",\"data\":{\"name\":\"双生\",\"current_state\":{\"summary\":\"旧状态乙\"}},\"isNative\":false,\"roomCombatantKey\":\"two\",\"unknownEnvelope\":{\"retained\":true}},{\"type\":\"canshou\",\"data\":{\"core\":{\"unnamed\":true}},\"isNative\":true,\"roomCombatantKey\":\"three\"}],\"mode\":\"daily\",\"storyLength\":\"default\",\"language\":\"zh-CN\",\"settings\":{\"readArenaHistory\":false,\"writeArenaHistory\":false,\"readCurrentState\":true,\"writeCurrentState\":true,\"readNarrativeHistory\":false,\"writeNarrativeHistory\":false}},\"userGuidance\":\"输入指导\\n保留空格  🪄\"}"
+    },
+    {
+      "name": "input-nested-settings",
+      "kind": "input",
+      "document": "{\"version\":1,\"sessionId\":\"session_content_0\",\"generationRequestId\":\"story_content_request_0\",\"action\":\"start\",\"chapterIndex\":1,\"chapterContext\":{\"recentWindow\":[],\"workingCombatants\":[{\"type\":\"magical-girl\",\"data\":{\"name\":\"双生\",\"current_state\":{\"summary\":\"旧状态甲\"},\"extension\":{\"token\":\"fictional lore\"}},\"isNative\":false,\"roomCombatantKey\":\"one\",\"selected\":true},{\"type\":\"magical-girl\",\"data\":{\"name\":\"双生\",\"current_state\":{\"summary\":\"旧状态乙\"}},\"isNative\":false,\"roomCombatantKey\":\"two\",\"unknownEnvelope\":{\"retained\":true}},{\"type\":\"canshou\",\"data\":{\"core\":{\"unnamed\":true}},\"isNative\":true,\"roomCombatantKey\":\"three\"}]},\"seed\":{\"combatants\":[{\"type\":\"magical-girl\",\"data\":{\"name\":\"双生\",\"current_state\":{\"summary\":\"旧状态甲\"},\"extension\":{\"token\":\"fictional lore\"}},\"isNative\":false,\"roomCombatantKey\":\"one\",\"selected\":true},{\"type\":\"magical-girl\",\"data\":{\"name\":\"双生\",\"current_state\":{\"summary\":\"旧状态乙\"}},\"isNative\":false,\"roomCombatantKey\":\"two\",\"unknownEnvelope\":{\"retained\":true}},{\"type\":\"canshou\",\"data\":{\"core\":{\"unnamed\":true}},\"isNative\":true,\"roomCombatantKey\":\"three\"}],\"mode\":\"daily\",\"storyLength\":\"default\",\"language\":\"zh-CN\",\"settings\":{\"Authorization\":\"SECRET_DUPLICATE_CARRIER\"},\"settings\":{\"readArenaHistory\":false,\"writeArenaHistory\":false,\"readCurrentState\":true,\"writeCurrentState\":true,\"readNarrativeHistory\":false,\"writeNarrativeHistory\":false}},\"userGuidance\":\"输入指导\\n保留空格  🪄\"}"
+    },
+    {
+      "name": "header-report-format",
+      "kind": "header",
+      "document": "{\"reportFormat\":{\"Authorization\":\"SECRET_DUPLICATE_CARRIER\"},\"reportFormat\":\"markdown\",\"outputContract\":\"stream-markdown\",\"mode\":\"daily\",\"language\":\"zh-CN\",\"storyLength\":\"default\",\"reporterInfo\":{\"name\":\"记者雪\",\"extension\":{\"untouched\":[\"🪄\",1]}},\"userGuidance\":\"响应指导优先\\n原样  \",\"characterGuidances\":[{\"combatantIndex\":2,\"guidance\":\"别丢无名角色\\n\"}],\"adjudicationResults\":[{\"name\":\"抉择\",\"result\":false,\"extension\":{\"count\":0}}],\"narrativeHistoryReadCount\":0,\"scenarioDisplayName\":\"  废站\\n𐐀 \"}"
+    },
+    {
+      "name": "meta-data",
+      "kind": "meta",
+      "document": "{\"data\":{\"Authorization\":\"SECRET_DUPLICATE_CARRIER\"},\"id\":\"4-0\",\"event\":\"meta\",\"data\":{\"parseOk\":true,\"meta\":{\"report\":{\"title\":\"潮汐回声\",\"winner\":\"双生\",\"conclusion\":\"一起归来\"},\"impacts\":[{\"characterName\":\"双生\",\"impact\":\"理解彼此\",\"extension\":[null,false,\"𐐀\"]}],\"unknownExtension\":{\"nested\":{\"raw\":\"不是调试正文\\n\",\"token\":\"fictional-only\"}}},\"raw\":\"{\\n  \\\"report\\\": \\\"完整原文另在 reportJson\\\"\\n}\",\"rawTruncated\":false}}"
+    },
+    {
+      "name": "role-updates",
+      "kind": "roleResponse",
+      "document": "{\"updatedCombatants\":{\"Authorization\":\"SECRET_DUPLICATE_CARRIER\"},\"version\":\"arena-reconciliation-v1\",\"generationId\":\"generation_content_0\",\"success\":true,\"updatedCombatants\":[{\"combatantIndex\":2,\"data\":{\"core\":{\"unnamed\":true},\"newField\":\"最后角色先返回\"},\"isNative\":false},{\"combatantIndex\":0,\"data\":{\"name\":\"双生\",\"signature\":\"fresh-server-signature\",\"current_state\":{\"summary\":\"新状态甲\\n\"},\"extension\":{\"apiKey\":\"fictional card text\"}},\"isNative\":true}],\"warnings\":[{\"combatantIndex\":1,\"code\":\"ARENA_RECONCILIATION_COMBATANT_UNMATCHED\",\"message\":\"保留第二个同名角色\\n\"},{\"rosterIndex\":2,\"characterName\":null,\"code\":\"ARENA_RECONCILIATION_ROSTER_COMBATANT_MISSING\",\"message\":\"无名快照提示\"},{\"characterName\":\"双生\",\"code\":\"ARENA_RECONCILIATION_IMPACT_AMBIGUOUS\",\"message\":\"同名影响未归并\"}]}"
+    },
+    {
+      "name": "meta-nested-parse-ok",
+      "kind": "meta",
+      "document": "{\"id\":\"4-0\",\"event\":\"meta\",\"data\":{\"parseOk\":{\"Authorization\":\"SECRET_DUPLICATE_CARRIER\"},\"parseOk\":true,\"meta\":{\"report\":{\"title\":\"潮汐回声\",\"winner\":\"双生\",\"conclusion\":\"一起归来\"},\"impacts\":[{\"characterName\":\"双生\",\"impact\":\"理解彼此\",\"extension\":[null,false,\"𐐀\"]}],\"unknownExtension\":{\"nested\":{\"raw\":\"不是调试正文\\n\",\"token\":\"fictional-only\"}}},\"raw\":\"{\\n  \\\"report\\\": \\\"完整原文另在 reportJson\\\"\\n}\",\"rawTruncated\":false}}"
+    },
+    {
+      "name": "role-nested-native",
+      "kind": "roleResponse",
+      "document": "{\"version\":\"arena-reconciliation-v1\",\"generationId\":\"generation_content_0\",\"success\":true,\"updatedCombatants\":[{\"combatantIndex\":2,\"data\":{\"core\":{\"unnamed\":true},\"newField\":\"最后角色先返回\"},\"isNative\":{\"Authorization\":\"SECRET_DUPLICATE_CARRIER\"},\"isNative\":false},{\"combatantIndex\":0,\"data\":{\"name\":\"双生\",\"signature\":\"fresh-server-signature\",\"current_state\":{\"summary\":\"新状态甲\\n\"},\"extension\":{\"apiKey\":\"fictional card text\"}},\"isNative\":true}],\"warnings\":[{\"combatantIndex\":1,\"code\":\"ARENA_RECONCILIATION_COMBATANT_UNMATCHED\",\"message\":\"保留第二个同名角色\\n\"},{\"rosterIndex\":2,\"characterName\":null,\"code\":\"ARENA_RECONCILIATION_ROSTER_COMBATANT_MISSING\",\"message\":\"无名快照提示\"},{\"characterName\":\"双生\",\"code\":\"ARENA_RECONCILIATION_IMPACT_AMBIGUOUS\",\"message\":\"同名影响未归并\"}]}"
+    }
+  ],
+  "validOpaqueRawInput": "{\"version\":1,\"sessionId\":\"session_content_0\",\"generationRequestId\":\"story_content_request_0\",\"action\":\"start\",\"chapterIndex\":1,\"chapterContext\":{\"recentWindow\":[],\"workingCombatants\":[{\"type\":\"magical-girl\",\"data\":{\"opaqueDuplicate\":{\"tag\":\"first\",\"tag\":\"last\",\"lone\":\"\\ud800\"},\"name\":\"双生\",\"current_state\":{\"summary\":\"旧状态甲\"},\"extension\":{\"token\":\"fictional lore\"}},\"isNative\":false,\"roomCombatantKey\":\"one\",\"selected\":true},{\"type\":\"magical-girl\",\"data\":{\"name\":\"双生\",\"current_state\":{\"summary\":\"旧状态乙\"}},\"isNative\":false,\"roomCombatantKey\":\"two\",\"unknownEnvelope\":{\"retained\":true}},{\"type\":\"canshou\",\"data\":{\"core\":{\"unnamed\":true}},\"isNative\":true,\"roomCombatantKey\":\"three\"}]},\"seed\":{\"combatants\":[{\"type\":\"magical-girl\",\"data\":{\"name\":\"双生\",\"current_state\":{\"summary\":\"旧状态甲\"},\"extension\":{\"token\":\"fictional lore\"}},\"isNative\":false,\"roomCombatantKey\":\"one\",\"selected\":true},{\"type\":\"magical-girl\",\"data\":{\"name\":\"双生\",\"current_state\":{\"summary\":\"旧状态乙\"}},\"isNative\":false,\"roomCombatantKey\":\"two\",\"unknownEnvelope\":{\"retained\":true}},{\"type\":\"canshou\",\"data\":{\"core\":{\"unnamed\":true}},\"isNative\":true,\"roomCombatantKey\":\"three\"}],\"mode\":\"daily\",\"storyLength\":\"default\",\"language\":\"zh-CN\",\"settings\":{\"readArenaHistory\":false,\"writeArenaHistory\":false,\"readCurrentState\":true,\"writeCurrentState\":true,\"readNarrativeHistory\":false,\"writeNarrativeHistory\":false}},\"userGuidance\":\"输入指导\\n保留空格  🪄\"}"
+}
