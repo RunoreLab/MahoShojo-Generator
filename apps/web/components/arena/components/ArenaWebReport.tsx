@@ -6,9 +6,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { ChevronDown, FileText, Maximize, Minimize, PanelsTopLeft } from 'lucide-react';
 import type { NewsReport } from '@/components/BattleReportCard';
 import { SegmentedControl, type SegmentedOption } from '@/components/shared/SegmentedControl';
-import { BaseModal } from '@/components/shared/BaseModal';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
-import { ArenaReportFormatSelectorView, ArenaWebNotes, ArenaWebSourceView, ArenaWebReportActions, ArenaWebReplayControlsView, type ArenaWebReportAction } from '@mahoshojo/ui-web/arena-report';
+import { ArenaReportFormatSelectorView, ArenaWebNotes, ArenaWebSourceView, ArenaWebReportActions, ArenaWebReplayControlsView, WebReportConsentDialogView, type ArenaWebReportAction } from '@mahoshojo/ui-web/arena-report';
 import { resolveWebDisplayTitle } from '@/lib/arena/battle-report-display-title';
 import { normalizeArenaWebOutput } from '@/lib/arena/web-output';
 import { downloadBlob } from '@/lib/client/blobUrl';
@@ -104,21 +103,12 @@ function WebReportConsentDialog({ open, onCancel, onAccept }: {
 }) {
   const [remember, setRemember] = useState(false);
   return (
-    <BaseModal isOpen={open} title="启用 Web 战报" onClose={onCancel} maxWidthClassName="max-w-lg">
-      <p className="text-sm leading-6">
-        Web 战报会运行生成的网页或 Web 包中的 HTML、CSS 和 JavaScript，并可能加载第三方脚本、样式、图片或其他网络资源。
-        生成页面可能出现显示异常、页面卡顿或外部资源失效，第三方资源也可能接收到相关网络请求或页面发送的信息。
-        请仅在了解这些风险后启用。
-      </p>
-      <label className="mt-4 flex items-center gap-2 text-sm">
-        <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} />
-        此浏览器不再提示（多人房间分别确认）
-      </label>
-      <div className="mt-5 flex justify-end gap-3">
-        <button type="button" onClick={onCancel} className="rounded-lg border px-4 py-2 text-sm">取消</button>
-        <button type="button" onClick={() => onAccept(remember)} className="rounded-lg bg-purple-600 px-4 py-2 text-sm text-white">继续使用 Web</button>
-      </div>
-    </BaseModal>
+    <WebReportConsentDialogView
+      open={open}
+      onCancel={onCancel}
+      onAccept={() => onAccept(remember)}
+      remember={{ checked: remember, onChange: setRemember }}
+    />
   );
 }
 

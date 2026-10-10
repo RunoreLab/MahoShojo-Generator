@@ -8,3 +8,4 @@ export {
   type ArenaWebExecutionCapability, type ArenaWebResultViewProps,
 } from './ArenaWebResultView';
 export { ArenaWebReplayControlsView, type ArenaWebReplayControlsViewProps } from './ArenaWebReplayControlsView';
+export { WebReportConsentDialogView, type WebReportConsentDialogViewProps } from './WebReportConsentDialogView';

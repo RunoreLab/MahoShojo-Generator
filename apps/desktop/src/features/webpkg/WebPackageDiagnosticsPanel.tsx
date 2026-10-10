@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 
+import { WebReportConsentDialogView } from '@mahoshojo/ui-web/arena-report';
 import type { LocalWebPackageRecordV1 } from '@mahoshojo/local-library/web-package-record';
 import {
   createWebPackageResourceSnapshot,
@@ -24,8 +25,8 @@ import type { RawInvokeFn, StructuredInvokeFn } from '../../platform/local-archi
  * ## 它验收什么
  *
  * 点"在受限 webview 中打开"会走完整链：读 blob 里的 ZIP → `unpackWebPackageZip` 重新
- * 解包与逐文件摘要校验（不信任记录里缓存的 manifest）→ 物化 base-only 快照 →
- * begin/append/open 三段 → native 创建 `webpkg-<id>` 零 capability webview。
+ * 解包与逐文件摘要校验（不信任记录里缓存的 manifest）→ 展示实际包名/版本并逐次确认 →
+ * 物化 base-only 快照 → begin/append/open 三段 → native 创建 `webpkg-<id>` 零 capability webview。
  *
  * **刻意 base-only**：生成 overlay 是运行期产物，不落进本地库记录；诊断面只验证
  * "按导入原样打开一个本地包"。overlay 合并语义的覆盖归
@@ -49,6 +50,13 @@ const tauriRawInvoke: RawInvokeFn = (command, body, options) =>
 
 const PACKAGE_LIST_LIMIT = 50;
 
+type PendingConsent = {
+  readonly name: string;
+  readonly version: string;
+  readonly isCurrent: () => boolean;
+  readonly resolve: (accepted: boolean) => void;
+};
+
 export const WebPackageDiagnosticsPanel = () => {
   const packages = useMemo(() => new IpcWebPackageRepository(tauriInvoke), []);
   const [records, setRecords] = useState<readonly LocalWebPackageRecordV1[]>([]);
@@ -56,9 +64,11 @@ export const WebPackageDiagnosticsPanel = () => {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [consent, setConsent] = useState<PendingConsent | null>(null);
+  const pendingConsent = useRef<PendingConsent | null>(null);
   const lifecycle = useRef({ mounted: false, epoch: 0, flight: null as symbol | null });
 
-  // 单一同步锁覆盖列表与打开；effect 世代也隔离 StrictMode 的清理/重启。
+  // 单一同步锁覆盖列表、逐次确认与打开；effect 世代也隔离 StrictMode 的清理/重启。
   const startOperation = useCallback(() => {
     const owner = lifecycle.current;
     if (!owner.mounted || owner.flight !== null) return null;
@@ -101,8 +111,19 @@ export const WebPackageDiagnosticsPanel = () => {
       owner.mounted = false;
       owner.epoch += 1;
       owner.flight = null;
+      const pending = pendingConsent.current;
+      pendingConsent.current = null;
+      pending?.resolve(false);
     };
   }, [refresh]);
+
+  const settleConsent = (pending: PendingConsent, accepted: boolean) => {
+    // 旧对话框/同刻重复确认不能消费下一次许可，也不能越过 owner 的生命周期围栏。
+    if (pendingConsent.current !== pending) return;
+    pendingConsent.current = null;
+    setConsent(null);
+    pending.resolve(accepted && pending.isCurrent());
+  };
 
   const openInIsolatedWebview = useCallback(
     async (record: LocalWebPackageRecordV1): Promise<void> => {
@@ -119,6 +140,18 @@ export const WebPackageDiagnosticsPanel = () => {
         }
         const base = await unpackWebPackageZip(archive);
         if (!operation.isCurrent()) return;
+        // 先重验并冻结实际包，再逐次确认；不信任列表标题，也不持久保存执行许可。
+        const accepted = await new Promise<boolean>((resolve) => {
+          const pending: PendingConsent = {
+            name: base.manifest.name,
+            version: base.manifest.version,
+            isCurrent: operation.isCurrent,
+            resolve,
+          };
+          pendingConsent.current = pending;
+          setConsent(pending);
+        });
+        if (!accepted || !operation.isCurrent()) return;
         // 物化 id 是渲染层命名空间——native 的 `wpk-<N>` 由 begin 另行分配，两者刻意不混用。
         const snapshot = createWebPackageResourceSnapshot(`desktop-staging-${record.id}`, {
           base,
@@ -194,12 +227,19 @@ export const WebPackageDiagnosticsPanel = () => {
                 disabled={loading || busyId !== null}
                 onClick={() => void openInIsolatedWebview(record)}
               >
-                {busyId === record.id ? '正在暂存并打开…' : '在受限 webview 中打开'}
+                {busyId === record.id ? (consent ? '等待运行确认…' : '正在校验并打开…') : '在受限 webview 中打开'}
               </button>
             </li>
           ))}
         </ul>
       )}
+      {consent ? <WebReportConsentDialogView
+        open
+        title="运行 Web 包（诊断）"
+        executionDescription={<>将按导入原样运行「{consent.name}」（版本 {consent.version}），不含生成覆盖层。仅确认本次运行，每次打开都需重新确认。</>}
+        onCancel={() => settleConsent(consent, false)}
+        onAccept={() => settleConsent(consent, true)}
+      /> : null}
       <p className="mt-3 text-xs text-(--app-text-muted)">
         只按导入原样打开（不含生成覆盖层）；真实 webview 的隔离验收需在运行中的桌面应用里确认。
         离开诊断页只停止尚未派发的步骤；已派发的打开仍可能建立窗口，请单独关闭。

@@ -78,7 +78,7 @@ afterEach(async () => {
   container.remove();
   vi.restoreAllMocks();
   vi.clearAllMocks();
-  useBattleStore.setState({ webPackageRef: null, isGenerating: false }, true);
+  useBattleStore.setState(useBattleStore.getInitialState(), true);
 });
 
 const buildLocalPackage = async (version: string, id = 'local.ui-replay-package') => {
@@ -739,6 +739,34 @@ describe('Web 战报的本地执行许可', () => {
     expect(change).toHaveBeenCalledWith('web');
     expect(window.localStorage.getItem('arena.web-report-consent.v1.room.selector')).toBe('accepted');
     expect(window.localStorage.getItem('arena.web-report-consent.v1')).toBeNull();
+  });
+
+  it('共享普通确认保留取消后的勾选状态与房间会话许可，未勾选不持久保存', async () => {
+    const change = vi.fn();
+    const renderSelector = (key: string, roomId = 'selector-shared-consent') => (
+      <ArenaReportFormatSelector key={key} value="markdown" onChange={change} roomId={roomId} />
+    );
+    await act(async () => root.render(renderSelector('first')));
+    await click('Web（实验性）');
+    const checkbox = () => document.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    expect(checkbox().checked).toBe(false);
+    await act(async () => checkbox().click());
+    await click('取消');
+    expect(change).not.toHaveBeenCalled();
+    await click('Web（实验性）');
+    expect(checkbox().checked).toBe(true);
+    await act(async () => checkbox().click());
+    await click('继续使用 Web');
+    expect(change).toHaveBeenCalledExactlyOnceWith('web');
+    expect(window.localStorage.getItem('arena.web-report-consent.v1.room.selector-shared-consent')).toBeNull();
+    await act(async () => root.render(renderSelector('remounted')));
+    await click('Web（实验性）');
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(change).toHaveBeenCalledTimes(2);
+    await act(async () => root.render(renderSelector('other-room', 'selector-shared-consent-other')));
+    await click('Web（实验性）');
+    expect(document.querySelector('[role="dialog"]')).toBeTruthy();
+    expect(change).toHaveBeenCalledTimes(2);
   });
 
   it('未完成时不确认、不挂载；完成并确认后只用 allow-scripts，移除机器 meta', async () => {
