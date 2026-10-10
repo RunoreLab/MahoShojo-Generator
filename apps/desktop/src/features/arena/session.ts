@@ -11,7 +11,10 @@ import { resolveAdjudicationEvents } from '@mahoshojo/domain/arena-adjudication'
 import { isLegacyAdjudicatorFormat } from '@mahoshojo/domain/arena-character-validator';
 import type { QuestionnaireSelection } from '@mahoshojo/domain/questionnaire-selection';
 import { buildArenaQuestionnaireRequest } from '@mahoshojo/domain/arena-questionnaire-request';
-import type { NarrativeHistorySort } from '@mahoshojo/domain/narrative-history-operations';
+import { appendNarrativeHistoryEntry, type NarrativeHistorySort } from '@mahoshojo/domain/narrative-history-operations';
+import { DesktopArenaHostedGenerationIdSchema, type DesktopArenaHostedActor, type DesktopArenaHostedRecoveryPointer } from '@mahoshojo/contracts/desktop-arena-hosted';
+import { DesktopArenaHostedRecovery } from './hosted-recovery';
+import { ARENA_HOSTED_DETACH, ARENA_HOSTED_USER_STOP, executeArenaHosted, resumeArenaHosted, parseArenaHostedDetails, type ArenaHostedContext, type ArenaHostedDetails, type ArenaHostedIntent, type ArenaHostedOutcome } from './hosted';
 import { parseDesktopLoreSelections } from '../questionnaire/lore-source';
 import type { AdjudicationResult } from '@mahoshojo/domain/arena-types';
 import { AdjudicatorEventSchema } from '@mahoshojo/domain/data-card-schemas';
@@ -44,7 +47,8 @@ export const createInitialArenaDraft = (): ArenaDraft => ({
 });
 export type ArenaSessionPhase = 'idle' | 'generating' | 'completed' | 'failed' | 'cancelled';
 export interface ArenaSessionState extends ArenaDirectPartial {
-  draft: ArenaDraft; generation: { input: ArenaDraft; intent: ArenaDirectIntent; scopeKey: string; startedAt: string; adjudicationResults: AdjudicationResult[]; profileId: string; providerTarget: DesktopAiExecutionOptions['providerTarget'] } | null; phase: ArenaSessionPhase; activeGenerationMode: ArenaDraft['generationMode'] | null; report: ArenaBattleReport | null;
+  draft: ArenaDraft; generation: { input: ArenaDraft; intent: ArenaDirectIntent | ArenaHostedIntent; scopeKey: string; startedAt: string; adjudicationResults: AdjudicationResult[]; profileId: string; providerTarget: DesktopAiExecutionOptions['providerTarget'] } | null; phase: ArenaSessionPhase; activeGenerationMode: ArenaDraft['generationMode'] | null; report: ArenaBattleReport | null;
+  hosted: ArenaHostedDetails | null; hostedGenerationId: string | null;
   resultFormat: 'markdown' | 'web'; renderSnapshot: BattleReportRenderSnapshotV1 | null;
   pendingRestore: boolean; draftSaved: boolean; draftError: string | null; message: string | null;
   saving: boolean; importing: boolean; saveStatus: 'idle' | 'saved' | 'failed'; saveError: string | null;
@@ -115,10 +119,13 @@ export class DesktopArenaSession {
   private dirty = false;
   private draftTimer: ReturnType<typeof setTimeout> | null = null;
   private listeners = new Set<() => void>();
-  private resultMode: ArenaDirectIntent['mode'] | undefined;
+  private hostedResultScope: string | null = null;
+  private resultMode: ArenaDirectIntent['mode'] | 'hosted' | undefined;
+  readonly hostedRecovery: DesktopArenaHostedRecovery;
   private get draftKey() { return this.dependencies.product === 'arena' ? ADVANCED_ARENA_DRAFT_KEY : ARENA_DRAFT_KEY; }
-  constructor(private readonly dependencies: { product?: DesktopArenaProduct; repository: CardRepository; storage: GenerationDraftStorage; execute?: typeof executeArenaDirect; resolveWebPackage?: ArenaDirectHostContext['resolveWebPackage']; requestId?: () => string; now?: () => string; random?: () => number }) {
-    this.state = { draft: createInitialArenaDraft(), generation: null, rawText: '', markdown: '', reasoning: '', phase: 'idle', activeGenerationMode: null, report: null, resultFormat: 'markdown', renderSnapshot: null, pendingRestore: false,
+  constructor(private readonly dependencies: { product?: DesktopArenaProduct; repository: CardRepository; storage: GenerationDraftStorage; execute?: typeof executeArenaDirect; executeHosted?: typeof executeArenaHosted; resumeHosted?: typeof resumeArenaHosted; hostedTestPorts?: Pick<ArenaHostedContext, 'createChannel' | 'wait' | 'maxReconnectAttempts'>; resolveWebPackage?: ArenaDirectHostContext['resolveWebPackage']; requestId?: () => string; now?: () => string; random?: () => number }) {
+    this.hostedRecovery = new DesktopArenaHostedRecovery(dependencies.storage, dependencies.product ?? 'battle');
+    this.state = { hosted: null, hostedGenerationId: null, draft: createInitialArenaDraft(), generation: null, rawText: '', markdown: '', reasoning: '', phase: 'idle', activeGenerationMode: null, report: null, resultFormat: 'markdown', renderSnapshot: null, pendingRestore: false,
       draftSaved: true, draftError: null, message: null, saving: false, importing: false, saveStatus: 'idle', saveError: null, candidates: null, restored: false };
     try {
       const raw = dependencies.storage.getItem(this.draftKey);
@@ -128,11 +135,12 @@ export class DesktopArenaSession {
         if (!record(saved) || saved.version !== 1) throw new Error('version');
         const draft = validateArenaDraft(saved.draft, this.dependencies.product);
         if (saved.output !== undefined && (!record(saved.output) || typeof saved.output.phase !== 'string' || !['idle', 'completed', 'failed', 'cancelled'].includes(saved.output.phase)
-          || (saved.output.executionMode !== undefined && saved.output.executionMode !== 'direct-local' && saved.output.executionMode !== 'direct-remote')
+          || (saved.output.executionMode !== undefined && saved.output.executionMode !== 'direct-local' && saved.output.executionMode !== 'direct-remote' && saved.output.executionMode !== 'hosted')
           || (saved.output.generationMode !== undefined && saved.output.generationMode !== null && saved.output.generationMode !== 'stream' && saved.output.generationMode !== 'non-stream')
           || (saved.output.reportFormat !== undefined && saved.output.reportFormat !== 'markdown' && saved.output.reportFormat !== 'web')
           || (saved.output.renderSnapshot !== undefined && saved.output.renderSnapshot !== null && (parseBattleReportRenderSnapshotV1(saved.output.renderSnapshot)?.reportFormat !== 'web' || saved.output.reportFormat !== 'web'))
           || !['rawText', 'markdown', 'reasoning'].every((key) => typeof (saved.output as Record<string, unknown>)[key] === 'string'))) throw new Error('output');
+        if (record(saved.output)) { parseArenaHostedDetails(saved.output.hosted); if (saved.output.hostedGenerationId != null) DesktopArenaHostedGenerationIdSchema.parse(saved.output.hostedGenerationId); }
         this.pending = { draft, output: saved.output as Record<string, unknown> | undefined };
         this.state.pendingRestore = true;
       }
@@ -146,9 +154,9 @@ export class DesktopArenaSession {
   private current(scope: string, epoch: number) { return !this.disposed && this.scopeKey === scope && this.epoch === epoch; }
   setScope(scopeKey: string) {
     if (scopeKey === this.scopeKey) return;
-    const wasGenerating = !!this.controller;
-    this.scopeKey = scopeKey; this.epoch += 1; this.controller?.abort(); this.importController?.abort();
-    this.publish({ candidates: null, ...(wasGenerating ? { phase: 'cancelled' as const, report: null, message: '账号或 AI 配置已变更，原生成已取消，收到的原文仍可导出。' } : {}) });
+    const wasGenerating = !!this.controller; this.hostedResultScope = null; this.clearHostedSoftTimeout();
+    this.scopeKey = scopeKey; this.epoch += 1; this.controller?.abort(ARENA_HOSTED_DETACH); this.importController?.abort();
+    this.publish({ candidates: null, ...(wasGenerating ? { phase: 'cancelled' as const, report: null, message: this.resultMode === 'hosted' ? '账号或 AI 配置已变更，已停止本机订阅；服务器仍可能运行，请显式恢复原请求。' : '账号或 AI 配置已变更，原生成已取消，收到的原文仍可导出。' } : {}) });
   }
   updateDraft(draft: ArenaDraft) {
     if (this.disposed || this.isBusy() || this.state.pendingRestore) return;
@@ -165,9 +173,9 @@ export class DesktopArenaSession {
   }
   restoreDraft() {
     if (!this.pending || this.isBusy()) return;
-    const saved = this.pending; this.pending = null;
-    this.resultMode = saved.output?.executionMode === 'direct-remote' ? 'direct-remote' : saved.output?.executionMode === 'direct-local' ? 'direct-local' : undefined;
-    this.publish({ draft: saved.draft, pendingRestore: false, restored: true, generation: null, draftSaved: true,
+    const saved = this.pending; this.pending = null; this.hostedResultScope = null;
+    this.resultMode = saved.output?.executionMode === 'hosted' ? 'hosted' : saved.output?.executionMode === 'direct-remote' ? 'direct-remote' : saved.output?.executionMode === 'direct-local' ? 'direct-local' : undefined;
+    this.publish({ hosted: parseArenaHostedDetails(saved.output?.hosted), hostedGenerationId: typeof saved.output?.hostedGenerationId === 'string' ? saved.output.hostedGenerationId : null, draft: saved.draft, pendingRestore: false, restored: true, generation: null, draftSaved: true,
       rawText: String(saved.output?.rawText ?? ''), markdown: String(saved.output?.markdown ?? ''), reasoning: String(saved.output?.reasoning ?? ''),
       resultFormat: saved.output?.reportFormat === 'web' ? 'web' : 'markdown', renderSnapshot: parseBattleReportRenderSnapshotV1(saved.output?.renderSnapshot),
       activeGenerationMode: saved.output?.generationMode === 'stream' ? 'stream' : 'non-stream', phase: saved.output?.phase as ArenaSessionPhase ?? 'idle', report: null, candidates: null,
@@ -176,14 +184,14 @@ export class DesktopArenaSession {
   discardDraft() {
     if (this.isBusy()) return;
     try { this.dependencies.storage.removeItem(this.draftKey); this.pending = null; this.draftBlocked = false; this.dirty = false;
-      this.publish({ draft: createInitialArenaDraft(), generation: null, pendingRestore: false, draftSaved: true, draftError: null, rawText: '', markdown: '', reasoning: '', report: null, resultFormat: 'markdown', renderSnapshot: null, phase: 'idle', candidates: null, message: null, saveError: null, saveStatus: 'idle' });
+      this.publish({ hosted: null, hostedGenerationId: null, draft: createInitialArenaDraft(), generation: null, pendingRestore: false, draftSaved: true, draftError: null, rawText: '', markdown: '', reasoning: '', report: null, resultFormat: 'markdown', renderSnapshot: null, phase: 'idle', candidates: null, message: null, saveError: null, saveStatus: 'idle' });
     } catch { this.publish({ draftError: '清除失败，旧草稿仍受保护。' }); }
   }
   retryDraftSave() {
     if (this.draftTimer) clearTimeout(this.draftTimer); this.draftTimer = null;
     if (this.disposed || this.draftBlocked || this.state.pendingRestore) return;
     try { const { draft, rawText, markdown, reasoning, phase } = this.state;
-      const raw = JSON.stringify({ version: 1, draft, output: { rawText, markdown, reasoning, reportFormat: this.state.resultFormat, renderSnapshot: this.state.renderSnapshot, executionMode: this.resultMode, generationMode: this.state.activeGenerationMode, phase: phase === 'generating' ? 'cancelled' : phase } });
+      const raw = JSON.stringify({ version: 1, draft, output: { rawText, markdown, reasoning, hosted: this.state.hosted, hostedGenerationId: this.state.hostedGenerationId, reportFormat: this.state.resultFormat, renderSnapshot: this.state.renderSnapshot, executionMode: this.resultMode, generationMode: this.state.activeGenerationMode, phase: phase === 'generating' ? 'cancelled' : phase } });
       if (raw.length > MAX_DRAFT_CHARACTERS) throw new Error('limit');
       this.dependencies.storage.setItem(this.draftKey, raw); this.publish({ draftSaved: true, draftError: null });
     } catch { this.publish({ draftSaved: false, draftError: '草稿保存失败或超过 4 MiB 字符上限。完整内容保留在内存，请导出后再离开。' }); }
@@ -198,7 +206,7 @@ export class DesktopArenaSession {
     try { adjudicationResults = resolveAdjudicationEvents(inheritedArenaAdjudication(frozen, this.dependencies.product).events, this.dependencies.random ?? (() => crypto.getRandomValues(new Uint32Array(1))[0]! / 0x1_0000_0000)) as unknown as AdjudicationResult[]; }
     catch { this.controller = null; this.publish({ message: '本地随机判定失败，未开始生成。' }); return; }
     this.resultMode = intent.mode; this.dirty = true;
-    this.publish({ phase: 'generating', activeGenerationMode: intent.generationMode, generation: { input: frozen, intent: { ...clone(intent), requestId }, scopeKey: scope, adjudicationResults, startedAt: (this.dependencies.now ?? (() => new Date().toISOString()))(), profileId: options.profileId, providerTarget: options.providerTarget ? clone(options.providerTarget) : undefined }, report: null, resultFormat: frozen.reportFormat, renderSnapshot: null, rawText: '', markdown: '', reasoning: '', usage: undefined, candidates: null,
+    this.publish({ hosted: null, hostedGenerationId: null, phase: 'generating', activeGenerationMode: intent.generationMode, generation: { input: frozen, intent: { ...clone(intent), requestId }, scopeKey: scope, adjudicationResults, startedAt: (this.dependencies.now ?? (() => new Date().toISOString()))(), profileId: options.profileId, providerTarget: options.providerTarget ? clone(options.providerTarget) : undefined }, report: null, resultFormat: frozen.reportFormat, renderSnapshot: null, rawText: '', markdown: '', reasoning: '', usage: undefined, candidates: null,
       message: null, restored: false, saveStatus: 'idle', saveError: null, draftSaved: false }); this.retryDraftSave();
     try {
       const outcome = await (this.dependencies.execute ?? executeArenaDirect)(options, buildDesktopArenaInput(frozen, this.dependencies.product), { ...clone(intent), requestId },
@@ -217,6 +225,68 @@ export class DesktopArenaSession {
     } catch (cause) { if (this.current(scope, epoch)) this.publish({ phase: controller.signal.aborted ? 'cancelled' : 'failed', message: cause instanceof Error ? cause.message : '生成失败，原文保留。' }); }
     finally { if (this.controller === controller) this.controller = null; if (!this.disposed) this.retryDraftSave(); }
   }
+  async generateHosted(options: Pick<DesktopAiExecutionOptions, 'invoke'>, input: ArenaDraft,
+    intent: Omit<ArenaHostedIntent, 'requestId'>, actor: DesktopArenaHostedActor, replaceRequestId?: string, repair?: import('./hosted-recovery').ArenaHostedRecoveryReplacement): Promise<void> {
+    if (this.disposed || this.isBusy() || this.state.pendingRestore || !this.scopeKey) return;
+    if (input.generationMode !== 'stream') { this.publish({ message: '服务器 Arena 当前仅接入流式输出，请明确选择流式；非流式 JSON 尚待后继接入。' }); return; }
+    const error = arenaReadinessMessage(input, this.dependencies.product); if (error) { this.publish({ message: error }); return; }
+    const requestId = (this.dependencies.requestId ?? (() => crypto.randomUUID()))();
+    await this.runHosted(options, { ...clone(intent), requestId }, clone(actor), clone(input), undefined, replaceRequestId, repair);
+  }
+  async restoreHosted(options: Pick<DesktopAiExecutionOptions, 'invoke'>, requestId: string): Promise<void> {
+    if (this.disposed || this.isBusy() || this.state.pendingRestore || !this.scopeKey) return;
+    const pointer = this.hostedRecovery.acceptRestore(requestId); if (!pointer) return;
+    await this.runHosted(options, undefined, pointer.actor, undefined, pointer);
+  }
+  private async runHosted(options: Pick<DesktopAiExecutionOptions, 'invoke'>, intent: ArenaHostedIntent | undefined,
+    actor: DesktopArenaHostedActor, frozen?: ArenaDraft, pointer?: DesktopArenaHostedRecoveryPointer, replaceRequestId?: string, repair?: import('./hosted-recovery').ArenaHostedRecoveryReplacement) {
+    const scope = this.scopeKey, epoch = this.epoch, controller = new AbortController();
+    this.controller = controller; this.resultMode = 'hosted'; this.hostedResultScope = scope; this.dirty = true;
+    const requestId = intent?.requestId ?? pointer!.requestId;
+    this.publish({ phase: 'generating', activeGenerationMode: 'stream', hosted: null, hostedGenerationId: null,
+      generation: frozen && intent ? { input: frozen, intent, scopeKey: scope, startedAt: (this.dependencies.now ?? (() => new Date().toISOString()))(), adjudicationResults: [], profileId: '', providerTarget: intent.presetConfig ? { kind: 'preset', providerId: intent.presetConfig.providerId } : { kind: 'system' } } : null,
+      resultFormat: frozen?.reportFormat ?? pointer!.format, renderSnapshot: null, rawText: '', markdown: '', reasoning: '', report: null, usage: undefined,
+      candidates: null, restored: Boolean(pointer), draftSaved: false, message: null, saveStatus: 'idle', saveError: null });
+    const context: ArenaHostedContext = { product: this.dependencies.product ?? 'battle', scopeKey: scope, actor,
+      recovery: this.hostedRecovery, replaceRequestId, repair, resolveWebPackage: this.dependencies.resolveWebPackage,
+      now: this.dependencies.now, ...this.dependencies.hostedTestPorts, isCurrent: () => this.current(scope, epoch) };
+    const partial = (value: Parameters<NonNullable<Parameters<typeof executeArenaHosted>[5]>>[0]) => {
+      if (!this.current(scope, epoch) || controller.signal.aborted) return;
+      this.publish({ ...value, draftSaved: false }); if (!this.draftTimer) this.draftTimer = setTimeout(() => this.retryDraftSave(), 1000);
+    };
+    this.retryDraftSave();
+    try {
+      const outcome: ArenaHostedOutcome = pointer
+        ? await (this.dependencies.resumeHosted ?? resumeArenaHosted)(options, pointer, context, controller.signal, partial)
+        : await (this.dependencies.executeHosted ?? executeArenaHosted)(options, buildDesktopArenaInput(frozen!, this.dependencies.product), intent!, context, controller.signal, partial);
+      if (!this.current(scope, epoch)) return;
+      if (outcome.requestId !== requestId || outcome.scopeKey !== scope) throw new Error('服务器生成身份不匹配，未应用结果。');
+      this.publish({ rawText: outcome.rawText, markdown: outcome.markdown, reasoning: outcome.reasoning, usage: outcome.usage,
+        hosted: outcome.hosted, hostedGenerationId: outcome.generationId, draftSaved: false });
+      if (controller.signal.aborted || outcome.status === 'cancelled') { this.publish({ phase: 'cancelled', message: outcome.status === 'cancelled' ? outcome.message : '停止状态尚未确认，请按原请求恢复。' }); return; }
+      if (outcome.status !== 'completed') { this.publish({ phase: 'failed', message: outcome.message }); return; }
+      if (outcome.hosted.terminal?.event !== 'done' || outcome.hosted.terminal.data.status !== 'completed' || !outcome.hosted.terminal.data.ok) throw new Error('服务器终态不合法。');
+      this.publish({ phase: 'completed', report: outcome.report, renderSnapshot: outcome.renderSnapshot ?? null,
+        message: outcome.hosted.validationMessage ?? '服务器生成完成。角色签名更新尚未接入，原角色保持不变；本地保存需单独操作。' });
+      if (frozen?.settings.writeNarrativeHistory && outcome.canAppendHistory) this.appendHostedHistory();
+    } catch (cause) { if (this.current(scope, epoch)) this.publish({ phase: controller.signal.aborted ? 'cancelled' : 'failed', message: cause instanceof Error ? cause.message : '服务器连接未完成，可恢复原请求。' }); }
+    finally { if (this.controller === controller) this.controller = null; if (this.current(scope, epoch)) this.retryDraftSave(); }
+  }
+  /** Explicit recovered-report copy, or the original opted-in completion; never projects character effects. */
+  canAppendHostedHistory = () => !this.disposed && this.hostedResultScope === this.scopeKey && this.state.phase === 'completed' && this.state.hosted?.outputValidation === 'valid' && !!this.state.hostedGenerationId;
+  appendHostedHistory() {
+    if (!this.canAppendHostedHistory()) return;
+    const occurredAt = (this.dependencies.now ?? (() => new Date().toISOString()))();
+    const projected = appendNarrativeHistoryEntry([...this.state.draft.narrativeHistoryEntries],
+      { title: this.state.report?.headline ?? (this.state.resultFormat === 'web' ? 'Web 战报' : '恢复战报'), content: this.state.markdown, generationId: this.state.hostedGenerationId },
+      { fallbackId: this.state.hostedGenerationId!, createdAt: occurredAt });
+    if (!projected.appended || !projected.entry) return;
+    const entries = projected.entries.map((entry) => entry === projected.entry ? { ...entry, hostedSource: {
+      generationId: this.state.hostedGenerationId, metadataState: this.state.hosted!.metadataState, signedCharacterUpdates: false,
+      ...(this.state.renderSnapshot ? { renderSnapshot: this.state.renderSnapshot } : {}) } } : entry);
+    this.dirty = true;
+    this.publish({ draft: { ...this.state.draft, narrativeHistoryEntries: entries, historyUpdatedAt: occurredAt }, draftSaved: false }); this.retryDraftSave();
+  }
   private complete(input: ArenaDraft, outcome: Extract<ArenaDirectOutcome, { status: 'completed' }>, occurredAt: string) {
     const source = { combatants: input.combatants, report: outcome.report as unknown as Record<string, unknown>, impacts: outcome.impacts,
       userGuidance: input.settings.userGuidance, scenario: input.battleMode === 'scenario' ? input.scenario.content : null,
@@ -232,7 +302,9 @@ export class DesktopArenaSession {
       ...(this.dependencies.product === 'arena' && candidates.narrativeHistory?.appended ? { historyUpdatedAt: occurredAt } : {}) };
     this.publish({ phase: 'completed', report: outcome.report, renderSnapshot: outcome.renderSnapshot ?? null, draft, candidates, message: input.reportFormat === 'web' && outcome.metaStatus !== 'valid' ? '生成完成，未提供可用机器元数据，未应用角色效果。源码仍可保存和导出。' : '生成完成。工作副本已更新；保存到本地库需单独确认操作。' });
   }
-  cancel() { this.controller?.abort(); this.importController?.abort(); }
+  private clearHostedSoftTimeout() { if (this.state.hosted?.softTimeoutWarning) this.publish({ hosted: { ...this.state.hosted, softTimeoutWarning: null } }); }
+  cancel() { this.clearHostedSoftTimeout(); this.controller?.abort(this.resultMode === 'hosted' ? ARENA_HOSTED_USER_STOP : undefined); this.importController?.abort(); }
+  detach() { this.clearHostedSoftTimeout(); this.controller?.abort(ARENA_HOSTED_DETACH); this.importController?.abort(); }
   async save(kind: 'history' | 'characters'): Promise<boolean> {
     if (this.disposed || this.isBusy() || this.state.pendingRestore) return false;
     const scope = this.scopeKey, epoch = this.epoch, candidates = this.state.candidates;
@@ -262,6 +334,6 @@ export class DesktopArenaSession {
     } catch (cause) { if (this.current(scope, epoch)) this.publish({ saveStatus: 'failed', saveError: `${cause instanceof Error ? cause.message : '保存失败。'} 完整原文仍在内存，可导出或重试，无需重新生成。` }); return false; }
     finally { this.publish({ saving: false }); }
   }
-  exportDocument() { return JSON.stringify({ version: 1, product: this.dependencies.product ?? 'battle', draft: this.state.draft, generation: this.state.generation, result: { phase: this.state.phase, reportFormat: this.state.resultFormat, renderSnapshot: this.state.renderSnapshot, rawText: this.state.rawText, markdown: this.state.markdown, reasoning: this.state.reasoning, report: this.state.report, usage: this.state.usage }, candidates: this.state.candidates }, null, 2); }
-  dispose() { if (this.dirty) this.retryDraftSave(); this.disposed = true; this.epoch += 1; this.controller?.abort(); this.importController?.abort(); if (this.draftTimer) clearTimeout(this.draftTimer); this.listeners.clear(); }
+  exportDocument() { return JSON.stringify({ version: 1, product: this.dependencies.product ?? 'battle', hostedRecovery: this.hostedRecovery.getSnapshot(), draft: this.state.draft, generation: this.state.generation, result: { phase: this.state.phase, hosted: this.state.hosted, hostedGenerationId: this.state.hostedGenerationId, reportFormat: this.state.resultFormat, renderSnapshot: this.state.renderSnapshot, rawText: this.state.rawText, markdown: this.state.markdown, reasoning: this.state.reasoning, report: this.state.report, usage: this.state.usage }, candidates: this.state.candidates }, null, 2); }
+  dispose() { if (this.dirty) this.retryDraftSave(); this.disposed = true; this.epoch += 1; this.controller?.abort(ARENA_HOSTED_DETACH); this.importController?.abort(); if (this.draftTimer) clearTimeout(this.draftTimer); this.listeners.clear(); }
 }
