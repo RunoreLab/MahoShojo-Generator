@@ -6,12 +6,13 @@ import { withArenaGenerationActorToken } from '@/lib/arena/resumable-generation-
 import { authStorage } from '@/lib/auth';
 import { buildGenerationApiHeaders } from '@/lib/hono-api-client';
 import {
+  applyArenaReconciliationUpdates,
   buildArenaReconciliationRetryPayload,
   projectArenaReconciliationCombatants,
   type ArenaReconciliationRetryCombatant,
-} from '@/lib/arena/reconciliation-retry';
+} from '@mahoshojo/domain/arena-reconciliation';
 import { useBattleStore } from '../stores/useBattleStore';
-import { BattleStoreState, CombatantData } from '../types';
+import type { BattleStoreState, CombatantData, UpdatedCombatantData } from '../types';
 
 const log = getLogger('stream-combatant-updater');
 
@@ -91,43 +92,9 @@ export const useStreamCombatantUpdater = () => {
       }
 
       if (result.updatedCombatants && result.updatedCombatants.length > 0) {
-        const indexedUpdates = result.updatedCombatants.flatMap((value: unknown) => {
-          if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
-          const entry = value as {
-            combatantIndex?: unknown;
-            data?: unknown;
-            isNative?: unknown;
-          };
-          return typeof entry.combatantIndex === 'number'
-            && Number.isSafeInteger(entry.combatantIndex)
-            && entry.combatantIndex >= 0
-            && entry.data
-            && typeof entry.data === 'object'
-            && !Array.isArray(entry.data)
-            ? [{
-              combatantIndex: entry.combatantIndex,
-              data: entry.data,
-              isNative: entry.isNative === true,
-            }]
-            : [];
-        });
-        setUpdatedCombatants(indexedUpdates.map((entry: { data: any }) => entry.data));
-        const updateByIndex = new Map<number, { data: any; isNative: boolean }>(indexedUpdates.map((entry: {
-          combatantIndex: number;
-          data: any;
-          isNative: boolean;
-        }) => [entry.combatantIndex, entry] as const));
-        let readableCombatantIndex = 0;
-        const updatedRoster = currentCombatants.map((combatant) => {
-          if (!('data' in combatant)) return combatant;
-          const updated = updateByIndex.get(readableCombatantIndex);
-          readableCombatantIndex += 1;
-          return updated
-            ? { ...combatant, data: updated.data, isValid: updated.isNative }
-            : combatant;
-        });
-
-        setCombatants(updatedRoster);
+        const projection = applyArenaReconciliationUpdates(currentCombatants, result.updatedCombatants);
+        setUpdatedCombatants(projection.updatedCombatants as UpdatedCombatantData[]);
+        setCombatants(projection.combatants);
         log.info('成功更新角色数据', { count: result.updatedCombatants.length });
       } else if (Array.isArray(result.updatedCombatants)) {
         setUpdatedCombatants([]);

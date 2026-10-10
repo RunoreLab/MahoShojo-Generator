@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import React, { act } from 'react';
+import React, { act, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -20,7 +20,8 @@ import { useBattleStore } from '@/components/arena/stores/useBattleStore';
 let currentHook: ReturnType<typeof useStreamCombatantUpdater> | null = null;
 
 const Harness = () => {
-  currentHook = useStreamCombatantUpdater();
+  const hook = useStreamCombatantUpdater();
+  useEffect(() => { currentHook = hook; }, [hook]);
   return null;
 };
 
@@ -30,6 +31,7 @@ afterEach(() => {
   useBattleStore.setState({
     combatants: [],
     updatedCombatants: [],
+    lastGenerationId: null,
   });
 });
 
@@ -287,4 +289,82 @@ describe('useStreamCombatantUpdater', () => {
     await act(async () => root.unmount());
     container.remove();
   });
+
+  it('重试上传重排后的当前卡片，按本次请求 index 接受服务器的局部对账结果', async () => {
+    const first = {
+      type: 'general-character' as const, filename: 'first.json', isPreset: false, isValid: false,
+      data: { name: '同名角色', marker: 'first' },
+    };
+    const second = { ...first, filename: 'second.json', data: { name: '同名角色', marker: 'second' } };
+    const generationId = 'generation-reordered-current';
+    const roster = [second, first];
+    const updatedData = {
+      name: '同名角色', marker: 'second-updated', signature: 'server-signature',
+      current_state: { generation_id: generationId, summary: '服务器冻结结果' },
+    };
+    useBattleStore.setState({ combatants: roster, updatedCombatants: [] });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      updatedCombatants: [{ combatantIndex: 0, data: updatedData, isNative: true }],
+      warnings: [{ code: 'ARENA_RECONCILIATION_ROSTER_COMBATANT_MISSING', message: '缺失角色已跳过' }],
+    }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const container = document.createElement('div');
+    const root = createRoot(container);
+    await act(async () => root.render(<Harness />));
+    try {
+      await act(async () => currentHook!.retryGenerationUpdate(generationId, roster));
+      expect(JSON.parse(String(fetchMock.mock.calls[0][1].body))).toEqual({
+        generationId,
+        combatants: [second, first].map(({ type, filename, data, isPreset }) => ({ type, filename, data, isPreset })),
+      });
+      expect(useBattleStore.getState().combatants).toEqual([{ ...second, data: updatedData, isValid: true }, first]);
+      expect(useBattleStore.getState().updatedCombatants).toEqual([updatedData]);
+      expect(currentHook!.updateError).toContain('缺失角色已跳过');
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
+
+  it.each(['reorder', 'remove', 'generation', 'current-state'] as const)(
+    '请求发出后的 %s 变化使迟到响应失效，已有结果不被覆盖', async (change) => {
+      const first = {
+        type: 'general-character' as const, filename: 'first.json', isPreset: false, isValid: false,
+        data: { name: '同名角色', marker: 'first' },
+      };
+      const second = { ...first, filename: 'second.json', data: { name: '同名角色', marker: 'second' } };
+      const generationId = 'generation-original';
+      const previousUpdates = [{ name: '既有结果', arena_history: {} }];
+      useBattleStore.setState({ combatants: [first, second], updatedCombatants: previousUpdates, lastGenerationId: generationId });
+      let resolveResponse!: (response: Response) => void;
+      const fetchMock = vi.fn().mockReturnValue(new Promise<Response>((resolve) => { resolveResponse = resolve; }));
+      vi.stubGlobal('fetch', fetchMock);
+      const container = document.createElement('div');
+      const root = createRoot(container);
+      await act(async () => root.render(<Harness />));
+      try {
+        await act(async () => {
+          const pending = currentHook!.retryGenerationUpdate(generationId, [first, second], () => (
+            useBattleStore.getState().lastGenerationId === generationId
+          ));
+          await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+          if (change === 'reorder') useBattleStore.setState({ combatants: [second, first] });
+          if (change === 'remove') useBattleStore.setState({ combatants: [first] });
+          if (change === 'generation') useBattleStore.setState({ lastGenerationId: 'generation-new' });
+          if (change === 'current-state') useBattleStore.setState({ combatants: [{
+            ...first, data: { ...first.data, current_state: { generation_id: 'generation-new' } },
+          }, second] });
+          const currentRoster = useBattleStore.getState().combatants;
+          resolveResponse(new Response(JSON.stringify({
+            updatedCombatants: [{ combatantIndex: 0, data: { name: '过期结果' }, isNative: true }],
+          }), { status: 200 }));
+          await expect(pending).rejects.toThrow('角色更新上下文已变化');
+          expect(useBattleStore.getState().combatants).toBe(currentRoster);
+          expect(useBattleStore.getState().updatedCombatants).toBe(previousUpdates);
+        });
+      } finally {
+        await act(async () => root.unmount());
+      }
+    },
+  );
+
 });

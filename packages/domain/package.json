@@ -250,7 +250,8 @@
     "./wantu-card/wantu-data-card": "./src/wantu-card/wantu-data-card.ts",
     "./arena-adjudication": "./src/arena-adjudication.ts",
     "./arena-questionnaire-request": "./src/arena-questionnaire-request.ts",
-    "./arena-adjudication-events": "./src/arena-adjudication-events.ts"
+    "./arena-adjudication-events": "./src/arena-adjudication-events.ts",
+    "./arena-reconciliation": "./src/arena-reconciliation.ts"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",
