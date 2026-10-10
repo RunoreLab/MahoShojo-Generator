@@ -1,5 +1,7 @@
 # 文档导航
 
+2026-10-10 Direct 连续故事候选：[两页线性故事与原件旅程](./reports/2026-10-10_150900_DesktopDirect线性连续故事纵切候选.md)已接真实共享 Prompt/目录/阅读/动作和设备 owner；终版定向 222 项、源码独审与真实 owner→默认 binder→Native pipe/SQLite/全导出链通过。128 MiB 独立保存拒绝保全文，超长展示保护双端共用；修后同源完整本地 CI 已通过，首轮纯叶边界失败及修复保留记录；未发布，真实模型/Windows/Tauri 仍待验，七项实机交接清单已备。
+
 2026-10-10 历战编号后继：[新增编号共源与容量证据修正](./reports/2026-10-10_111500_历战新增编号共源与容量证据修正.md)统一四条真实写入路径的新 ID 分配，保留旧条目/扩展并规避重排碰号与安全整数溢出；真实近 12 MiB producer 与合成 16 MiB 传输防御分别通过 Native/TS 原件链，独审与正规完整本地 CI 通过。此前 C3 原件与历史验收保持，不再把旧字符串复制配方视为当前 producer 证据。
 
 2026-10-10 D5.1b C3：[固定 Next 角色更新验收](./reports/2026-10-10_103200_DesktopHostedArena固定Next角色更新验收.md)完成新任务冻结角色写入、原 Native actor 到独立固定 Next、共源角色结果展示与新鲜签名另存；保旧 C1/C2 false 权限。真实 producer→Native→TS 16MiB 容量链、Native 原始创建请求→SQLite→Next 合成链、源码独审及同源完整本地 CI 已通过；[接受的 ADR](./decisions/2026-10-10_100700_Desktop固定Next角色更新修订.md)与 DESK-097 为权威边界。未生产部署或验证真实凭据/模型、Windows/Tauri，不是生成 fallback。
