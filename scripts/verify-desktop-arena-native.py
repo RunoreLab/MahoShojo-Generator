@@ -79,9 +79,11 @@ pub mod ipc {
     command += ["--", "--test-threads=4", "--nocapture"]
     run(command, work, work / "tests.log")
     run([args.cargo, "clippy", "--offline", "--locked", "--all-targets", "--", "-D", "warnings"], work, work / "clippy.log")
-    paths = [PRODUCT / "src" / f"{name}.rs" for name in MODULES + TEST_MODULES + ["arena_hosted_tests"]]
+    paths = [PRODUCT / "src" / f"{name}.rs" for name in MODULES + TEST_MODULES + ["arena_hosted_tests", "arena_hosted_json", "arena_hosted_json_tests"]]
     paths += sorted((PRODUCT / "src/generated").glob("*.json"))
-    paths += [ROOT / "packages/contracts/fixtures/desktop-arena-hosted.json", PRODUCT / "Cargo.toml", PRODUCT / "Cargo.lock", Path(__file__).resolve()]
+    paths += [ROOT / "packages/contracts/fixtures/desktop-arena-hosted.json",
+              ROOT / "packages/contracts/fixtures/arena-companion.json", ROOT / "packages/contracts/fixtures/desktop-arena-hosted-json.json",
+              ROOT / "packages/contracts/fixtures/arena-companion-utf16.json", ROOT / "packages/contracts/fixtures/arena-companion-error-utf16.json", PRODUCT / "Cargo.toml", PRODUCT / "Cargo.lock", Path(__file__).resolve()]
     hashes = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
     (work / "source-verification.json").write_text(json.dumps({
         "head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),

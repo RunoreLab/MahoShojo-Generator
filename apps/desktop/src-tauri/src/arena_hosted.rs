@@ -117,6 +117,18 @@ pub enum ArenaRequest {
         #[serde(default, deserialize_with = "non_null")]
         replace_request_id: Option<String>,
     },
+    CreateJson {
+        product: Product,
+        request_id: String,
+        actor: Actor,
+        body: Value,
+        #[serde(default, deserialize_with = "non_null")]
+        system_config: Option<CloudHostedSystemConfig>,
+        #[serde(default, deserialize_with = "non_null")]
+        preset_config: Option<CloudHostedPresetConfig>,
+        #[serde(default, deserialize_with = "non_null")]
+        replace_request_id: Option<String>,
+    },
     LookupRequest {
         product: Product,
         request_id: String,
@@ -170,6 +182,12 @@ impl ArenaRequest {
     fn scope(&self) -> (Product, &str, &Actor) {
         match self {
             Self::CreateStream {
+                product,
+                request_id,
+                actor,
+                ..
+            }
+            | Self::CreateJson {
                 product,
                 request_id,
                 actor,
@@ -267,6 +285,28 @@ pub enum ChannelEvent {
         metadata_state: &'static str,
         recovery_credential_state: &'static str,
     },
+    JsonResponse {
+        request_id: String,
+        sequence: u64,
+        status: u16,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        generation_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        generation_request_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        payload_hash: Option<String>,
+        recovery_credential_state: &'static str,
+    },
+    JsonFragment {
+        request_id: String,
+        sequence: u64,
+        text: String,
+        r#final: bool,
+    },
+    JsonEnd {
+        request_id: String,
+        sequence: u64,
+    },
     SseFragment {
         request_id: String,
         sequence: u64,
@@ -315,6 +355,7 @@ struct Flight {
     anonymous: Option<AnonymousRecord>,
     memory_only: bool,
     capability_verified: bool,
+    json_capability_verified: bool,
     dispatched: bool,
     terminal: bool,
     generation_id: Option<String>,
@@ -489,7 +530,10 @@ impl ArenaState {
         request.validate()?;
         let (product, request_id, actor) = request.scope();
         let snapshot = cloud::arena_account_snapshot(cloud, secrets).map_err(|_| stale())?;
-        let create = matches!(request, ArenaRequest::CreateStream { .. });
+        let create = matches!(
+            request,
+            ArenaRequest::CreateStream { .. } | ArenaRequest::CreateJson { .. }
+        );
         if let Actor::Account { expected_user_id } = actor {
             if snapshot.user_id != Some(*expected_user_id) {
                 return Err(stale());
@@ -543,6 +587,7 @@ impl ArenaState {
                         anonymous: old.anonymous.clone(),
                         memory_only: old.memory_only,
                         capability_verified: false,
+                        json_capability_verified: false,
                         dispatched: old.dispatched,
                         terminal: old.terminal,
                         generation_id: old.generation_id.clone(),
@@ -562,6 +607,9 @@ impl ArenaState {
             let replace_id = match request {
                 ArenaRequest::CreateStream {
                     replace_request_id, ..
+                }
+                | ArenaRequest::CreateJson {
+                    replace_request_id, ..
                 } => replace_request_id.as_deref(),
                 _ => None,
             };
@@ -580,6 +628,9 @@ impl ArenaState {
             if let Some(old) = load_anonymous(product, secrets)? {
                 let replacement = match request {
                     ArenaRequest::CreateStream {
+                        replace_request_id, ..
+                    }
+                    | ArenaRequest::CreateJson {
                         replace_request_id, ..
                     } => replace_request_id.as_deref(),
                     _ => None,
@@ -610,6 +661,9 @@ impl ArenaState {
                     }
                     let replace_id = match request {
                         ArenaRequest::CreateStream {
+                            replace_request_id, ..
+                        }
+                        | ArenaRequest::CreateJson {
                             replace_request_id, ..
                         } => replace_request_id.as_deref(),
                         _ => None,
@@ -666,6 +720,7 @@ impl ArenaState {
             anonymous,
             memory_only: false,
             capability_verified: false,
+            json_capability_verified: false,
             dispatched: !create,
             terminal: false,
             generation_id: None,
@@ -682,10 +737,14 @@ impl ArenaState {
         flight: &Arc<Mutex<Flight>>,
         cloud: &CloudState,
         secrets: &dyn SecretStore,
+        require_json: bool,
     ) -> Result<(), ArenaError> {
         self.is_current(product, flight, cloud, secrets)?;
-        if flight.lock().map_err(|_| stale())?.capability_verified {
-            return Ok(());
+        {
+            let f = flight.lock().map_err(|_| stale())?;
+            if f.capability_verified && (!require_json || f.json_capability_verified) {
+                return Ok(());
+            }
         }
         // Deliberately a fresh public GET: no Cookie, actor token, Provider Key or renderer headers.
         let response = self
@@ -700,6 +759,17 @@ impl ArenaState {
             return Err(error(
                 "capability-unavailable",
                 "Arena 服务尚未支持本客户端的身份协议",
+            ));
+        }
+        let json_capable = response
+            .headers()
+            .get(json_delivery::PROTOCOL_HEADER)
+            .and_then(|v| v.to_str().ok())
+            == Some(json_delivery::PROTOCOL_VERSION);
+        if require_json && !json_capable {
+            return Err(error(
+                "capability-unavailable",
+                "Arena 服务尚未支持完整非流报告协议",
             ));
         }
         let value = read_json(response, HEADER_BYTES).await?;
@@ -717,7 +787,9 @@ impl ArenaState {
             ));
         }
         self.is_current(product, flight, cloud, secrets)?;
-        flight.lock().map_err(|_| stale())?.capability_verified = true;
+        let mut f = flight.lock().map_err(|_| stale())?;
+        f.capability_verified = true;
+        f.json_capability_verified = json_capable;
         Ok(())
     }
     fn authenticated(
@@ -1389,13 +1461,17 @@ pub async fn control(
 ) -> Result<ControlResponse, ArenaError> {
     if matches!(
         request,
-        ArenaRequest::CreateStream { .. } | ArenaRequest::Resume { .. }
+        ArenaRequest::CreateStream { .. }
+            | ArenaRequest::CreateJson { .. }
+            | ArenaRequest::Resume { .. }
     ) {
         return Err(invalid());
     }
     let (product, _, _) = request.scope();
     let flight = state.prepare(&request, cloud, secrets)?;
-    state.capability(product, &flight, cloud, secrets).await?;
+    state
+        .capability(product, &flight, cloud, secrets, false)
+        .await?;
     if let Some(id) = request.generation_id() {
         state
             .bind_generation(product, id, &flight, cloud, secrets)
@@ -2260,6 +2336,12 @@ async fn stream_inner(
         system_config,
         preset_config,
         ..
+    }
+    | ArenaRequest::CreateJson {
+        body,
+        system_config,
+        preset_config,
+        ..
     } = &request
     {
         validate_body(body)?;
@@ -2326,8 +2408,11 @@ async fn stream_inner(
         flight: flight.clone(),
         token: token.clone(),
     };
+    let is_json = matches!(&request, ArenaRequest::CreateJson { .. });
     let operation = async {
-        state.capability(product, &flight, cloud, secrets).await?;
+        state
+            .capability(product, &flight, cloud, secrets, is_json)
+            .await?;
         if let Some(id) = request.generation_id() {
             state
                 .bind_generation(product, id, &flight, cloud, secrets)
@@ -2346,7 +2431,7 @@ async fn stream_inner(
             }
         }
         let builder = match &request {
-            ArenaRequest::CreateStream { .. } => {
+            ArenaRequest::CreateStream { .. } | ArenaRequest::CreateJson { .. } => {
                 let mut f = flight.lock().map_err(|_| stale())?;
                 if f.dispatched {
                     return Err(invalid());
@@ -2356,7 +2441,11 @@ async fn stream_inner(
                 state
                     .authenticated(
                         reqwest::Method::POST,
-                        &format!("{CREATE_PATH}?format=sse"),
+                        &if is_json {
+                            json_delivery::CREATE_PATH.to_string()
+                        } else {
+                            format!("{CREATE_PATH}?format=sse")
+                        },
                         &flight,
                     )?
                     .json(body.as_ref().ok_or_else(invalid)?)
@@ -2377,16 +2466,29 @@ async fn stream_inner(
             }
             _ => return Err(invalid()),
         };
-        // Response head has a bounded deadline; streaming body deliberately has no total timeout.
-        let response = tokio::time::timeout(
-            SHORT_TIMEOUT,
+        // Companion returns headers after generation/finalization: only connection is timed.
+        // Shared host soft deadlines may prompt, but never cancel/recreate this POST.
+        let response = if is_json {
             builder
-                .header(reqwest::header::ACCEPT, "text/event-stream")
-                .send(),
-        )
-        .await
-        .map_err(|_| network())?
-        .map_err(|_| network())?;
+                .header(reqwest::header::ACCEPT, "application/json")
+                .header(
+                    json_delivery::PROTOCOL_HEADER,
+                    json_delivery::PROTOCOL_VERSION,
+                )
+                .send()
+                .await
+                .map_err(|_| network())?
+        } else {
+            tokio::time::timeout(
+                SHORT_TIMEOUT,
+                builder
+                    .header(reqwest::header::ACCEPT, "text/event-stream")
+                    .send(),
+            )
+            .await
+            .map_err(|_| network())?
+            .map_err(|_| network())?
+        };
         state.is_current(product, &flight, cloud, secrets)?;
         state.capture_response_token(product, &flight, cloud, secrets, response.headers())?;
         let status = response.status().as_u16();
@@ -2423,6 +2525,27 @@ async fn stream_inner(
                 &json!({"generationId":id,"generationRequestId":request_id}),
                 &flight,
             )?;
+        }
+        if is_json {
+            return json_delivery::deliver(
+                json_delivery::Delivery {
+                    state,
+                    cloud,
+                    secrets,
+                    product,
+                    flight: &flight,
+                    token: &token,
+                    request_id: &request_id,
+                    sink,
+                },
+                response,
+                json_delivery::ResponseIdentity {
+                    generation_id,
+                    generation_request_id,
+                    payload_hash,
+                },
+            )
+            .await;
         }
         let (header_meta, metadata_state) = header_metadata(response.headers());
         let recovery_credential_state = flight.lock().map_err(|_| stale())?.credential_state();
@@ -2563,3 +2686,6 @@ async fn stream_inner(
 #[cfg(test)]
 #[path = "arena_hosted_tests.rs"]
 mod tests;
+
+#[path = "arena_hosted_json.rs"]
+mod json_delivery;

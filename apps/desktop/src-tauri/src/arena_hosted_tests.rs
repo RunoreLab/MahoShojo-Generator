@@ -1880,3 +1880,6 @@ async fn source_limit_meta_recipe_traverses_real_http_and_channel_without_loss()
     }
     eprintln!("ARENA_META_HTTP_BOUNDARY source_bytes={} wire_bytes={wire_bytes} channel_messages={} raw_utf16_units={}", source.len(), events.len(), data["raw"].as_str().unwrap().encode_utf16().count());
 }
+
+#[path = "arena_hosted_json_tests.rs"]
+mod json_tests;
