@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
+import { useArenaInputLifecycle } from '../../input-lifecycle';
 
 import { ArenaRosterList, ArenaRosterRow } from '../../presentation/ArenaRoster';
 import type {
@@ -29,16 +30,21 @@ const removeTeamConfirmMessage = (teamName: string): string =>
 export function ArenaRosterSection({
   model,
   emptyLabel,
+  onDirtyChange,
 }: Readonly<{
   model: ArenaRosterSectionModel;
   /** 提供后空 roster 不再整体隐藏，而是渲染空态（proposal 草稿语义）。 */
   emptyLabel?: string;
+  /** Transient, uncommitted team-name edits; the host owns its existing leave guard. */
+  onDirtyChange?(dirty: boolean): void;
 }>) {
   const { rows, teams, capabilities, actions } = model;
   const [expandedGuidanceKeys, setExpandedGuidanceKeys] = useState<ReadonlySet<string>>(new Set());
   const [editingTeamKey, setEditingTeamKey] = useState<string | null>(null);
   const [editingTeamName, setEditingTeamName] = useState('');
   const [unassignedCollapsed, setUnassignedCollapsed] = useState(false);
+  const editingTeam = teams.find((team) => team.key === editingTeamKey);
+  useArenaInputLifecycle(Boolean(editingTeam && editingTeamName !== editingTeam.name), { onDirtyChange });
 
   const rowByKey = useMemo(
     () => new Map(rows.map((row) => [row.key, row])),

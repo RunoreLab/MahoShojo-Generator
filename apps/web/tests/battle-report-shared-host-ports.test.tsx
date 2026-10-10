@@ -11,7 +11,7 @@ vi.mock('@/lib/client/blobUrl', () => ({ createBlobUrl: host.createUrl, download
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const report: NewsReport = {
   headline: '破晓战报', reporterInfo: { name: '记者甲', publication: '报社' },
-  article: { body: '正文\n\n|角色|状态|\n|---|---|\n|翠雀|胜利|\n\n![许可](http://i.imgur.com/good.png)\n\n![拒绝](https://untrusted.example/bad.png)', analysis: '点评' },
+  article: { body: '正文\n\n[原生外链](https://example.com/report)\n\n|角色|状态|\n|---|---|\n|翠雀|胜利|\n\n![许可](http://i.imgur.com/good.png)\n\n![拒绝](https://untrusted.example/bad.png)', analysis: '点评' },
   officialReport: { winner: '翠雀', conclusion: '守住舞台' }, userGuidance: '雨夜', characterGuidances: [{ characterName: '翠雀', guidance: '保护队友' }],
   adjudicationResults: [{ description: '命中', type: 'binary', roll: 42, outcome: '成功', details: '42', depth: 0 }],
   aiModel: 'model-test', aiUsage: { promptTokens: 100, reasoningTokens: 20, completionTokens: 50, textTokens: 30 },
@@ -31,6 +31,8 @@ describe('real Web report wrappers consume shared rendering and explicit host po
   it('retains content/metadata, battle tables, media policy, generator auth and Markdown export', async () => {
     await act(async () => root.render(<BattleReportCard report={report} mode="scenario" cardWidthPx={720} />));
     expect(container.textContent).toContain('翠雀'); expect(container.textContent).toContain('model-test'); expect(container.querySelector('table')).not.toBeNull();
+    const external = container.querySelector<HTMLAnchorElement>('a[href="https://example.com/report"]')!;
+    expect(external.target).toBe('_blank'); expect(external.rel).toBe('noopener noreferrer'); expect(external.hasAttribute('role')).toBe(false);
     expect(container.querySelector('img[src="https://i.imgur.com/good.png"]')).not.toBeNull();
     expect(container.querySelector('img[src="https://untrusted.example/bad.png"]')).toBeNull(); expect(container.textContent).toContain('https://untrusted.example/bad.png');
     expect(container.querySelector('.logo-placeholder')?.textContent).toContain('生成者甲');

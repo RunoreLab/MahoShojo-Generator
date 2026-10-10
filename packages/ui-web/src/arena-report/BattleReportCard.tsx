@@ -11,6 +11,7 @@ import remarkBattleTable from './remarkBattleTable';
 import { fixNestedListIndentation } from '../markdown/text';
 import { formatMarkdownImage, formatMarkdownLink, DENY_EXTERNAL_MEDIA } from '../markdown/text';
 import type { BattleReportHostPorts } from './ports';
+import { BattleReportLink } from './BattleReportLink';
 import {
   buildAdjudicationRecordMarkdown,
   resolveAdjudicationOutcomeTone,
@@ -239,7 +240,7 @@ ${adjudicationMarkdown}
         return (
           <span className="inline-flex max-w-full flex-col gap-1 align-middle">
             <audio controls preload="none" src={resolvedAudioHref} className="h-8 max-w-full" />
-            <a
+            <BattleReportLink onNavigateExternal={ports.onNavigateExternal}
               href={resolvedAudioHref}
               target="_blank"
               rel="noopener noreferrer"
@@ -247,7 +248,7 @@ ${adjudicationMarkdown}
               {...props}
             >
               {linkText || '打开音频链接'}
-            </a>
+            </BattleReportLink>
           </span>
         );
       }
@@ -265,7 +266,7 @@ ${adjudicationMarkdown}
         return (
           <span className="inline-flex max-w-full flex-col gap-1 align-middle">
             <video controls preload="metadata" playsInline src={resolvedVideoHref} className="my-2 max-w-full rounded-md border border-white/15" />
-            <a
+            <BattleReportLink onNavigateExternal={ports.onNavigateExternal}
               href={resolvedVideoHref}
               target="_blank"
               rel="noopener noreferrer"
@@ -273,13 +274,13 @@ ${adjudicationMarkdown}
               {...props}
             >
               {videoLabel}
-            </a>
+            </BattleReportLink>
           </span>
         );
       }
 
       return (
-        <a
+        <BattleReportLink onNavigateExternal={ports.onNavigateExternal}
           href={href}
           target={isExternal ? '_blank' : undefined}
           rel={isExternal ? 'noopener noreferrer' : undefined}
@@ -287,7 +288,7 @@ ${adjudicationMarkdown}
           {...props}
         >
           {children}
-        </a>
+        </BattleReportLink>
       );
     },
     h1: ({ children }) => <h3 className="text-lg font-semibold mt-4 mb-2">{children}</h3>,
@@ -366,14 +367,14 @@ ${adjudicationMarkdown}
         return (
           <span className="inline-flex max-w-full flex-col gap-1 align-middle">
             <audio controls preload="none" src={normalizedSrc} className="h-8 max-w-full" />
-            <a
+            <BattleReportLink onNavigateExternal={ports.onNavigateExternal}
               href={normalizedSrc}
               target="_blank"
               rel="noopener noreferrer"
               className="text-[11px] underline underline-offset-2 text-blue-200"
             >
               {audioLabel}
-            </a>
+            </BattleReportLink>
           </span>
         );
       }
@@ -394,14 +395,14 @@ ${adjudicationMarkdown}
         return (
           <span className="inline-flex max-w-full flex-col gap-1 align-middle">
             <video controls preload="metadata" playsInline src={normalizedSrc} className="my-2 max-w-full rounded-md border border-white/15" />
-            <a
+            <BattleReportLink onNavigateExternal={ports.onNavigateExternal}
               href={normalizedSrc}
               target="_blank"
               rel="noopener noreferrer"
               className="text-[11px] underline underline-offset-2 text-blue-200"
             >
               {videoLabel}
-            </a>
+            </BattleReportLink>
           </span>
         );
       }
