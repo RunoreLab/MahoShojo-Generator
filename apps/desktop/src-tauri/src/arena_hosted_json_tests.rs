@@ -850,3 +850,6 @@ async fn json_real_error_writer_utf16_fields_remain_original_and_keep_http_statu
     }
     srv.task.await.unwrap();
 }
+
+#[path = "arena_hosted_reconciliation_tests.rs"]
+mod reconciliation_tests;

@@ -213,7 +213,10 @@ impl SecretMatcher {
         self.matched == self.units.len()
     }
 }
-fn reject_json_secret_echo(raw: &str, flight: &Arc<Mutex<Flight>>) -> Result<(), ArenaError> {
+pub(super) fn reject_json_secret_echo(
+    raw: &str,
+    flight: &Arc<Mutex<Flight>>,
+) -> Result<(), ArenaError> {
     let mut patterns: Vec<SecretMatcher> = {
         let f = flight.lock().map_err(|_| stale())?;
         let mut values: Vec<&str> = f.secrets_to_redact.iter().map(String::as_str).collect();

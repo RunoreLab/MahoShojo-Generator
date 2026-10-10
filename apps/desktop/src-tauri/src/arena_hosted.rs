@@ -1,4 +1,4 @@
-//! Arena C1-SSE: fixed Hono origin, native-only actors, bounded replay and IPC.
+//! Arena C1/C2 plus fixed Next reconciliation: native-only actors, bounded replay and IPC.
 //! Does not share the six-family Hosted parser/budgets or expose arbitrary HTTP.
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -111,6 +111,8 @@ pub enum ArenaRequest {
         actor: Actor,
         body: Value,
         #[serde(default, deserialize_with = "non_null")]
+        reconciliation_version: Option<reconciliation::Version>,
+        #[serde(default, deserialize_with = "non_null")]
         system_config: Option<CloudHostedSystemConfig>,
         #[serde(default, deserialize_with = "non_null")]
         preset_config: Option<CloudHostedPresetConfig>,
@@ -123,11 +125,20 @@ pub enum ArenaRequest {
         actor: Actor,
         body: Value,
         #[serde(default, deserialize_with = "non_null")]
+        reconciliation_version: Option<reconciliation::Version>,
+        #[serde(default, deserialize_with = "non_null")]
         system_config: Option<CloudHostedSystemConfig>,
         #[serde(default, deserialize_with = "non_null")]
         preset_config: Option<CloudHostedPresetConfig>,
         #[serde(default, deserialize_with = "non_null")]
         replace_request_id: Option<String>,
+    },
+    Reconcile {
+        product: Product,
+        request_id: String,
+        actor: Actor,
+        generation_id: String,
+        combatants: Vec<Value>,
     },
     LookupRequest {
         product: Product,
@@ -193,6 +204,12 @@ impl ArenaRequest {
                 actor,
                 ..
             }
+            | Self::Reconcile {
+                product,
+                request_id,
+                actor,
+                ..
+            }
             | Self::LookupRequest {
                 product,
                 request_id,
@@ -221,9 +238,9 @@ impl ArenaRequest {
     }
     fn generation_id(&self) -> Option<&str> {
         match self {
-            Self::Status { generation_id, .. } | Self::Resume { generation_id, .. } => {
-                Some(generation_id)
-            }
+            Self::Status { generation_id, .. }
+            | Self::Resume { generation_id, .. }
+            | Self::Reconcile { generation_id, .. } => Some(generation_id),
             Self::Stop { generation_id, .. } => generation_id.as_deref(),
             _ => None,
         }
@@ -256,6 +273,14 @@ impl ArenaRequest {
             if reason != "user" && reason != "content_policy" {
                 return Err(invalid());
             }
+        }
+        if let Self::Reconcile {
+            generation_id,
+            combatants,
+            ..
+        } = self
+        {
+            reconciliation::validate_input(generation_id, combatants)?;
         }
         Ok(())
     }
@@ -473,11 +498,14 @@ pub enum RecoveryHint {
 pub struct ArenaState {
     http: reqwest::Client,
     origin: String,
+    reconciliation_origin: String,
     flights: Mutex<HashMap<Product, Arc<Mutex<Flight>>>>,
 }
 impl ArenaState {
     pub fn new() -> Result<Self, ArenaError> {
         let http = reqwest::Client::builder()
+            // Fixed credential-bearing origins must not inherit a third-party environment proxy.
+            .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(SHORT_TIMEOUT)
             .build()
@@ -485,6 +513,7 @@ impl ArenaState {
         Ok(Self {
             http,
             origin: ORIGIN.to_string(),
+            reconciliation_origin: reconciliation::ORIGIN.to_string(),
             flights: Mutex::new(HashMap::new()),
         })
     }
@@ -738,11 +767,15 @@ impl ArenaState {
         cloud: &CloudState,
         secrets: &dyn SecretStore,
         require_json: bool,
+        require_json_reconciliation: bool,
     ) -> Result<(), ArenaError> {
         self.is_current(product, flight, cloud, secrets)?;
         {
             let f = flight.lock().map_err(|_| stale())?;
-            if f.capability_verified && (!require_json || f.json_capability_verified) {
+            if f.capability_verified
+                && (!require_json || f.json_capability_verified)
+                && !require_json_reconciliation
+            {
                 return Ok(());
             }
         }
@@ -770,6 +803,20 @@ impl ArenaState {
             return Err(error(
                 "capability-unavailable",
                 "Arena 服务尚未支持完整非流报告协议",
+            ));
+        }
+        // This is the installed companion service's own opt-in, separate from the
+        // fixed Next service's capability. Old C2 servers must never receive true writes.
+        if require_json_reconciliation
+            && response
+                .headers()
+                .get(reconciliation::PROTOCOL_HEADER)
+                .and_then(|v| v.to_str().ok())
+                != Some(reconciliation::PROTOCOL_VERSION)
+        {
+            return Err(error(
+                "capability-unavailable",
+                "Arena 完整报告服务尚未支持冻结角色写入选择",
             ));
         }
         let value = read_json(response, HEADER_BYTES).await?;
@@ -997,6 +1044,9 @@ fn capture_token(
     Ok(())
 }
 fn validate_body(body: &Value) -> Result<(), ArenaError> {
+    validate_body_with_reconciliation(body, false)
+}
+fn validate_body_with_reconciliation(body: &Value, reconciliation: bool) -> Result<(), ArenaError> {
     let map = body.as_object().ok_or_else(invalid)?;
     const KEYS: &[&str] = &[
         "reportFormat",
@@ -1069,7 +1119,9 @@ fn validate_body(body: &Value) -> Result<(), ArenaError> {
         return Err(invalid());
     }
     for key in ["writeArenaHistory", "writeCurrentState"] {
-        if map.get(key) != Some(&Value::Bool(false)) {
+        if !map.get(key).is_some_and(Value::is_boolean)
+            || (!reconciliation && map.get(key) != Some(&Value::Bool(false)))
+        {
             return Err(invalid());
         }
     }
@@ -1464,13 +1516,14 @@ pub async fn control(
         ArenaRequest::CreateStream { .. }
             | ArenaRequest::CreateJson { .. }
             | ArenaRequest::Resume { .. }
+            | ArenaRequest::Reconcile { .. }
     ) {
         return Err(invalid());
     }
     let (product, _, _) = request.scope();
     let flight = state.prepare(&request, cloud, secrets)?;
     state
-        .capability(product, &flight, cloud, secrets, false)
+        .capability(product, &flight, cloud, secrets, false, false)
         .await?;
     if let Some(id) = request.generation_id() {
         state
@@ -2328,6 +2381,9 @@ async fn stream_inner(
     sink: &dyn EventSink,
 ) -> Result<(), ArenaError> {
     request.validate()?;
+    if matches!(&request, ArenaRequest::Reconcile { .. }) {
+        return reconciliation::run(state, cloud, secrets, request, sink).await;
+    }
     let (product, id, _) = request.scope();
     let request_id = id.to_string();
     // Capture provider selection and plaintext before the first network await; never re-resolve on controls.
@@ -2335,16 +2391,22 @@ async fn stream_inner(
         body,
         system_config,
         preset_config,
+        reconciliation_version,
         ..
     }
     | ArenaRequest::CreateJson {
         body,
         system_config,
         preset_config,
+        reconciliation_version,
         ..
     } = &request
     {
-        validate_body(body)?;
+        if reconciliation_version.is_some() {
+            validate_body_with_reconciliation(body, true)?;
+        } else {
+            validate_body(body)?;
+        }
         let provider =
             cloud::arena_provider_config(system_config.clone(), preset_config.clone(), secrets)
                 .map_err(|_| invalid())?;
@@ -2409,9 +2471,35 @@ async fn stream_inner(
         token: token.clone(),
     };
     let is_json = matches!(&request, ArenaRequest::CreateJson { .. });
+    let requires_reconciliation = match &request {
+        ArenaRequest::CreateStream {
+            reconciliation_version: Some(_),
+            body,
+            ..
+        }
+        | ArenaRequest::CreateJson {
+            reconciliation_version: Some(_),
+            body,
+            ..
+        } => {
+            body.get("writeArenaHistory") == Some(&Value::Bool(true))
+                || body.get("writeCurrentState") == Some(&Value::Bool(true))
+        }
+        _ => false,
+    };
     let operation = async {
+        if requires_reconciliation {
+            reconciliation::capability(state, product, &flight, cloud, secrets).await?;
+        }
         state
-            .capability(product, &flight, cloud, secrets, is_json)
+            .capability(
+                product,
+                &flight,
+                cloud,
+                secrets,
+                is_json,
+                is_json && requires_reconciliation,
+            )
             .await?;
         if let Some(id) = request.generation_id() {
             state
@@ -2469,15 +2557,19 @@ async fn stream_inner(
         // Companion returns headers after generation/finalization: only connection is timed.
         // Shared host soft deadlines may prompt, but never cancel/recreate this POST.
         let response = if is_json {
-            builder
+            let mut builder = builder
                 .header(reqwest::header::ACCEPT, "application/json")
                 .header(
                     json_delivery::PROTOCOL_HEADER,
                     json_delivery::PROTOCOL_VERSION,
-                )
-                .send()
-                .await
-                .map_err(|_| network())?
+                );
+            if requires_reconciliation {
+                builder = builder.header(
+                    reconciliation::PROTOCOL_HEADER,
+                    reconciliation::PROTOCOL_VERSION,
+                );
+            }
+            builder.send().await.map_err(|_| network())?
         } else {
             tokio::time::timeout(
                 SHORT_TIMEOUT,
@@ -2689,3 +2781,6 @@ mod tests;
 
 #[path = "arena_hosted_json.rs"]
 mod json_delivery;
+
+#[path = "arena_hosted_reconciliation.rs"]
+mod reconciliation;
