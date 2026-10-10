@@ -351,8 +351,9 @@ export class IpcWebPackageRepository implements WebPackageRepository {
     return fromRawBytes(raw);
   }
 
-  async delete(id: string): Promise<void> {
+  async delete(id: string, isCurrent: () => boolean = () => true): Promise<void> {
     const existing = await this.get(id);
+    if (!isCurrent()) return;
     // 契约：缺失 id 与已删除记录都是 no-op。
     if (existing === null || existing.deletedAt !== undefined) return;
 
@@ -366,8 +367,9 @@ export class IpcWebPackageRepository implements WebPackageRepository {
     });
   }
 
-  async restore(id: string): Promise<void> {
+  async restore(id: string, isCurrent: () => boolean = () => true): Promise<void> {
     const existing = await this.get(id);
+    if (!isCurrent()) return;
     if (existing === null || existing.deletedAt === undefined) return;
 
     const restored = { ...existing, updatedAt: nextLocalTimestamp(existing.updatedAt) };

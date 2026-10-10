@@ -359,3 +359,15 @@ describe('IpcWebPackageRepository', () => {
     ]);
   });
 });
+
+
+it.each(['delete', 'restore'] as const)('does not dispatch a stale %s after the adapter internal read', async (operation) => {
+  let complete!: (value: string) => void;
+  const read = new Promise<string>((resolve) => { complete = resolve; });
+  const calls: string[] = [];
+  const repository = new IpcWebPackageRepository(async (command) => { calls.push(command); return read; });
+  let current = true;
+  const pending = repository[operation](PKG_ID, () => current);
+  current = false; complete(JSON.stringify(record(operation === 'restore' ? { deletedAt: '2026-09-30T12:00:00.000Z' } : {})));
+  await pending; expect(calls).toEqual([GET_WEB_PACKAGE_COMMAND]);
+});
