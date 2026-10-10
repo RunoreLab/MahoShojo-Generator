@@ -1,3 +1,6 @@
+import { ARENA_RECONCILIATION_PROTOCOL_HEADER, ARENA_RECONCILIATION_PROTOCOL_VERSION } from '@mahoshojo/contracts/arena-reconciliation';
+import { configureArenaCompanionRouteService, createArenaCompanionRouteService } from '@mahoshojo/hosted-runtime/arena-companion';
+import type { ArenaGenerationService } from '@mahoshojo/hosted-api/arena-generation/service';
 import { ARENA_COMPANION_PROTOCOL_HEADER, ARENA_COMPANION_PROTOCOL_VERSION } from '@mahoshojo/contracts/arena-companion';
 import { DesktopArenaHostedReadinessSchema } from '@mahoshojo/contracts/desktop-arena-hosted';
 import { describe, expect, it } from 'vitest';
@@ -77,5 +80,35 @@ describe('Arena companion supplemental readiness header', () => {
     expect(legacy.headers.get(ARENA_COMPANION_PROTOCOL_HEADER)).toBeNull();
     const failed = await createHonoDrReadinessHandler({ id: 'hono-d1-primary', openSession: () => null }, () => true)(new Request('https://hono.test/api/hosted/dr-readiness'));
     expect(failed.status).toBe(503); expect(failed.headers.get(ARENA_COMPANION_PROTOCOL_HEADER)).toBeNull();
+  });
+});
+
+
+describe('Arena reconciliation creation readiness header', () => {
+  it('comes from actual registered service installation, not importing the protocol constant', async () => {
+    const request = () => new Request('https://hono.test/api/hosted/dr-readiness');
+    configureArenaCompanionRouteService(null);
+    const handler = createHonoDrReadinessHandler(provider, () => true);
+    expect((await handler(request())).headers.has(ARENA_RECONCILIATION_PROTOCOL_HEADER)).toBe(false);
+    const unavailable = async () => new Response(null, { status: 503 });
+    const generationService: ArenaGenerationService = { create: unavailable, createSubscription: unavailable, lookup: unavailable, resume: unavailable, status: unavailable, cancel: unavailable, cancelRequest: unavailable };
+    const service = createArenaCompanionRouteService({ generationService, placement: 'hono-primary', signatures: { verifySignature: async () => false, generateSignature: async () => null } });
+    try {
+      configureArenaCompanionRouteService({ ...service, reconciliationProtocolVersion: undefined });
+      const old = await handler(request());
+      expect(old.headers.get(ARENA_COMPANION_PROTOCOL_HEADER)).toBe(ARENA_COMPANION_PROTOCOL_VERSION);
+      expect(old.headers.has(ARENA_RECONCILIATION_PROTOCOL_HEADER)).toBe(false);
+      configureArenaCompanionRouteService(service);
+      const ready = await handler(request());
+      expect(ready.headers.get(ARENA_RECONCILIATION_PROTOCOL_HEADER)).toBe(ARENA_RECONCILIATION_PROTOCOL_VERSION);
+      expect(DesktopArenaHostedReadinessSchema.safeParse(await ready.json()).success).toBe(true);
+      const head = await handler(new Request(request().url, { method: 'HEAD' }));
+      expect(head.headers.has(ARENA_RECONCILIATION_PROTOCOL_HEADER)).toBe(false);
+      const failed = await createHonoDrReadinessHandler({ id: 'hono-d1-primary', openSession: () => null }, () => true)(request());
+      expect(failed.headers.has(ARENA_RECONCILIATION_PROTOCOL_HEADER)).toBe(false);
+    } finally {
+      configureArenaCompanionRouteService(null);
+    }
+    expect((await handler(request())).headers.has(ARENA_RECONCILIATION_PROTOCOL_HEADER)).toBe(false);
   });
 });

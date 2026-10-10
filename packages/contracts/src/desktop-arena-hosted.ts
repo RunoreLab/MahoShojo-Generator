@@ -58,7 +58,7 @@ const JsonObjectSchema = JsonValueSchema.refine((v): v is Record<string, JsonVal
   .transform((v) => v as Record<string, JsonValue>);
 const json = JsonValueSchema;
 /** Nested user card data remains lossless; only the top-level authority surface is closed. */
-export const DesktopArenaHostedBodySchema = z.object({
+const DesktopArenaHostedWritableBodySchema = z.object({
   reportFormat: z.enum(['markdown', 'web']),
   combatants: z.array(JsonObjectSchema).min(1).max(32),
   mode: z.enum(['classic', 'kizuna', 'daily', 'scenario']),
@@ -69,7 +69,7 @@ export const DesktopArenaHostedBodySchema = z.object({
   scenarioSourceDataCardId: z.string().optional(), scenarioSourceDataCardUpdatedAt: z.string().optional(),
   teams: JsonObjectSchema.optional(), teamNames: JsonObjectSchema.optional(), language: z.string().optional(),
   readArenaHistory: z.boolean().optional(), arenaHistoryReadLimit: z.number().int().positive().nullable().optional(),
-  writeArenaHistory: z.literal(false), readCurrentState: z.boolean().optional(), writeCurrentState: z.literal(false),
+  writeArenaHistory: z.boolean(), readCurrentState: z.boolean().optional(), writeCurrentState: z.boolean(),
   readNarrativeHistory: z.boolean().optional(), writeNarrativeHistory: z.boolean().optional(),
   narrativeHistoryReadLimit: z.number().int().positive().nullable().optional(), narrativeHistory: z.array(json).optional(),
   isDowngrade: z.literal(false).optional(), adjudicationEvents: z.array(json).max(100).optional(),
@@ -84,13 +84,18 @@ export const DesktopArenaHostedBodySchema = z.object({
     ctx.addIssue({ code: 'custom', message: 'invalid Arena Hosted business request' });
   }
 });
+export const DesktopArenaHostedBodySchema = DesktopArenaHostedWritableBodySchema.refine(
+  value => !value.writeArenaHistory && !value.writeCurrentState, 'legacy Arena writes remain disabled');
 export type DesktopArenaHostedBody = z.infer<typeof DesktopArenaHostedBodySchema>;
 const scope = DesktopArenaHostedScopeSchema.shape;
 export const DesktopArenaHostedCreateRequestSchema = z.object({
-  operation: z.literal('create-stream'), ...scope, body: DesktopArenaHostedBodySchema,
+  operation: z.literal('create-stream'), ...scope,
+  body: DesktopArenaHostedWritableBodySchema,
+  reconciliationVersion: z.literal('arena-reconciliation-v1').optional(),
   systemConfig: DesktopHostedSystemConfigSchema.optional(), presetConfig: DesktopHostedPresetConfigSchema.optional(),
   replaceRequestId: DesktopArenaHostedRequestIdSchema.optional(),
-}).strict().refine((v) => !(v.systemConfig && v.presetConfig), { message: 'funding selections are mutually exclusive' });
+}).strict().refine((v) => !(v.systemConfig && v.presetConfig), { message: 'funding selections are mutually exclusive' })
+  .refine((v) => v.reconciliationVersion !== undefined || (!v.body.writeArenaHistory && !v.body.writeCurrentState), { message: 'legacy Arena writes remain disabled' });
 export const DesktopArenaHostedResumeRequestSchema = z.object({
   operation: z.literal('resume'), ...scope, generationId: DesktopArenaHostedGenerationIdSchema,
   after: DesktopArenaHostedCursorSchema.optional(),
@@ -225,7 +230,7 @@ export const parseDesktopArenaHostedSseBlock = (block: string): DesktopArenaHost
 /** Safe Native failure evidence; only unknown may enter C0 first-response recovery. */
 export const DesktopArenaHostedErrorSchema = z.object({
   code: z.enum(['invalid-request', 'invalid-response', 'storage-unavailable', 'scope-changed', 'network-error',
-    'capability-unavailable', 'create-already-attempted', 'recovery-conflict', 'recovery-unavailable', 'recovery-expired',
+    'capability-unavailable', 'reconciliation-capability-unavailable', 'reconciliation-output-too-large', 'create-already-attempted', 'recovery-conflict', 'recovery-unavailable', 'recovery-expired',
     'generation-unavailable', 'resume-cursor-mismatch', 'subscription-in-progress', 'output-too-large', 'stream-truncated', 'detached']),
   message: z.string().min(1).max(512), dispatchState: z.enum(['not-dispatched', 'unknown']),
   // Independent native evidence: only prior-retained can authorize a conditional local-pointer rollback.

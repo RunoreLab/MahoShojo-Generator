@@ -11,7 +11,8 @@ import {
 /** Uses the existing Arena flight/control/detach commands; no new URL or credentials authority. */
 export const DesktopArenaHostedJsonCreateRequestSchema = z.object({
   ...DesktopArenaHostedCreateRequestSchema.shape, operation: z.literal('create-json'),
-}).strict().refine((value) => !(value.systemConfig && value.presetConfig), { message: 'funding selections are mutually exclusive' });
+}).strict().refine((value) => !(value.systemConfig && value.presetConfig), { message: 'funding selections are mutually exclusive' })
+  .refine((value) => value.reconciliationVersion !== undefined || (!value.body.writeArenaHistory && !value.body.writeCurrentState), { message: 'legacy Arena writes remain disabled' });
 export type DesktopArenaHostedJsonCreateRequest = z.infer<typeof DesktopArenaHostedJsonCreateRequestSchema>;
 const sequence = { requestId: DesktopArenaHostedRequestIdSchema, sequence: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) };
 export const DesktopArenaHostedJsonChannelEventSchema = z.discriminatedUnion('kind', [
@@ -35,5 +36,16 @@ export const DesktopArenaHostedRecoveryPointerV2Schema = z.object({
     ? value.protocolVersion === DESKTOP_ARENA_HOSTED_PROTOCOL_VERSION
     : value.protocolVersion === ARENA_COMPANION_PROTOCOL_VERSION));
 export type DesktopArenaHostedRecoveryPointerV2 = z.infer<typeof DesktopArenaHostedRecoveryPointerV2Schema>;
-export const DesktopArenaHostedAnyRecoveryPointerSchema = z.union([DesktopArenaHostedRecoveryPointerSchema, DesktopArenaHostedRecoveryPointerV2Schema]);
+/** The same two public storage slots dual-read old false-only tasks; v3 never upgrades them. */
+export const DesktopArenaHostedRecoveryPointerV3Schema = z.object({
+  ...DesktopArenaHostedRecoveryPointerV2Schema.shape, version: z.literal(3),
+  reconciliationVersion: z.literal('arena-reconciliation-v1'),
+  writeArenaHistory: z.boolean(), writeCurrentState: z.boolean(),
+}).strict().refine((value) => JSON.stringify(value).length <= DESKTOP_ARENA_HOSTED_LIMITS.recoveryPointerCodeUnits
+  && (value.format === 'web' || value.webPackageRef === undefined)
+  && (value.delivery === 'stream'
+    ? value.protocolVersion === DESKTOP_ARENA_HOSTED_PROTOCOL_VERSION
+    : value.protocolVersion === ARENA_COMPANION_PROTOCOL_VERSION));
+export type DesktopArenaHostedRecoveryPointerV3 = z.infer<typeof DesktopArenaHostedRecoveryPointerV3Schema>;
+export const DesktopArenaHostedAnyRecoveryPointerSchema = z.union([DesktopArenaHostedRecoveryPointerSchema, DesktopArenaHostedRecoveryPointerV2Schema, DesktopArenaHostedRecoveryPointerV3Schema]);
 export type DesktopArenaHostedAnyRecoveryPointer = z.infer<typeof DesktopArenaHostedAnyRecoveryPointerSchema>;

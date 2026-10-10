@@ -101,6 +101,7 @@ export const createArenaCompanionRouteService = (input: {
   };
   return Object.freeze({
     companionProtocolVersion: generation.companionProtocolVersion,
+    reconciliationProtocolVersion: generation.reconciliationProtocolVersion,
     generate: (request: Request, operation?: ArenaCompanionOperation) => {
       const resolvedOperation: ArenaCompanionOperation = operation
         ?? (new URL(request.url).pathname.endsWith('/generate-battle-story')

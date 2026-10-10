@@ -1,12 +1,14 @@
+import { ARENA_RECONCILIATION_PROTOCOL_HEADER, ARENA_RECONCILIATION_PROTOCOL_VERSION } from '@mahoshojo/contracts/arena-reconciliation';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import type { ArenaGenerationService, ArenaGenerationSubscription, GenerationStreamEvent } from '@mahoshojo/hosted-api/arena-generation/service';
 import { ARENA_COMPANION_PROTOCOL_HEADER, ARENA_COMPANION_PROTOCOL_VERSION, parseArenaCompanionEnvelope } from '@mahoshojo/contracts/arena-companion';
 import { createArenaCompanionService, type ArenaCompanionServiceOptions } from '../src/arena-companion/service';
+import { createArenaCompanionRouteService } from '../src/arena-companion';
 import { createArenaPostBattleProjector } from '../src/arena-companion/post-battle';
 const fixture = JSON.parse(readFileSync(new URL('../../contracts/fixtures/arena-companion.json', import.meta.url), 'utf8'));
 import { createArenaCompanionResponseWriter } from '../src/arena-companion/response';
-import { configureArenaCompanionRouteService, isArenaCompanionProtocolInstalled, registeredArenaCompanionRouteService } from '../src/arena-companion/service-registry';
+import { configureArenaCompanionRouteService, isArenaCompanionProtocolInstalled, isArenaCompanionReconciliationProtocolInstalled, registeredArenaCompanionRouteService } from '../src/arena-companion/service-registry';
 
 const generationId = fixture.successEnvelopes[0]!.body.generationId;
 const requestId = 'request-12345678';
@@ -98,6 +100,62 @@ describe('Arena companion exact opt-in delivery', () => {
     expect((await companion.generate(wrongVersion)).status).toBe(400); expect(create).not.toHaveBeenCalled();
     expect((await companion.generate(request(false))).status).toBe(200); expect(create).toHaveBeenCalledOnce();
   });
+  it.each([[true, false], [false, true], [true, true], [false, false]])('separate reconciliation opt-in freezes %s/%s and returns the complete report without legacy projection', async (writeArenaHistory, writeCurrentState) => {
+    const source = { ...baseReport, impacts: [{ characterName: '角色甲', impact: '冻结历史影响', currentStateSummary: '冻结状态摘要' }] };
+    const create = vi.fn(async (_request: Request, _command: unknown) => makeSubscription(0, {}, { events: events([
+      { id: '1-0', type: 'snapshot', data: { markdown: JSON.stringify(source) } },
+      { id: '2-0', type: 'done', data: { ok: true, status: 'completed' } },
+    ]) }));
+    const projectUpdatedCombatants = vi.fn(async () => { throw new Error('legacy projection must not run'); });
+    const companion = createArenaCompanionService({ generationService: fakeService(create), projectUpdatedCombatants });
+    const body = { generationRequestId: requestId, mode: 'classic', combatants: [{ data: { name: '角色甲' } }], writeArenaHistory, writeCurrentState };
+    const req = request(true, body);
+    req.headers.set(ARENA_RECONCILIATION_PROTOCOL_HEADER, ARENA_RECONCILIATION_PROTOCOL_VERSION);
+    const response = await companion.generate(req);
+    const wire = await response.text();
+    expect(response.status, wire).toBe(200);
+    const envelope = parseArenaCompanionEnvelope(wire);
+    expect(envelope.body).toMatchObject({ generationId, report: baseReport, updatedCombatants: [] });
+    expect(envelope.body).not.toHaveProperty('report.impacts');
+    expect(envelope.metadata).toEqual(fixture.successEnvelopes[0]!.metadata);
+    expect(create).toHaveBeenCalledOnce();
+    expect(create.mock.calls[0]![1]).toMatchObject({ generationRequestId: requestId, payload: { writeArenaHistory, writeCurrentState, forceStreamMeta: true } });
+    expect(projectUpdatedCombatants).not.toHaveBeenCalled();
+    if (writeArenaHistory || writeCurrentState) expect(envelope.body).toMatchObject({ impacts: [expect.objectContaining({ characterName: '角色甲' })] });
+  });
+
+  it('new reconciliation header rejects wrong versions and non-boolean selections before generation', async () => {
+    const create = vi.fn(() => makeSubscription());
+    const companion = makeCompanion(create);
+    for (const version of ['', 'unknown', 'arena-reconciliation-v1, arena-reconciliation-v1']) {
+      const req = request(); req.headers.set(ARENA_RECONCILIATION_PROTOCOL_HEADER, version);
+      const response = await companion.generate(req);
+      expect(response.status).toBe(400);
+      expect(parseArenaCompanionEnvelope(await response.text()).body).toMatchObject({ code: 'ARENA_RECONCILIATION_PROTOCOL_UNSUPPORTED' });
+    }
+    for (const flags of [{}, { writeArenaHistory: 'true', writeCurrentState: false }, { writeArenaHistory: true, writeCurrentState: null }]) {
+      const req = request(true, flags); req.headers.set(ARENA_RECONCILIATION_PROTOCOL_HEADER, ARENA_RECONCILIATION_PROTOCOL_VERSION);
+      const response = await companion.generate(req);
+      expect(response.status).toBe(400);
+      expect(parseArenaCompanionEnvelope(await response.text()).body).toMatchObject({ code: 'ARENA_RECONCILIATION_INVALID_REQUEST' });
+    }
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('registry only advertises reconciliation after the implementing route service is actually installed', () => {
+    configureArenaCompanionRouteService(null);
+    expect(isArenaCompanionReconciliationProtocolInstalled()).toBe(false);
+    const generationService = fakeService(async () => makeSubscription());
+    const real = createArenaCompanionRouteService({ generationService, placement: 'hono-primary', signatures: { verifySignature: async () => false, generateSignature: async () => null } });
+    configureArenaCompanionRouteService({ ...real, reconciliationProtocolVersion: undefined });
+    expect(isArenaCompanionProtocolInstalled()).toBe(true);
+    expect(isArenaCompanionReconciliationProtocolInstalled()).toBe(false);
+    configureArenaCompanionRouteService(real);
+    expect(isArenaCompanionReconciliationProtocolInstalled()).toBe(true);
+    configureArenaCompanionRouteService(null);
+    expect(isArenaCompanionReconciliationProtocolInstalled()).toBe(false);
+  });
+
   it('wraps invalid JSON, failed/throwing streams and huge or malformed upstream errors without a Stream-Meta header', async () => {
     const companion = makeCompanion(() => makeSubscription());
     const invalid = request(); const invalidRequest = new Request(invalid.url, { method: 'POST', headers: invalid.headers, body: '{' });

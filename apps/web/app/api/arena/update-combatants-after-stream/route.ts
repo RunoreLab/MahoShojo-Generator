@@ -1,5 +1,8 @@
 import { appRouteHandler } from './handler';
 
+// Capability is local runtime state, never a cached deployment-time assertion.
+export const dynamic = 'force-dynamic';
+
 export const GET = appRouteHandler;
 export const HEAD = appRouteHandler;
 export const OPTIONS = appRouteHandler;

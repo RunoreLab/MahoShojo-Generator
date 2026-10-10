@@ -114,6 +114,11 @@
       "types": "./src/desktop-arena-hosted-json.ts",
       "import": "./src/desktop-arena-hosted-json.ts",
       "default": "./src/desktop-arena-hosted-json.ts"
+    },
+    "./arena-reconciliation": {
+      "types": "./src/arena-reconciliation.ts",
+      "import": "./src/arena-reconciliation.ts",
+      "default": "./src/arena-reconciliation.ts"
     }
   },
   "scripts": {

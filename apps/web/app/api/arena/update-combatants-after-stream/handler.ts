@@ -2,8 +2,21 @@ import { resolveCloudflareDrArenaGenerationActor } from '@/app/api/arena/generat
 import { getNextHostedD1Client } from '@/lib/hosted-dr/database-provider';
 import { applyPostBattleUpdates } from '@/lib/arena/service';
 import { getLogger } from '@/lib/logger';
-import { verifySignature } from '@/lib/signature';
+import { generateSignature, verifySignature } from '@/lib/signature';
 import {
+  ARENA_RECONCILIATION_CAPABILITY,
+  ARENA_RECONCILIATION_LIMITS,
+  ARENA_RECONCILIATION_PROTOCOL_HEADER,
+  ARENA_RECONCILIATION_PROTOCOL_VERSION,
+  ArenaReconciliationRequestSchema,
+  parseArenaReconciliationResponse,
+} from '@mahoshojo/contracts/arena-reconciliation';
+import {
+  ARENA_EXPECTED_USER_ID_HEADER,
+  parseArenaExpectedUserIdAssertion,
+} from '@mahoshojo/contracts/desktop-arena-hosted';
+import {
+  ARENA_ANONYMOUS_TOKEN_HEADER,
   isCanonicalArenaCharacterPreset,
   readOwnedNodeArenaGenerationReconciliation,
   resolveArenaCombatantNativeAuthority,
@@ -12,6 +25,7 @@ import { NextRequest } from 'next/server';
 
 const log = getLogger('api-update-combatants-stream');
 const GENERATION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/u;
+const protocolHeaders = { [ARENA_RECONCILIATION_PROTOCOL_HEADER]: ARENA_RECONCILIATION_PROTOCOL_VERSION };
 
 const json = (payload: unknown, status = 200, headers?: HeadersInit): Response => new Response(
   JSON.stringify(payload),
@@ -225,30 +239,139 @@ const matchCombatants = (
   };
 };
 
+/** Check this Next runtime only. This does not prove Hono/Next D1 contents or keys agree. */
+const hasReconciliationCapability = async (): Promise<boolean> => {
+  try {
+    return Boolean(getNextHostedD1Client()
+      && process.env.SIGNATURE_SECRET_KEY?.trim()
+      && await generateSignature({ purpose: 'arena-reconciliation-capability-v1' }));
+  } catch {
+    return false;
+  }
+};
+
+const readBoundedReconciliationBody = async (request: Request): Promise<unknown> => {
+  const declaredLength = request.headers.get('content-length');
+  if (declaredLength !== null && Number(declaredLength) > ARENA_RECONCILIATION_LIMITS.requestBodyBytes) {
+    throw new Error('ARENA_RECONCILIATION_REQUEST_TOO_LARGE');
+  }
+  if (!request.body) return null;
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > ARENA_RECONCILIATION_LIMITS.requestBodyBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new Error('ARENA_RECONCILIATION_REQUEST_TOO_LARGE');
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const body = new Uint8Array(bytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body)) as unknown;
+};
+
 /**
  * 将浏览器当前本地卡片与服务器冻结的 roster identity / effect 对账。
  * 客户端卡片正文与 isNative 都不是许可；服务器只保留 generation owner、终态和 effect 权威。
  */
 async function handler(req: NextRequest): Promise<Response> {
+  if (req.method === 'GET') {
+    return await hasReconciliationCapability()
+      ? json(ARENA_RECONCILIATION_CAPABILITY, 200, protocolHeaders)
+      : json({
+        code: 'ARENA_RECONCILIATION_CAPABILITY_UNAVAILABLE',
+        error: 'Arena reconciliation durable or signing capability unavailable',
+      }, 503, protocolHeaders);
+  }
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
 
-  const body = await req.json().catch(() => null) as unknown;
+  const protocol = req.headers.get(ARENA_RECONCILIATION_PROTOCOL_HEADER);
+  const optIn = protocol !== null;
+  let generationId: string | null = null;
+  let combatantCount = 0;
+  const respond = (payload: Record<string, unknown>, status = 200): Response => {
+    if (!optIn) return json(payload, status);
+    const envelope = {
+      version: ARENA_RECONCILIATION_PROTOCOL_VERSION,
+      ...(generationId && GENERATION_ID_PATTERN.test(generationId) ? { generationId } : {}),
+      ...(status >= 400 && !payload.code ? { code: 'ARENA_RECONCILIATION_INVALID_REQUEST' } : {}),
+      ...payload,
+    };
+    const raw = JSON.stringify(envelope);
+    if (new TextEncoder().encode(raw).byteLength > ARENA_RECONCILIATION_LIMITS.responseBodyBytes) {
+      return json({
+        version: ARENA_RECONCILIATION_PROTOCOL_VERSION,
+        ...(generationId ? { generationId } : {}),
+        code: 'ARENA_RECONCILIATION_RESPONSE_TOO_LARGE',
+        error: '角色更新超过接收预算，战报与原卡保留；请勿重新生成。',
+      }, 503, protocolHeaders);
+    }
+    if (status < 400) parseArenaReconciliationResponse(raw, generationId!, combatantCount);
+    return json(envelope, status, protocolHeaders);
+  };
+  if (optIn && protocol !== ARENA_RECONCILIATION_PROTOCOL_VERSION) {
+    return respond({
+      code: 'ARENA_RECONCILIATION_PROTOCOL_UNSUPPORTED',
+      error: 'Unsupported Arena reconciliation protocol',
+    }, 409);
+  }
+  if (optIn && !await hasReconciliationCapability()) {
+    return respond({
+      code: 'ARENA_RECONCILIATION_CAPABILITY_UNAVAILABLE',
+      error: 'Arena reconciliation durable or signing capability unavailable',
+    }, 503);
+  }
+
+  let body: unknown;
+  try {
+    body = optIn ? await readBoundedReconciliationBody(req) : await req.json();
+  } catch (error) {
+    if (optIn && error instanceof Error && error.message === 'ARENA_RECONCILIATION_REQUEST_TOO_LARGE') {
+      return respond({ code: error.message, error: 'Arena reconciliation request exceeds the input budget' }, 413);
+    }
+    body = null;
+  }
   const input = recordOf(body);
-  const generationId = stringOf(input?.generationId);
+  generationId = stringOf(input?.generationId);
   const combatants = input?.combatants;
+  if (optIn && !ArenaReconciliationRequestSchema.safeParse(body).success) {
+    return respond({ error: 'Arena reconciliation request is invalid' }, 400);
+  }
+  combatantCount = Array.isArray(combatants) ? combatants.length : 0;
   if (!generationId || !GENERATION_ID_PATTERN.test(generationId)) {
-    return json({ error: 'generationId 无效' }, 400);
+    return respond({ error: 'generationId 无效' }, 400);
   }
   if (!Array.isArray(combatants) || combatants.length === 0) {
-    return json({ error: '缺少必需参数' }, 400);
+    return respond({ error: '缺少必需参数' }, 400);
   }
 
   const client = getNextHostedD1Client();
   if (!client) {
-    return json({
+    return respond({
       code: 'ARENA_RECONCILIATION_CAPABILITY_UNAVAILABLE',
       error: 'Arena reconciliation durable capability unavailable',
     }, 503);
+  }
+
+  const expectedUserAssertion = req.headers.get(ARENA_EXPECTED_USER_ID_HEADER);
+  const expectedUserId = expectedUserAssertion === null ? null : parseArenaExpectedUserIdAssertion(expectedUserAssertion);
+  if (optIn) {
+    const originalActorToken = req.headers.get(ARENA_ANONYMOUS_TOKEN_HEADER)?.trim() ?? '';
+    if (expectedUserAssertion !== null ? expectedUserId === null : !/^[A-Za-z0-9_-]+$/u.test(originalActorToken)) {
+      return respond({ code: 'UNAUTHORIZED', error: 'Original generation actor credential required' }, 401);
+    }
   }
 
   let actor: Awaited<ReturnType<typeof resolveCloudflareDrArenaGenerationActor>>;
@@ -256,12 +379,17 @@ async function handler(req: NextRequest): Promise<Response> {
     actor = await resolveCloudflareDrArenaGenerationActor(req);
   } catch {
     log.error('解析 Arena reconciliation actor 失败', { generationId });
-    return json({
+    return respond({
       code: 'ARENA_RECONCILIATION_ACTOR_UNAVAILABLE',
       error: 'Arena reconciliation actor unavailable',
     }, 503);
   }
-  if (!actor) return json({ code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
+  if (!actor) return respond({ code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
+  if (optIn && (expectedUserId !== null
+    ? actor.actorKey !== `user:${expectedUserId}`
+    : !actor.actorKey.startsWith('anonymous:') || new Headers(actor.responseHeaders).has(ARENA_ANONYMOUS_TOKEN_HEADER))) {
+    return respond({ code: 'UNAUTHORIZED', error: 'Original generation actor does not match' }, 401);
+  }
 
   let ownedReconciliation: Awaited<ReturnType<typeof readOwnedNodeArenaGenerationReconciliation>>;
   try {
@@ -272,31 +400,31 @@ async function handler(req: NextRequest): Promise<Response> {
     });
   } catch {
     log.error('读取 Arena reconciliation durable authority 失败', { generationId });
-    return json({
+    return respond({
       code: 'ARENA_RECONCILIATION_DURABLE_READ_FAILED',
       error: 'Arena reconciliation durable authority unavailable',
     }, 503);
   }
   if (ownedReconciliation.kind === 'not-found') {
-    return json({
+    return respond({
       code: 'ARENA_RECONCILIATION_NOT_FOUND',
       error: 'Generation reconciliation not found',
     }, 404);
   }
   if (ownedReconciliation.kind === 'unavailable') {
     if (ownedReconciliation.reason === 'generation_not_completed') {
-      return json({
+      return respond({
         code: 'ARENA_RECONCILIATION_GENERATION_NOT_COMPLETED',
         error: 'Generation is not completed',
       }, 409);
     }
     if (ownedReconciliation.reason === 'finalization_pending') {
-      return json({
+      return respond({
         code: 'ARENA_RECONCILIATION_FINALIZATION_PENDING',
         error: 'Generation reconciliation finalization remains pending',
       }, 503);
     }
-    return json({
+    return respond({
       code: 'ARENA_RECONCILIATION_MANIFEST_UNAVAILABLE',
       error: 'Generation reconciliation manifest unavailable',
     }, 409);
@@ -305,7 +433,7 @@ async function handler(req: NextRequest): Promise<Response> {
   try {
     const authoritative = ownedReconciliation.reconciliation;
     if (authoritative.available === false) {
-      return json({
+      return respond({
         code: 'ARENA_RECONCILIATION_MANIFEST_UNAVAILABLE',
         error: 'Generation reconciliation manifest unavailable',
       }, 409);
@@ -325,7 +453,7 @@ async function handler(req: NextRequest): Promise<Response> {
     }));
     const warnings: Array<Record<string, unknown>> = [...unmatchedCurrent, ...unmatchedRoster];
     if (reconciliation.matches.length === 0) {
-      return json({
+      return respond({
         code: 'ARENA_RECONCILIATION_ROSTER_MISMATCH',
         error: 'No current combatant can be matched to the generation roster',
         errors: warnings,
@@ -460,10 +588,10 @@ async function handler(req: NextRequest): Promise<Response> {
       },
     );
 
-    return json({ updatedCombatants, warnings, success: true });
+    return respond({ updatedCombatants, warnings, success: true });
   } catch (error) {
     log.error('更新角色数据时发生错误', { error, generationId });
-    return json({
+    return respond({
       code: 'ARENA_RECONCILIATION_FAILED',
       error: '更新角色数据失败',
     }, 500);

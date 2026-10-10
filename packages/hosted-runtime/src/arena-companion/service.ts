@@ -1,3 +1,4 @@
+import { ARENA_RECONCILIATION_PROTOCOL_HEADER, ARENA_RECONCILIATION_PROTOCOL_VERSION } from '@mahoshojo/contracts/arena-reconciliation';
 import { ARENA_COMPANION_PROTOCOL_HEADER, ARENA_COMPANION_PROTOCOL_VERSION, ArenaCompanionModelIdSchema } from '@mahoshojo/contracts/arena-companion';
 import { createArenaCompanionResponseWriter } from './response';
 import type { ArenaPostBattleImpact, ArenaPostBattleProjectionInput } from '@mahoshojo/domain/arena-post-battle';
@@ -51,6 +52,7 @@ export type ArenaCompanionServiceOptions = {
 
 export interface ArenaCompanionService {
   readonly companionProtocolVersion?: typeof ARENA_COMPANION_PROTOCOL_VERSION;
+  readonly reconciliationProtocolVersion?: typeof ARENA_RECONCILIATION_PROTOCOL_VERSION;
   generate(_request: Request, _operation?: ArenaCompanionOperation): Promise<Response>;
 }
 
@@ -341,11 +343,14 @@ export const createArenaCompanionService = (
   options: ArenaCompanionServiceOptions,
 ): ArenaCompanionService => Object.freeze({
   companionProtocolVersion: ARENA_COMPANION_PROTOCOL_VERSION,
+  reconciliationProtocolVersion: ARENA_RECONCILIATION_PROTOCOL_VERSION,
   async generate(
     request: Request,
     requestedOperation?: ArenaCompanionOperation,
   ): Promise<Response> {
     const optIn = request.headers.has(ARENA_COMPANION_PROTOCOL_HEADER);
+    const reconciliationVersion = request.headers.get(ARENA_RECONCILIATION_PROTOCOL_HEADER);
+    const reconciliationOptIn = optIn && reconciliationVersion === ARENA_RECONCILIATION_PROTOCOL_VERSION;
     const response = createArenaCompanionResponseWriter(optIn);
     let deliveryHeaders: Readonly<Record<string, string>> = {};
     let producerCompleted = false;
@@ -353,10 +358,16 @@ export const createArenaCompanionService = (
       if (optIn && request.headers.get(ARENA_COMPANION_PROTOCOL_HEADER) !== ARENA_COMPANION_PROTOCOL_VERSION) {
         return response.write({ code: 'ARENA_COMPANION_PROTOCOL_UNSUPPORTED', error: 'Unsupported Arena companion protocol' }, 400);
       }
+      if (reconciliationVersion !== null && !reconciliationOptIn) {
+        return response.write({ code: 'ARENA_RECONCILIATION_PROTOCOL_UNSUPPORTED', error: 'Unsupported Arena reconciliation protocol' }, 400);
+      }
       const parsedBody = await readArenaCompanionJsonPayload(request);
       if (parsedBody instanceof Response) return response.upstream(parsedBody);
       const { payload, bodyBytes } = parsedBody;
-      if (optIn && (payload.writeArenaHistory !== false || payload.writeCurrentState !== false)) {
+      if (reconciliationOptIn && (typeof payload.writeArenaHistory !== 'boolean' || typeof payload.writeCurrentState !== 'boolean')) {
+        return response.write({ code: 'ARENA_RECONCILIATION_INVALID_REQUEST', error: 'Arena reconciliation requires frozen boolean write selections' }, 400);
+      }
+      if (optIn && !reconciliationOptIn && (payload.writeArenaHistory !== false || payload.writeCurrentState !== false)) {
         return response.write({ code: 'ARENA_COMPANION_REPORT_ONLY_REQUIRED', error: 'Arena companion protocol requires report-only generation' }, 400);
       }
       if ('generationRequestId' in payload && !isGenerationRequestId(payload.generationRequestId)) {
@@ -470,9 +481,13 @@ export const createArenaCompanionService = (
           ? { aiReasoning: { text: collected.reasoning, status: 'complete' } }
           : {}),
       };
+      // The complete C2 wire carries impacts beside report. Legacy Web keeps its original report shape.
+      if (optIn) delete report.impacts;
       let updatedCombatants: Array<Record<string, unknown>>;
       try {
-        updatedCombatants = await options.projectUpdatedCombatants({
+        // New opt-in freezes generation effects, but only the separate owned Next reconciliation
+        // may produce updated cards. Never sign/project a second copy in the companion response.
+        updatedCombatants = reconciliationOptIn ? [] : await options.projectUpdatedCombatants({
           combatants: Array.isArray(payload.combatants) ? payload.combatants : [],
           report,
           impacts,
