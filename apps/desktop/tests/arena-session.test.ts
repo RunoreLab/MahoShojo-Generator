@@ -210,3 +210,22 @@ describe('Desktop Arena independent session', () => {
   });
 
 });
+
+
+it('keeps completed Web source and narrative history without inventing character effects or executable history', async () => {
+  const storage = memory(), { port, records } = repository();
+  const draft = { ...makeDraft(), reportFormat: 'web' as const };
+  const original = structuredClone(draft.combatants), source = '<html><body><script>untrusted()</script>故事</body></html>';
+  const session = new DesktopArenaSession({ repository: port, storage }); session.setScope('one'); session.updateDraft(draft);
+  await session.generate(native(source), draft, intent());
+  expect(session.getSnapshot()).toMatchObject({ phase: 'completed', resultFormat: 'web', renderSnapshot: { version: 1, reportFormat: 'web' } });
+  expect(session.getSnapshot().candidates?.characterEffects).toEqual([]); expect(session.getSnapshot().draft.combatants).toEqual(original);
+  expect(session.getSnapshot().draft.narrativeHistoryEntries[0]?.content).toBe(source);
+  expect(records.size).toBe(0); expect(await session.save('history')).toBe(true);
+  expect([...records.values()][0]?.cardType).toBe('history');
+  const exportValue = JSON.parse(session.exportDocument()); expect(exportValue.result.renderSnapshot).toEqual({ version: 1, reportFormat: 'web' });
+  session.updateDraft({ ...session.getSnapshot().draft, reportFormat: 'markdown' }); session.dispose();
+  const restored = new DesktopArenaSession({ repository: port, storage }); restored.restoreDraft();
+  expect(restored.getSnapshot().draft.reportFormat).toBe('markdown'); expect(restored.getSnapshot().resultFormat).toBe('web');
+  expect(restored.getSnapshot().markdown).toBe(source); expect(restored.getSnapshot().candidates).toBeNull(); restored.dispose();
+});

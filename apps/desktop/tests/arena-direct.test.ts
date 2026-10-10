@@ -116,8 +116,8 @@ describe('typed Arena Direct adapter', () => {
     const native = harness(); const result = await executeArenaDirect({ ...native.options, providerTarget: { kind: 'preset', providerId: 'deepseek' } }, input(), { ...task(), modelId: 'deepseek-chat' }, host(), new AbortController().signal);
     expect(result.status).toBe('completed'); expect(native.invoke.mock.calls[0]?.[0]).toBe('stream_target_ai');
   });
-  it('rejects unsupported Web/ranked inputs and count overruns rather than truncating', async () => {
-    for (const value of [{ ...input(), reportFormat: 'web' as const }, { ...input(), arenaFreeRankingEnabled: true }, { ...input(), combatants: Array(33).fill(input().combatants[0]) }, { ...input(), materials: Array(257).fill({}) }]) {
+  it('rejects unsupported ranked inputs and count overruns rather than truncating', async () => {
+    for (const value of [{ ...input(), arenaFreeRankingEnabled: true }, { ...input(), combatants: Array(33).fill(input().combatants[0]) }, { ...input(), materials: Array(257).fill({}) }]) {
       const native = harness(); const result = await executeArenaDirect(native.options, value, task(), host(), new AbortController().signal);
       expect(result.status).toBe('failed'); expect(native.invoke).not.toHaveBeenCalled();
     }

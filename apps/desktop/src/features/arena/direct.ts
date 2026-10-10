@@ -2,6 +2,9 @@ import {
   assembleArenaGenerationPrompt,
   buildArenaGenerationInputSnapshot,
   buildArenaStructuredReportSchema,
+  createArenaStreamProjector,
+  qualifyArenaWebPackageOutput,
+  StreamUpdateMetaSchema,
   extractStreamUpdateMeta,
   extractTitleFromBattleMarkdown,
   normalizeBattleAiImpacts,
@@ -16,6 +19,9 @@ import { collectAiStreamResult, looksLikeTrivialEmptyOutput, type AiStreamEvent 
 import { findAiProviderPreset } from '@mahoshojo/ai-core/provider-catalog';
 import { ARENA_CANONICAL_RESOURCE_LIMITS } from '@mahoshojo/contracts/arena-capabilities';
 import { AiExecutionRequestSchema, validateArenaAiInputJson, type AiExecutionResult, type AiExecutionUsage } from '@mahoshojo/contracts/ai-execution';
+import { WebPackageRefSchema, type WebPackageRef } from '@mahoshojo/contracts/web-package';
+import type { BattleReportRenderSnapshotV1 } from '@mahoshojo/contracts';
+import { buildWebPackagePromptProjection, buildWebPackagePromptFromProjection, createWebPackageOverlayFromBase, type ResolvedWebPackage } from '@mahoshojo/web-package';
 import { ProviderTargetSchema } from '@mahoshojo/contracts/provider-target';
 import type { AdjudicationResult } from '@mahoshojo/domain/arena-types';
 import type { NarrativeHistoryAppendInput } from '@mahoshojo/domain/narrative-history-operations';
@@ -38,6 +44,8 @@ export interface ArenaDirectHostContext {
   reporterInfo: { name: string; publication: string };
   /** Already resolved by the host; this adapter never rolls dice or signs updates. */
   adjudicationResults: AdjudicationResult[];
+  /** Local read-only source; resolved bytes are verified and frozen before dispatch. */
+  resolveWebPackage?: (ref: WebPackageRef) => Promise<ResolvedWebPackage>;
 }
 export interface ArenaDirectPartial {
   rawText: string;
@@ -54,6 +62,7 @@ type CommonOutcome = ArenaDirectPartial & {
 export type ArenaDirectOutcome = CommonOutcome & (
   | { status: 'completed'; report: ArenaBattleReport; impacts: ArenaBattleAiImpact[];
       metaStatus: 'absent' | 'valid';
+      renderSnapshot?: BattleReportRenderSnapshotV1;
       /** Candidate only. A later host writer must verify this original scopeKey. */
       historyCandidate?: NarrativeHistoryAppendInput & { scopeKey: string; requestId: string } }
   | { status: 'cancelled'; reason: 'aborted' }
@@ -74,7 +83,8 @@ export const executeArenaDirect = async (
 ): Promise<ArenaDirectOutcome> => {
   // Snapshot before the first await. Mutating selection, model, roster or account
   // while a request is running cannot redirect its result into a new scope.
-  const frozen = clone({ input, intent, context });
+  const resolveWebPackage = context.resolveWebPackage;
+  const frozen = clone({ input, intent, context: { ...context, resolveWebPackage: undefined } });
   const { intent: task, context: host } = frozen;
   const target = options.providerTarget === undefined ? undefined : ProviderTargetSchema.parse(options.providerTarget);
   const executionOptions = { ...options, providerTarget: target };
@@ -89,11 +99,11 @@ export const executeArenaDirect = async (
   if (signal.aborted) return cancelled();
   if (!['direct-local', 'direct-remote'].includes(task.mode)
     || !['stream', 'non-stream'].includes(task.generationMode)
-    || frozen.input.reportFormat !== 'markdown'
+    || !['markdown', 'web'].includes(frozen.input.reportFormat)
     || frozen.input.arenaFreeRankingEnabled
     || !host.scopeKey.trim()
     || host.adjudicationResults.length > ARENA_CANONICAL_RESOURCE_LIMITS.maxAdjudicationEvents) {
-    return failed('invalid-request', '本片仅支持非排位单人 Arena 的结构化或 Markdown 输出。');
+    return failed('invalid-request', '本片仅支持非排位单人 Arena 的 Markdown 或 Web 输出。');
   }
   if (target?.kind === 'system') return failed('unsupported-model', '系统默认配置需要服务器执行。');
   if (target?.kind === 'preset') {
@@ -103,7 +113,27 @@ export const executeArenaDirect = async (
     }
   }
   const streaming = task.generationMode === 'stream';
-  const payload = { ...buildArenaGenerationInputSnapshot(frozen.input), adjudicationResults: host.adjudicationResults };
+  const web = frozen.input.reportFormat === 'web';
+  let packageBase: ResolvedWebPackage | undefined;
+  let packageContext: Parameters<typeof assembleArenaGenerationPrompt>[0]['packageContext'];
+  if (web && frozen.input.webPackageRef) {
+    try {
+      if (!resolveWebPackage) throw new Error('missing package source');
+      const ref = WebPackageRefSchema.parse(frozen.input.webPackageRef);
+      packageBase = await resolveWebPackage(ref);
+      if (signal.aborted) return cancelled();
+      if (packageBase.ref.id !== ref.id || packageBase.ref.version !== ref.version || packageBase.ref.digest !== ref.digest) throw new Error('package mismatch');
+      const projection = buildWebPackagePromptProjection(packageBase);
+      if (frozen.input.webPackagePromptProjection && JSON.stringify(frozen.input.webPackagePromptProjection) !== JSON.stringify(projection)) throw new Error('projection mismatch');
+      packageContext = { ref, projection, prompt: buildWebPackagePromptFromProjection(projection) };
+    } catch {
+      if (signal.aborted) return cancelled();
+      return failed('invalid-package', 'Web 包的精确版本或提示投影不可用，请重新选择或导入。');
+    }
+  }
+  if (signal.aborted) return cancelled();
+  const payload = { ...buildArenaGenerationInputSnapshot(frozen.input), adjudicationResults: host.adjudicationResults,
+    ...(packageContext ? { webPackagePromptProjection: packageContext.projection } : {}) };
   // The original business JSON is resource evidence. Formatted messages may expand;
   // native does not certify equivalence or apply a false 12 MiB whole-IPC cap.
   const arenaInputJson = JSON.stringify(payload);
@@ -116,7 +146,8 @@ export const executeArenaDirect = async (
   const schema = buildArenaStructuredReportSchema(reportOptions);
   const prompt = assembleArenaGenerationPrompt({
     payload: { ...payload, userGuidance: streaming ? payload.userGuidance.trim() : payload.userGuidance.trim().slice(0, 200) },
-    outputContract: streaming ? 'stream-markdown' : 'structured-report',
+    outputContract: web ? packageContext ? 'web-package-target' : 'web-document' : streaming ? 'stream-markdown' : 'structured-report',
+    ...(packageContext ? { packageContext } : {}),
     reporterInfo: host.reporterInfo,
     adjudicationResults: host.adjudicationResults,
   });
@@ -124,7 +155,7 @@ export const executeArenaDirect = async (
     requestId: task.requestId, contractVersion: 1, mode: task.mode, requestKind: 'arena', arenaInputJson,
     modelId: task.modelId,
     messages: [
-      ...(!streaming ? [{ role: 'system', content: buildStructuredJsonInstructionFromZodSchema(schema) }] : []),
+      ...(prompt.systemPrompt ? [{ role: 'system', content: prompt.systemPrompt }] : !streaming && !web ? [{ role: 'system', content: buildStructuredJsonInstructionFromZodSchema(schema) }] : []),
       { role: 'user', content: prompt.prompt },
     ],
     ...(task.temperature === undefined ? {} : { temperature: task.temperature }),
@@ -168,8 +199,33 @@ export const executeArenaDirect = async (
   let impacts: ArenaBattleAiImpact[] = [];
   let markdown: string;
   let metaStatus: 'absent' | 'valid' = 'absent';
+  let renderSnapshot: BattleReportRenderSnapshotV1 | undefined;
   try {
-    if (streaming) {
+    if (web) {
+      const projector = createArenaStreamProjector({ expectsMeta: true, strictTrailer: Boolean(packageContext) });
+      const chunks = projector.push(rawText); chunks.push(...projector.finish().markdown);
+      // The shared projector governs the package trailer; the ordinary splitter only guards free-Web diagnostics.
+      markdown = packageContext ? chunks.join('') : splitStreamMeta(chunks.join('')).markdown;
+      if (!markdown.trim()) return failed('empty-output', '未收到有效 Web 目标正文。', true);
+      const event = projector.result().metaEvent;
+      const parsedMeta = StreamUpdateMetaSchema.safeParse(event?.type === 'meta' ? event.data.meta : null);
+      const meta = parsedMeta.success ? parsedMeta.data : null;
+      metaStatus = meta ? 'valid' : 'absent';
+      impacts = normalizeBattleAiImpacts(meta?.impacts, unchangedText);
+      renderSnapshot = { version: 1, reportFormat: 'web' };
+      if (packageContext && packageBase) {
+        const base = packageBase;
+        const qualified = await qualifyArenaWebPackageOutput({ ref: packageContext.ref, projection: packageContext.projection,
+          content: markdown, meta: event?.type === 'meta' ? event.data.meta : null,
+          createOverlay: (content, limits) => createWebPackageOverlayFromBase(base, content, limits) });
+        if (signal.aborted) return cancelled();
+        markdown = qualified.overlay.generatedContent;
+        renderSnapshot.webPackage = qualified.artifact;
+      }
+      report = { headline: meta?.report?.headline ?? '', reporterInfo: host.reporterInfo,
+        article: { body: markdown, analysis: '' }, officialReport: { winner: meta?.report?.winner ?? '', conclusion: '' },
+        ...(renderSnapshot.webPackage ? { webPackage: renderSnapshot.webPackage } : {}) };
+    } else if (streaming) {
       const split = splitStreamMeta(rawText);
       markdown = split.markdown;
       if (looksLikeTrivialEmptyOutput(markdown)) return failed('empty-output', '未收到有效战报正文。', true);
@@ -211,13 +267,13 @@ export const executeArenaDirect = async (
   if (signal.aborted) return cancelled();
   report.mode = frozen.input.battleMode;
   report.adjudicationResults = host.adjudicationResults;
-  report.reportFormat = 'markdown';
+  report.reportFormat = web ? 'web' : 'markdown';
   report.aiModel = terminal.resolvedModelId ?? task.modelId;
   if (frozen.input.battleMode === 'scenario' && frozen.input.scenarioDisplayName) report.scenario = frozen.input.scenarioDisplayName;
   return {
-    ...common(), status: 'completed', markdown, report, impacts, metaStatus,
+    ...common(), status: 'completed', markdown, report, impacts, metaStatus, ...(renderSnapshot ? { renderSnapshot } : {}),
     ...(frozen.input.settings.writeNarrativeHistory ? { historyCandidate: {
-      scopeKey: host.scopeKey, requestId: request.requestId, generationId: request.requestId, title: report.headline, content: markdown,
+      scopeKey: host.scopeKey, requestId: request.requestId, generationId: request.requestId, title: report.headline || (web ? 'Web 战报' : ''), content: markdown,
     } } : {}),
   };
 };
