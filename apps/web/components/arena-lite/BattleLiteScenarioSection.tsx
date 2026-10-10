@@ -2,9 +2,7 @@
 
 import { useMemo, useState } from 'react';
 
-import { ScenarioPresetGridPicker } from '@/components/ScenarioPresetGridPicker';
-import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
-import { ScenarioPickerPanel } from '@/components/shared/ScenarioPickerPanel';
+import { ArenaScenarioSection } from '@/components/arena/editor/features/scenario/ArenaScenarioSection';
 import type { ScenarioPreset } from '@/lib/scenario-presets';
 
 import { useBattleActions } from '@/components/arena/hooks/useBattleActions';
@@ -35,7 +33,6 @@ export function BattleLiteScenarioSection({
   const clearScenario = useBattleSelector((state) => state.clearScenario);
   const { handleScenarioUpload, handleScenarioPaste, handleRandomMatch } = useBattleActions();
 
-  const [presetPage, setPresetPage] = useState(1);
   const [loadingScenarioPreset, setLoadingScenarioPreset] = useState<string | null>(null);
   const scenarioPresetQuery = useScenarioPresetQuery();
 
@@ -88,68 +85,43 @@ export function BattleLiteScenarioSection({
   };
 
   return (
-    <div className="space-y-4">
-      <div className="battle-lite-surface-card rounded-2xl px-4 py-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="battle-lite-subtle-text text-[11px] font-semibold uppercase tracking-[0.24em]">当前主情景</div>
-            <div className="battle-lite-strong-text mt-2 text-sm font-semibold">{scenarioSummary}</div>
-            {scenario.isNative ? <div className="battle-lite-link mt-1 text-xs">该情景已识别为原生格式。</div> : null}
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              clearScenario();
-              setError(null);
-            }}
-            disabled={isGenerating || !scenario.content}
-            className="battle-lite-danger-button rounded-full px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            清空情景
-          </button>
-        </div>
-      </div>
-
-      <ScenarioPickerPanel
-        onOpenScenarioModal={onOpenScenarioModal}
-        onRandomMatchScenario={() => handleRandomMatch('scenario')}
-        onScenarioUpload={handleScenarioUpload}
-        onScenarioPaste={handleScenarioPaste}
-        onActionError={(error) => setError(`❌ ${error.message}`)}
-        isAuthenticated={isAuthenticated}
-        isGenerating={isGenerating}
-        isMatchingBlocked={isMatching !== null}
-        isMatchingScenario={isMatching === 'scenario'}
-        scenarioFileName={scenario.fileName || null}
-        isScenarioNative={scenario.isNative}
-      />
-
-      <CollapsibleSection
-        title="推荐预设情景"
-        description="使用当前最新预设；点击即可设为主情景，再次点击已选项可移除"
-        defaultOpen={false}
-        disabled={isGenerating}
-        storageKey="battle-lite.section.scenarioPreset.open"
-      >
-        {scenarioPresetQuery.error ? (
-          <div className="text-sm text-red-600">
-            无法加载预设情景：{(scenarioPresetQuery.error as Error).message}
-          </div>
-        ) : scenarioPresetQuery.isLoading || !scenarioPresetQuery.data ? (
-          <div className="battle-lite-subtle-text text-sm">正在加载预设情景...</div>
-        ) : (
-          <ScenarioPresetGridPicker
-            title="选择预设情景"
-            presets={scenarioPresetQuery.data}
-            currentPage={presetPage}
-            onPageChange={setPresetPage}
-            disabled={isGenerating}
-            selectedFilenames={selectedScenarioPresetFilenames}
-            loadingFilename={loadingScenarioPreset}
-            onToggle={handleToggleScenarioPreset}
-          />
-        )}
-      </CollapsibleSection>
-    </div>
+    <ArenaScenarioSection
+      presentation={{ variant: 'lite', summary: scenarioSummary, hasMain: Boolean(scenario.content) }}
+      onActionError={(error) => setError(`❌ ${error.message}`)}
+      model={{
+        disabled: isGenerating,
+        isAuthenticated,
+        isMatchingBlocked: isMatching !== null,
+        isMatchingScenario: isMatching === 'scenario',
+        mainName: scenario.fileName || null,
+        mainIsNative: scenario.isNative,
+        auxScenarios: [],
+        auxBudgetLine: null,
+        auxBudgetExhausted: false,
+        presets: scenarioPresetQuery.data ?? [],
+        presetsLoading: scenarioPresetQuery.isLoading || !scenarioPresetQuery.data,
+        presetsError: scenarioPresetQuery.error ? (scenarioPresetQuery.error as Error).message : null,
+        selectedPresetFilenames: selectedScenarioPresetFilenames,
+        loadingPresetFilename: loadingScenarioPreset,
+        capabilities: {
+          browseMain: true, randomMatchMain: true, clearMain: true, uploadMain: true, pasteMain: true,
+          presetRefs: true, auxSection: false, addAux: false, browseAux: false, randomMatchAux: false,
+          uploadAux: false, pasteAux: false, reorderAux: false, removeAux: false, clearAux: false,
+        },
+        actions: {
+          openMainModal: onOpenScenarioModal,
+          randomMatchMain: () => void handleRandomMatch('scenario'),
+          clearMain: () => { clearScenario(); setError(null); },
+          uploadMain: handleScenarioUpload,
+          pasteMain: handleScenarioPaste,
+          togglePreset: (filename) => {
+            const preset = scenarioPresetQuery.data?.find((item) => item.filename === filename);
+            if (preset) void handleToggleScenarioPreset(preset);
+          },
+          openAuxModal: () => {}, randomMatchAux: () => {}, uploadAux: async () => {},
+          pasteAux: async () => {}, moveAux: () => {}, removeAux: () => {}, clearAux: () => {},
+        },
+      }}
+    />
   );
 }

@@ -1,4 +1,7 @@
-import React from 'react';
+// @vitest-environment jsdom
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 import { expect, vi, test } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -66,12 +69,6 @@ vi.mock('@/components/shared/CollapsibleSection', () => ({
 vi.mock('@/components/arena/components/BattleActions', () => ({
   BattleActions() {
     return <div>battle-actions</div>;
-  },
-}));
-
-vi.mock('@/components/arena/components/BattleModeSwitcher', () => ({
-  BattleModeSwitcher() {
-    return <div>battle-mode-switcher</div>;
   },
 }));
 
@@ -186,11 +183,7 @@ vi.mock('@/components/arena-lite/BattleLiteScenarioSection', () => ({
   },
 }));
 
-vi.mock('@/components/arena-lite/BattleLiteStoryOptions', () => ({
-  BattleLiteStoryOptions() {
-    return <div>battle-lite-story-options</div>;
-  },
-}));
+vi.mock('@/components/AiProviderSelector', () => ({ default: () => <div>host-provider</div> }));
 
 const { BattleLitePage } = await import('@/components/arena-lite/BattleLitePage');
 vi.restoreAllMocks();
@@ -250,4 +243,33 @@ test('BattleLitePage 不再引用 applyBattleLiteDefaults，并保留共享设�
       settings: before.settings,
     }));
   }
+});
+
+
+test('真实 Lite 页面通过共源页框保留四模式、故事输入清除、宿主区块和继承高级设置', async () => {
+  localStorage.clear();
+  useBattleStore.setState(useBattleStore.getInitialState(), true);
+  useBattleStore.setState({ storyLength: 'long', selectedLanguage: 'en-US' });
+  const container = document.createElement('div'); document.body.append(container);
+  const root = createRoot(container);
+  const button = (label: string) => [...container.querySelectorAll('button')].find((item) => item.textContent?.includes(label))!;
+  try {
+    await act(async () => root.render(<BattleLitePage />));
+    expect(container.querySelector('.magic-background-white.battle-lite-shell .battle-lite-panel')).not.toBeNull();
+    expect(container.textContent).toContain('host-provider');
+    for (const [label, value] of [['日常模式', 'daily'], ['羁绊模式', 'kizuna'], ['经典模式', 'classic'], ['情景模式', 'scenario']]) {
+      await act(async () => button(label).click()); expect(useBattleStore.getState().battleMode).toBe(value);
+    }
+    expect(container.textContent).toContain('battle-lite-scenario');
+    const guidance = container.querySelector<HTMLInputElement>('#arena-story-guidance')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(guidance, '雨夜相遇');
+      guidance.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(useBattleStore.getState().settings.userGuidance).toBe('雨夜相遇');
+    await act(async () => guidance.parentElement!.querySelector<HTMLButtonElement>('button')!.click()); expect(guidance.value).toBe('');
+    expect(useBattleStore.getState().storyLength).toBe('long'); expect(useBattleStore.getState().selectedLanguage).toBe('en-US');
+    expect(container.querySelector('#custom-story-length')).toBeNull();
+    expect(container.querySelector('#language-select')).toBeNull();
+  } finally { await act(async () => root.unmount()); container.remove(); localStorage.clear(); }
 });

@@ -219,6 +219,23 @@ describe('server-safe shared entrypoints stay free of React hooks', () => {
     expect(findHookCalls(bundled.outputFiles[0].text)).toEqual([]);
   });
 
+  it('keeps the battle report text leaf free of view hooks', () => {
+    const graph = collectModuleGraph(path.join(SRC, 'arena-report/text.ts'));
+    expect(graph.length).toBeGreaterThan(1);
+    for (const file of graph) expect(findHookCalls(readFileSync(file, 'utf8'))).toEqual([]);
+  });
+
+  it('keeps the Web story-length server helper in the pure domain graph', async () => {
+    const bundled = await build({
+      entryPoints: [path.resolve(PACKAGE_ROOT, '../../apps/web/lib/story-length.ts')],
+      bundle: true, platform: 'node', format: 'esm', write: false, metafile: true, logLevel: 'silent',
+    });
+    const inputs = Object.keys(bundled.metafile!.inputs);
+    expect(inputs.some((file) => file.endsWith('packages/domain/src/story-length.ts'))).toBe(true);
+    expect(inputs.some((file) => file.includes('packages/ui-web/'))).toBe(false);
+    expect(findHookCalls(bundled.outputFiles[0].text)).toEqual([]);
+  });
+
   it('lists every shared entrypoint so a new one is a deliberate decision', () => {
     // 新增 subpath 时如果忘了判断它是否 RSC 安全，这条会提醒你。刻意不在这里自动推断——推断需要
     // 知道 RSC 消费者，而那是仓库里另一处的事实。
@@ -257,6 +274,9 @@ describe('server-safe shared entrypoints stay free of React hooks', () => {
     expect(unlisted.sort()).toEqual([
       './ai-provider',
       './announcement',
+      './arena',
+      './arena-report',
+      './arena-report-text',
       './card-editor',
       './card-forge',
       './card-library',

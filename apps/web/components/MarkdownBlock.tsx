@@ -21,11 +21,10 @@ import { renderWebExternalLink } from './markdown-link-adapters';
  * 只提供三样宿主事实——竞技场领域插件、外部媒体策略（白名单 + 网易云等地址知识），以及站内/站外
  * 链接的接法。删掉这个包装里的任何一行，剩下的仍然是 Desktop 也在跑的那份共享实现。
  *
- * ## 领域插件为什么留在这里
+ * ## 战报插件的显式边界
  *
- * `remarkBattleTable` 把战报里的对局表格语法翻译成 mdast 表格。它是竞技场领域知识：百科不需要它，
- * 而让 Desktop 的百科页依赖它会让 `ui-web` 变成倾倒包（`packages/README.md`）。因此共享层把它留成
- * 注入点，由本文件按既有顺序插在 GFM 与数学公式之间。
+ * 战报表格语法现在由 `ui-web/arena-report-text` 共源；通用 Markdown 不默认绑定竞技场插件。
+ * Web 仍在原顺序注入它，Desktop 的战报卡直接消费同一插件。
  *
  * ## 站内链接走 `next/link`
  *

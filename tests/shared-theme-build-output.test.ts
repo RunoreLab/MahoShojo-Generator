@@ -161,7 +161,13 @@ const readDesktopBuiltCss = (): string | null => {
 
 describe('shared theme reaches the Web production stylesheet', () => {
   it('compiles shared-only utilities and carries the shared theme tokens', async () => {
-    expectSharedOutput(await compileWebCss(), 'Web 产物');
+    const css = await compileWebCss();
+    expectSharedOutput(css, 'Web 产物');
+    for (const selector of ['.battle-lite-shell', '.battle-lite-panel', '.battle-lite-surface-card', '.battle-lite-hero-card', '.battle-lite-danger-button', '.battle-lite-chip-active', '.battle-lite-modal-surface', '.battle-lite-file-input']) {
+      expect(css, `Web 产物缺少共享竞技场样式 ${selector}`).toContain(selector);
+    }
+    expect(css).toContain('--battle-lite-panel-bg');
+    expect(css).toContain('--battle-lite-hero-shadow');
   }, 60_000);
 });
 
@@ -220,6 +226,11 @@ describe('Tailwind stays a single per-app compilation', () => {
     // ——一个不会报错的静默分叉。
     expect(globalsCss).not.toMatch(/--app-[a-z0-9-]+\s*:/);
     expect(globalsCss).not.toMatch(/--creator-[a-z0-9-]+\s*:/);
-    expect(globalsCss).toMatch(/var\(--app-surface\)/);
+    expect(globalsCss).toContain('@import "@mahoshojo/ui-web/arena.css";');
+    expect(globalsCss).not.toMatch(/--battle-lite-[a-z0-9-]+\s*:/);
+    const arenaCss = readFileSync(path.join(REPO_ROOT, 'packages/ui-web/src/arena/styles.css'), 'utf8');
+    expect(arenaCss).toMatch(/var\(--app-surface\)/);
+    expect(arenaCss).toContain(":root[data-color-mode='dark'] .battle-lite-shell");
+    expect(arenaCss).toContain('@media (prefers-color-scheme: dark)');
   });
 });

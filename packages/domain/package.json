@@ -238,7 +238,16 @@
     "./presets": "./src/presets.ts",
     "./scenario-presets": "./src/scenario-presets.ts",
     "./arena-post-battle": "./src/arena-post-battle.ts",
-    "./arena-post-battle-candidates": "./src/arena-post-battle-candidates.ts"
+    "./arena-post-battle-candidates": "./src/arena-post-battle-candidates.ts",
+    "./story-length": "./src/story-length.ts",
+    "./arena-file-parser": "./src/arena-file-parser.ts",
+    "./arena-character-validator": "./src/arena-character-validator.ts",
+    "./arena-materials": "./src/arena-materials.ts",
+    "./wantu-card/adapter": "./src/wantu-card/adapter.ts",
+    "./wantu-card/markdown": "./src/wantu-card/markdown.ts",
+    "./wantu-card/schema": "./src/wantu-card/schema.ts",
+    "./wantu-card/types": "./src/wantu-card/types.ts",
+    "./wantu-card/wantu-data-card": "./src/wantu-card/wantu-data-card.ts"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",

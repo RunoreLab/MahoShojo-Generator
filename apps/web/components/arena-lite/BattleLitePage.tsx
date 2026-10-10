@@ -6,7 +6,7 @@ import BattleDataModal from '@/components/BattleDataModal';
 import DataCardDetailsModal from '@/components/DataCardDetailsModal';
 import Footer from '@/components/Footer';
 import { ErrorMessage } from '@/components/ErrorMessage';
-import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
+import { BattleLitePageView } from '@mahoshojo/ui-web/arena';
 import { useAuth } from '@/lib/useAuth';
 import { ONLINE_DATA_CARD_TYPES } from '@mahoshojo/contracts/data-cards';
 
@@ -159,35 +159,21 @@ export function BattleLitePage() {
 
   return (
     <>
-      <div className="magic-background-white battle-lite-shell">
-        <div className="mx-auto w-full max-w-[820px] px-4 pb-8 pt-6 sm:px-6 lg:px-8">
-          <div className="battle-lite-panel rounded-[30px] px-4 py-5 sm:px-6 sm:py-6">
-            <BattleLiteHeader />
-
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-              <ArenaRankingLinks onOpenRankingModal={() => setShowRankingModal(true)} />
-              <ArenaPageLinks variant="lite" />
-            </div>
-
-            <div className="mt-6 space-y-4">
-              <CollapsibleSection
-                title="🎴 预设角色"
-                description={`已选 ${formatCombatantCount(presetCombatantCount, MAX_COMBATANTS)}，适合快速开始`}
-                defaultOpen
-                disabled={isGenerating}
-                storageKey="battle-lite.section.presetCharacters.open"
-              >
-                <PresetSelector />
-              </CollapsibleSection>
-
-              <CollapsibleSection
-                title="🌐 在线角色库 / 随机匹配"
-                description={`当前已选 ${formatCombatantCount(combatants.length, MAX_COMBATANTS)}`}
-                defaultOpen={false}
-                disabled={isGenerating}
-                storageKey="battle-lite.section.characterDatabase.open"
-              >
-                <DatabaseSelector
+      <BattleLitePageView
+        isGenerating={isGenerating}
+        presetCountLabel={formatCombatantCount(presetCombatantCount, MAX_COMBATANTS)}
+        combatantCountLabel={formatCombatantCount(combatants.length, MAX_COMBATANTS)}
+        showScenario={battleMode === 'scenario'}
+        hasScenario={Boolean(scenario.content)}
+        materialCount={materials.length}
+        referenceItemCount={referenceItemCount}
+        maxReferenceItems={MAX_ARENA_REFERENCE_ITEMS}
+        slots={{
+          header: <BattleLiteHeader />,
+          rankingLinks: <ArenaRankingLinks onOpenRankingModal={() => setShowRankingModal(true)} />,
+          pageLinks: <ArenaPageLinks variant="lite" />,
+          presets: <PresetSelector />,
+          database: <>                <DatabaseSelector
                   className="!mb-0"
                   title={null}
                   layout="column"
@@ -200,96 +186,15 @@ export function BattleLitePage() {
                 />
                 <div className="battle-lite-muted-text mt-2 text-xs">
                   提示：浏览在线角色库可选择公开/私有数据卡；随机匹配仅从公开角色库中抽取。
-                </div>
-              </CollapsibleSection>
-
-              <CollapsibleSection
-                title="📁 本地导入（上传 / 粘贴）"
-                description="支持上传多个 .json 或直接粘贴文本"
-                defaultOpen={false}
-                disabled={isGenerating}
-                keepMounted
-                storageKey="battle-lite.section.localImport.open"
-              >
-                <RosterUploader />
-              </CollapsibleSection>
-
-              <CollapsibleSection
-                title="👥 已选角色 / 分队"
-                description={`已选 ${formatCombatantCount(combatants.length, MAX_COMBATANTS)}`}
-                defaultOpen
-                disabled={isGenerating}
-                keepMounted
-                storageKey="battle-lite.section.combatants.open"
-              >
-                <CombatantList onShowDetails={(combatant) => setSelectedCombatant(combatant)} />
-              </CollapsibleSection>
-
-              <CollapsibleSection
-                title="🎮 模式选择"
-                description="不同模式会影响输出风格与计分规则"
-                defaultOpen
-                disabled={isGenerating}
-                storageKey="battle-lite.section.battleMode.open"
-              >
-                <BattleModeSwitcher />
-              </CollapsibleSection>
-
-              {battleMode === 'scenario' && (
-                <CollapsibleSection
-                  title="🎭 情景设置"
-                  description={scenario.content ? '仅保留主情景，避免主流程过载' : '当前还未选择主情景'}
-                  defaultOpen
-                  autoOpen={scenario.content === null}
-                  disabled={isGenerating}
-                  keepMounted
-                  storageKey="battle-lite.section.scenario.open"
-                >
-                  <BattleLiteScenarioSection
-                    onOpenScenarioModal={handleOpenScenarioDataModal}
-                    isAuthenticated={isAuthenticated}
-                  />
-                </CollapsibleSection>
-              )}
-
-              <CollapsibleSection
-                title="📎 素材注入"
-                description={`已选素材 ${materials.length}；参考项合计 ${referenceItemCount}/${MAX_ARENA_REFERENCE_ITEMS}`}
-                defaultOpen={false}
-                disabled={isGenerating}
-                keepMounted
-                storageKey="battle-lite.section.materials.open"
-              >
-                <MaterialPanel onOpenMaterialModal={handleOpenMaterialDataModal} />
-              </CollapsibleSection>
-
-              <CollapsibleSection
-                title="🧠 故事方向引导 / AI 提供商"
-                description="如需其他高级项请前往完整版竞技场"
-                defaultOpen
-                disabled={isGenerating}
-                keepMounted
-                storageKey="battle-lite.section.storyOptions.open"
-              >
-                <BattleLiteStoryOptions />
-              </CollapsibleSection>
-
-              <CollapsibleSection
-                title="⚡ 生成方式"
-                description="流式生成可边生成边阅读；非流式适合一次性结果"
-                defaultOpen={false}
-                disabled={isGenerating}
-                storageKey="battle-lite.section.generationMode.open"
-              >
-                <GenerationModeSwitcher showReportFormat />
-              </CollapsibleSection>
-
-              <CollapsibleSection
-                title="🚀 开始生成"
-                description="确认设置后点击按钮生成战报"
-                collapsible={false}
-              >
-                <BattleLiteInheritedContextNotice summary={inheritedSummary} />
+                </div></>,
+          localImport: <RosterUploader />,
+          roster: <CombatantList onShowDetails={(combatant) => setSelectedCombatant(combatant)} />,
+          mode: <BattleModeSwitcher />,
+          scenario: <BattleLiteScenarioSection onOpenScenarioModal={handleOpenScenarioDataModal} isAuthenticated={isAuthenticated} />,
+          materials: <MaterialPanel onOpenMaterialModal={handleOpenMaterialDataModal} />,
+          storyOptions: <BattleLiteStoryOptions />,
+          generationMode: <GenerationModeSwitcher showReportFormat />,
+          actions: <>                <BattleLiteInheritedContextNotice summary={inheritedSummary} />
                 <BattleActions showAdvancedUtilities={false} />
                 {error ? (
                   <ErrorMessage
@@ -300,32 +205,14 @@ export function BattleLitePage() {
                         : 'battle-lite-alert battle-lite-alert--warning'
                     }`}
                   />
-                ) : null}
-              </CollapsibleSection>
-
-              <CollapsibleSection
-                title="💬 社区"
-                description="QQ群 / 腾讯频道"
-                defaultOpen={false}
-                storageKey="battle-lite.section.community.open"
-              >
-                <ArenaCommunitySection />
-              </CollapsibleSection>
-            </div>
-          </div>
-
-          <BattleResult onSaveImage={handleSaveImage} />
-          <BattleStorySessionPanel onSaveImage={handleSaveImage} />
-
-          <div className="mt-8 text-center">
-            <button onClick={() => window.location.assign('/')} className="footer-link">
-              返回首页
-            </button>
-          </div>
-
-          <Footer />
-        </div>
-      </div>
+                ) : null}</>,
+          community: <ArenaCommunitySection />,
+          result: <BattleResult onSaveImage={handleSaveImage} />,
+          storySession: <BattleStorySessionPanel onSaveImage={handleSaveImage} />,
+          homeLink: <button onClick={() => window.location.assign('/')} className="footer-link">返回首页</button>,
+          footer: <Footer />,
+        }}
+      />
 
       {showImageModal && savedImageUrl ? (
         <div

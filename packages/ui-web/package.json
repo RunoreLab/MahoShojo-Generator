@@ -207,7 +207,11 @@
       "types": "./src/cloud-save/index.ts",
       "import": "./src/cloud-save/index.ts",
       "default": "./src/cloud-save/index.ts"
-    }
+    },
+    "./arena": "./src/arena/index.ts",
+    "./arena.css": "./src/arena/styles.css",
+    "./arena-report": "./src/arena-report/index.ts",
+    "./arena-report-text": "./src/arena-report/text.ts"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",
@@ -227,7 +231,13 @@
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
-    "tailwind-merge": "^3.3.0"
+    "tailwind-merge": "^3.3.0",
+    "@types/mdast": "^4.0.4",
+    "mdast-util-from-markdown": "^2.0.2",
+    "mdast-util-math": "^3.0.0",
+    "micromark-extension-math": "^3.1.0",
+    "unified": "^11.0.5",
+    "unist-util-visit": "^5.0.0"
   },
   "peerDependencies": {
     "react": "^19.2.1",

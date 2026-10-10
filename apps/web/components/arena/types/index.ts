@@ -27,7 +27,7 @@ export const isCombatantLimitReached = (count: number, limit: number | null = MA
 export const formatCombatantCount = (count: number, limit: number | null = MAX_COMBATANTS): string =>
   hasCombatantLimit(limit) ? `${count}/${limit}` : `${count}/无限制`;
 
-export type CombatantType = 'magical-girl' | 'canshou' | 'general-character';
+export type { CombatantType } from '@mahoshojo/domain/arena-file-parser';
 export type BattleMode = 'classic' | 'kizuna' | 'daily' | 'scenario';
 export type StoryLengthOption = 'default' | 'short' | 'standard' | 'detailed' | 'long';
 export type GenerationMode = 'non-stream' | 'stream';
@@ -77,31 +77,8 @@ export type ArenaGenerationRepairContext = Readonly<{
   customProvider: CustomProviderPayload | null;
 }>;
 
-export interface CombatantData {
-  type: CombatantType;
-  data: any;
-  filename: string;
-  isValid: boolean;
-  isPreset: boolean;
-  isNonStandard?: boolean;
-  wasCorrected?: boolean;
-  teamId?: number;
-  /** 从多人 authority materialize 后保留原始 opaque resource key。 */
-  arenaRoomKey?: string;
-  adjudicationSourceKey?: string;
-  /** 用户对该角色的行动/想法引导（可选，最多 100 字）。 */
-  characterGuidance?: string;
-  sourceDataCardId?: string;
-  sourceDataCardDescription?: string;
-  sourceDataCardCreatedAt?: string;
-  sourceDataCardUpdatedAt?: string;
-  sourceDataCardName?: string;
-  sourceIsPublic?: boolean;
-  sourceAuthor?: string;
-  sourceDataCardUsageCount?: number;
-  sourceDataCardLikeCount?: number;
-  sourceDataCardFavoriteCount?: number;
-}
+export type { CombatantData } from '@mahoshojo/domain/arena-file-parser';
+import type { CombatantData } from '@mahoshojo/domain/arena-file-parser';
 
 export interface RandomCombatantPlaceholder {
   type: 'random-magical-girl' | 'random-canshou';

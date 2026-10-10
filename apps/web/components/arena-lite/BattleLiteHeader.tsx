@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { BattleLiteHeaderView } from '@mahoshojo/ui-web/arena';
 
 import { EncyclopediaLinks } from '@/components/encyclopedia/EncyclopediaLinks';
 import { ThemeImage } from '@/components/shared/ThemeImage';
@@ -10,22 +11,11 @@ import { ArenaPageLinks } from '@/components/arena/shared/ArenaPageLinks';
 
 export function BattleLiteHeader() {
   return (
-    <>
-      <div className="battle-lite-hero-card relative overflow-hidden rounded-[28px] border px-5 py-6 text-center sm:px-8">
-        <div className="battle-lite-hero-pill inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold tracking-[0.22em]">
-          简洁版竞技场
-        </div>
-        <div className="mt-4 flex justify-center">
-          <ThemeImage lightSrc="/arena-black.svg" darkSrc="/arena-white.svg" width={300} height={84} alt="魔法少女竞技场" />
-        </div>
-        <p className="battle-lite-muted-text mt-4 text-sm leading-6 sm:text-[15px]">
-          基于 2025 年 9 月的轻量怀旧版本，同时加入了选择AI模型等实用新功能，继续复用最新版竞技场后端与结果链路。
-        </p>
-        <div className="battle-lite-subtle-text mt-4 flex flex-wrap items-center justify-center gap-2 text-xs sm:text-sm">
-          <span>需要辅助情景、问卷 Lore 等完整能力时，可随时</span>
-          <ArenaPageLinks variant="lite" className="battle-lite-link font-semibold" />
-        </div>
-      </div>
+      <BattleLiteHeaderView
+        logo={<ThemeImage lightSrc="/arena-black.svg" darkSrc="/arena-white.svg" width={300} height={84} alt="魔法少女竞技场" />}
+        description="基于 2025 年 9 月的轻量怀旧版本，同时加入了选择AI模型等实用新功能，继续复用最新版竞技场后端与结果链路。"
+        helper={<><span>需要辅助情景、问卷 Lore 等完整能力时，可随时</span><ArenaPageLinks variant="lite" className="battle-lite-link font-semibold" /></>}
+      >
 
       <CollapsibleSection
         title="📰 使用须知"
@@ -66,6 +56,6 @@ export function BattleLiteHeader() {
           linkClassName="battle-lite-link"
         />
       </CollapsibleSection>
-    </>
+      </BattleLiteHeaderView>
   );
 }

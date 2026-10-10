@@ -612,12 +612,12 @@ importers:
       '@mahoshojo/contracts':
         specifier: workspace:*
         version: link:../contracts
-      zod:
-        specifier: ^4.1.13
-        version: 4.3.6
       fflate:
         specifier: ^0.8.2
         version: 0.8.3
+      zod:
+        specifier: ^4.1.13
+        version: 4.3.6
     devDependencies:
       '@types/node':
         specifier: ^20
@@ -815,6 +815,9 @@ importers:
       '@mahoshojo/local-library':
         specifier: workspace:*
         version: link:../local-library
+      '@types/mdast':
+        specifier: ^4.0.4
+        version: 4.0.4
       '@zumer/snapdom':
         specifier: ^1.9.7
         version: 1.9.14
@@ -827,6 +830,15 @@ importers:
       lucide-react:
         specifier: ^0.511.0
         version: 0.511.0(react@19.2.3)
+      mdast-util-from-markdown:
+        specifier: ^2.0.2
+        version: 2.0.3
+      mdast-util-math:
+        specifier: ^3.0.0
+        version: 3.0.0
+      micromark-extension-math:
+        specifier: ^3.1.0
+        version: 3.1.0
       react-markdown:
         specifier: ^10.1.0
         version: 10.1.0(@types/react@19.2.15)(react@19.2.3)
@@ -842,6 +854,12 @@ importers:
       tailwind-merge:
         specifier: ^3.3.0
         version: 3.4.0
+      unified:
+        specifier: ^11.0.5
+        version: 11.0.5
+      unist-util-visit:
+        specifier: ^5.0.0
+        version: 5.1.0
     devDependencies:
       '@types/node':
         specifier: ^20
