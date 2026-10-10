@@ -103,3 +103,25 @@ describe('共源替换确认', () => {
     expect(document.querySelectorAll('[role=dialog]')).toHaveLength(1); expect(close).not.toHaveBeenCalled(); expect(document.body.style.overflow).toBe('hidden');
   });
 });
+
+describe('数据卡列表的视口与原生滚动结构', () => {
+  it.each([0, 1, 30])('为 %i 张卡保留独立可聚焦滚动区，fieldset 只负责禁用', async count => {
+    await render({ dataCards: Array.from({ length: count }, (_, index) => ({ ...row, id: `card-${index}` })), cardsPerPage: 40, busy: true });
+    const dialog = document.querySelector<HTMLElement>('[role=dialog]')!;
+    const region = dialog.querySelector<HTMLElement>('[role=region]')!;
+    expect(dialog.parentElement?.parentElement).toBe(document.body);
+    expect(dialog.className).toContain('max-h-[min(90dvh,calc(100dvh-2rem))]');
+    expect(region.tagName).toBe('DIV');
+    expect(region.className).toContain('min-h-0');
+    expect(region.className).toContain('overflow-auto');
+    expect(region.className).toContain('overscroll-contain');
+    expect(region.tabIndex).toBe(0);
+    expect(region.getAttribute('aria-labelledby')).toBe(dialog.getAttribute('aria-labelledby'));
+    expect(region.querySelector('fieldset')?.disabled).toBe(true);
+    region.focus();
+    const event = new KeyboardEvent('keydown', { key: 'PageDown', bubbles: true, cancelable: true });
+    region.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(document.documentElement.style.overflow).toBe('hidden');
+  });
+});

@@ -7,7 +7,7 @@ import { useCardLibrarySummaryPage } from '../card-library/use-card-library-summ
 import { normalizePublicVisibilityValue } from '../card-library/read-mappers';
 import { getDataCardStatus } from '../card-library/status';
 import type { DataCardsModalHost } from './host';
-import { useBaseModalAccessibility } from '../modal/BaseModal';
+import { BASE_MODAL_BODY_LAYOUT_CLASS_NAME, useBaseModalAccessibility } from '../modal/BaseModal';
 import { ChevronDown, Filter } from 'lucide-react';
 import { ONLINE_DATA_CARD_TYPES, type OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
 
@@ -546,8 +546,8 @@ function DataCardsModalScope({
   if (!isOpen) return null;
 
   const modal = (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className="bg-white rounded-lg p-6 max-w-7xl w-full max-h-[90vh] overflow-hidden flex flex-col relative">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center overflow-hidden overscroll-none z-50 p-4">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className="bg-white rounded-lg p-6 max-w-7xl w-full max-h-[min(90dvh,calc(100dvh-2rem))] overflow-hidden flex flex-col relative">
         <button
           ref={initialFocusRef}
           onClick={close}
@@ -557,7 +557,7 @@ function DataCardsModalScope({
         >
           ×
         </button>
-        <div className="flex justify-between items-center mb-4 pr-8 gap-4 flex-wrap">
+        <div className="shrink-0 flex justify-between items-center mb-4 pr-8 gap-4 flex-wrap">
           <div className="flex items-center gap-3">
             <h2 id={titleId} className="text-xl font-bold">{title}</h2>
             <div className="text-sm text-gray-600">
@@ -589,7 +589,9 @@ function DataCardsModalScope({
           )}
         </div>
 
-        <fieldset disabled={busy} className="flex-1 min-h-0 min-w-0 overflow-y-auto">
+        <div className={BASE_MODAL_BODY_LAYOUT_CLASS_NAME} role="region" aria-labelledby={titleId} tabIndex={0}>
+        {/* fieldset 只承载禁用语义，普通 div 负责 flex 收缩与原生滚动。 */}
+        <fieldset disabled={busy} className="min-w-0">
           {(error || actionError) && <p role="alert" className="text-red-600 text-center py-3">{error && dataCards.length > 0 ? `刷新失败，当前显示上次成功结果：${error}` : error || actionError}</p>}
           <>
               {/* 搜索 / 排序 / 筛选 */}
@@ -802,6 +804,7 @@ function DataCardsModalScope({
               )}
           </>
         </fieldset>
+        </div>
       </div>
 
       {/* 详情模态框 */}

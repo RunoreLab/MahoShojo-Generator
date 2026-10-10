@@ -137,3 +137,107 @@ it('falls back to a surviving lower layer after the middle layer closes first', 
   expect(document.activeElement).toBe(opener);
   expect(document.body.style.overflow).toBe('auto');
 });
+
+it('locks the viewport root as well as the body when the host has explicit root overflow', () => {
+  const originalRoot = document.documentElement.style.cssText;
+  document.documentElement.style.overflowX = 'hidden';
+  try {
+    render(<BaseModal isOpen title="根滚动容器" onClose={() => {}}>正文</BaseModal>);
+    expect(document.documentElement.style.overflow).toBe('hidden');
+    expect(document.body.style.overflow).toBe('hidden');
+    expect(document.documentElement.style.overscrollBehavior).toBe('none');
+    render(null);
+    expect(document.documentElement.style.overflow).toBe('');
+    expect(document.documentElement.style.overflowX).toBe('hidden');
+    expect(document.documentElement.style.overscrollBehavior).toBe('');
+  } finally {
+    render(null);
+    document.documentElement.style.cssText = originalRoot;
+  }
+});
+
+it('preserves inline scroll longhands and priorities without reverting unrelated host changes', () => {
+  const originalRoot = document.documentElement.style.cssText;
+  const originalBody = document.body.style.cssText;
+  const declarations = (element: HTMLElement) => Array.from(element.style)
+    .filter(property => property.startsWith('overflow') || property.startsWith('overscroll'))
+    .map(property => [property, element.style.getPropertyValue(property), element.style.getPropertyPriority(property)]);
+  document.documentElement.style.setProperty('overflow-x', 'hidden', 'important');
+  document.documentElement.style.setProperty('overflow-y', 'scroll');
+  document.documentElement.style.setProperty('overscroll-behavior-y', 'contain', 'important');
+  document.body.style.setProperty('overflow', 'scroll', 'important');
+  document.body.style.setProperty('overscroll-behavior', 'contain');
+  const rootDeclarations = declarations(document.documentElement);
+  const bodyDeclarations = declarations(document.body);
+  try {
+    const mount = (lower: boolean, upper: boolean) => <>
+      <BaseModal isOpen={lower} title="下层" onClose={() => {}}>正文</BaseModal>
+      <BaseModal isOpen={upper} title="上层" onClose={() => {}}>正文</BaseModal>
+    </>;
+    render(mount(true, false));
+    render(mount(true, true));
+    render(mount(false, true));
+    expect(document.documentElement.style.overflow).toBe('hidden');
+    document.documentElement.style.color = 'red';
+    document.body.style.color = 'blue';
+    render(null);
+    expect(declarations(document.documentElement)).toEqual(rootDeclarations);
+    expect(declarations(document.body)).toEqual(bodyDeclarations);
+    expect(document.documentElement.style.color).toBe('red');
+    expect(document.body.style.color).toBe('blue');
+    render(<StrictMode><BaseModal isOpen title="快速重开" onClose={() => {}}>正文</BaseModal></StrictMode>);
+    expect(document.documentElement.style.overflow).toBe('hidden');
+    render(null);
+    expect(declarations(document.documentElement)).toEqual(rootDeclarations);
+    expect(declarations(document.body)).toEqual(bodyDeclarations);
+  } finally {
+    render(null);
+    document.documentElement.style.cssText = originalRoot;
+    document.body.style.cssText = originalBody;
+  }
+});
+
+it('does not reposition the page and returns focus without scrolling the opener into view', () => {
+  const previousTop = document.documentElement.scrollTop;
+  const previousLeft = document.documentElement.scrollLeft;
+  const scrollTo = vi.spyOn(window, 'scrollTo');
+  const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+  render(<button data-opener>页面入口</button>);
+  const opener = container.querySelector<HTMLButtonElement>('[data-opener]')!;
+  opener.focus();
+  document.documentElement.scrollTop = 840;
+  document.documentElement.scrollLeft = 12;
+  try {
+    render(<><button data-opener>页面入口</button><BaseModal isOpen title="保持位置" onClose={() => {}}>正文</BaseModal></>);
+    expect(document.body.style.position).toBe('');
+    expect(document.documentElement.scrollTop).toBe(840);
+    expect(document.documentElement.scrollLeft).toBe(12);
+    render(<button data-opener>页面入口</button>);
+    expect(document.activeElement).toBe(opener);
+    expect(focus).toHaveBeenLastCalledWith({ preventScroll: true });
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(document.documentElement.scrollTop).toBe(840);
+  } finally {
+    document.documentElement.scrollTop = previousTop;
+    document.documentElement.scrollLeft = previousLeft;
+  }
+});
+
+it('exposes the native content scroller as a keyboard stop without swallowing scroll input', () => {
+  render(<BaseModal isOpen title="键盘正文" onClose={() => {}}><p>正文</p></BaseModal>);
+  const region = document.querySelector<HTMLElement>('[role="dialog"] [role="region"]')!;
+  expect(region.tabIndex).toBe(0);
+  expect(region.classList.contains('overflow-auto')).toBe(true);
+  expect(region.classList.contains('overscroll-contain')).toBe(true);
+  region.focus();
+  for (const key of ['PageDown', 'PageUp', 'ArrowDown', 'ArrowUp', 'Home', 'End', ' ']) {
+    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+    region.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+  }
+  for (const type of ['wheel', 'touchmove']) {
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    region.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+  }
+});

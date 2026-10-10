@@ -22,7 +22,7 @@ import { buildSafeFileName } from '../client/fileName';
 import { useLocalDataCards } from './use-local-data-cards';
 import { useLocalLibraryAutoSave } from './use-local-library-auto-save';
 import { ChevronDown, Filter, HardDrive } from 'lucide-react';
-import { BaseModal } from '../modal/BaseModal';
+import { BASE_MODAL_BODY_LAYOUT_CLASS_NAME, BaseModal } from '../modal/BaseModal';
 import { acquireModalEnvironment } from '../modal/modal-lifecycle';
 import { isTopmostFocusTrapLayer, useEscapeLayer } from '../modal/escape-stack';
 import { ModalTabs, modalTabIds, type ModalTabItem } from '../modal/ModalTabs';
@@ -333,7 +333,7 @@ export function CardLibraryModal({
     if (!isOpen) return;
     const modalEnvironment = acquireModalEnvironment();
     const modal = modalRef.current;
-    closeButtonRef.current?.focus();
+    closeButtonRef.current?.focus({ preventScroll: true });
 
     const focusableSelector = [
       'button:not([disabled])',
@@ -2041,7 +2041,7 @@ export function CardLibraryModal({
   }
 
   const modal = (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center overflow-hidden overscroll-none z-50 p-4">
       <div
         ref={modalRef}
         role="dialog"
@@ -2090,7 +2090,7 @@ export function CardLibraryModal({
             <div className="mb-4" />
           )}
 
-        <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className={BASE_MODAL_BODY_LAYOUT_CLASS_NAME} role="region" aria-labelledby={modalTitleId} tabIndex={0}>
           {/* 筛选和排序区域 */}
           <div className="mb-2">
             <div className="flex flex-wrap gap-2 mb-2 items-center">
@@ -2702,7 +2702,7 @@ export function CardLibraryModal({
           onClose={() => {
             setShowDetailsModal(false);
             setSelectedCard(null);
-            closeButtonRef.current?.focus();
+            closeButtonRef.current?.focus({ preventScroll: true });
           }}
           card={{
             id: selectedCard.id,

@@ -19,6 +19,8 @@ it('真实 Web 管理→详情嵌套：Tab留在最上层，Escape逐层关闭�
   const row = { id: 'owned-real', name: '真实详情卡', description: '', type: 'character', data: '{"name":"真实内容","content":"保留正文"}', is_public: 0, review_status: 'approved' };
   function Harness() { const [open, setOpen] = useState(false); return <><button onClick={() => setOpen(true)}>打开管理</button><DataCardsModal isOpen={open} onClose={() => setOpen(false)} dataCards={[row]} currentPage={1} onPageChange={() => {}} cardsPerPage={12} /></>; }
   await act(async () => { root.render(<Harness />); }); button('打开管理').focus(); await act(async () => { button('打开管理').click(); });
+  expect(document.documentElement.style.overflow).toBe('hidden');
+  expect(document.querySelector('[role=dialog] [role=region]')?.getAttribute('tabindex')).toBe('0');
   const detailsButton = button('详情'); detailsButton.focus(); await act(async () => { detailsButton.click(); });
   const dialogs = document.querySelectorAll<HTMLElement>('[role=dialog]'); expect(dialogs).toHaveLength(2);
   const detail = dialogs[1]; expect(detail.textContent).toContain('保留正文'); expect(detail.contains(document.activeElement)).toBe(true);
@@ -28,7 +30,7 @@ it('真实 Web 管理→详情嵌套：Tab留在最上层，Escape逐层关闭�
   await act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true })); });
   expect(document.activeElement).toBe(stops.at(-1));
   await act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
-  expect(document.querySelectorAll('[role=dialog]')).toHaveLength(1); expect(document.body.style.overflow).toBe('hidden'); expect(document.activeElement).toBe(detailsButton);
+  expect(document.querySelectorAll('[role=dialog]')).toHaveLength(1); expect(document.body.style.overflow).toBe('hidden'); expect(document.documentElement.style.overflow).toBe('hidden'); expect(document.activeElement).toBe(detailsButton);
   await act(async () => { document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
-  expect(document.querySelector('[role=dialog]')).toBeNull(); expect(document.body.style.overflow).toBe('auto'); expect(document.activeElement).toBe(button('打开管理'));
+  expect(document.querySelector('[role=dialog]')).toBeNull(); expect(document.body.style.overflow).toBe('auto'); expect(document.documentElement.style.overflow).toBe(''); expect(document.activeElement).toBe(button('打开管理'));
 });

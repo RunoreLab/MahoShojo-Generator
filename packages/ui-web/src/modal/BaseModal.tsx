@@ -78,19 +78,19 @@ export const useBaseModalAccessibility = ({
     const modalEnvironment = acquireModalEnvironment(fallbackFocusRef?.current ?? null);
     const initialFocus = initialFocusRef.current;
     if (initialFocus && !initialFocus.disabled) {
-      initialFocus.focus();
+      initialFocus.focus({ preventScroll: true });
     } else {
-      dialogRef.current?.focus();
+      dialogRef.current?.focus({ preventScroll: true });
     }
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Tab' || !isTopmostFocusTrapLayer(layerId)) return;
 
       const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR) ?? [])]
-        .filter((element) => !element.hidden && element.getAttribute('aria-hidden') !== 'true');
+        .filter((element) => !element.matches(':disabled') && !element.hidden && element.getAttribute('aria-hidden') !== 'true');
       if (focusable.length === 0) {
         event.preventDefault();
-        dialogRef.current?.focus();
+        dialogRef.current?.focus({ preventScroll: true });
         return;
       }
 
@@ -121,11 +121,11 @@ export const useBaseModalAccessibility = ({
   return { dialogRef, initialFocusRef, titleId };
 };
 
-export const BASE_MODAL_ROOT_LAYOUT_CLASS_NAME = 'fixed inset-0 flex items-center justify-center p-4';
+export const BASE_MODAL_ROOT_LAYOUT_CLASS_NAME = 'fixed inset-0 flex items-center justify-center overflow-hidden overscroll-none p-4';
 export const BASE_MODAL_PANEL_LAYOUT_CLASS_NAME =
   'relative flex max-h-[calc(100dvh-2rem)] w-full flex-col overflow-hidden';
 export const BASE_MODAL_HEADER_LAYOUT_CLASS_NAME = 'shrink-0';
-export const BASE_MODAL_BODY_LAYOUT_CLASS_NAME = 'min-h-0 flex-1 overflow-auto';
+export const BASE_MODAL_BODY_LAYOUT_CLASS_NAME = 'min-h-0 flex-1 overflow-auto overscroll-contain';
 export const BASE_MODAL_FOOTER_LAYOUT_CLASS_NAME = 'shrink-0';
 
 export const getBaseModalLayoutClassNames = ({
@@ -222,7 +222,7 @@ export function BaseModal({
           </button>
         </div>
 
-        <div className={bodyClassName}>{children}</div>
+        <div className={bodyClassName} role="region" aria-labelledby={titleId} tabIndex={0}>{children}</div>
 
         {footer ? <div className={footerClassName}>{footer}</div> : null}
       </div>

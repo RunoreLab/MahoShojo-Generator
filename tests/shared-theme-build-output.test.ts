@@ -109,11 +109,18 @@ const expectSharedOutput = (css: string, artifact: string): void => {
     });
     return layers;
   };
-  // Brand visibility must survive each actual host pipeline.
+  // Brand visibility and modal scroll containment must survive each actual host pipeline.
   expect(declarationsFor('.theme-image-light').display, artifact).toBe('inline-block');
   expect(declarationsFor('.theme-image-dark').display, artifact).toBe('none');
   expect(declarationsFor(":root[data-color-mode='dark'] .theme-image-light").display, artifact).toBe('none');
   expect(declarationsFor(":root[data-color-mode='dark'] .theme-image-dark").display, artifact).toBe('inline-block');
+  expect(declarationsFor('.overscroll-contain')['overscroll-behavior'], artifact).toBe('contain');
+  expect(declarationsFor('.overscroll-none')['overscroll-behavior'], artifact).toBe('none');
+  const modalViewportClass = '.max-h-\\[min\\(90dvh\\,calc\\(100dvh-2rem\\)\\)\\]';
+  const modalViewportHeight = declarationsFor(modalViewportClass)['max-height'];
+  expect(modalViewportHeight?.replace(/\s/g, '').replace(/calc\(([^()]*)\)/g, '$1'), artifact)
+    .toBe('min(90dvh,100dvh-2rem)');
+
   expect(layersFor('body', 'font-family', 'var(--app-font-sans)'), artifact).toContain('base');
   expect(layersFor('pre', 'font-family', 'var(--app-font-mono)'), artifact).toContain('base');
   expect(layersFor('.font-mono', 'font-family', 'var(--app-font-mono)'), artifact).toContain('utilities');
