@@ -8,6 +8,7 @@ import type { NewsReport } from '@/components/BattleReportCard';
 import { SegmentedControl, type SegmentedOption } from '@/components/shared/SegmentedControl';
 import { BaseModal } from '@/components/shared/BaseModal';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
+import { ArenaReportFormatSelectorView, ArenaWebNotes, ArenaWebSourceView, ArenaWebReportActions, ArenaWebReplayControlsView, type ArenaWebReportAction } from '@mahoshojo/ui-web/arena-report';
 import { resolveWebDisplayTitle } from '@/lib/arena/battle-report-display-title';
 import { normalizeArenaWebOutput } from '@/lib/arena/web-output';
 import { downloadBlob } from '@/lib/client/blobUrl';
@@ -22,6 +23,7 @@ import styles from './ArenaWebReport.module.css';
 import type { WebPackageArtifact, WebPackageRef } from '@mahoshojo/contracts/web-package';
 import {
   formatWebPackageFallback,
+  resolveWebPackageTargetExtension,
   prepareWebPackageReplay,
   packWebPackageZip,
   WebPackageImportError,
@@ -59,10 +61,6 @@ const PREVIEW_SCROLLBAR_STYLE = `<style data-arena-web-scrollbars>
   }
 }
 </style>`;
-const FORMAT_OPTIONS: readonly SegmentedOption<'markdown' | 'web'>[] = [
-  { value: 'markdown', label: 'Markdown', icon: <FileText />, description: '以正文为主的战报，支持标题、表格与公式，适合阅读和保存图片。' },
-  { value: 'web', label: 'Web（实验性）', icon: <PanelsTopLeft />, description: '生成带自定义排版、动画或交互的网页；完成后经本地确认展示，可能加载第三方资源。' },
-];
 type ArenaWebDisplayMode = 'ordinary' | 'web';
 const DISPLAY_OPTIONS: readonly SegmentedOption<ArenaWebDisplayMode>[] = [
   { value: 'ordinary', label: '普通显示', icon: <FileText />, description: '使用普通战报卡片展示正文，适合阅读、保存图片和下载战斗记录。' },
@@ -121,41 +119,6 @@ function WebReportConsentDialog({ open, onCancel, onAccept }: {
         <button type="button" onClick={() => onAccept(remember)} className="rounded-lg bg-purple-600 px-4 py-2 text-sm text-white">继续使用 Web</button>
       </div>
     </BaseModal>
-  );
-}
-
-function ArenaWebNotes({ prelude, epilogue }: {
-  prelude: string;
-  epilogue: string;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const notes = [
-    prelude ? { label: '前言', content: prelude } : null,
-    epilogue ? { label: '后记', content: epilogue } : null,
-  ].filter((note): note is { label: string; content: string } => note !== null);
-
-  if (notes.length === 0) return null;
-
-  return (
-    <section className="rounded-lg border border-white/10 bg-black/20 text-white/90" data-testid="arena-web-notes">
-      <button
-        type="button"
-        className="flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm font-semibold transition-colors hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pink-300"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((value) => !value)}
-      >
-        <span>💬 AI 附言（{notes.length} 段）</span>
-        <span aria-hidden="true" className="text-white/60">{expanded ? '⌃' : '⌄'}</span>
-      </button>
-      {expanded ? <div className="space-y-3 border-t border-white/10 px-3 py-3">
-        {notes.map((note) => (
-          <div key={note.label}>
-            <div className="mb-1 text-xs font-semibold tracking-wide text-white/60">AI {note.label}</div>
-            <MarkdownBlock content={note.content} variant="dark" mode="article" />
-          </div>
-        ))}
-      </div> : null}
-    </section>
   );
 }
 
@@ -293,7 +256,7 @@ function ArenaWebDocument({ location, prelude, epilogue, reload, immersive, aiMo
         />}
       </div>
       {prelude || epilogue ? <div className="px-4 pt-4" hidden={immersive}>
-        <ArenaWebNotes prelude={prelude} epilogue={epilogue} />
+        <ArenaWebNotes prelude={prelude} epilogue={epilogue} renderNote={(note) => <MarkdownBlock content={note} variant="dark" mode="article" />} />
       </div> : null}
     </>
   );
@@ -310,18 +273,21 @@ export function ArenaReportFormatSelector({ value, onChange, disabled = false, r
   const { accepted, accept } = useWebConsent(roomId);
   const [confirming, setConfirming] = useState(false);
   return (
-    <div className="input-group">
-      <SegmentedControl label="战报格式" value={value} options={FORMAT_OPTIONS} disabled={disabled} onChange={(format) => {
-        if (format === 'web' && !accepted) setConfirming(true);
-        else onChange(format);
-      }} />
-      {value === 'web' && children ? <div className="mt-3 text-sm">{children}</div> : null}
+    <>
+      <ArenaReportFormatSelectorView value={value} disabled={disabled}
+        webDescription="生成带自定义排版、动画或交互的网页；完成后经本地确认展示，可能加载第三方资源。"
+        onChange={(format) => {
+          if (format === 'web' && !accepted) setConfirming(true);
+          else onChange(format);
+        }}>
+        {children}
+      </ArenaReportFormatSelectorView>
       <WebReportConsentDialog open={confirming && !disabled} onCancel={() => setConfirming(false)} onAccept={(remember) => {
         accept(remember);
         setConfirming(false);
         onChange('web');
       }} />
-    </div>
+    </>
   );
 }
 
@@ -348,7 +314,16 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
   const [replayEpoch, setReplayEpoch] = useState(0);
   const [importing, setImporting] = useState(false);
   const [importFeedback, setImportFeedback] = useState<{ message: string; hint: string; diagnostics: readonly string[] } | null>(null);
-  const importInputRef = useRef<HTMLInputElement>(null);
+  const importFlight = useRef<symbol | null>(null);
+  const mounted = useRef(false);
+  const resultScope = useMemo(() => ({ roomId, content, ready, webPackage }), [roomId, content, ready, webPackage]);
+  const currentScope = useRef(resultScope);
+  currentScope.current = resultScope;
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  useEffect(() => { setImportFeedback(null); }, [resultScope]);
   const [trustDialogKey, setTrustDialogKey] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   // Use immutable content identity instead of embedding the whole generated target.
@@ -374,13 +349,13 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
     let active = true;
     // 历史回放只恢复这一个 exact revision；它已从本机本地库删除时返回 false，
     // 由此走既有的「缺失包 / 重新导入」分支，而不是静默当成可用。
-    void hydrateExactWebPackageFromLibrary(webPackage.packageRef).then(() => prepareWebPackageReplay({
+    void hydrateExactWebPackageFromLibrary(webPackage.packageRef).then(() => active ? prepareWebPackageReplay({
       artifact: webPackage,
       generatedContent: content,
       allowCompatibility: Boolean(compatibilityRef),
       compatibilityRef,
-    })).then(async (outcome) => {
-      if (!active) return;
+    }) : null).then(async (outcome) => {
+      if (!active || !outcome) return;
       if ((outcome.status === 'exact' || outcome.status === 'compatibility') && outcome.instance) {
         const compatibility = outcome.status === 'compatibility';
         let profile: WebPackageRiskProfile | undefined;
@@ -438,24 +413,34 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
       || resolutionStatus === 'mismatch-available'
       || resolutionStatus === 'rejected');
   const handleImportArchive = useCallback(async (file: File | null | undefined) => {
-    if (!file || importing) return;
+    if (!file || importFlight.current) return 'cancelled' as const;
+    const flight = Symbol('web-report-import');
+    importFlight.current = flight;
+    const isCurrent = () => mounted.current && currentScope.current === resultScope && importFlight.current === flight;
     setImporting(true);
     setImportFeedback(null);
     try {
-      const { diagnostics } = await importLocalWebPackageArchive(new Uint8Array(await file.arrayBuffer()));
+      const bytes = await file.arrayBuffer();
+      if (!isCurrent()) return 'cancelled' as const;
+      const { diagnostics } = await importLocalWebPackageArchive(new Uint8Array(bytes));
+      if (!isCurrent()) return 'cancelled' as const;
       setImportFeedback({ message: '', hint: '', diagnostics });
       setReplayEpoch((value) => value + 1);
     } catch (error) {
+      if (!isCurrent()) return 'cancelled' as const;
       setImportFeedback({
         message: error instanceof Error ? error.message : 'Web 包导入失败',
         hint: error instanceof WebPackageImportError ? error.hint : '请确认选择的是有效的 Web 包 ZIP 后重试。',
         diagnostics: [],
       });
+      return 'failed' as const;
     } finally {
-      setImporting(false);
-      if (importInputRef.current) importInputRef.current.value = '';
+      if (importFlight.current === flight) {
+        importFlight.current = null;
+        if (mounted.current) setImporting(false);
+      }
     }
-  }, [importing]);
+  }, [resultScope]);
   // Package documents are structured locations (srcdoc adapter or mounted URL); ordinary web stays a raw HTML string.
   const documentSource: { kind: 'srcdoc'; html: string } | { kind: 'url'; url: string } | string | null = webPackage
     ? packageLocation
@@ -580,21 +565,18 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
   };
   const downloadTarget = () => {
     if (!ready || !webPackage) return;
-    const extension = ({
-      'application/json': 'json',
-      'text/html': 'html',
-      'text/plain': 'txt',
-      'text/markdown': 'md',
-      'text/css': 'css',
-      'text/javascript': 'js',
-      'application/javascript': 'js',
-      'image/svg+xml': 'svg',
-    } as Record<string, string>)[webPackage.targetMediaType] ?? 'txt';
+    const extension = resolveWebPackageTargetExtension(webPackage.targetMediaType);
     const leaf = webPackage.targetPath.split('/').pop() || `魔法少女速报_${resolvedDisplayTitle}`;
     const stem = leaf.replace(/\.[^.]+$/u, '') || leaf;
     const blob = new Blob([content], { type: `${webPackage.targetMediaType};charset=utf-8` });
     downloadBlob(blob, buildSafeFileName(stem, extension, '魔法少女速报'));
   };
+  const reportActions: ArenaWebReportAction[] = immersive ? [] : [
+    ...(showingWeb ? [{ id: 'reload', label: '↻ 重新加载', onClick: () => setReload((value) => value + 1), ariaLabel: '重新加载 Web 战报', title: '重新加载 Web 战报' }] : []),
+    ...(matchingResolution?.base ? [{ id: 'package', label: '⬇ 下载 Web 包 ZIP', disabled: !ready, onClick: () => { void downloadPackage(); } }] : []),
+    ...(webPackage ? [{ id: 'target', label: '⬇ 下载生成目标', disabled: !ready, onClick: downloadTarget }] : []),
+    { id: 'html', label: '🌐 下载 HTML', disabled: !ready || !webDocument || Boolean(webPackage) && packageLocation?.kind !== 'srcdoc', onClick: downloadHtml },
+  ];
   return (
     <>
       <div className="mb-4 flex flex-wrap items-end gap-3 text-sm">
@@ -629,56 +611,17 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
       {ready && matchingResolution?.compatibility && packageLocation ? <p className="mb-3 rounded-lg border border-amber-300/50 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-300/30 dark:bg-amber-950/30 dark:text-amber-100" role="status">
         当前使用的是不同版本的 Web 包，效果可能与生成时不一致。
       </p> : null}
-      {ready && webPackage && showReplayActions ? <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
-        {resolutionStatus === 'mismatch-available' && candidates.length > 1 ? <label className="flex min-w-0 flex-col gap-1">
-          选择兼容重放版本
-          <select
-            value={selectedCandidate?.digest ?? ''}
-            onChange={(event) => setCandidateChoice({ key: replayKey, digest: event.target.value })}
-            className="max-w-full rounded-lg border border-amber-400/60 bg-amber-50 px-3 py-2 text-amber-900"
-          >
-            <option value="" disabled>请选择版本与 digest</option>
-            {candidates.map((candidate) => <option key={candidate.digest} value={candidate.digest}>
-              {candidate.version} · {candidate.digest}
-            </option>)}
-          </select>
-        </label> : null}
-        {resolutionStatus === 'mismatch-available' ? <button
-          type="button"
-          disabled={!selectedCandidate}
-          onClick={() => { if (selectedCandidate) setCompatChoice({ key: replayKey, ref: selectedCandidate }); }}
-          className="rounded-lg border border-amber-400/60 bg-amber-50 px-3 py-1.5 font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50 dark:border-amber-300/40 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-950/70"
-        >
-          仍尝试使用此 Web 包
-        </button> : null}
-        <button
-          type="button"
-          disabled={importing}
-          onClick={() => importInputRef.current?.click()}
-          className="rounded-lg border border-white/20 bg-white/10 px-3 py-1.5 font-medium text-white hover:bg-white/20 disabled:opacity-60"
-        >
-          {importing ? '正在导入…' : '重新导入本地 Web 包'}
-        </button>
-        <input
-          ref={importInputRef}
-          type="file"
-          accept=".zip,application/zip"
-          className="hidden"
-          aria-label="重新导入本地 Web 包"
-          onChange={(event) => void handleImportArchive(event.target.files?.[0])}
-        />
-        {importFeedback?.message ? (
-          <span className="text-red-300" role="alert">
-            {importFeedback.message}
-            {importFeedback.hint ? <span className="block text-xs text-gray-400">{importFeedback.hint}</span> : null}
-          </span>
-        ) : null}
-        {importFeedback && importFeedback.diagnostics.length > 0 ? (
-          <ul className="text-xs text-gray-400">
-            {importFeedback.diagnostics.map((note) => <li key={note}>· {note}</li>)}
-          </ul>
-        ) : null}
-      </div> : null}
+      {ready && webPackage && (showReplayActions || importFeedback?.message || Boolean(importFeedback?.diagnostics.length)) ? <ArenaWebReplayControlsView
+        key={`${roomId ?? ''}:${replayKey}`}
+        status={resolutionStatus}
+        candidates={candidates}
+        selectedCandidateDigest={selectedCandidate?.digest ?? null}
+        onSelectCandidate={(digest) => setCandidateChoice({ key: replayKey, digest })}
+        onConfirmCompatibility={(ref) => setCompatChoice({ key: replayKey, ref })}
+        onImportFile={handleImportArchive}
+        importing={importing}
+        importFeedback={importFeedback}
+      /> : null}
       {ready && webPackage ? <p className="mb-3 text-xs text-gray-500">
         Web 包战报可下载 AI 生成的目标文件；预设或本地包的完整资源请使用「下载 Web 包 ZIP」或重新导入。
         {packageLocation?.kind === 'url' ? '当前通过隔离 URL 空间加载，不提供单文件 HTML 导出。' : null}
@@ -696,34 +639,7 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
           packageMode={webPackage ? (trust.trusted ? 'trusted' : 'restricted') : undefined}
           packageIdentity={`${matchingResolution?.base?.ref.digest ?? webPackage?.packageRef.digest}:${webPackage?.generatedDigest}`}
         />
-      ) : webPackage ? <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap break-words p-4 text-sm" aria-label="Web 包故事数据（安全文本）">{packageFallback}</pre> : undefined, <>
-        {showingWeb && !immersive ? <button
-          type="button"
-          onClick={() => setReload((value) => value + 1)}
-          className="save-button flex-1 bg-white/10 hover:bg-white/20 text-white py-2 px-4 rounded transition-all"
-          aria-label="重新加载 Web 战报"
-          title="重新加载 Web 战报"
-        >
-          ↻ 重新加载
-        </button> : null}
-        {!immersive && matchingResolution?.base ? <button type="button" disabled={!ready} onClick={() => void downloadPackage()} className="save-button flex-1 bg-white/10 hover:bg-white/20 text-white py-2 px-4 rounded transition-all">⬇ 下载 Web 包 ZIP</button> : null}
-        {!immersive && webPackage ? <button
-          type="button"
-          disabled={!ready}
-          onClick={downloadTarget}
-          className="save-button flex-1 bg-white/10 hover:bg-white/20 text-white py-2 px-4 rounded transition-all disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          ⬇ 下载生成目标
-        </button> : null}
-        {!immersive ? <button
-          type="button"
-          disabled={!ready || !webDocument || Boolean(webPackage) && packageLocation?.kind !== 'srcdoc'}
-          onClick={downloadHtml}
-          className="save-button flex-1 bg-white/10 hover:bg-white/20 text-white py-2 px-4 rounded transition-all disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          🌐 下载 HTML
-        </button> : null}
-      </>)}
+      ) : webPackage ? <ArenaWebSourceView source={packageFallback} label="Web 包故事数据（安全文本）" /> : undefined, <ArenaWebReportActions actions={reportActions} />)}
       {ready && accepted && riskProfile && trustDialogKey === riskProfile.fingerprint ? <WebPackageTrustDialog
         key={riskProfile.fingerprint}
         profile={riskProfile}

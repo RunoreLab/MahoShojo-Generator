@@ -815,6 +815,9 @@ importers:
       '@mahoshojo/local-library':
         specifier: workspace:*
         version: link:../local-library
+      '@mahoshojo/web-package':
+        specifier: workspace:*
+        version: link:../web-package
       '@types/mdast':
         specifier: ^4.0.4
         version: 4.0.4

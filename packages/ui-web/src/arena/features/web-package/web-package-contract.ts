@@ -1,0 +1,103 @@
+/**
+ * 共享 Web 包选择区块的 UI contract。
+ *
+ * 状态容器（单人 battle store / proposal editor session）由各自 adapter 持有；
+ * 共享视图只消费归一化 model，不 import store、Room controller 或网络 client。
+ * 异步 action 的同步锁、冻结输入、每次 await 后的 scope 检查和页面 busy/离开保护均属宿主；
+ * 视图只保留搜索、详情与删除确认状态，不另建库 IO 或导航守卫。宿主 scope 改变时以 key 重挂载。
+ *
+ * 「本地库」与「内置预设」是两个并列来源，不再像旧实现那样压进同一个网格：
+ * 前者可删可导出，后者随应用分发、不可删。
+ */
+
+import type { WebPackageRef } from '@mahoshojo/contracts/web-package';
+
+export type ArenaWebPackageOptionView = Readonly<{
+  digest: string;
+  title: string;
+  kind: 'builtin' | 'local' | 'unknown';
+  ref: WebPackageRef | null;
+  /** 来源身份行，通常是 `id@version`。 */
+  summary?: string | null;
+  /** 本地库条目：ZIP 字节数。 */
+  byteLength?: number | null;
+  /** 本地库条目：记录与字节不一致、已无法恢复。 */
+  broken?: boolean;
+  /**
+   * 只存在于本次会话 staging、尚未写入本地库。
+   * 导入默认不落盘，若这类包不可选，用户刚导入完就会看到"不可用的 Web 包"。
+   */
+  sessionOnly?: boolean;
+}>;
+
+export type ArenaWebPackageSectionCapabilities = Readonly<{
+  /** 本地 ZIP 导入：仅单人 source；多人不得展示为可发布共享配置。 */
+  importLocal: boolean;
+  /** 预设 ZIP 下载；与选择卡片分离，避免误触。 */
+  downloadPreset: boolean;
+  /** 当前选择的移除（回到自由 Web）。 */
+  remove: boolean;
+  /** 更换当前包（打开选择列表）。 */
+  replace: boolean;
+  /** 本地库管理（删除/导出）。多人模式下不存在，因此为 false。 */
+  manageLibrary: boolean;
+}>;
+
+export type ArenaWebPackageImportFeedback = Readonly<{
+  /** What went wrong, in the user's terms. */
+  message: string;
+  /** What to change; empty when the failure has no actionable remedy. */
+  hint: string;
+  /** Normalization and defaults applied during a successful import. */
+  diagnostics: readonly string[];
+}>;
+
+export type ArenaWebPackageSectionModel = Readonly<{
+  disabled: boolean;
+  /** reportFormat === 'web' 时才展示选择器细节；markdown 时保持简洁。 */
+  active: boolean;
+  selected: ArenaWebPackageOptionView | null;
+  /** 内置预设；始终可下载，不可删除。 */
+  presets: readonly ArenaWebPackageOptionView[];
+  /** 本地库条目；可删除、可导出。 */
+  library: readonly ArenaWebPackageOptionView[];
+  importFeedback: ArenaWebPackageImportFeedback | null;
+  /** 导出 ZIP 失败。与 `libraryError` 分开：一个是动作失败，一个是根本读不到列表。 */
+  downloadError: string | null;
+  /**
+   * 本地库列表或完整性探测读取失败。
+   *
+   * 必须与"本地库是空的"区分开：读失败时若仍提示"还没有本地 Web 包"，用户会以为
+   * 自己存的包被删了，从而重复导入或清站点数据。
+   */
+  libraryError: string | null;
+  importing: boolean;
+  /** 正在导出 ZIP 的条目 digest；null 表示空闲。 */
+  downloadingDigest: string | null;
+  /** 正在执行删除/导出的条目 digest。 */
+  busyDigest: string | null;
+  /** 受控导入选择；是否持久记忆由宿主决定，视图不读写偏好。 */
+  saveImportedToLibrary: boolean;
+  capabilities: ArenaWebPackageSectionCapabilities;
+  actions: Readonly<{
+    select(digest: string | null): void;
+    /** 只取消当前选择，不动本地库。 */
+    remove(): void;
+    downloadPreset(digest: string): Promise<void>;
+    downloadFromLibrary(digest: string): Promise<void>;
+    importFile(file: File | null | undefined): Promise<void | 'cancelled' | 'failed'>;
+    /**
+     * 失败/取消可返回 'failed'/'cancelled' 以保持确认；Web 旧 void port 仍兼容。失败原因由宿主写入 importFeedback。
+     * 预期失败写入 importFeedback；意外 rejection 由视图保留确认并提示，不隐式重试。
+     */
+    removeFromLibrary(digest: string): Promise<void | 'cancelled' | 'failed'>;
+    setSaveImportedToLibrary(next: boolean): void;
+    /**
+     * 重新读取本地库列表与挂载期水合。
+     *
+     * `libraryError` 目前只有"刷新页面"这一条恢复途径，用户拿不到任何可点的重试；
+     * 多人模式没有本地库，实现为 no-op。
+     */
+    reloadLibrary(): void;
+  }>;
+}>;

@@ -27,3 +27,9 @@ export { ArenaEditorWorkspaceLayout, type ArenaEditorWorkspaceSection } from './
 export { AdjudicatorSettingsPanel, type AdjudicatorSettingsPanelProps } from './AdjudicatorSettingsPanel';
 export { QuestionnaireLorePanel, type QuestionnaireLorePanelProps, type QuestionnaireLoreActionResult } from './QuestionnaireLorePanel';
 export { AdvancedArenaHeaderView, type AdvancedArenaHeaderViewProps } from './AdvancedArenaHeaderView';
+
+export { ArenaWebPackageSection } from './features/web-package/ArenaWebPackageSection';
+export { WebPackagePickerModal } from './features/web-package/WebPackagePickerModal';
+export { WebPackageCardGrid, type WebPackageCardItem } from './features/web-package/WebPackageCardGrid';
+export type { ArenaWebPackageOptionView, ArenaWebPackageSectionCapabilities, ArenaWebPackageImportFeedback, ArenaWebPackageSectionModel } from './features/web-package/web-package-contract';
+export type { ArenaWebPackageViewHost, WebPackageSavePreferenceProps } from './features/web-package/web-package-host';

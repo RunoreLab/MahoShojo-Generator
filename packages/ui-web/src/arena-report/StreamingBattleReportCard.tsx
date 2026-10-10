@@ -14,6 +14,7 @@ import { fixNestedListIndentation } from '../markdown/text';
 import { formatMarkdownImage, formatMarkdownLink, DENY_EXTERNAL_MEDIA } from '../markdown/text';
 import type { BattleReportHostPorts } from './ports';
 import { BattleReportLink } from './BattleReportLink';
+import { WEB_REPORT_SURFACE_BACKGROUND } from './report-surface';
 import {
     buildAdjudicationRecordMarkdown,
     hasAdjudicationRecordSection,
@@ -523,7 +524,7 @@ export const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps>
             className={`result-card relative${showingWeb ? ' before:hidden' : ''}`}
             style={{
                 background: showingWeb
-                    ? 'linear-gradient(180deg, #18181b 0%, #000000 100%)'
+                    ? WEB_REPORT_SURFACE_BACKGROUND
                     : 'linear-gradient(135deg, #434343 0%, #000000 100%)',
                 color: 'white',
                 padding: showingWeb ? 0 : '1.5rem',

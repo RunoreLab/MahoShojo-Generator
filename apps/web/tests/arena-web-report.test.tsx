@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ArenaReportFormatSelector, ArenaWebReport } from '@/components/arena/components/ArenaWebReport';
 import { SoloArenaWebPackageSection } from '@/components/arena/editor/features/web-package/SoloArenaWebPackageSection';
 import { downloadBlob } from '@/lib/client/blobUrl';
+import * as webPackageCache from '@/lib/web-package/cache';
 import { BattleResultPresentation } from '@/components/arena/components/BattleResultPresentation';
 import { BaseModal } from '@/components/shared/BaseModal';
 import {
@@ -244,6 +245,76 @@ describe('Web 战报的本地执行许可', () => {
     expect(container.textContent).not.toContain('不同版本的 Web 包');
     expect(container.querySelector('iframe')).toBeNull();
     expect(container.querySelector('pre')?.textContent).toContain('缺失包故事');
+  });
+
+  it('成功重导入精确 revision 后仍展示规范化诊断', async () => {
+    const content = '<!doctype html><html><body>导入已修复</body></html>';
+    const local = await buildLocalPackage('1.0.0', 'local.import-diagnostic');
+    stageLocalWebPackage(local);
+    const { generatedContent: _generated, ...artifact } = await createWebPackageOverlay(local.ref, content);
+    expect(_generated).toBe(content);
+    clearLocalWebPackageSessionStaging();
+    vi.spyOn(webPackageCache, 'importLocalWebPackageArchive').mockImplementation(async () => {
+      stageLocalWebPackage(local);
+      return { pkg: local, diagnostics: ['兼容入口已规范化，原包身份保留'] };
+    });
+    await act(async () => root.render(<ArenaWebReport roomId="import-diagnostic" ready content={content} webPackage={artifact}>
+      {(web, actions) => <section>{web}<div>{actions}</div></section>}
+    </ArenaWebReport>));
+    await waitForReact(() => { expect(container.querySelector('input[type="file"]')).toBeTruthy(); });
+    const file = new File(['test'], 'base.zip');
+    Object.defineProperty(file, 'arrayBuffer', { value: async () => new ArrayBuffer(0) });
+    await act(async () => {
+      const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+      Object.defineProperty(input, 'files', { configurable: true, value: [file] });
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await waitForReact(() => {
+      expect(container.textContent).toContain('受限模式（未授予本站同源权限）');
+      expect(container.querySelector('input[type="file"]')).toBeNull();
+    });
+    expect(container.textContent).toContain('兼容入口已规范化，原包身份保留');
+    expect(container.textContent).not.toContain('重新导入本地 Web 包');
+    expect(container.querySelector('iframe')).toBeNull();
+  });
+
+  it.each(['file-read', 'archive-import'] as const)('重导入在 %s 后切换结果 scope 不发布迟到诊断或重放', async (phase) => {
+    const content = '<!doctype html><html><body>受控导入</body></html>';
+    const local = await buildLocalPackage('1.0.0', 'local.import-scope');
+    stageLocalWebPackage(local);
+    const { generatedContent: _generated, ...artifact } = await createWebPackageOverlay(local.ref, content);
+    expect(_generated).toBe(content);
+    clearLocalWebPackageSessionStaging();
+    let finishRead!: (bytes: ArrayBuffer) => void;
+    let finishImport!: () => void;
+    const importArchive = vi.spyOn(webPackageCache, 'importLocalWebPackageArchive').mockImplementation(async () => {
+      if (phase === 'archive-import') await new Promise<void>((resolve) => { finishImport = resolve; });
+      return { pkg: local, diagnostics: ['迟到诊断不应出现在新结果'] };
+    });
+    const renderScope = async (roomId: string) => {
+      await act(async () => root.render(<ArenaWebReport roomId={roomId} ready content={content} webPackage={artifact}>
+        {(web, actions) => <section>{web}<div>{actions}</div></section>}
+      </ArenaWebReport>));
+    };
+    await renderScope('old-import-scope');
+    await waitForReact(() => { expect(container.querySelector('input[type="file"]')).toBeTruthy(); });
+    const file = new File(['test'], 'base.zip');
+    Object.defineProperty(file, 'arrayBuffer', { value: () => phase === 'file-read'
+      ? new Promise<ArrayBuffer>((resolve) => { finishRead = resolve; })
+      : Promise.resolve(new ArrayBuffer(0)) });
+    await act(async () => {
+      const input = container.querySelector<HTMLInputElement>('input[type="file"]')!;
+      Object.defineProperty(input, 'files', { configurable: true, value: [file] });
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(importArchive).toHaveBeenCalledTimes(phase === 'file-read' ? 0 : 1);
+    await renderScope('new-import-scope');
+    await act(async () => { if (phase === 'file-read') finishRead(new ArrayBuffer(0)); else finishImport(); });
+    expect(importArchive).toHaveBeenCalledTimes(phase === 'file-read' ? 0 : 1);
+    expect(container.textContent).not.toContain('迟到诊断不应出现在新结果');
+    expect(container.querySelector('iframe')).toBeNull();
+    expect(container.querySelector('pre')?.textContent).toContain('受控导入');
   });
 
   it('同 id 不同版本需显式选择兼容重放并展示不一致警告', async () => {

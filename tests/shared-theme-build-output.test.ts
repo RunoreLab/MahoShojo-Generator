@@ -136,6 +136,10 @@ const expectSharedOutput = (css: string, artifact: string): void => {
   expect(declarationsFor('.creator-workbench-shell .container'), artifact).toMatchObject({ 'max-width': 'none', padding: '0' });
   expect(declarationsFor('.creator-workbench-shell .card'), artifact).toMatchObject({ 'max-width': 'none', 'margin-top': '1rem' });
   expect(declarationsFor('.creator-workbench-shell .result-card'), artifact).toMatchObject({ 'max-width': 'none' });
+  // Result chrome keeps its common white foreground and content layer; the Web surface overrides only its background.
+  expect(declarationsFor('.result-card'), artifact).toMatchObject({ background: 'var(--app-result-card-bg)' });
+  expect(['white', '#fff', '#ffffff'], artifact).toContain(declarationsFor('.result-card').color);
+  expect(declarationsFor('.result-content'), artifact).toMatchObject({ position: 'relative', 'z-index': '1' });
   expect(declarationsFor('.creator-workbench-shell .creator-workbench-sidebar'), artifact).toMatchObject({ position: 'sticky', top: '24px', 'align-self': 'start' });
 };
 
@@ -158,6 +162,23 @@ const readDesktopBuiltCss = (): string | null => {
   if (cssFiles.length === 0) return null;
   return cssFiles.map((name) => readFileSync(path.join(assetDirectory, name), 'utf8')).join('\n');
 };
+
+describe('shared result surface CSS contract', () => {
+  it('keeps result card layout and white controls in the shared product stylesheet', () => {
+    const requireFromApp = createRequire(path.join(WEB_ROOT, 'package.json'));
+    const postcss = createRequire(requireFromApp.resolve('@tailwindcss/postcss'))('postcss') as typeof import('postcss');
+    const rules = postcss.parse(readFileSync(path.join(REPO_ROOT, 'packages/ui-web/src/product-shell.css'), 'utf8'));
+    const declarationsFor = (selector: string): Record<string, string> => {
+      const values: Record<string, string> = {};
+      rules.walkRules(selector, (rule) => { rule.walkDecls((decl) => { values[decl.prop] = decl.value; }); });
+      return values;
+    };
+    expect(declarationsFor('.result-card')).toMatchObject({ background: 'var(--app-result-card-bg)', color: 'white' });
+    expect(declarationsFor('.result-content')).toMatchObject({ position: 'relative', 'z-index': '1' });
+    expect(declarationsFor('.save-button')).toMatchObject({ color: 'white', background: 'rgba(255, 255, 255, 0.2)' });
+    expect(readFileSync(SHARED_STYLESHEET, 'utf8')).toContain('--app-result-card-bg:');
+  });
+});
 
 describe('shared theme reaches the Web production stylesheet', () => {
   it('compiles shared-only utilities and carries the shared theme tokens', async () => {
