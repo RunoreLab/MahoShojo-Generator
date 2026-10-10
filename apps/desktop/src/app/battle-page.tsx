@@ -62,7 +62,7 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
   const { state: cloudState, store: cloudStore } = useDesktopCloudSession();
   const target = resolveDesktopAiTarget(aiState.selection, aiState.profiles, aiState.generationOverrides, aiState.modelsByProfileId, aiState.presetsByProviderId);
   const hostedTarget = target.location === 'server';
-  const hostedUnavailable = !hostedTarget ? null : (!cloudState.bootstrapped ? '正在确认本机账号身份，请稍后。' : state.draft.generationMode !== 'stream' ? '服务器 Arena 当前仅支持流式输出，请明确选择流式。' : null);
+  const hostedUnavailable = hostedTarget && !cloudState.bootstrapped ? '正在确认本机账号身份，请稍后。' : null;
   const router = useRouter(); const { openFixed, openContent } = useExternalLinks(); const libraryHost = useDesktopCardLibraryHost();
   const [library, setLibrary] = useState<LibraryPurpose | null>(null);
   const [recoveryHint, setRecoveryHint] = useState<{ value: DesktopArenaHostedRecoveryHint; repair: ArenaHostedRecoveryReplacement; epoch: number } | null>(null);
@@ -239,7 +239,7 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
         const config = prepared.providerTarget.kind === 'preset'
           ? { presetConfig: { providerId: prepared.providerTarget.providerId, modelId: prepared.modelId, generationOverrides: prepared.generationOverrides } }
           : { systemConfig: { ...(prepared.modelId !== 'default' ? { modelId: prepared.modelId } : {}), generationOverrides: prepared.generationOverrides } };
-        await session.generateHosted({ invoke }, frozen, { mode: 'hosted', generationMode: 'stream', modelId: prepared.modelId, ...config }, actor, previousRequest, repair);
+        await session.generateHosted({ invoke }, frozen, { mode: 'hosted', generationMode: frozen.generationMode, modelId: prepared.modelId, ...config }, actor, previousRequest, repair);
         return;
       }
       if (!prepared.mode) return;
@@ -252,23 +252,25 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
     const pointer = session.hostedRecovery.getSnapshot().pointer;
     if (!pointer || disabled || diagnosisFlight.current || preparing.current || session.isBusy() || !cloudState.bootstrapped) return;
     if (pointer.actor.kind === 'account' && cloudState.account?.userId !== pointer.actor.expectedUserId) { setError('请先登录原生成账号，再显式恢复。不会切换到当前账号或匿名身份。'); return; }
-    if (!window.confirm(`${pointer.actor.kind === 'anonymous' ? '以原匿名身份' : '以原账号'}恢复服务器请求？不会重新创建或携带供应商 Key；当前结果将被恢复正文替换。`)) return;
+    if (!window.confirm(`${pointer.actor.kind === 'anonymous' ? '以原匿名身份' : '以原账号'}恢复服务器请求？不会重新创建或携带供应商 Key；当前结果将被恢复正文替换。${pointer.version === 2 && pointer.delivery === 'non-stream' ? ' 原完整非流式 JSON 及附加信息可能无法重新取得，建议先完整导出。' : ''}`)) return;
     void session.restoreHosted({ invoke }, pointer.requestId);
   };
-  const reasoning = state.reasoning ? { status: state.phase === 'generating' ? 'thinking' as const : 'done' as const, source: 'provider' as const, text: state.reasoning } : null;
+  const reasoning = state.hosted?.delivery === 'non-stream' && state.report?.aiReasoning ? state.report.aiReasoning : state.reasoning ? { status: state.phase === 'generating' ? 'thinking' as const : 'done' as const, source: 'provider' as const, text: state.reasoning } : null;
   const download = (filename: string, text: string, mimeType: string) => { try { downloadTextFile(filename, text, mimeType); } catch (cause) { reportError(cause); } };
   const exportAll = () => download('arena-complete.json', session.exportDocument(), 'application/json');
+  const hostedSummary = state.hosted ? (({ companion: _companion, ...summary }) => summary)(state.hosted) : null;
   const result = (state.rawText || state.reasoning || state.report) ? <section ref={resultRef} className="mt-6 space-y-4" aria-label="战报结果">
     {state.resultFormat === 'web' ? <><DesktopArenaWebResult key={`${scope}:${state.generation?.intent.requestId ?? 'restored'}`} state={state} owner={packageOwner} disabled={disabled} />{reasoning ? <AiReasoningPanel reasoning={reasoning} /> : null}</> : state.report && state.activeGenerationMode !== 'stream' ? <BattleReportCard report={{ ...state.report, aiReasoning: reasoning }} mode={state.report.mode} ports={{ mediaPolicy: DENY_EXTERNAL_MEDIA, onNavigateExternal: openContent, downloadMarkdown: (text: string, filename: string) => download(filename, text, 'text/markdown;charset=utf-8') }} />
       : state.markdown && state.activeGenerationMode === 'stream' ? <StreamingBattleReportCard aiReasoning={reasoning} reporterInfo={state.report?.reporterInfo} adjudicationResults={state.generation?.adjudicationResults} content={state.markdown} mode={state.generation?.input.battleMode ?? draft.battleMode} isStreaming={state.phase === 'generating'} onStopGeneration={() => session.cancel()} ports={{ mediaPolicy: DENY_EXTERNAL_MEDIA, onNavigateExternal: openContent, downloadMarkdown: (text: string, filename: string) => download(filename, text, 'text/markdown;charset=utf-8') }} /> : null}
     {state.resultFormat !== 'web' && !(state.markdown && state.activeGenerationMode === 'stream') && !state.report && reasoning ? <AiReasoningPanel reasoning={reasoning} /> : null}
     <details><summary>{state.hosted ? '服务器收到的正文（控制元数据单独保留）' : '完整原始输出（含元数据）'}</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap break-all">{state.rawText}</pre></details>
     {state.hosted ? <div className="space-y-2" aria-label="服务器生成状态">
-      <p role="status">连接：{state.hosted.connectionState}；{state.hosted.terminal?.event === 'done' ? '服务器任务终态' : '最近服务响应状态'}：{state.hosted.serverStatus ?? '尚未确认'}。角色签名更新尚未接入；连接或恢复错误不表示任务已取消。</p>
+      <p role="status">连接：{state.hosted.connectionState}；{state.hosted.terminal?.event === 'done' || (state.hosted.companionState === 'complete' && state.hosted.serverStatus === 'completed') ? '服务器任务终态' : '最近服务响应状态'}：{state.hosted.serverStatus ?? '尚未确认'}。角色签名更新尚未接入；连接或恢复错误不表示任务已取消。</p>
       {state.hosted.metadataState !== 'available' ? <p role="status">本次判定、记者等附加元数据未取得；服务器可能已经执行判定，恢复时不会在本机重掷。</p> : null}
       {state.hosted.recoveryCredentialState === 'memory-only' ? <p role="alert">匿名恢复凭据保存失败，当前任务可继续；关闭应用后可能无法恢复，请完整导出。</p> : null}
       {state.hosted.validationMessage ? <p role="status">{state.hosted.validationMessage}</p> : null}
-      <details><summary>服务器公开元数据与终态</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap break-all">{JSON.stringify(state.hosted, null, 2)}</pre></details>
+      {state.hosted.companionState === 'complete' ? <p role="status">完整非流式报告与附加元数据已保留；服务端判定 {state.hosted.companion?.metadata?.adjudicationResults?.length ?? 0} 条。完整导出包含全部原字段，状态面板不重复展开大体积 JSON。</p> : null}
+      <details><summary>服务器公开元数据与终态</summary><pre className="max-h-96 overflow-auto whitespace-pre-wrap break-all">{JSON.stringify(state.hosted.delivery === 'non-stream' ? hostedSummary : state.hosted, null, 2)}</pre></details>
     </div> : null}
     <div className="flex flex-wrap gap-3">
       {session.canAppendHostedHistory() ? <button className={secondary} type="button" disabled={disabled} onClick={() => session.appendHostedHistory()}>将本次正文加入活动历史</button> : null}
@@ -286,7 +288,7 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
           <p className="text-xs">已引用 {draft.historyReferences.length} 条；活动历史 {draft.narrativeHistoryEntries.length} 条</p>
   </>;
   const slots = {
-        header: <BattleLiteHeaderView logo={<ThemeImage lightSrc="/arena-black.svg" darkSrc="/arena-white.svg" width={300} height={84} alt="魔法少女竞技场" />} description="选择角色，生成属于他们的故事。" helper={product === 'arena' ? '桌面高级单次 · 本机独立工作稿 · 客户端 Direct' : '桌面简洁版 · 本机工作副本 · Direct / 服务器流式'} />,
+        header: <BattleLiteHeaderView logo={<ThemeImage lightSrc="/arena-black.svg" darkSrc="/arena-white.svg" width={300} height={84} alt="魔法少女竞技场" />} description="选择角色，生成属于他们的故事。" helper={product === 'arena' ? '桌面高级单次 · 本机独立工作稿 · 客户端 Direct' : '桌面简洁版 · 本机工作副本 · Direct / 服务器生成'} />,
         rankingLinks: null, pageLinks: product === 'battle' ? <a className="footer-link" href="#/arena" onClick={(event) => { event.preventDefault(); navigateByProductHref(router, '/arena'); }}>高级单次配置</a> : null,
         presets: <PresetGridPicker title="预设角色" presets={PRESET_LIST} currentPage={presetPage} onPageChange={setPresetPage} disabled={disabled} maxSelected={limits.maxCombatants} selectedCountOverride={draft.combatants.length} selectedFilenames={draft.combatants.filter((item) => item.isPreset).map((item) => item.filename)} onToggle={(preset) => togglePreset(preset.filename)} />,
         database: <button type="button" className={secondary} disabled={disabled} onClick={() => openLibrary('character')}>选择本地 / 公开角色</button>,
@@ -306,13 +308,13 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
           {product === 'battle' ? settings : null}
           <p className="text-xs">{product === 'arena' ? '手动及角色、主辅情景' : '角色与主情景继承'} {inheritedAdjudication.events.length} {hostedTarget ? '个随机判定由服务器在创建时执行，本机不会重掷；素材内判定不执行。' : '个随机判定每次生成只在本机掷骰一次，非服务器权威；素材内判定不执行。'}</p>
           {inheritedAdjudication.skippedLegacy ? <p role="status">{inheritedAdjudication.skippedLegacy} 个旧版随机事件格式不受支持，保留原字段但不执行。</p> : null}
-          <fieldset disabled={!guard.ready} className="min-w-0"><DesktopAiProviderPanel generationMode={draft.generationMode} onDirtyChange={onAiDirty} showConnectionTest={false} copy={{ serverOutput: { stream: '', nonStream: '' }, emptyProfilesHint: '请配置客户端连接。', serverFootnote: 'Arena 服务器目前仅支持流式创建、恢复与停止；角色签名更新和非流式 JSON 待接入。', payloadNoun: '角色与故事设定' }} /></fieldset>
-          {hostedTarget ? <p role="status">官方服务器流式生成。创建前验证支持与原账号；不会自动改为客户端执行。</p> : null}
+          <fieldset disabled={!guard.ready} className="min-w-0"><DesktopAiProviderPanel generationMode={draft.generationMode} onDirtyChange={onAiDirty} showConnectionTest={false} copy={{ serverOutput: { stream: '', nonStream: '' }, emptyProfilesHint: '请配置客户端连接。', serverFootnote: 'Arena 服务器支持流式或完整非流式报告；恢复与停止沿原请求，角色签名更新尚未接入。', payloadNoun: '角色与故事设定' }} /></fieldset>
+          {hostedTarget ? <p role="status">官方服务器生成。创建前验证所选交付协议与原账号；不会自动改为客户端执行。</p> : null}
         </>,
         generationMode: <>
           <ArenaReportFormatSelectorView value={draft.reportFormat} disabled={disabled} onChange={(reportFormat) => update({ reportFormat })} webDescription="生成网页或包目标源码；本片仅验证、保存与导出，隔离运行待 D4 验收。" />
           {draft.reportFormat === 'web' ? <DesktopArenaWebPackageControls key={`${product}:${scope}`} owner={packageOwner} selectedRef={draft.webPackageRef} disabled={disabled} onSelect={(webPackageRef) => { const next = { ...session.getSnapshot().draft, webPackageRef }; delete next.webPackagePromptProjection; session.updateDraft(next); }} /> : null}
-          <GenerationModeSwitcher optionDescriptions={{ stream: '生成时逐步显示正文；Web 输出仅显示安全源码，隔离运行仍待验。' }} value={draft.generationMode} disabled={disabled} disabledReasons={hostedTarget ? { 'non-stream': '服务器 Arena 非流式 JSON 尚待接入，请明确选择流式。' } : undefined} onChange={(generationMode) => update({ generationMode })} helper={hostedTarget ? '服务器逐步返回战报；流断开可按原请求恢复，停止需服务器确认。' : draft.reportFormat === 'web' ? '两种方式都生成相同 Web 目标；流式期间只显示安全源码，不执行内容。' : '非流式输出结构化战报；流式逐步显示 Markdown。'} />
+          <GenerationModeSwitcher optionDescriptions={{ stream: '生成时逐步显示正文；Web 输出仅显示安全源码，隔离运行仍待验。' }} value={draft.generationMode} disabled={disabled} onChange={(generationMode) => update({ generationMode })} helper={hostedTarget ? '流式逐步返回正文；非流式等待完整报告与附加元数据。连接断开只恢复原任务可用内容，停止需服务器确认。' : draft.reportFormat === 'web' ? '两种方式都生成相同 Web 目标；流式期间只显示安全源码，不执行内容。' : '非流式输出结构化战报；流式逐步显示 Markdown。'} />
         </>,
         actions: <>
           {state.pendingRestore ? <p role="status">发现本机草稿。<button type="button" className={secondary} onClick={() => session.restoreDraft()}>恢复草稿</button><button type="button" className={secondary} onClick={() => { if (window.confirm('清除旧草稿？此操作不会删除本地库。')) session.discardDraft(); }}>清除草稿</button></p> : null}
@@ -340,7 +342,7 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
         footer: <ProductFooter assetSource={{ baseUrl: '/' }} onNavigateInternal={(href) => navigateByProductHref(router, href)} resolveInternalHref={resolveInternalHrefForHashHistory} onNavigateExternal={openFixed} />,
   };
   return <>
-    {product === 'arena' ? <AdvancedArenaPageView header={<AdvancedArenaHeaderView logo={<ThemeImage lightSrc="/arena-black.svg" darkSrc="/arena-white.svg" width={320} height={90} alt="魔法少女竞技场" />} description="桌面高级单次 · 角色、主辅情景与故事设定" guideChildren={<p>配置输入后生成单次战报。此页使用独立本机草稿，支持客户端 Direct、官方服务器流式与 Web 源码生成/验证/导出；隔离运行、连续故事、插图和服务器角色签名更新尚未开放。<button className="footer-link" type="button" onClick={() => navigateByProductHref(router, '/battle')}>前往简洁版</button></p>} />} result={result} homeLink={slots.homeLink} footer={slots.footer}>
+    {product === 'arena' ? <AdvancedArenaPageView header={<AdvancedArenaHeaderView logo={<ThemeImage lightSrc="/arena-black.svg" darkSrc="/arena-white.svg" width={320} height={90} alt="魔法少女竞技场" />} description="桌面高级单次 · 角色、主辅情景与故事设定" guideChildren={<p>配置输入后生成单次战报。此页使用独立本机草稿，支持客户端 Direct、官方服务器流式/非流式报告与 Web 源码生成/验证/导出；隔离运行、连续故事、插图和服务器角色签名更新尚未开放。<button className="footer-link" type="button" onClick={() => navigateByProductHref(router, '/battle')}>前往简洁版</button></p>} />} result={result} homeLink={slots.homeLink} footer={slots.footer}>
       <ArenaEditorWorkspaceLayout disabled={disabled} sections={[
         { kind: 'presets', title: '🎴 预设角色', column: 'left', description: '选择内置角色', defaultOpen: true, content: slots.presets },
         { kind: 'database', title: '📚 角色库', column: 'left', description: '本地、公开或缓存副本', defaultOpen: true, content: slots.database },

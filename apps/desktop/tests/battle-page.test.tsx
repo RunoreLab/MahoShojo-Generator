@@ -183,10 +183,10 @@ describe('Desktop /battle journey against loopback fixture', () => {
     expect([...document.querySelectorAll('button')].some((item) => item.textContent?.includes('新建自定义连接'))).toBe(false);
     expect(mocks.invoke.mock.calls.some(([command]) => ['save_provider_profile', 'set_provider_secret'].includes(command))).toBe(false);
   });
-  it('server non-stream stays explicitly unavailable while inputs remain editable without Direct fallback', async () => {
+  it('server non-stream is selectable without dispatching or falling back to Direct', async () => {
     localStorage.setItem(DESKTOP_AI_CONFIG_STORAGE_KEY, JSON.stringify({ version: 2, selection: { executionPreference: 'server', clientConnectionId: 'loopback' }, hiddenPresetIds: [] }));
     saveDraft(draft('daily', 'non-stream')); await mount(); await click('恢复草稿');
-    expect(container.textContent).toContain('服务器 Arena 当前仅支持流式输出'); expect(button('生成战报').disabled).toBe(true);
+    expect(container.textContent).toContain('官方服务器生成'); expect(button('生成战报').disabled).toBe(false);
     expect(document.querySelector<HTMLInputElement>('#arena-story-guidance')?.disabled).toBe(false); expect(calls()).toHaveLength(0);
   });
   it('missing configuration leaves shared inputs editable and connection edits join the single close guard', async () => {
@@ -467,7 +467,7 @@ describe('Desktop Web source journey with execution closed', () => {
     await act(async () => getDesktopAiConfigStore().selectExecutionLocation('server')); await settle(); finish(archive.slice().buffer); await settle();
     expect(mocks.invoke.mock.calls.filter(([command]) => command === 'save_web_package')).toHaveLength(writes); expect(packageDocs.size).toBe(0);
     expect(JSON.parse(localStorage.getItem(ARENA_DRAFT_KEY)!).draft.webPackageRef).toEqual(base.ref);
-    expect(document.body.textContent).toContain('官方服务器流式生成'); expect(mocks.invoke.mock.calls.some(([command]) => command === 'open_web_package_instance')).toBe(false);
+    expect(document.body.textContent).toContain('官方服务器生成'); expect(mocks.invoke.mock.calls.some(([command]) => command === 'open_web_package_instance')).toBe(false);
   });
 
   it.each(['cancel', 'EOF', 'target'] as const)('Web package %s retains partial source with no success artifact, history or duplicate execution', async (ending) => {
