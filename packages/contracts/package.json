@@ -119,7 +119,8 @@
       "types": "./src/arena-reconciliation.ts",
       "import": "./src/arena-reconciliation.ts",
       "default": "./src/arena-reconciliation.ts"
-    }
+    },
+    "./desktop-arena-story": "./src/desktop-arena-story.ts"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",

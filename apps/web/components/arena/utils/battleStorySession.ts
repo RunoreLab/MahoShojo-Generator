@@ -1,13 +1,12 @@
 'use client';
 
 import { randomUUID } from '@/lib/crypto';
-import { formatBattleStoryChapterProgress } from '@/lib/ai-session/battle-story/plan';
+import {
+  createBattleStoryExportMarkdownWriter,
+  projectBattleStoryExportChapter,
+} from '@mahoshojo/domain/arena-story-export';
 import { normalizeUsage } from '@/lib/arena/battle-report-log-utils';
 import { normalizeCustomStoryLength } from '@/lib/story-length';
-import {
-  buildAdjudicationRecordMarkdown,
-  hasAdjudicationRecordSection,
-} from '@/lib/adjudicator/presentation';
 import type {
   BattleStoryCheckpointRecord,
   BattleStoryChapterCardSnapshot,
@@ -442,51 +441,14 @@ export const buildBattleStoryExportMarkdown = (
     .filter((chapter) => chapter.status !== 'superseded')
     .sort((left, right) => left.index - right.index);
 
-  const header = [
-    `# ${normalizeText(session.title) || '未命名连续战报'}`,
-    '',
-    `> 模式：${session.source.mode}｜语言：${session.source.language}｜${
-      session.chapterPlan ? '章节进度' : '章节数'
-    }：${formatBattleStoryChapterProgress({
-      completedChapterCount: activeChapters.length,
-      chapterPlan: session.chapterPlan,
-    })}`,
-    `> 会话 ID：${session.id}`,
-  ];
-
-  if (session.branchLabel) {
-    header.push(`> 分支标签：${session.branchLabel}`);
-  }
-
-  if (session.branchOf?.sessionId && session.branchOf?.chapterId) {
-    header.push(
-      `> 分支来源：${session.branchOf.sessionId} / ${session.branchOf.chapterId} / 第 ${session.branchOf.chapterIndex} 章${
-        session.branchOf.chapterTitle ? `《${session.branchOf.chapterTitle}》` : ''
-      }`
-    );
-  }
-  if (session.sessionSummary) {
-    header.push('');
-    header.push('## 会话摘要');
-    header.push(session.sessionSummary.trim());
-  }
-
-  const chapterBlocks = activeChapters
-    .map((chapter) => {
-      const baseMarkdown = chapter.markdown.trim();
-      const snapshot = resolveBattleStoryChapterCardSnapshot(chapter);
-      const adjudicationSection = hasAdjudicationRecordSection(baseMarkdown)
-        ? ''
-        : buildAdjudicationRecordMarkdown(snapshot?.adjudicationResults);
-
-      if (!adjudicationSection) return baseMarkdown;
-      return `${baseMarkdown}\n\n---\n\n${adjudicationSection}`;
-    })
-    .filter(Boolean);
-
-  return [...header, '', '---', '', chapterBlocks.join('\n\n---\n\n')]
-    .filter(Boolean)
-    .join('\n');
+  const writer = createBattleStoryExportMarkdownWriter(session, activeChapters.length);
+  return [
+    writer.header,
+    ...activeChapters.map((chapter) => writer.writeChapter(projectBattleStoryExportChapter({
+      markdown: chapter.markdown,
+      cardSnapshot: resolveBattleStoryChapterCardSnapshot(chapter),
+    }))),
+  ].join('');
 };
 
 export const cloneBattleStoryActiveChaptersForNewSession = (input: {

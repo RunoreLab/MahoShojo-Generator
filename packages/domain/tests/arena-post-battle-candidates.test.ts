@@ -1,9 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   projectUnsignedArenaPostBattleCandidates,
+  planUnsignedArenaPostBattleCandidates,
+  prepareUnsignedArenaPostBattleCandidates,
   type ArenaPostBattleCandidateContext,
   type ArenaPostBattleCandidateInput,
 } from '../src/arena-post-battle-candidates';
+import { BattleStoryCommitByteLimitError, freezeBattleStoryCommit, countBattleStoryCommitJsonBytes } from '../src/arena-story-commit';
 import { materializeArenaNarrativeHistoryForRequest } from '../src/narrative-history-operations';
 
 const context: ArenaPostBattleCandidateContext = {
@@ -131,5 +134,90 @@ describe('unsigned Arena candidates without persistence', () => {
   it('rejects a noncanonical generation instead of splitting narrative and character replay identity', () => {
     expect(() => projectUnsignedArenaPostBattleCandidates(input, { ...context, generationId: ' request-1 ' }))
       .toThrow('original scope, request, generation and fixed time');
+  });
+});
+
+
+describe('budgeted copy-on-write post-battle plan', () => {
+  it('uses the real projection and preserves legacy/unknown data without cloning or freezing the source', () => {
+    const source = structuredClone(input);
+    const before = structuredClone(source);
+    const legacy = projectUnsignedArenaPostBattleCandidates(source, context);
+    const plan = planUnsignedArenaPostBattleCandidates(source, context);
+    expect(plan).toEqual(legacy);
+    expect(source).toEqual(before);
+    const sourceData = (source.combatants[0] as { data: Record<string, unknown> }).data;
+    expect(plan.characterEffects[0]!.data.custom).toBe(sourceData.custom);
+    expect(legacy.characterEffects[0]!.data.custom).not.toBe(sourceData.custom);
+    expect((plan.characterEffects[0]!.data.arena_history as { entries: unknown[] }).entries[0])
+      .toBe((sourceData.arena_history as { entries: unknown[] }).entries[0]);
+    expect(Object.isFrozen(sourceData.custom)).toBe(false);
+    expect(Object.isFrozen(source.narrativeHistory.entries)).toBe(false);
+    // The old public API still owns independent mutable nested copies.
+    (legacy.characterEffects[0]!.data.custom as Record<string, unknown>).signature = 'candidate-only';
+    expect(source).toEqual(before);
+  });
+
+  it('rejects editable page input without implicitly freezing it or assembling a payload', () => {
+    const source = structuredClone(input);
+    const assemble = vi.fn((plan) => ({ plan }));
+    expect(() => prepareUnsignedArenaPostBattleCandidates(source, context, { maxBytes: 1024, assemble }))
+      .toThrow('已冻结的独立生成输入');
+    expect(assemble).not.toHaveBeenCalled();
+    expect(Object.isFrozen(source)).toBe(false);
+    expect(Object.isFrozen(source.combatants)).toBe(false);
+    (source.report as Record<string, unknown>).extra = 'draft stays editable';
+    expect(source.report.extra).toBe('draft stays editable');
+  });
+
+  it('counts the actual assembled payload once, then materializes or streams that frozen graph', () => {
+    const source = freezeBattleStoryCommit(structuredClone(input));
+    const assemble = vi.fn((plan) => ({ checkpoint: plan.characterEffects, extra: { wholeEnvelope: '中😀\u0000' }, history: plan.narrativeHistory }));
+    const prepared = prepareUnsignedArenaPostBattleCandidates(source, context, { maxBytes: 32_768, assemble });
+    expect(assemble).toHaveBeenCalledTimes(1);
+    expect(prepared.byteLength).toBe(Buffer.byteLength(JSON.stringify(prepared.value)));
+    const copy = prepared.materialize();
+    expect(copy).toEqual(prepared.value);
+    expect(countBattleStoryCommitJsonBytes(copy)).toBe(prepared.byteLength);
+    expect(copy.checkpoint[0]!.data.custom).not.toBe(prepared.value.checkpoint[0]!.data.custom);
+    expect(Object.isFrozen(prepared.value.checkpoint[0]!.data.custom)).toBe(true);
+    const decoder = new TextDecoder();
+    let encoded = '';
+    for (const bytes of prepared.chunks(113)) encoded += decoder.decode(bytes, { stream: true });
+    encoded += decoder.decode();
+    expect(JSON.parse(encoded)).toEqual(JSON.parse(JSON.stringify(prepared.value)));
+    expect(() => prepareUnsignedArenaPostBattleCandidates(source, context, {
+      maxBytes: prepared.byteLength - 1, assemble,
+    })).toThrow(BattleStoryCommitByteLimitError);
+  });
+
+  it('rejects amplified guidance before any deep clone or whole-object stringify', () => {
+    const source = freezeBattleStoryCommit({
+      ...structuredClone(input),
+      combatants: Array.from({ length: 32 }, (_, index) => ({ data: {
+        name: `角色${index}`, custom: { signature: '用户扩展' },
+        arena_history: { attributes: { world_line_id: `world-${index}` }, entries: [{ id: 'legacy', unknown: true }] },
+      } })),
+      userGuidance: '\u0000'.repeat(64 * 1024),
+    });
+    const stringify = JSON.stringify;
+    const stringifySpy = vi.spyOn(JSON, 'stringify').mockImplementation(((value: unknown) => {
+      if (typeof value === 'object' || (typeof value === 'string' && value.length > 8_192)) {
+        throw new Error('clone or unbounded serialization before budget');
+      }
+      return stringify(value);
+    }) as typeof JSON.stringify);
+    const cloneSpy = vi.spyOn(globalThis, 'structuredClone').mockImplementation(() => {
+      throw new Error('deep clone before budget');
+    });
+    try {
+      // 32 histories retain the full guidance; the small policy rejects before materialization.
+      expect(() => prepareUnsignedArenaPostBattleCandidates(source, context, {
+        maxBytes: 128 * 1024,
+        assemble: (plan) => ({ checkpoint: { combatants: plan.characterEffects.map(({ data }) => ({ data })) } }),
+      })).toThrow(BattleStoryCommitByteLimitError);
+      expect(cloneSpy).not.toHaveBeenCalled();
+      expect(source.userGuidance).toHaveLength(64 * 1024);
+    } finally { stringifySpy.mockRestore(); cloneSpy.mockRestore(); }
   });
 });

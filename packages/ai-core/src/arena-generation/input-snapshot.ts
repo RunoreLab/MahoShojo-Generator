@@ -1,6 +1,7 @@
 import type { WebPackageRef, WebPackagePromptProjection } from '@mahoshojo/contracts/web-package';
 import type { NarrativeHistoryEntry } from '@mahoshojo/domain/arena-types';
 import { materializeArenaNarrativeHistoryForRequest } from '@mahoshojo/domain/narrative-history-operations';
+import { buildBattleStoryArenaRequest, type BattleStoryArenaRequestInput } from '@mahoshojo/domain/arena-battle-story-request';
 
 export type ArenaGenerationSnapshotSettings = Readonly<{
   userGuidance: string;
@@ -114,3 +115,16 @@ export const buildArenaGenerationInputSnapshot = (input: ArenaGenerationInputSna
     questionnaires,
   };
 };
+
+/** Controlled story seam. Arbitrary draft extensions never become internal guidance.
+ * Uses the same business fields as Hosted session generation, with Direct output policy.
+ */
+export const buildArenaStoryGenerationInputSnapshot = (story: BattleStoryArenaRequestInput) => ({
+  ...buildBattleStoryArenaRequest(story),
+  reportFormat: 'markdown' as const,
+  arenaFreeRankingEnabled: false,
+  webPackageRef: undefined,
+  webPackagePromptProjection: undefined,
+  scenarioTitle: undefined,
+  isDowngrade: false,
+});

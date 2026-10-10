@@ -1,3 +1,8 @@
+import { createBattleStoryReadFence, type BattleStoryReadToken } from './fence';
+
+export { createBattleStoryReadFence } from './fence';
+export type { BattleStoryReadFence, BattleStoryReadToken } from './fence';
+
 /** The reader retains each host's complete records; these are read/sort keys, not a storage schema. */
 type SessionKeys = { id: string; lastChapterId?: string | null };
 type ChapterKeys = { id: string; index: number };
@@ -43,28 +48,23 @@ export function createBattleStorySessionReader<S extends SessionKeys, C extends 
     selection(snapshot: BattleStorySelectionSnapshot<S, C, K>): void;
   },
 ): BattleStorySessionReader<S> {
-  let disposed = false;
-  let selectionGeneration = 0;
-  let listGeneration = 0;
-  let scopeGeneration = 0;
-  const isCurrentSelection = (generation: number) => !disposed && generation === selectionGeneration;
+  const fence = createBattleStoryReadFence<'list' | 'selection'>();
 
   const refreshList = async (): Promise<S[] | null> => {
-    if (disposed) return null;
-    const generation = ++listGeneration;
-    const scope = scopeGeneration;
+    const token = fence.begin('list');
+    if (!token) return null;
     try {
       const sessions = await ports.listSessions({ limit: 100, direction: 'prev' });
-      if (disposed || scope !== scopeGeneration) return null;
-      if (generation === listGeneration) publish.list(sessions);
+      if (!token.isInScope()) return null;
+      if (token.isCurrent()) publish.list(sessions);
       return sessions;
     } catch (error) {
-      if (disposed || generation !== listGeneration) return null;
+      if (!token.isCurrent()) return null;
       throw error;
     }
   };
 
-  const readSelection = async (id: string | null, generation: number, onError?: (error: unknown) => void) => {
+  const readSelection = async (id: string | null, token: BattleStoryReadToken, onError?: (error: unknown) => void) => {
     try {
       const [session, chapters, checkpoints] = id
         ? await Promise.all([
@@ -73,7 +73,7 @@ export function createBattleStorySessionReader<S extends SessionKeys, C extends 
           ports.listCheckpoints(id, { direction: 'next', limit: 400 }),
         ])
         : [null, [], []] as const;
-      if (!isCurrentSelection(generation)) return;
+      if (!token.isCurrent()) return;
       const sortedChapters = session ? [...chapters].sort((left, right) => left.index - right.index) : [];
       const sortedCheckpoints = session ? [...checkpoints].sort((left, right) => left.boundaryIndex - right.boundaryIndex) : [];
       // Publish the whole Promise.all snapshot together; a rejected read preserves the old selection.
@@ -83,9 +83,9 @@ export function createBattleStorySessionReader<S extends SessionKeys, C extends 
         checkpoints: sortedCheckpoints,
         selectedChapterId: session?.lastChapterId ?? sortedChapters.at(-1)?.id ?? null,
       });
-      if (isCurrentSelection(generation)) ports.writePreferredId(session?.id ?? null);
+      if (token.isCurrent()) ports.writePreferredId(session?.id ?? null);
     } catch (error) {
-      if (!isCurrentSelection(generation)) return;
+      if (!token.isCurrent()) return;
       // Interactive errors publish inside the fence, rather than in a later host catch microtask.
       if (onError) onError(error);
       else throw error;
@@ -95,37 +95,38 @@ export function createBattleStorySessionReader<S extends SessionKeys, C extends 
   return {
     refreshList,
     select: (id, onError) => {
-      if (disposed) return Promise.resolve();
       // Reserve the intent before the first await, including explicit clear.
-      return readSelection(id, ++selectionGeneration, onError);
+      const token = fence.begin('selection');
+      return token ? readSelection(id, token, onError) : Promise.resolve();
     },
     captureSelection: () => {
-      const generation = selectionGeneration;
-      return (id) => isCurrentSelection(generation)
-        ? readSelection(id, ++selectionGeneration)
-        : Promise.resolve();
+      const captured = fence.capture('selection');
+      return (id) => {
+        if (!captured.isCurrent()) return Promise.resolve();
+        const token = fence.begin('selection');
+        return token ? readSelection(id, token) : Promise.resolve();
+      };
     },
     restore: async ({ onError, onReady }) => {
-      if (disposed) return;
       // This SAME intent spans list + detail. A late list cannot supersede a manual selection.
-      const generation = ++selectionGeneration;
-      const scope = scopeGeneration;
+      const token = fence.begin('selection');
+      if (!token) return;
       try {
         const pendingList = refreshList();
-        const restoreListGeneration = listGeneration;
+        const listToken = fence.capture('list');
         const sessions = await pendingList;
-        if (!sessions || restoreListGeneration !== listGeneration || !isCurrentSelection(generation)) return;
+        if (!sessions || !listToken.isCurrent() || !token.isCurrent()) return;
         // No preference chooses the first row; a missing preferred record must not fall back.
         const id = ports.readPreferredId() ?? sessions[0]?.id ?? null;
-        await readSelection(id, generation, onError);
+        await readSelection(id, token, onError);
       } catch (error) {
-        if (isCurrentSelection(generation)) onError(error);
+        if (token.isCurrent()) onError(error);
       } finally {
         // A manual selection may supersede restoration, but initialization has still settled.
-        if (!disposed && scope === scopeGeneration) onReady();
+        if (token.isInScope()) onReady();
       }
     },
-    invalidate: () => { scopeGeneration += 1; selectionGeneration += 1; listGeneration += 1; },
-    dispose: () => { disposed = true; scopeGeneration += 1; selectionGeneration += 1; listGeneration += 1; },
+    invalidate: fence.invalidate,
+    dispose: fence.dispose,
   };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { advanceBattleStorySaveEvidence, buildCompletedBattleStoryCommit, captureBattleStoryCommitExpected, digestBattleStoryCommitValue, freezeBattleStoryCommit } from '../src/arena-story-commit';
+import { advanceBattleStorySaveEvidence, buildCompletedBattleStoryCommit, buildCompletedBattleStoryRecords, captureBattleStoryCommitExpected, digestBattleStoryCommitValue, freezeBattleStoryCommit } from '../src/arena-story-commit';
 
 const session = {
   id: 'session', title: '原标题', createdAt: 1, updatedAt: 1, source: { mode: 'daily' },
@@ -62,4 +62,30 @@ describe('completed battle story commit rules', () => {
     expect(() => captureBattleStoryCommitExpected({ session: first.session, chapters: [first.chapter], checkpoint: { ...first.checkpoints[1]!, chapterId: 'other' } })).toThrow();
     expect(captureBattleStoryCommitExpected({ session: first.session, chapters: [first.chapter], checkpoint: null }).checkpointDigest).toBe(digestBattleStoryCommitValue(null));
   });
+  it('shares exact record assembly with Native without inventing a Web content-CAS expectation', () => {
+    const input = {
+      action: 'start' as const, session, operationId: 'chapter1', checkpointId: 'cp1', initialCheckpointId: 'cp0',
+      now: 2, source: session.source, inputCombatants: session.workingCombatants, generated,
+    };
+    const records = buildCompletedBattleStoryRecords(input);
+    const commit = buildCompletedBattleStoryCommit({ ...input, expected: null });
+    expect(records).toEqual({ session: commit.session, chapter: commit.chapter, checkpoints: commit.checkpoints });
+    expect(commit).toEqual(start());
+    expect(records).not.toHaveProperty('expected');
+    const next = {
+      ...input, action: 'continue' as const, session: records.session,
+      operationId: 'chapter2', checkpointId: 'cp2', inputCombatants: records.session.workingCombatants,
+      now: 3, generated: { ...generated, chapterIndex: 2 },
+    };
+    const expected = captureBattleStoryCommitExpected({ session: records.session, chapters: [records.chapter], checkpoint: records.checkpoints[1]! });
+    const nextCommit = buildCompletedBattleStoryCommit({ ...next, expected });
+    expect(buildCompletedBattleStoryRecords(next)).toEqual({
+      session: nextCommit.session, chapter: nextCommit.chapter, checkpoints: nextCommit.checkpoints,
+    });
+    // The old Web API still requires its original CAS state; sharing records does not relax it.
+    expect(() => buildCompletedBattleStoryCommit({ ...next, expected: null })).toThrow('预期会话位置');
+    expect(() => buildCompletedBattleStoryRecords({ ...input, initialCheckpointId: undefined })).toThrow('预期会话位置');
+    expect(() => buildCompletedBattleStoryRecords({ ...next, session: { ...next.session, chapterCount: -1 } })).toThrow('预期会话位置');
+  });
+
 });

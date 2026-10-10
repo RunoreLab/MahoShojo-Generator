@@ -2,10 +2,9 @@ import { z } from 'zod/v3';
 import {
   BATTLE_STORY_MAX_TOTAL_CHAPTERS,
   buildBattleStoryDeterministicDigest,
-  buildBattleStoryInternalGuidance,
-  buildBattleStoryPromptContext,
   validateBattleStoryGenerateNextInput,
 } from '@mahoshojo/domain/arena-battle-story-session';
+import { buildBattleStoryArenaRequest, projectBattleStoryArenaPayload } from '@mahoshojo/domain/arena-battle-story-request';
 import type {
   ArenaGenerationService,
   GenerationStreamEvent,
@@ -144,56 +143,13 @@ const jsonResponse = (
   },
 });
 
-const resolveOptionalReadLimit = (input: {
-  enabled: boolean;
-  limit?: number;
-  unlimited?: boolean;
-  fallback: number;
-}): number | null | undefined => {
-  if (!input.enabled) return undefined;
-  if (input.unlimited === true) return null;
-  return typeof input.limit === 'number' && Number.isFinite(input.limit)
-    ? Math.max(1, Math.floor(input.limit))
-    : input.fallback;
-};
-
 export const buildArenaSessionUpstreamRequestBody = (
   payload: ArenaSessionRequest,
   internalGuidance: string,
   customProvider: ArenaCustomProvider | null,
 ): Record<string, unknown> => ({
   generationRequestId: payload.generationRequestId,
-  combatants: payload.chapterContext.workingCombatants,
-  mode: payload.seed.mode,
-  userGuidance: payload.userGuidance,
-  internalGuidance,
-  scenario: payload.seed.scenario ?? undefined,
-  auxScenarios: payload.seed.auxScenarios,
-  materials: payload.seed.materials,
-  adjudicationEvents: payload.seed.adjudicationEvents,
-  language: payload.seed.language,
-  readArenaHistory: payload.seed.settings.readArenaHistory,
-  arenaHistoryReadLimit: resolveOptionalReadLimit({
-    enabled: payload.seed.settings.readArenaHistory,
-    limit: payload.seed.settings.readArenaHistoryLimit,
-    unlimited: payload.seed.settings.isArenaHistoryUnlimited,
-    fallback: 3,
-  }),
-  writeArenaHistory: payload.seed.settings.writeArenaHistory,
-  readCurrentState: payload.seed.settings.readCurrentState,
-  writeCurrentState: payload.seed.settings.writeCurrentState,
-  readNarrativeHistory: payload.seed.settings.readNarrativeHistory,
-  narrativeHistoryReadLimit: resolveOptionalReadLimit({
-    enabled: payload.seed.settings.readNarrativeHistory,
-    limit: payload.seed.settings.readNarrativeHistoryLimit,
-    unlimited: payload.seed.settings.isNarrativeHistoryUnlimited,
-    fallback: 10,
-  }),
-  writeNarrativeHistory: payload.seed.settings.writeNarrativeHistory,
-  storyLength: payload.seed.storyLength,
-  customStoryLength: payload.seed.customStoryLength,
-  questionnaires: payload.seed.questionnaires,
-  forceStreamMeta: true,
+  ...projectBattleStoryArenaPayload(payload, internalGuidance),
   ...(customProvider ? { customProvider } : {}),
 });
 
@@ -286,42 +242,12 @@ export const createArenaSessionCompanionService = (
     });
     if (!validation.ok) return jsonResponse({ error: validation.error }, 400);
     const chapterIndex = validation.chapterIndex;
-    const promptContext = buildBattleStoryPromptContext({
-      baseContext: 'arena-provided',
-      source: {
-        mode: payload.seed.mode,
-        language: payload.seed.language,
-        storyLength: payload.seed.storyLength,
-        ...(payload.seed.customStoryLength
-          ? { customStoryLength: payload.seed.customStoryLength }
-          : {}),
-        generationMode: 'stream',
-        providerMode,
-        providerId: resolvedCustomProvider?.providerId ?? 'system',
-        ...(resolvedCustomProvider?.modelId ? { modelId: resolvedCustomProvider.modelId } : {}),
-      },
-      seed: {
-        combatants: payload.seed.combatants,
-        scenario: payload.seed.scenario ?? null,
-        auxScenarios: payload.seed.auxScenarios ?? [],
-        materials: payload.seed.materials ?? [],
-        questionnaires: payload.seed.questionnaires ?? [],
-        settings: payload.seed.settings,
-      },
-      chapterPlan: payload.chapterPlan,
-      chapterIndex,
-      workingCombatants: payload.chapterContext.workingCombatants,
-      sessionSummary: payload.chapterContext.sessionSummary,
-      recentChapters: payload.chapterContext.recentChapters,
-      userGuidance: payload.userGuidance,
-    });
-    const internalGuidance = buildBattleStoryInternalGuidance({
-      action: payload.action,
-      chapterIndex,
-      sourceChapterId: payload.sourceChapterId,
-      chapterPlan: payload.chapterPlan,
-      context: promptContext,
-    });
+    let internalGuidance: string;
+    try {
+      internalGuidance = buildBattleStoryArenaRequest(payload).internalGuidance;
+    } catch {
+      return jsonResponse({ error: '连续故事章节输入无效' }, 400);
+    }
     const guidanceSignature = await createArenaInternalGuidanceAuthority(options.signatures)
       .sign(internalGuidance);
     if (!guidanceSignature) {

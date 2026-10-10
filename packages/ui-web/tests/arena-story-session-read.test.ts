@@ -15,7 +15,7 @@ function fixture() {
   const checkpoints = [{ boundaryIndex: 2, extra: 'two' }, { boundaryIndex: 0, extra: 'zero' }];
   const ports = {
     listSessions: vi.fn(async () => [session]),
-    getSession: vi.fn(async () => session),
+    getSession: vi.fn(async (): Promise<typeof session | null> => session),
     listChapters: vi.fn(async () => chapters),
     listCheckpoints: vi.fn(async () => checkpoints),
     readPreferredId: vi.fn(() => null as string | null),
@@ -79,5 +79,55 @@ describe('feature-local battle story session reader', () => {
     expect(onError).toHaveBeenCalledExactlyOnceWith(cause);
     expect(f.publish.selection).not.toHaveBeenCalled(); expect(f.ports.writePreferredId).not.toHaveBeenCalled();
     f.ports[port].mockRejectedValueOnce(cause); await expect(f.reader.select('A')).rejects.toBe(cause);
+  });
+});
+
+// Keep the complete-record Web reader's selection semantics when the ordering core is shared.
+describe('restore and captured reload ordering', () => {
+  it('a manual selection wins a delayed restore list, but ready still settles', async () => {
+    const f = fixture(); const list = deferred<typeof f.session[]>(); f.ports.listSessions.mockReturnValueOnce(list.promise);
+    const callbacks = { onError: vi.fn(), onReady: vi.fn() };
+    const restore = f.reader.restore(callbacks); await f.reader.select('A');
+    list.resolve([f.session]); await restore;
+    expect(f.ports.getSession).toHaveBeenCalledTimes(1);
+    expect(f.publish.selection).toHaveBeenCalledTimes(1);
+    expect(callbacks.onReady).toHaveBeenCalledTimes(1); expect(callbacks.onError).not.toHaveBeenCalled();
+  });
+
+  it('a fresh list supersedes restoration without changing an existing chapter selection', async () => {
+    const f = fixture(); const list = deferred<typeof f.session[]>(); f.ports.listSessions.mockReturnValueOnce(list.promise);
+    const callbacks = { onError: vi.fn(), onReady: vi.fn() };
+    const restore = f.reader.restore(callbacks); await f.reader.refreshList(); list.resolve([f.session]); await restore;
+    expect(f.publish.selection).not.toHaveBeenCalled(); expect(f.ports.getSession).not.toHaveBeenCalled();
+    expect(callbacks.onReady).toHaveBeenCalledTimes(1);
+  });
+
+  it('missing preferred session does not silently select a different session', async () => {
+    const f = fixture(); f.ports.readPreferredId.mockReturnValue('missing');
+    f.ports.getSession.mockResolvedValueOnce(null);
+    await f.reader.restore({ onError: vi.fn(), onReady: vi.fn() });
+    expect(f.ports.getSession).toHaveBeenCalledExactlyOnceWith('missing');
+    expect(f.publish.selection).toHaveBeenCalledExactlyOnceWith({ session: null, chapters: [], checkpoints: [], selectedChapterId: null });
+  });
+
+  it('clear wins delayed reads and a captured reload cannot override later selection', async () => {
+    const f = fixture(); const session = deferred<typeof f.session>(); f.ports.getSession.mockReturnValueOnce(session.promise);
+    const old = f.reader.select('A'); const reload = f.reader.captureSelection();
+    await f.reader.select(null); await reload('A'); session.resolve(f.session); await old;
+    expect(f.ports.getSession).toHaveBeenCalledTimes(1);
+    expect(f.publish.selection).toHaveBeenCalledExactlyOnceWith({ session: null, chapters: [], checkpoints: [], selectedChapterId: null });
+    expect(f.ports.writePreferredId).toHaveBeenCalledExactlyOnceWith(null);
+  });
+
+  it('captured reload remains eligible across independent list refresh, and can only win once', async () => {
+    const f = fixture(); const reload = f.reader.captureSelection(); await f.reader.refreshList();
+    await reload('A'); await reload('A');
+    expect(f.publish.selection).toHaveBeenCalledTimes(1);
+  });
+
+  it('late selection failure cannot report over the current selection', async () => {
+    const f = fixture(); const session = deferred<typeof f.session>(); f.ports.getSession.mockReturnValueOnce(session.promise);
+    const onError = vi.fn(); const old = f.reader.select('A', onError); await f.reader.select(null);
+    session.reject(new Error('stale')); await old; expect(onError).not.toHaveBeenCalled();
   });
 });

@@ -13,12 +13,19 @@ const DERIVED_CHARACTER_AUTHORITY_FIELDS = new Set([
   'created_at', 'updated_at', 'createdAt', 'updatedAt', 'generated_at', 'generatedAt',
 ]);
 
-export const stripDerivedCharacterAuthority = (source: Record<string, unknown>): Record<string, unknown> => {
-  const result = cloneJson(source);
+/** Copy only the locations whose fields change; opaque nested values remain references. */
+export const planDerivedCharacterAuthorityRemoval = (source: Readonly<Record<string, unknown>>): Record<string, unknown> => {
+  const result = { ...source };
   for (const key of DERIVED_CHARACTER_AUTHORITY_FIELDS) delete result[key];
   if (isObject(result.metadata)) {
-    for (const key of DERIVED_CHARACTER_AUTHORITY_FIELDS) delete result.metadata[key];
+    const metadata = { ...result.metadata };
+    for (const key of DERIVED_CHARACTER_AUTHORITY_FIELDS) delete metadata[key];
+    result.metadata = metadata;
   }
   return result;
 };
 
+/** Preserve the existing independent JSON-copy API for callers that edit its result. */
+export const stripDerivedCharacterAuthority = (source: Record<string, unknown>): Record<string, unknown> => (
+  planDerivedCharacterAuthorityRemoval(cloneJson(source))
+);

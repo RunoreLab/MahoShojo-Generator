@@ -71,12 +71,13 @@ export const getArenaPostBattleWorldLineIndices = (
  * The caller owns completion eligibility, fixed time/IDs and any verified native assessment.
  * Hosted may sign the result afterwards; client callers must use the unsigned candidate adapter.
  */
-export const projectArenaPostBattleCharacters = (
+const projectArenaPostBattleCharactersWithCopy = (
   input: ArenaPostBattleProjectionInput,
   context: Readonly<{
     worldLineIds: Readonly<Record<number, string>>;
     nonNativeDataInvolved: boolean;
   }>,
+  copyData: (data: Record<string, unknown>) => Record<string, unknown>,
 ): ArenaPostBattleCharacterProjection[] => {
   const valid = combatantsOf(input.combatants);
   const participants = valid.map((item) => item.name);
@@ -90,7 +91,7 @@ export const projectArenaPostBattleCharacters = (
 
   for (const item of valid) {
     // Preserve the existing JSON document projection rather than normalizing through a card schema.
-    const data = JSON.parse(JSON.stringify(item.data)) as Record<string, unknown>;
+    const data = copyData(item.data);
     if (!textOf(data.templateId)) data.templateId = inferTemplateId(data);
     let didMutate = false;
     const impact = impactByName.get(token(item.name));
@@ -151,3 +152,28 @@ export const projectArenaPostBattleCharacters = (
   }
   return updated;
 };
+
+/** Existing public API: returned edits are independent of the original card graph. */
+export const projectArenaPostBattleCharacters = (
+  input: ArenaPostBattleProjectionInput,
+  context: Parameters<typeof projectArenaPostBattleCharactersWithCopy>[1],
+): ArenaPostBattleCharacterProjection[] => projectArenaPostBattleCharactersWithCopy(
+  input, context, (data) => JSON.parse(JSON.stringify(data)) as Record<string, unknown>,
+);
+
+export type ArenaPostBattleCharacterPlan = Readonly<{
+  combatantIndex: number;
+  data: Readonly<Record<string, unknown>>;
+}>;
+
+/**
+ * The same effects with copy-on-write containers only. Existing entries/opaque extensions
+ * remain references; no expanded history is deep-cloned. Treat this as a read-only plan.
+ * The budgeted candidate entry point requires a frozen, independently-owned input first.
+ */
+export const planArenaPostBattleCharacters = (
+  input: ArenaPostBattleProjectionInput,
+  context: Parameters<typeof projectArenaPostBattleCharactersWithCopy>[1],
+): readonly ArenaPostBattleCharacterPlan[] => projectArenaPostBattleCharactersWithCopy(
+  input, context, (data) => ({ ...data }),
+);

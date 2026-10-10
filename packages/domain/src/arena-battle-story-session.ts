@@ -80,7 +80,7 @@ export type BattleStoryPromptSection = {
 };
 
 export type BattleStoryPromptContextInput = {
-  /** 内部组合选项；仅当 Arena 已提供基础设定与本轮引导时使用，不接受客户端决定。 */
+  /** 宿主受控组合选项；仅当 Arena 已提供基础设定与本轮引导时使用，不接受普通页草稿决定。 */
   baseContext?: 'standalone' | 'arena-provided';
   source?: object;
   seed?: {
@@ -93,6 +93,8 @@ export type BattleStoryPromptContextInput = {
   workingCombatants?: unknown[];
   sessionSummary?: string;
   recentChapters?: BattleStoryPromptChapterInput[];
+  /** Already projected by a sequential storage reader; no complete chapter hydration needed. */
+  recentWindow?: BattleStoryPromptWindowItem[];
   userGuidance?: string;
   maxRecentChapters?: number;
   maxFullChapterChars?: number;
@@ -404,6 +406,21 @@ const digestText = (chapter: BattleStoryPromptChapterInput): string => {
   return lines.join('\n');
 };
 
+/** The real recent-window rule as a single-record projection, for sequential native reads.
+ * It does not change stored content and does not retain another chapter's full body. */
+export const projectBattleStoryPromptWindowItem = (
+  chapter: BattleStoryPromptChapterInput,
+  mode: 'digest' | 'full',
+  maxFullChapterChars = DEFAULT_MAX_FULL_CHAPTER_CHARS,
+): BattleStoryPromptWindowItem => {
+  const maxChars = Math.max(500, Math.floor(maxFullChapterChars));
+  const title = normalizeText(chapter.title) || chapter.deterministicDigest?.chapterTitle || `第 ${chapter.index} 章`;
+  if (mode === 'digest') return { chapterId: chapter.id, chapterIndex: chapter.index, title, mode, text: digestText(chapter), truncated: false };
+  const full = stripMetaComments(normalizeText(chapter.markdown)) || digestText(chapter);
+  const bounded = truncateText(full, maxChars);
+  return { chapterId: chapter.id, chapterIndex: chapter.index, title, mode, text: bounded.text, truncated: bounded.truncated };
+};
+
 export const resolveBattleStoryRecentWindow = (input: {
   chapters?: BattleStoryPromptChapterInput[];
   maxRecentChapters?: number;
@@ -414,31 +431,7 @@ export const resolveBattleStoryRecentWindow = (input: {
   const maxRecent = Math.max(1, Math.floor(input.maxRecentChapters ?? DEFAULT_MAX_RECENT_CHAPTERS));
   const maxChars = Math.max(500, Math.floor(input.maxFullChapterChars ?? DEFAULT_MAX_FULL_CHAPTER_CHARS));
   const fullStart = Math.max(0, chapters.length - maxRecent);
-  return chapters.map((chapter, index) => {
-    const title = normalizeText(chapter.title)
-      || chapter.deterministicDigest?.chapterTitle
-      || `第 ${chapter.index} 章`;
-    if (index < fullStart) {
-      return {
-        chapterId: chapter.id,
-        chapterIndex: chapter.index,
-        title,
-        mode: 'digest',
-        text: digestText(chapter),
-        truncated: false,
-      };
-    }
-    const full = stripMetaComments(normalizeText(chapter.markdown)) || digestText(chapter);
-    const bounded = truncateText(full, maxChars);
-    return {
-      chapterId: chapter.id,
-      chapterIndex: chapter.index,
-      title,
-      mode: 'full',
-      text: bounded.text,
-      truncated: bounded.truncated,
-    };
-  });
+  return chapters.map((chapter, index) => projectBattleStoryPromptWindowItem(chapter, index < fullStart ? 'digest' : 'full', maxChars));
 };
 
 const promptSettings = (value: unknown): Record<string, unknown> => isRecord(value)
@@ -509,7 +502,7 @@ export const buildBattleStoryPromptContext = (
   if (sessionSummary) {
     sections.push({ key: 'session-summary', title: '会话摘要层', text: sessionSummary });
   }
-  const recentWindow = resolveBattleStoryRecentWindow({
+  const recentWindow = input.recentWindow ?? resolveBattleStoryRecentWindow({
     chapters: input.recentChapters,
     maxRecentChapters: input.maxRecentChapters,
     maxFullChapterChars: input.maxFullChapterChars,

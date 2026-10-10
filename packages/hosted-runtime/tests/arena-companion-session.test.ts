@@ -6,6 +6,7 @@ import type {
 import { parseGenerationSseBlock } from '@mahoshojo/hosted-api/arena-generation/sse';
 import type { SignatureService } from '../src/signature';
 import { buildArenaGenerationPrompt } from '../src/arena-generation/prompt';
+import { buildBattleStoryArenaRequest, type BattleStoryArenaRequestInput } from '@mahoshojo/domain/arena-battle-story-request';
 import {
   buildArenaSessionUpstreamRequestBody,
   createArenaSessionCompanionService,
@@ -160,6 +161,7 @@ describe('Arena session companion service', () => {
     expect(result.status).toBe(200);
     expect(result.headers.get('x-mahoshojo-generation-id')).toBe('arena_story_generation');
     expect(captured).toHaveLength(1);
+    expect(captured[0]!.body).toEqual(buildBattleStoryArenaRequest(requestBody() as BattleStoryArenaRequestInput));
     expect(captured[0]!.headers.get('cookie')).toBe('session=1');
     expect(captured[0]!.headers.get('x-mahoshojo-arena-internal-guidance-signature'))
       .toBe('guidance-signature');

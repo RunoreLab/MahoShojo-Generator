@@ -212,7 +212,8 @@
     "./arena.css": "./src/arena/styles.css",
     "./arena-report": "./src/arena-report/index.ts",
     "./arena-report-text": "./src/arena-report/text.ts",
-    "./arena-story-session-read": "./src/arena-story-session-read/index.ts"
+    "./arena-story-session-read": "./src/arena-story-session-read/index.ts",
+    "./arena-story-session": "./src/arena-story-session/index.ts"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",

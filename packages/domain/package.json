@@ -253,7 +253,10 @@
     "./arena-questionnaire-request": "./src/arena-questionnaire-request.ts",
     "./arena-adjudication-events": "./src/arena-adjudication-events.ts",
     "./arena-reconciliation": "./src/arena-reconciliation.ts",
-    "./arena-story-commit": "./src/arena-story-commit.ts"
+    "./arena-story-commit": "./src/arena-story-commit.ts",
+    "./arena-battle-story-request": "./src/arena-battle-story-request.ts",
+    "./arena-adjudication-markdown": "./src/arena-adjudication-markdown.ts",
+    "./arena-story-export": "./src/arena-story-export.ts"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",

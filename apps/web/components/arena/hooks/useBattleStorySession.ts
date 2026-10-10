@@ -4,6 +4,7 @@ import { advanceBattleStorySaveEvidence, type BattleStorySaveEvidence, buildComp
 
 import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
 import { createBattleStorySessionReader, type BattleStorySessionReader } from '@mahoshojo/ui-web/arena-story-session-read';
+import { formatBattleStoryDisplayTitle } from '@mahoshojo/ui-web/arena-story-session';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -1795,7 +1796,7 @@ export function useBattleStorySession() {
         delete summaryRetryAtRef.current[sessionRecord.id];
         const nextSessions = await refreshSessionList();
         if (nextSessions) await reloadSelection?.(nextSessions[0]?.id ?? null);
-        setNotice(`已删除连续战报会话《${sessionRecord.title || '未命名连续战报'}》。`);
+        setNotice(`已删除连续战报会话《${formatBattleStoryDisplayTitle(sessionRecord.title || '未命名连续战报')}》。`);
       } catch (error) {
         setActionError(normalizeErrorMessage(error, '删除连续战报会话失败。'));
       } finally {
@@ -1925,7 +1926,7 @@ export function useBattleStorySession() {
           await reloadSelection?.(nextSessions[0]?.id ?? null);
         }
 
-        setNotice(`已删除连续战报会话《${targetTitle}》。`);
+        setNotice(`已删除连续战报会话《${formatBattleStoryDisplayTitle(targetTitle)}》。`);
       } catch (error) {
         setActionError(normalizeErrorMessage(error, '删除连续战报会话失败。'));
       } finally {

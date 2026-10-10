@@ -1,9 +1,11 @@
-import { stripDerivedCharacterAuthority } from './character-authority';
+import { planDerivedCharacterAuthorityRemoval, stripDerivedCharacterAuthority } from './character-authority';
 import {
   projectArenaPostBattleCharacters,
+  planArenaPostBattleCharacters,
   type ArenaPostBattleCharacterProjection,
   type ArenaPostBattleProjectionInput,
 } from './arena-post-battle';
+import { assertBattleStoryCommitFrozenJson, prepareBattleStoryCommitJson, type PreparedBattleStoryCommitJson } from './arena-story-commit';
 import type { NarrativeHistoryEntry } from './arena-types';
 import { appendNarrativeHistoryEntry } from './narrative-history-operations';
 
@@ -48,16 +50,21 @@ export type ArenaUnsignedPostBattleCandidates = Readonly<{
  * Keep the complete body here; a storage adapter must report its own document-envelope limit
  * instead of truncating this candidate or broadening the storage contract.
  */
-export const projectUnsignedArenaPostBattleCandidates = (
+const projectUnsignedArenaPostBattleCandidatesWithCopies = (
   input: ArenaPostBattleCandidateInput,
   context: ArenaPostBattleCandidateContext,
+  copies: Readonly<{
+    characters: typeof planArenaPostBattleCharacters;
+    authority: typeof planDerivedCharacterAuthorityRemoval;
+    history: (entries: readonly NarrativeHistoryEntry[]) => NarrativeHistoryEntry[];
+  }>,
 ): ArenaUnsignedPostBattleCandidates => {
   if (!context.scopeKey.trim() || !context.requestId.trim() || !context.generationId.trim()
     || context.generationId !== context.generationId.trim()
     || !Number.isFinite(Date.parse(context.occurredAt))) {
     throw new Error('Arena candidates require original scope, request, generation and fixed time');
   }
-  const projected = projectArenaPostBattleCharacters({
+  const projected = copies.characters({
     ...input, generationId: context.generationId, occurredAt: context.occurredAt,
   }, {
     worldLineIds: context.worldLineIds,
@@ -67,11 +74,11 @@ export const projectUnsignedArenaPostBattleCandidates = (
   const characterEffects = projected.map(({ combatantIndex, data }) => ({
     combatantIndex,
     // Reuse the canonical, location-specific cleanup; nested/unknown user fields stay intact.
-    data: stripDerivedCharacterAuthority(data),
+    data: copies.authority(data),
   }));
   const narrativeHistory = input.writeNarrativeHistory
     ? appendNarrativeHistoryEntry(
-      structuredClone([...input.narrativeHistory.entries]),
+      copies.history(input.narrativeHistory.entries),
       {
         title: input.narrativeHistory.title,
         content: input.narrativeHistory.content,
@@ -88,4 +95,48 @@ export const projectUnsignedArenaPostBattleCandidates = (
     characterEffects,
     narrativeHistory,
   });
+};
+
+/** Preserve the existing editable, independent candidate-copy API. */
+export const projectUnsignedArenaPostBattleCandidates = (
+  input: ArenaPostBattleCandidateInput,
+  context: ArenaPostBattleCandidateContext,
+): ArenaUnsignedPostBattleCandidates => projectUnsignedArenaPostBattleCandidatesWithCopies(input, context, {
+  characters: projectArenaPostBattleCharacters,
+  authority: stripDerivedCharacterAuthority,
+  history: (entries) => structuredClone([...entries]),
+});
+
+/**
+ * Read-only copy-on-write plan of the exact same effects. No source objects are frozen or
+ * changed here; callers must not edit referenced data. Large participants, guidance and
+ * existing history are shared in memory, but each occurrence still counts in JSON bytes.
+ */
+export const planUnsignedArenaPostBattleCandidates = (
+  input: ArenaPostBattleCandidateInput,
+  context: ArenaPostBattleCandidateContext,
+): ArenaUnsignedPostBattleCandidates => projectUnsignedArenaPostBattleCandidatesWithCopies(input, context, {
+  characters: planArenaPostBattleCharacters,
+  authority: planDerivedCharacterAuthorityRemoval,
+  history: (entries) => [...entries],
+});
+
+/**
+ * The host freezes its independently-owned generation snapshot explicitly, before calling
+ * this API. Mutable inputs are rejected without freezing a page draft behind its back.
+ * assemble runs once and must build the actual save payload from references, without deep
+ * cloning. Only then is that entire payload frozen and counted. There is no default budget.
+ * Native can stream the returned handle directly; optional materialization happens later.
+ */
+export const prepareUnsignedArenaPostBattleCandidates = <T>(
+  input: ArenaPostBattleCandidateInput,
+  context: ArenaPostBattleCandidateContext,
+  options: Readonly<{
+    maxBytes: number;
+    assemble: (plan: ArenaUnsignedPostBattleCandidates) => T;
+  }>,
+): PreparedBattleStoryCommitJson<T> => {
+  assertBattleStoryCommitFrozenJson(input);
+  const plan = planUnsignedArenaPostBattleCandidates(input, context);
+  return prepareBattleStoryCommitJson(options.assemble(plan), options.maxBytes);
 };

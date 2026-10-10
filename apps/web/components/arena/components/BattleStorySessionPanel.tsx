@@ -1,10 +1,19 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import {
+  BattleStoryActions,
+  BattleStoryChapterDirectory,
+  BattleStoryChapterReader,
+  BattleStoryContentPreview,
+  formatBattleStoryDisplayTitle,
+  BattleStorySessionDirectory,
+} from '@mahoshojo/ui-web/arena-story-session';
 
 import { ProviderCooldownNotice } from '@/components/ai/ProviderCooldownNotice';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { CollapsibleSection } from '@/components/shared/CollapsibleSection';
+import { createWebBattleReportPorts } from '@/components/shared/battle-report-ports';
 import { StreamStopButton } from '@/components/shared/StreamStopButton';
 import StreamingBattleReportCard from '@/components/stream/StreamingBattleReportCard';
 import {
@@ -18,6 +27,7 @@ import type {
 } from '@/lib/ai-session/battle-story/types';
 import { formatDateTime } from '@/lib/constants';
 import { SCENARIO_BATTLE_STORY_MAX_TOTAL_CHAPTERS } from '@mahoshojo/domain/scenario-battle-story';
+import { buildBattleStoryExportChapterMarkdown } from '@mahoshojo/domain/arena-story-export';
 
 import { BattleStoryBranchChainModal } from './BattleStoryBranchChainModal';
 import { useBattleStorySession } from '../hooks/useBattleStorySession';
@@ -134,21 +144,41 @@ function ChapterPreviewSection(props: {
         {chapter.deterministicDigest.winner ? <span>胜利者：{chapter.deterministicDigest.winner}</span> : null}
         {chapter.generationId ? <span>生成记录：{chapter.generationId}</span> : null}
       </div>
-      <StreamingBattleReportCard
-        content={chapter.markdown}
-        onSaveImage={onSaveImage}
-        mode={mode}
-        scenarioName={scenarioName}
-        reporterInfo={snapshot?.reporterInfo ?? null}
-        userGuidance={snapshot?.userGuidance ?? null}
-        characterGuidances={snapshot?.characterGuidances ?? null}
-        adjudicationResults={snapshot?.adjudicationResults ?? null}
-        aiUsage={snapshot?.aiUsage ?? null}
-        aiModel={snapshot?.aiModel ?? null}
-        narrativeHistoryReadCount={snapshot?.narrativeHistoryReadCount ?? null}
-        aiReasoning={snapshot?.aiReasoning ?? null}
-        cardWidthPx={cardWidthPx}
-      />
+      <BattleStoryContentPreview
+        key={chapter.id}
+        characterCount={chapter.markdown.length}
+        exportAction={
+          <button
+            type="button"
+            className="rounded-lg border border-amber-300 bg-white px-3 py-2 font-semibold"
+            onClick={() => createWebBattleReportPorts(onSaveImage).downloadMarkdown?.(
+              buildBattleStoryExportChapterMarkdown({
+                markdown: chapter.markdown,
+                adjudicationResults: snapshot?.adjudicationResults,
+              }),
+              `连续战报_第${chapter.index}章.md`,
+            )}
+          >
+            导出本章
+          </button>
+        }
+      >
+        <StreamingBattleReportCard
+          content={chapter.markdown}
+          onSaveImage={onSaveImage}
+          mode={mode}
+          scenarioName={scenarioName}
+          reporterInfo={snapshot?.reporterInfo ?? null}
+          userGuidance={snapshot?.userGuidance ?? null}
+          characterGuidances={snapshot?.characterGuidances ?? null}
+          adjudicationResults={snapshot?.adjudicationResults ?? null}
+          aiUsage={snapshot?.aiUsage ?? null}
+          aiModel={snapshot?.aiModel ?? null}
+          narrativeHistoryReadCount={snapshot?.narrativeHistoryReadCount ?? null}
+          aiReasoning={snapshot?.aiReasoning ?? null}
+          cardWidthPx={cardWidthPx}
+        />
+      </BattleStoryContentPreview>
     </div>
   );
 }
@@ -257,6 +287,66 @@ export function BattleStorySessionPanel(props: {
   const hasChildBranches = useMemo(
     () => sessions.some((session) => session.branchOf?.sessionId === activeSession?.id),
     [activeSession?.id, sessions]
+  );
+
+  const selectedChapterActions = selectedChapter ? (
+    <div className="rounded-2xl border border-gray-200 bg-white p-4">
+      <div className="text-sm font-semibold text-gray-800">所选章节操作</div>
+      <div className="mt-1 text-xs text-gray-500">
+        如果想保留原路线，优先创建分支；中间章节重写或删除会截断其后续，本地会话链会改变，但服务端历史战报记录不会删除。
+      </div>
+      <BattleStoryActions className="mt-4 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => void handleBranchSelectedChapter()}
+          disabled={Boolean(pendingCompletedChapter) || isSavingChapter || isGenerating || isDeletingSession || isCooldown || !selectedChapter || Boolean(selectedBranchDisabledReason)}
+          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+          title={
+            isCooldown
+              ? `冷却中，请等待 ${remainingTime} 秒`
+              : (selectedBranchDisabledReason ?? '以当前所选章节为锚点创建新分支会话')
+          }
+        >
+          {isGenerating && generatingAction === 'branch'
+            ? '正在创建分支...'
+            : (isCooldown ? `冷却中 ${remainingTime}s` : selectedBranchButtonText)}
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleRewriteSelectedChapter()}
+          disabled={Boolean(pendingCompletedChapter) || isSavingChapter || isGenerating || isDeletingSession || isCooldown || !selectedChapter || Boolean(selectedRewriteDisabledReason)}
+          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+          title={
+            isCooldown
+              ? `冷却中，请等待 ${remainingTime} 秒`
+              : (selectedRewriteDisabledReason ?? '重写当前所选章节；若不是最后一章，会同时截断后续')
+          }
+        >
+          {isGenerating && generatingAction === 'rewrite'
+            ? '正在重写章节...'
+            : (isCooldown ? `冷却中 ${remainingTime}s` : selectedRewriteButtonText)}
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleDeleteSelectedChapter()}
+          disabled={Boolean(pendingCompletedChapter) || isSavingChapter || isGenerating || isDeletingSession || !selectedChapter || Boolean(selectedDeleteDisabledReason)}
+          className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
+          title={selectedDeleteDisabledReason ?? '删除当前所选章节；若不是最后一章，会同时删除其后续章节'}
+        >
+          {isDeletingSession ? '正在删除...' : selectedDeleteButtonText}
+        </button>
+      </BattleStoryActions>
+    </div>
+  ) : null;
+  const chapterPreview = (
+    <ChapterPreviewSection
+      chapter={selectedChapter}
+      snapshot={selectedChapterSnapshot}
+      scenarioName={scenarioName}
+      mode={activeSession?.source.mode}
+      onSaveImage={onSaveImage}
+      cardWidthPx={battleReportCardWidthPx}
+    />
   );
 
   return (
@@ -391,7 +481,7 @@ export function BattleStorySessionPanel(props: {
             </div>
           </section>
 
-          <div className="flex flex-wrap gap-2">
+          <BattleStoryActions>
             <button
               type="button"
               onClick={() => void handleStartSession()}
@@ -476,7 +566,7 @@ export function BattleStorySessionPanel(props: {
                 label="停止生成"
               />
             ) : null}
-          </div>
+          </BattleStoryActions>
           {isGenerating && streamSoftTimeoutWarning ? (
             <div
               className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900"
@@ -505,7 +595,7 @@ export function BattleStorySessionPanel(props: {
           {pendingCompletedChapter ? (
             <section className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status">
               <div className="font-semibold">{isSavingChapter ? '正在保存已完成的章节...' : pendingSaveUnknown ? '生成完成，保存状态待确认' : '生成完成，本章尚未保存'}</div>
-              <div className="mt-1">《{pendingCompletedChapter.title}》暂存在当前页面，离开或刷新会丢失。可以重试保存，或先导出正文。</div>
+              <div className="mt-1">《{formatBattleStoryDisplayTitle(pendingCompletedChapter.title)}》暂存在当前页面，离开或刷新会丢失。可以重试保存，或先导出正文。</div>
               <div className="mt-3 flex flex-wrap gap-2">
                 {pendingSaveAsNewSession ? (
                   <button type="button" disabled={isSavingChapter} onClick={() => void handleSavePendingAsNewSession()}
@@ -546,12 +636,12 @@ export function BattleStorySessionPanel(props: {
                   <div>
                     <div className="text-sm font-semibold text-gray-800">当前会话元数据</div>
                     <div className="mt-1 text-base font-semibold text-gray-900">
-                      {activeSession ? activeSession.title : '当前未选择会话'}
+                      {activeSession ? formatBattleStoryDisplayTitle(activeSession.title) : '当前未选择会话'}
                     </div>
                   </div>
                   {activeSession?.branchOf ? (
                     <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
-                      {activeSession.branchLabel || '分支会话'}
+                      {formatBattleStoryDisplayTitle(activeSession.branchLabel || '分支会话')}
                     </span>
                   ) : null}
                 </div>
@@ -604,7 +694,7 @@ export function BattleStorySessionPanel(props: {
                       <span className="text-gray-500">分支来源</span>
                       <span className="max-w-[16rem] text-right text-gray-700">
                         {`第 ${activeSession.branchOf.chapterIndex} 章`}
-                        {activeSession.branchOf.chapterTitle ? `《${activeSession.branchOf.chapterTitle}》` : ''}
+                        {activeSession.branchOf.chapterTitle ? `《${formatBattleStoryDisplayTitle(activeSession.branchOf.chapterTitle)}》` : ''}
                       </span>
                     </div>
                   ) : null}
@@ -637,79 +727,31 @@ export function BattleStorySessionPanel(props: {
               </section>
 
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
-                <section className="rounded-2xl border border-gray-200 bg-white p-4">
-                  <div className="mb-3 text-sm font-semibold text-gray-800">本地会话</div>
-                  {sessions.length === 0 ? (
-                    <div className="text-sm text-gray-500">本地还没有连续战报会话。</div>
-                  ) : (
-                    <div className="max-h-[320px] space-y-2 overflow-y-auto pr-1">
-                      {sessions.map((session) => {
-                        const isActive = session.id === activeSession?.id;
-                        return (
-                          <button
-                            key={session.id}
-                            type="button"
-                            onClick={() => void handleSelectSession(session.id)}
-                            className={`w-full rounded-xl border px-3 py-3 text-left transition-colors ${
-                              isActive
-                                ? 'border-emerald-300 bg-emerald-50'
-                                : 'border-gray-200 bg-white hover:bg-gray-50'
-                            }`}
-                          >
-                            <div className="text-sm font-medium text-gray-800">{session.title}</div>
-                            <div className="mt-1 text-xs text-gray-500">
-                              {formatDateTime(session.updatedAt)}｜
-                              {formatBattleStoryChapterProgress({
-                                completedChapterCount: session.chapterCount,
-                                chapterPlan: session.chapterPlan,
-                              })}
-                              {session.branchOf ? `｜${session.branchLabel || '分支'}` : ''}
-                            </div>
-                          </button>
-                        );
+                <BattleStorySessionDirectory
+                  rows={sessions.map((session) => ({
+                    id: session.id,
+                    title: formatBattleStoryDisplayTitle(session.title),
+                    description: <>
+                      {formatDateTime(session.updatedAt)}｜
+                      {formatBattleStoryChapterProgress({
+                        completedChapterCount: session.chapterCount,
+                        chapterPlan: session.chapterPlan,
                       })}
-                    </div>
-                  )}
-                </section>
-
-                <section className="rounded-2xl border border-gray-200 bg-white p-4">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <div className="text-sm font-semibold text-gray-800">章节列表</div>
-                    {chapters.length > 0 ? (
-                      <div className="text-xs text-gray-500">共 {chapters.length} 章</div>
-                    ) : null}
-                  </div>
-                  {chapters.length === 0 ? (
-                    <div className="text-sm text-gray-500">创建首章后，这里会显示连续章节链。</div>
-                  ) : (
-                    <div className="max-h-[420px] space-y-2 overflow-y-auto pr-1">
-                      {chapters.map((chapter) => {
-                        const isSelected = selectedChapterId
-                          ? selectedChapterId === chapter.id
-                          : latestActiveChapter?.id === chapter.id;
-                        return (
-                          <button
-                            key={chapter.id}
-                            type="button"
-                            onClick={() => setSelectedChapterId(chapter.id)}
-                            className={`w-full rounded-xl border px-3 py-3 text-left transition-colors ${
-                              isSelected
-                                ? 'border-blue-300 bg-blue-50'
-                                : 'border-gray-200 bg-white hover:bg-gray-50'
-                            }`}
-                          >
-                            <div className="text-sm font-medium text-gray-800">
-                              第 {chapter.index} 章 · {chapter.title}
-                            </div>
-                            <div className="mt-1 text-xs text-gray-500">
-                              {actionLabelMap[chapter.action]}｜{formatDateTime(chapter.createdAt)}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </section>
+                      {session.branchOf ? `｜${formatBattleStoryDisplayTitle(session.branchLabel || '分支')}` : ''}
+                    </>,
+                  }))}
+                  selectedId={activeSession?.id ?? null}
+                  onSelect={(id) => void handleSelectSession(id)}
+                />
+                <BattleStoryChapterDirectory
+                  rows={chapters.map((chapter) => ({
+                    id: chapter.id,
+                    title: <>第 {chapter.index} 章 · {formatBattleStoryDisplayTitle(chapter.title)}</>,
+                    description: <>{actionLabelMap[chapter.action]}｜{formatDateTime(chapter.createdAt)}</>,
+                  }))}
+                  selectedId={selectedChapterId || latestActiveChapter?.id || null}
+                  onSelect={setSelectedChapterId}
+                />
               </div>
             </div>
 
@@ -726,24 +768,40 @@ export function BattleStorySessionPanel(props: {
                       章节正文、模型思考与流式元数据会在这里实时更新。
                     </div>
                   </div>
-                  <StreamingBattleReportCard
-                    content={liveCardContent}
-                    onSaveImage={onSaveImage}
-                    mode={activeSession?.source.mode}
-                    scenarioName={scenarioName}
-                    reporterInfo={streamCardSnapshot?.reporterInfo ?? null}
-                    userGuidance={streamCardSnapshot?.userGuidance ?? null}
-                    characterGuidances={streamCardSnapshot?.characterGuidances ?? null}
-                    adjudicationResults={streamCardSnapshot?.adjudicationResults ?? null}
-                    aiUsage={streamCardSnapshot?.aiUsage ?? null}
-                    aiModel={streamCardSnapshot?.aiModel ?? null}
-                    narrativeHistoryReadCount={streamCardSnapshot?.narrativeHistoryReadCount ?? null}
-                    aiReasoning={streamCardSnapshot?.aiReasoning ?? null}
-                    isStreaming
-                    softTimeoutWarning={streamSoftTimeoutWarning}
-                    onStopGeneration={stopGeneration}
-                    cardWidthPx={battleReportCardWidthPx}
-                  />
+                  <BattleStoryContentPreview
+                    characterCount={liveCardContent.length}
+                    exportAction={
+                      <button
+                        type="button"
+                        className="rounded-lg border border-amber-300 bg-white px-3 py-2 font-semibold"
+                        onClick={() => createWebBattleReportPorts(onSaveImage).downloadMarkdown?.(
+                          streamingMarkdown,
+                          `连续战报_第${streamChapterIndex ?? '当前'}章_当前正文.md`,
+                        )}
+                      >
+                        导出当前正文
+                      </button>
+                    }
+                  >
+                    <StreamingBattleReportCard
+                      content={liveCardContent}
+                      onSaveImage={onSaveImage}
+                      mode={activeSession?.source.mode}
+                      scenarioName={scenarioName}
+                      reporterInfo={streamCardSnapshot?.reporterInfo ?? null}
+                      userGuidance={streamCardSnapshot?.userGuidance ?? null}
+                      characterGuidances={streamCardSnapshot?.characterGuidances ?? null}
+                      adjudicationResults={streamCardSnapshot?.adjudicationResults ?? null}
+                      aiUsage={streamCardSnapshot?.aiUsage ?? null}
+                      aiModel={streamCardSnapshot?.aiModel ?? null}
+                      narrativeHistoryReadCount={streamCardSnapshot?.narrativeHistoryReadCount ?? null}
+                      aiReasoning={streamCardSnapshot?.aiReasoning ?? null}
+                      isStreaming
+                      softTimeoutWarning={streamSoftTimeoutWarning}
+                      onStopGeneration={stopGeneration}
+                      cardWidthPx={battleReportCardWidthPx}
+                    />
+                  </BattleStoryContentPreview>
                   <BattleStoryMetaDebugPanel
                     debug={streamMetaDebug}
                     storageKey="arena.section.battleStorySession.liveMetaDebug.open"
@@ -752,79 +810,21 @@ export function BattleStorySessionPanel(props: {
                 </div>
               ) : null}
 
-              <div className="space-y-4">
-                <div className="rounded-2xl border border-gray-200 bg-white p-4">
-                  <div className="text-sm font-semibold text-gray-800">
-                    {selectedChapter
-                      ? `章节预览｜第 ${selectedChapter.index} 章 · ${selectedChapter.title}`
-                      : '章节预览'}
-                  </div>
-                  <div className="mt-1 text-xs text-gray-500">
-                    可在此处查看任意章节、下载 Markdown，并保存截图。
-                  </div>
-                </div>
-                {selectedChapter ? (
-                  <div className="rounded-2xl border border-gray-200 bg-white p-4">
-                    <div className="text-sm font-semibold text-gray-800">所选章节操作</div>
-                    <div className="mt-1 text-xs text-gray-500">
-                      如果想保留原路线，优先创建分支；中间章节重写或删除会截断其后续，本地会话链会改变，但服务端历史战报记录不会删除。
-                    </div>
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => void handleBranchSelectedChapter()}
-                        disabled={Boolean(pendingCompletedChapter) || isSavingChapter || isGenerating || isDeletingSession || isCooldown || !selectedChapter || Boolean(selectedBranchDisabledReason)}
-                        className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-                        title={
-                          isCooldown
-                            ? `冷却中，请等待 ${remainingTime} 秒`
-                            : (selectedBranchDisabledReason ?? '以当前所选章节为锚点创建新分支会话')
-                        }
-                      >
-                        {isGenerating && generatingAction === 'branch'
-                          ? '正在创建分支...'
-                          : (isCooldown ? `冷却中 ${remainingTime}s` : selectedBranchButtonText)}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void handleRewriteSelectedChapter()}
-                        disabled={Boolean(pendingCompletedChapter) || isSavingChapter || isGenerating || isDeletingSession || isCooldown || !selectedChapter || Boolean(selectedRewriteDisabledReason)}
-                        className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-                        title={
-                          isCooldown
-                            ? `冷却中，请等待 ${remainingTime} 秒`
-                            : (selectedRewriteDisabledReason ?? '重写当前所选章节；若不是最后一章，会同时截断后续')
-                        }
-                      >
-                        {isGenerating && generatingAction === 'rewrite'
-                          ? '正在重写章节...'
-                          : (isCooldown ? `冷却中 ${remainingTime}s` : selectedRewriteButtonText)}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void handleDeleteSelectedChapter()}
-                        disabled={Boolean(pendingCompletedChapter) || isSavingChapter || isGenerating || isDeletingSession || !selectedChapter || Boolean(selectedDeleteDisabledReason)}
-                        className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
-                        title={selectedDeleteDisabledReason ?? '删除当前所选章节；若不是最后一章，会同时删除其后续章节'}
-                      >
-                        {isDeletingSession ? '正在删除...' : selectedDeleteButtonText}
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-                <ChapterPreviewSection
-                  chapter={selectedChapter}
-                  snapshot={selectedChapterSnapshot}
-                  scenarioName={scenarioName}
-                  mode={activeSession?.source.mode}
-                  onSaveImage={onSaveImage}
-                  cardWidthPx={battleReportCardWidthPx}
-                />
-                <BattleStoryMetaDebugPanel
-                  debug={selectedMetaDebug}
-                  storageKey="arena.section.battleStorySession.selectedMetaDebug.open"
-                />
-              </div>
+              <BattleStoryChapterReader
+                description="可在此处查看任意章节、下载 Markdown，并保存截图。"
+                emptyContent={chapterPreview}
+                state={selectedChapter ? {
+                  status: 'loaded',
+                  identity: { sessionId: selectedChapter.sessionId, chapterId: selectedChapter.id },
+                  title: `章节预览｜第 ${selectedChapter.index} 章 · ${formatBattleStoryDisplayTitle(selectedChapter.title)}`,
+                  actions: selectedChapterActions,
+                  content: chapterPreview,
+                  footer: <BattleStoryMetaDebugPanel
+                    debug={selectedMetaDebug}
+                    storageKey="arena.section.battleStorySession.selectedMetaDebug.open"
+                  />,
+                } : { status: 'unloaded' }}
+              />
             </div>
           </div>
         </div>

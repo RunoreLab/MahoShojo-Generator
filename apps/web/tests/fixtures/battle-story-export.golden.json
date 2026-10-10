@@ -1,0 +1,16 @@
+{
+  "empty-default-title": "# 未命名连续战报\n> 模式：classic｜语言：zh-CN｜章节数：0 章\n> 会话 ID：session-golden\n---",
+  "whitespace-summary-and-empty-active-chapters": "# 连续故事\n> 模式：classic｜语言：zh-CN｜章节数：2 章\n> 会话 ID：session-golden\n## 会话摘要\n---",
+  "trim-edges-preserve-interior-crlf-unicode": "# 星海 🌟\n> 模式：classic｜语言：zh-CN｜章节数：1 章\n> 会话 ID：session-golden\n## 会话摘要\n摘要甲\r\n\r\n摘要乙\n---\n# 第一章\r\n\r\n正文 \u0000 星🌟",
+  "branch-plan-summary-preserve-untrimmed-metadata": "# 连续故事\n> 模式：classic｜语言：zh-CN｜章节进度：2 / 2\n> 会话 ID：session-golden\n> 分支标签： 分支标签 \n> 分支来源：root / old-3 / 第 3 章《 破晓 》\n## 会话摘要\n摘要\n\n后段\n---\n一\n\n---\n\n二\n\n---\n\n三",
+  "superseded-filter-stable-index-order-empty-count": "# 连续故事\n> 模式：classic｜语言：zh-CN｜章节数：5 章\n> 会话 ID：session-golden\n---\n一\n\n---\n\n二甲\n\n---\n\n二乙\n\n---\n\n三",
+  "append-nested-adjudication-and-skip-invalid-entries": "# 连续故事\n> 模式：classic｜语言：zh-CN｜章节数：1 章\n> 会话 ID：session-golden\n---\n# 正文\n\n段落\n\n---\n\n## 随机判定记录\n- **事件**: 暴雨是否降临\n  - **结果**: 大成功 (掷骰(7) vs 成功率(65%))\n    - **事件**: 子事件\n      - **结果**: 失败\n- **事件**: 低于零\n  - **结果**: 大成功\n- **事件**: 非有限深度\n  - **结果**: 大成功 (掷骰(7) vs 成功率(65%))",
+  "empty-body-still-appends-adjudication-with-old-leading-separator": "# 连续故事\n> 模式：classic｜语言：zh-CN｜章节数：1 章\n> 会话 ID：session-golden\n---\n\n\n---\n\n## 随机判定记录\n- **事件**: 暴雨是否降临\n  - **结果**: 大成功 (掷骰(7) vs 成功率(65%))",
+  "existing-h2-adjudication": "# 连续故事\n> 模式：classic｜语言：zh-CN｜章节数：1 章\n> 会话 ID：session-golden\n---\n# 正文\n\n## 随机判定记录\n已有记录",
+  "existing-h2-crlf-adjudication": "# 连续故事\n> 模式：classic｜语言：zh-CN｜章节数：1 章\n> 会话 ID：session-golden\n---\n# 正文\r\n##   随机判定记录  \r\n已有记录",
+  "existing-h2-at-end": "# 连续故事\n> 模式：classic｜语言：zh-CN｜章节数：1 章\n> 会话 ID：session-golden\n---\n##随机判定记录",
+  "h3-does-not-suppress-append": "# 连续故事\n> 模式：classic｜语言：zh-CN｜章节数：1 章\n> 会话 ID：session-golden\n---\n### 随机判定记录\n三级标题不是旧去重目标\n\n---\n\n## 随机判定记录\n- **事件**: 暴雨是否降临\n  - **结果**: 大成功 (掷骰(7) vs 成功率(65%))",
+  "inline-h2-does-not-suppress-append": "# 连续故事\n> 模式：classic｜语言：zh-CN｜章节数：1 章\n> 会话 ID：session-golden\n---\n正文中的 ## 随机判定记录\n仍须追加\n\n---\n\n## 随机判定记录\n- **事件**: 暴雨是否降临\n  - **结果**: 大成功 (掷骰(7) vs 成功率(65%))",
+  "report-json-does-not-supply-adjudication-fallback": "# 连续故事\n> 模式：classic｜语言：zh-CN｜章节数：1 章\n> 会话 ID：session-golden\n---\n正文",
+  "all-superseded-and-partial-branch": "# 连续故事\n> 模式：classic｜语言：zh-CN｜章节数：0 章\n> 会话 ID：session-golden\n---"
+}
