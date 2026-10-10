@@ -10,7 +10,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { AiExecutionRequest } from '@mahoshojo/contracts/ai-execution';
 import type { AiStreamEvent } from '@mahoshojo/ai-core/stream-events';
 import type { LocalCardRecordV1 } from '@mahoshojo/local-library/record';
-import { ARENA_DRAFT_KEY, createInitialArenaDraft, type ArenaDraft } from '../src/features/arena/session';
+import { ADVANCED_ARENA_DRAFT_KEY, ARENA_DRAFT_KEY, createInitialArenaDraft, type ArenaDraft } from '../src/features/arena/session';
 import { DESKTOP_AI_CONFIG_STORAGE_KEY } from '../src/features/ai-config/desktop-ai-config-store';
 import { getDesktopAiConfigStore, resetDesktopAiConfigStoreForTests } from '../src/features/ai-config/use-desktop-ai-config';
 import { createDesktopRouter } from '../src/app/router';
@@ -82,7 +82,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input); if (url.startsWith('http://127.0.0.1:')) return nativeFetch(input, init);
     if (url === '/languages.json') return new Response(JSON.stringify([{ code: 'zh-CN', name: '简体中文' }]));
-    if (url.startsWith('/presets/') || url.startsWith('/scenario-presets/')) return new Response(readFileSync(resolve(process.cwd(), '../../content', url.slice(1)), 'utf8'));
+    if (url.startsWith('/presets/') || url.startsWith('/scenario-presets/') || url.startsWith('/questionnaires/')) return new Response(readFileSync(resolve(process.cwd(), '../../content', url.slice(1)), 'utf8'));
     throw new Error('unexpected network');
   }));
   vi.spyOn(window, 'scrollTo').mockImplementation(() => {}); HTMLElement.prototype.scrollIntoView = vi.fn(); vi.spyOn(window, 'confirm').mockReturnValue(false);
@@ -236,4 +236,110 @@ describe('Desktop /battle journey against loopback fixture', () => {
     await click('取消生成'); release!(); await settle();
     await act(async () => { getDesktopAiConfigStore().selectExecutionLocation('server'); }); await settle(); expect(button('另存战后角色副本')).toBeUndefined(); expect(docs.size).toBe(0);
   });
+  it.each(['classic', 'kizuna', 'daily', 'scenario'] as const)('advanced /arena %s completes both outputs with an independent draft', async (mode) => {
+    const battleOriginal = JSON.stringify({ version: 1, draft: { ...draft('daily', 'stream'), customStoryLength: '独立简洁稿' } }); localStorage.setItem(ARENA_DRAFT_KEY, battleOriginal);
+    for (const output of ['non-stream', 'stream'] as const) {
+      localStorage.setItem(ADVANCED_ARENA_DRAFT_KEY, JSON.stringify({ version: 1, draft: { ...draft(mode, output), selectedQuestionnaires: [{ source: 'upload', selectionId: 'lore', questionnaire: { id: 'lore', title: '岛屿设定', kind: 'magical-girl', questions: [], loreMarkdown: '星海岛屿' } }] } }));
+      window.location.hash = '#/arena'; const router = await mount(); await click('恢复草稿'); expect(container.textContent).toContain('桌面高级单次');
+      await click('生成战报'); await vi.waitFor(() => expect(container.textContent).toContain('生成完成。'));
+      expect(JSON.parse(received.at(-1)!.arenaInputJson!)).toMatchObject({ mode, questionnaires: [{ loreMarkdown: '星海岛屿' }] });
+      await click('保存叙事历史到本地库'); expect([...docs.values()].some((item) => item.cardType === 'history')).toBe(true);
+      await act(async () => router.navigate({ to: '/local-library' })); await settle(); expect(window.location.hash).toContain('/local-library'); expect(localStorage.getItem(ARENA_DRAFT_KEY)).toBe(battleOriginal);
+      await act(async () => root.unmount()); root = createRoot(container); docs.clear();
+    }
+  });
+  it('advanced real Lore/auxiliary/history controls freeze an edited source-aware request', async () => {
+    window.location.hash = '#/arena'; localStorage.setItem(ADVANCED_ARENA_DRAFT_KEY, JSON.stringify({ version: 1, draft: draft('scenario', 'stream') }));
+    await mount(); await click('恢复草稿'); await click('粘贴 JSON'); await change('textarea[placeholder*="问卷 JSON"]', JSON.stringify({ id: 'lore', title: '岛屿', kind: 'magical-girl', questions: [], loreMarkdown: '星海岛屿', adjudicationEvents: [{ type: 'binary', description: 'Lore不得执行', probability: 100 }] })); await click('导入');
+    await act(async () => [...document.querySelectorAll('button')].find((item) => item.textContent?.includes('辅助情景（可选）'))!.click()); await settle();
+    await click('展开辅助情景粘贴区域'); await change('textarea[placeholder*="辅助情景"]', JSON.stringify({ templateId: '通用情景', title: '暗潮', content: '潮水上涨', adjudicationEvents: [{ id: 'aux-event', type: 'binary', description: '辅助判定', probability: 100 }] }));
+    await act(async () => [...document.querySelectorAll('button')].find((item) => item.textContent?.includes('日常模式'))!.click()); await settle();
+    expect(JSON.parse(localStorage.getItem(ADVANCED_ARENA_DRAFT_KEY)!).draft.battleMode).toBe('scenario'); expect(document.querySelector<HTMLTextAreaElement>('textarea[placeholder*="辅助情景"]')?.value).toContain('潮水上涨');
+    await click('从文本添加辅助情景');
+    expect(JSON.parse(localStorage.getItem(ADVANCED_ARENA_DRAFT_KEY)!).draft.adjudicationEvents).toMatchObject([{ description: '辅助判定' }]);
+    await click('查看 / 编辑活动叙事历史'); await click('新建条目'); await change('[aria-label="历史标题"]', '前情'); await change('[aria-label="历史正文"]', '未提交历史');
+    await act(async () => { expect(scopeClose().preventDefault).toHaveBeenCalledOnce(); }); expect(activeCloseHandles).toBe(1);
+    await act(async () => getDesktopAiConfigStore().selectExecutionLocation('server')); await settle(); expect(document.querySelector<HTMLTextAreaElement>('[aria-label="历史正文"]')?.value).toBe('未提交历史');
+    await act(async () => getDesktopAiConfigStore().selectExecutionLocation('client')); await settle();
+    await click('创建条目'); await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="关闭叙事历史"]')!.click()); await settle();
+    await click('生成战报'); await vi.waitFor(() => expect(container.textContent).toContain('生成完成。'));
+    const request = JSON.parse(received.at(-1)!.arenaInputJson!); expect(request.auxScenarios[0].title).toBe('暗潮'); expect(request.questionnaires[0].loreMarkdown).toBe('星海岛屿');
+    expect(request.adjudicationEvents).toHaveLength(1); expect(request.adjudicationResults).toHaveLength(1); expect(request.adjudicationResults[0].description).toBe('辅助判定');
+    expect(JSON.parse(localStorage.getItem(ADVANCED_ARENA_DRAFT_KEY)!).draft.narrativeHistoryEntries).toHaveLength(2);
+  });
+
+  it('advanced repeated text keeps original roles but replaces source events and reports skipped names', async () => {
+    window.location.hash = '#/arena'; await mount(); await click('展开角色粘贴区域（手机端推荐）');
+    const add = async (content: string, events: unknown[]) => {
+      await change('textarea', JSON.stringify({ templateId: '通用角色', name: '重导角色', content, adjudicationEvents: events }));
+      await act(async () => [...document.querySelectorAll('button')].find((item) => /从文本添加角色/.test(item.textContent ?? ''))!.click()); await settle();
+    };
+    await add('原正文', [{ type: 'binary', description: '原事件', probability: 100 }]);
+    await add('不可覆盖正文', [{ type: 'binary', description: '替换事件', probability: 100 }]);
+    const saved = () => JSON.parse(localStorage.getItem(ADVANCED_ARENA_DRAFT_KEY)!).draft;
+    expect(saved().combatants).toHaveLength(1); expect(saved().combatants[0].data.content).toBe('原正文');
+    expect(saved().adjudicationEvents).toMatchObject([{ description: '替换事件' }]); expect(container.textContent).toContain('已跳过 1 位重复文件名角色');
+    await add('空事件副本', []); expect(saved().adjudicationEvents).toMatchObject([{ description: '替换事件' }]);
+  });
+  it('advanced raw history import, display sort, explicit order, save failure and full export stay separate', async () => {
+    window.location.hash = '#/arena'; await mount(); await click('查看 / 编辑活动叙事历史'); await click('粘贴导入');
+    const raw = '  [{"entries":[{"id":"a","title":"先","content":"原文一","unknown":true,"updatedAt":"2020-01-01"}]},{"entries":[{"id":"b","title":"后","content":"原文二","updatedAt":"2025-01-01"}]}]  ';
+    await change('textarea[placeholder*="粘贴叙事历史 JSON"]', raw); await click('确认追加导入');
+    const saved = () => JSON.parse(localStorage.getItem(ADVANCED_ARENA_DRAFT_KEY)!).draft;
+    expect(saved().historyOriginals[0].text).toBe(raw); expect(saved().narrativeHistoryEntries.map((entry: { id: string }) => entry.id)).toEqual(['a', 'b']);
+    const sort = document.querySelector<HTMLSelectElement>('[role="dialog"] select')!;
+    await act(async () => { sort.value = 'created_desc'; sort.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect(saved().narrativeHistoryEntries.map((entry: { id: string }) => entry.id)).toEqual(['a', 'b']);
+    await click('编辑 AI 顺序'); await click('下移'); await click('完成排序');
+    expect(saved().narrativeHistoryEntries.map((entry: { id: string }) => entry.id)).toEqual(['b', 'a']);
+    await act(async () => document.querySelector<HTMLElement>('[role="dialog"] [role="button"]')!.click()); await settle();
+    const originalId = saved().narrativeHistoryEntries.find((entry: { title: string }) => entry.title === document.querySelector<HTMLInputElement>('[aria-label="历史标题"]')!.value).id;
+    await change('[aria-label="历史正文"]', '用户修订正文'); await click('保存修改'); expect(saved().narrativeHistoryEntries.find((entry: { id: string }) => entry.id === originalId).content).toBe('用户修订正文');
+    await click('删除'); expect(saved().narrativeHistoryEntries).toHaveLength(2); await click('← 返回列表');
+    await click('粘贴导入'); await change('textarea[placeholder*="粘贴叙事历史 JSON"]', '{"entries":[{"id":"replace","content":"替代"}]}');
+    const mode = [...document.querySelectorAll<HTMLSelectElement>('[role="dialog"] select')].find((item) => item.querySelector('option[value="replace"]'))!;
+    await act(async () => { mode.value = 'replace'; mode.dispatchEvent(new Event('change', { bubbles: true })); }); await click('确认覆盖导入');
+    expect(saved().narrativeHistoryEntries).toHaveLength(2); expect(saved().historyOriginals).toHaveLength(1);
+    vi.mocked(window.confirm).mockReturnValue(true); await click('取消', document.querySelector('[role="dialog"]')!); vi.mocked(window.confirm).mockReturnValue(false);
+    failSave = true; await click('另存完整历史到本地库'); expect(document.body.textContent).toContain('完整原文仍在内存');
+    failSave = false; await click('另存完整历史到本地库'); await click('另存完整历史到本地库'); expect(docs.size).toBe(1);
+    const record = [...docs.values()][0]!; expect(record.provenance).toEqual({ kind: 'unsigned' });
+    await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="关闭叙事历史"]')!.click()); await settle();
+    await click('导出当前会话'); const exported = JSON.parse(mocks.download.mock.calls.at(-1)![1]); expect(exported.draft.historyOriginals[0].text).toBe(raw);
+    expect(calls()).toHaveLength(0);
+  });
+  it('advanced late history upload after target change preserves unsubmitted paste and writes nothing', async () => {
+    window.location.hash = '#/arena'; await mount(); await click('查看 / 编辑活动叙事历史'); await click('粘贴导入');
+    const raw = '{"entries":[{"id":"paste","content":"未提交粘贴原件"}]}'; await change('textarea[placeholder*="粘贴叙事历史 JSON"]', raw);
+    let finish!: (text: string) => void; const pending = new Promise<string>((resolve) => { finish = resolve; });
+    const file = new File(['fixture'], 'pending-history.json'); Object.defineProperty(file, 'text', { value: () => pending });
+    vi.mocked(window.confirm).mockReturnValue(true); const fileInput = document.querySelector<HTMLInputElement>('[role="dialog"] input[type="file"]')!;
+    Object.defineProperty(fileInput, 'files', { configurable: true, value: [file] }); await act(async () => fileInput.dispatchEvent(new Event('change', { bubbles: true }))); await settle();
+    await act(async () => { expect(scopeClose().preventDefault).toHaveBeenCalledOnce(); }); expect(activeCloseHandles).toBe(1);
+    await act(async () => getDesktopAiConfigStore().selectExecutionLocation('server')); await settle();
+    await act(async () => finish('{"entries":[{"id":"late","content":"迟到"}]}')); await settle();
+    expect(document.querySelector<HTMLTextAreaElement>('textarea[placeholder*="粘贴叙事历史 JSON"]')?.value).toBe(raw);
+    expect(localStorage.getItem(ADVANCED_ARENA_DRAFT_KEY)).toBeNull(); expect(docs.size).toBe(0); expect(calls()).toHaveLength(0);
+    vi.mocked(window.confirm).mockReturnValue(false); await act(async () => { expect(scopeClose().preventDefault).toHaveBeenCalledOnce(); });
+    await click('确认追加导入'); expect(JSON.parse(localStorage.getItem(ADVANCED_ARENA_DRAFT_KEY)!).draft.narrativeHistoryEntries[0].id).toBe('paste');
+  });
+
+  it('advanced shared Lore local/preset controls and manual events freeze only enabled sources', async () => {
+    const local: LocalCardRecordV1 = { id: 'lc_abcdef0123456789abcdef0123456789', schemaVersion: 1, storageLocation: 'local', cardType: 'questionnaire', title: '本地设定', data: { id: 'local-lore', title: '本地设定', kind: 'magical-girl', questions: [], loreMarkdown: '本地岛屿', nativeAllowed: true }, contentDigest: `sha256:${'c'.repeat(64)}`, provenance: { kind: 'unsigned', execution: 'imported' }, createdAt: '2026-10-01T00:00:00Z', updatedAt: '2026-10-01T00:00:00Z' }; docs.set(local.id, local);
+    window.location.hash = '#/arena'; localStorage.setItem(ADVANCED_ARENA_DRAFT_KEY, JSON.stringify({ version: 1, draft: draft('daily', 'stream') }));
+    await mount(); await click('恢复草稿'); await click('选择本地 / 公开设定'); await vi.waitFor(() => expect(document.querySelector('[aria-label="选择本地设定"]')).toBeTruthy());
+    await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="选择本地设定"]')!.click()); await settle();
+    const select = [...document.querySelectorAll('select')].find((item) => item.querySelector('option[value="girl-band-taiban-war-1.1"]'))!;
+    await act(async () => { select.value = 'girl-band-taiban-war-1.1'; select.dispatchEvent(new Event('change', { bubbles: true })); }); await settle();
+    const saved = () => JSON.parse(localStorage.getItem(ADVANCED_ARENA_DRAFT_KEY)!).draft;
+    expect(saved().selectedQuestionnaires).toHaveLength(2); expect(saved().selectedQuestionnaires[0]).toMatchObject({ source: 'upload', questionnaire: { nativeAllowed: false } });
+    await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="下移 本地设定"]')!.click());
+    const localRow = document.querySelector('[aria-label="上移 本地设定"]')!.closest('li')!; await act(async () => localRow.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
+    expect(saved().selectedQuestionnaires[1].useLore).toBe(false); await click('+ 添加根判定事件'); await change('textarea[placeholder*="输入事件描述"]', '手动天空判定');
+    await click('生成战报'); await vi.waitFor(() => expect(container.textContent).toContain('生成完成。'));
+    const request = JSON.parse(received.at(-1)!.arenaInputJson!); expect(request.questionnaires).toHaveLength(2); expect(request.questionnaires[0].id).toBe('girl-band-taiban-war-1.1'); expect(request.questionnaires[1].useLore).toBe(false);
+    expect(received.at(-1)!.messages.map((message) => message.content).join('')).not.toContain('本地岛屿');
+    expect(request.adjudicationResults).toMatchObject([{ description: '手动天空判定' }]); expect(docs.get(local.id)).toEqual(local);
+  });
+
 });

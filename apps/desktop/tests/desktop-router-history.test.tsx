@@ -140,7 +140,7 @@ describe('desktop router keeps the product path inside the hash', () => {
     const hrefs = [...home.querySelectorAll('a')].map((anchor) => anchor.getAttribute('href'));
 
     // 共源首页目录在 hide 策略下只渲染已交付入口：/details、/canshou 与 /character-manager
-    // 可点；/battle 等 Web-only 或未交付路径整条不出现（DESK-PROD-001）。
+    // 可点；Web-only 或未交付路径整条不出现（DESK-PROD-001）。
     // hash-history 宿主的 <a href> 一律是 `#/产品路径`——裸 `/path` 会让复制链接与
     // 脚本失败后的原生跳转落在 Tauri 自定义协议伺服不了的路径上。
     expect(home.querySelector('[data-testid="home-feature-grid"]')).not.toBeNull();
@@ -165,6 +165,7 @@ describe('desktop router keeps the product path inside the hash', () => {
     expect(hrefs).toContain('#/local-library');
     expect(hrefs).toContain('#/settings');
     expect(hrefs).toContain('#/battle');
+    // 首页保持 Web 目录：由 /battle 内的高级入口进入 /arena。
     expect(hrefs).not.toContain('#/arena');
     // 页脚站外链接经 onNavigateExternal 渲染为真实 <a href>（点击被拦截走
     // open_external_url），而不是不可点的占位。
