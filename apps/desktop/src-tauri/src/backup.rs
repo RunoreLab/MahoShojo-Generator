@@ -565,6 +565,9 @@ fn verify_sqlite(connection: &Connection) -> Result<i64, BackupError> {
         (3, "blob", "digest, byte_length, created_at, last_referenced_at"),
         (4, "local_web_package", "id, document, ref_digest, updated_at, updated_at_sort, deleted_at, archive_byte_length"),
         (4, "web_package_archive_ref", "package_id, digest"),
+        (5, "arena_story_session", "id, document, document_bytes, document_digest, seed_document, seed_bytes, seed_digest, revision, title_preview, title_truncated, mode, chapter_plan, created_at, updated_at, chapter_count, last_chapter_id, working_checkpoint_id, last_input_checkpoint_id"),
+        (5, "arena_story_chapter", "id, session_id, chapter_index, action, source_chapter_id, title_preview, title_truncated, created_at, markdown_bytes, document, document_bytes, document_digest, operation_id, operation_digest, receipt"),
+        (5, "arena_story_checkpoint", "id, session_id, boundary_index, chapter_id, document, document_bytes, document_digest"),
     ] {
         if version >= introduced {
             let is_table: bool = connection.query_row(
@@ -594,6 +597,9 @@ fn verify_sqlite(connection: &Connection) -> Result<i64, BackupError> {
     let mut rows = statement.query([]).map_err(|_| BackupError::Corrupt)?;
     if rows.next().map_err(|_| BackupError::Corrupt)?.is_some() {
         return Err(BackupError::Corrupt);
+    }
+    if version >= 5 {
+        crate::arena_story::audit_relations(connection).map_err(|_| BackupError::Corrupt)?;
     }
     Ok(version)
 }

@@ -16,6 +16,7 @@ mod ai_contract_tests;
 mod ai_e2e_tests;
 mod announcements;
 mod arena_hosted;
+mod arena_story;
 mod audit;
 mod backup;
 mod blob;
@@ -850,6 +851,204 @@ fn webpkg_header(
         .ok_or(webpkg_instance::WebpkgError::Invalid)
 }
 
+// Dedicated story commands. All disk/connection waits run off the UI thread. The
+// app manifest grants these exact operations only to the main-ui webview.
+#[tauri::command(async)]
+fn begin_arena_story_commit(
+    app: tauri::AppHandle,
+    library: State<'_, LocalLibrary>,
+    manifest: arena_story::CommitManifest,
+) -> Result<arena_story::BeginOutcome, arena_story::StoryError> {
+    let begun = library
+        .stories()
+        .begin(manifest, std::time::Instant::now())?;
+    let token = begun.token.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(arena_story::STAGE_LIFETIME).await;
+        // Exact random token: a late timer cannot remove a newer operation.
+        let _ = app.state::<LocalLibrary>().stories().abort(&token);
+    });
+    Ok(begun)
+}
+#[tauri::command(async)]
+fn append_arena_story_part(
+    request: tauri::ipc::Request,
+    library: State<'_, LocalLibrary>,
+) -> Result<arena_story::AppendOutcome, arena_story::StoryError> {
+    let token = arena_story::ipc::token(
+        request
+            .headers()
+            .get(arena_story::ipc::TOKEN_HEADER)
+            .and_then(|value| value.to_str().ok()),
+    )?;
+    let kind = arena_story::ipc::part(
+        request
+            .headers()
+            .get(arena_story::ipc::PART_HEADER)
+            .and_then(|value| value.to_str().ok()),
+    )?;
+    let offset = arena_story::ipc::offset(
+        request
+            .headers()
+            .get(arena_story::ipc::OFFSET_HEADER)
+            .and_then(|value| value.to_str().ok()),
+    )?;
+    let bytes = match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => bytes,
+        tauri::ipc::InvokeBody::Json(_) => return Err(arena_story::StoryError::Invalid),
+    };
+    library
+        .stories()
+        .append(token, kind, offset, bytes, std::time::Instant::now())
+}
+#[tauri::command(async)]
+fn end_arena_story_commit(
+    library: State<'_, LocalLibrary>,
+    token: String,
+) -> Result<arena_story::StoryReceipt, arena_story::StoryError> {
+    arena_story::ipc::token(Some(&token))?;
+    library.stories().end(&token, std::time::Instant::now())
+}
+#[tauri::command(async)]
+fn abort_arena_story_commit(
+    library: State<'_, LocalLibrary>,
+    token: String,
+) -> Result<(), arena_story::StoryError> {
+    arena_story::ipc::token(Some(&token))?;
+    library.stories().abort(&token)
+}
+#[tauri::command(async)]
+fn query_arena_story_receipt(
+    library: State<'_, LocalLibrary>,
+    session_id: String,
+    operation_id: String,
+) -> Result<Option<arena_story::StoryReceipt>, arena_story::StoryError> {
+    library.stories().receipt(&session_id, &operation_id)
+}
+#[tauri::command(async)]
+fn list_arena_story_sessions(
+    library: State<'_, LocalLibrary>,
+    cursor: Option<arena_story::read::SessionCursor>,
+    limit: Option<u32>,
+) -> Result<arena_story::read::SessionPage, arena_story::StoryError> {
+    library.stories().list_sessions(cursor, limit)
+}
+#[tauri::command(async)]
+fn list_arena_story_chapters(
+    library: State<'_, LocalLibrary>,
+    session_id: String,
+    revision: u64,
+    cursor: Option<arena_story::read::ChapterCursor>,
+    limit: Option<u32>,
+) -> Result<arena_story::read::ChapterPage, arena_story::StoryError> {
+    library
+        .stories()
+        .list_chapters(&session_id, revision, cursor, limit)
+}
+#[tauri::command(async)]
+fn describe_arena_story_record(
+    library: State<'_, LocalLibrary>,
+    session_id: String,
+    revision: u64,
+    kind: arena_story::read::RecordKind,
+    record_id: String,
+) -> Result<arena_story::read::RecordDescriptor, arena_story::StoryError> {
+    library
+        .stories()
+        .describe_record(&session_id, revision, kind, &record_id)
+}
+#[tauri::command(async)]
+fn read_arena_story_record_chunk(
+    library: State<'_, LocalLibrary>,
+    descriptor: arena_story::read::RecordDescriptor,
+    offset: u64,
+    length: usize,
+) -> Result<tauri::ipc::Response, arena_story::StoryError> {
+    library
+        .stories()
+        .read_record_chunk(&descriptor, offset, length)
+        .map(tauri::ipc::Response::new)
+}
+#[tauri::command(async)]
+fn read_arena_story_continue_state(
+    library: State<'_, LocalLibrary>,
+    session_id: String,
+    revision: u64,
+    expected_head: String,
+) -> Result<arena_story::read::ContinueDescriptors, arena_story::StoryError> {
+    library
+        .stories()
+        .continue_descriptors(&session_id, revision, &expected_head)
+}
+#[tauri::command(async)]
+fn begin_arena_story_markdown_export(
+    app: tauri::AppHandle,
+    library: State<'_, LocalLibrary>,
+    manifest: arena_story::markdown_export::StoryMarkdownExportManifest,
+) -> Result<arena_story::markdown_export::StoryMarkdownExportBegin, arena_story::StoryError> {
+    let begun = library
+        .stories()
+        .begin_markdown_export(manifest, std::time::Instant::now())?;
+    let token = begun.token.clone();
+    tauri::async_runtime::spawn(async move {
+        loop {
+            let remaining = app
+                .state::<LocalLibrary>()
+                .stories()
+                .expire_markdown_export(&token, std::time::Instant::now());
+            match remaining {
+                Ok(Some(delay)) => tokio::time::sleep(delay).await,
+                _ => break,
+            }
+        }
+    });
+    Ok(begun)
+}
+#[tauri::command(async)]
+fn append_arena_story_markdown_export(
+    request: tauri::ipc::Request,
+    library: State<'_, LocalLibrary>,
+) -> Result<arena_story::markdown_export::StoryMarkdownExportAppend, arena_story::StoryError> {
+    let token = arena_story::ipc::token(
+        request
+            .headers()
+            .get(arena_story::ipc::TOKEN_HEADER)
+            .and_then(|value| value.to_str().ok()),
+    )?;
+    let offset = arena_story::ipc::offset(
+        request
+            .headers()
+            .get(arena_story::ipc::OFFSET_HEADER)
+            .and_then(|value| value.to_str().ok()),
+    )?;
+    let bytes = match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => bytes,
+        tauri::ipc::InvokeBody::Json(_) => return Err(arena_story::StoryError::Invalid),
+    };
+    library
+        .stories()
+        .append_markdown_export(token, offset, bytes, std::time::Instant::now())
+}
+#[tauri::command(async)]
+fn end_arena_story_markdown_export(
+    library: State<'_, LocalLibrary>,
+    token: String,
+    expected_digest: String,
+) -> Result<arena_story::markdown_export::StoryMarkdownExportEnd, arena_story::StoryError> {
+    arena_story::ipc::token(Some(&token))?;
+    library
+        .stories()
+        .end_markdown_export(&token, &expected_digest, std::time::Instant::now())
+}
+#[tauri::command(async)]
+fn abort_arena_story_markdown_export(
+    library: State<'_, LocalLibrary>,
+    token: String,
+) -> Result<(), arena_story::StoryError> {
+    arena_story::ipc::token(Some(&token))?;
+    library.stories().abort_markdown_export(&token)
+}
+
 /// 开启一次导出归档。
 ///
 /// 目标路径由 native 选定（`DESK-071b`"导出目标路径的命名与保留"），渲染层既不能指定目录也不能
@@ -1505,6 +1704,20 @@ pub fn run() {
             begin_web_package_instance,
             append_web_package_resource,
             open_web_package_instance,
+            begin_arena_story_commit,
+            append_arena_story_part,
+            end_arena_story_commit,
+            abort_arena_story_commit,
+            query_arena_story_receipt,
+            list_arena_story_sessions,
+            list_arena_story_chapters,
+            describe_arena_story_record,
+            read_arena_story_record_chunk,
+            read_arena_story_continue_state,
+            begin_arena_story_markdown_export,
+            append_arena_story_markdown_export,
+            end_arena_story_markdown_export,
+            abort_arena_story_markdown_export,
             begin_local_archive_export,
             append_local_archive_export_chunk,
             audit_local_library,

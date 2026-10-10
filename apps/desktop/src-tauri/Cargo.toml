@@ -32,7 +32,7 @@ keyring = { version = "4", features = [
 # encodeURIComponent 的 unreserved 集，而不是引入新的供应链面。
 percent-encoding = "2.3"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream", "json", "http2", "charset"] }
-rusqlite = { version = "0.37", features = ["bundled"] }
+rusqlite = { version = "0.37", features = ["bundled", "blob"] }
 serde = { version = "1", features = ["derive"] }
 # raw_value 让本地卡 document 的自由载荷以原始文本保留，而不是实例化成 String。
 # 没有它，serde_json 会拒绝 JavaScript 可产出的孤立代理项转义（\ud800），

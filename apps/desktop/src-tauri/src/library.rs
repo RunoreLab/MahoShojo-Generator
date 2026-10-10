@@ -45,6 +45,11 @@ use crate::web_package::WebPackageStore;
 /// 本地库在进程内的整体句柄。**唯一**的 Tauri `State`。
 pub struct LocalLibrary {
     gate: Arc<MaintenanceGate>,
+    #[allow(
+        dead_code,
+        reason = "internal story storage candidate has no command binding yet"
+    )]
+    stories: crate::arena_story::StoryStore,
     /// 保留一份自有引用，让 store 之外的维护操作（审计 / GC / 备份）能在同一临界区里
     /// 跑跨表查询，而不必重新拼装连接。D2.2b 起被 `connection()` 使用。
     #[allow(dead_code, reason = "D2.2b 审计需要跨表只读查询")]
@@ -82,8 +87,16 @@ impl LocalLibrary {
         let blob_store = crate::blob::open(BlobPaths::under(&data_root), Arc::clone(&connection))
             .map_err(|_| crate::store::StoreError::Unavailable)?;
 
+        let gate = MaintenanceGate::shared();
+        let stories = crate::arena_story::StoryStore::open(
+            &data_root,
+            Arc::clone(&connection),
+            Arc::clone(&gate),
+        )
+        .map_err(|_| crate::store::StoreError::Unavailable)?;
         Ok(Self {
-            gate: MaintenanceGate::shared(),
+            gate,
+            stories,
             profiles: LocalStore::new(Arc::clone(&connection)),
             cards: LocalCardStore::new(Arc::clone(&connection)),
             packages: WebPackageStore::new(Arc::clone(&connection)),
@@ -112,6 +125,14 @@ impl LocalLibrary {
     }
 
     // ---- 访问者 -----------------------------------------------------------
+
+    #[allow(
+        dead_code,
+        reason = "internal story storage candidate has no command binding yet"
+    )]
+    pub fn stories(&self) -> &crate::arena_story::StoryStore {
+        &self.stories
+    }
 
     pub fn profiles(&self) -> &LocalStore {
         &self.profiles
