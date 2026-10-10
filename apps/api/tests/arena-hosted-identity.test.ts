@@ -1,3 +1,4 @@
+import { ARENA_COMPANION_PROTOCOL_HEADER, ARENA_COMPANION_PROTOCOL_VERSION } from '@mahoshojo/contracts/arena-companion';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
 import { ARENA_EXPECTED_USER_ID_HEADER, DesktopArenaHostedReadinessSchema } from '@mahoshojo/contracts/desktop-arena-hosted';
@@ -130,6 +131,7 @@ describe('Hono public Arena capability evidence', () => {
     });
     const response = await createHonoDrReadinessHandler(provider)(new Request('https://hono.test/api/hosted/dr-readiness'));
     expect(DesktopArenaHostedReadinessSchema.safeParse(await response.json()).success).toBe(true);
+    expect(response.headers.get(ARENA_COMPANION_PROTOCOL_HEADER)).toBe(ARENA_COMPANION_PROTOCOL_VERSION);
   });
   it('retains the shared unavailable response and never advertises failed readiness', async () => {
     await setup(); const response = await createHonoDrReadinessHandler({ id: 'hono-d1-primary', openSession: () => null })(new Request('https://hono.test/api/hosted/dr-readiness'));

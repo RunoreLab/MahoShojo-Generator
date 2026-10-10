@@ -469,3 +469,54 @@ describe('战报首次可预览通知', () => {
     expect(useBattleStore.getState().resultNavigation).toBeNull();
   });
 });
+
+describe('legacy Web consumer with the actual companion producer', () => {
+  it.each(['structured', 'web', 'package', 'failed'])('keeps no-opt-in useBattleEngine behavior (%s)', async (kind) => {
+    const { createArenaCompanionService } = await import('@mahoshojo/hosted-runtime/arena-companion');
+    const generationId = `arena_${'a'.repeat(64)}`;
+    const requestId = 'request-web-companion';
+    const html = '<!doctype html><html><head><title>故事</title></head><body>SHIELD 原始故事</body></html>';
+    const { generatedContent, ...artifact } = await createWebPackageOverlay(BUILTIN_ARENA_NEWS_PACKAGE_REF, html);
+    expect(generatedContent).toBe(html);
+    const report = { headline: 'SHIELD 故事', article: { body: 'SHIELD 正文', analysis: '独立点评' }, officialReport: { winner: '角色甲', conclusion: '结论' } };
+    const metadata = { reportFormat: kind === 'structured' ? 'markdown' : 'web', outputContract: kind === 'structured' ? 'structured-report' : kind === 'package' ? 'web-package-target' : 'web-document', reporterInfo: { name: '记者', publication: 'Arena' }, ...(kind === 'package' ? { webPackageRef: BUILTIN_ARENA_NEWS_PACKAGE_REF } : {}) };
+    const forbidden = async () => { throw new Error('Unexpected extra generation'); };
+    const service = createArenaCompanionService({
+      generationService: {
+        create: forbidden, createSubscription: forbidden, cancelRequest: forbidden, lookup: forbidden, resume: forbidden, status: forbidden, cancel: forbidden,
+        createParsedSubscription: async () => ({
+          generationId, generationRequestId: requestId,
+          headers: { 'X-Mahoshojo-Stream-Meta': encodeURIComponent(JSON.stringify(metadata)), 'X-Mahoshojo-Generation-Id': generationId },
+          events: new ReadableStream({ start(controller) {
+            controller.enqueue({ id: '1-0', type: 'snapshot', data: { markdown: kind === 'structured' ? JSON.stringify(report) : html } });
+            controller.enqueue({ id: '2-0', type: 'meta', data: { meta: { report: { headline: report.headline, winner: '角色甲' } } } });
+            if (kind === 'failed') controller.enqueue({ id: '3-0', type: 'error', data: { code: 'GENERATION_FAILED', error: '明确的生成失败' } });
+            else controller.enqueue({ id: '3-0', type: 'done', data: { ok: true, status: 'completed', ...(kind === 'package' ? { webPackage: artifact } : {}) } });
+            controller.close();
+          } }),
+        }),
+      }, projectUpdatedCombatants: async () => [],
+    });
+    await act(async () => {
+      const initial = useBattleStore.getState();
+      useBattleStore.setState({ generationMode: 'non-stream', reportFormat: kind === 'structured' ? 'markdown' : 'web', settings: { ...initial.settings, writeArenaHistory: false, writeCurrentState: false } });
+      if (kind === 'package') useBattleStore.getState().setWebPackageRef(BUILTIN_ARENA_NEWS_PACKAGE_REF);
+    });
+    mocks.dispatch.mockImplementation(async (path: string, init: RequestInit) => {
+      expect(new Headers(init.headers).has('X-Mahoshojo-Arena-Companion-Protocol')).toBe(false);
+      const response = await service.generate(new Request(`https://fixture.invalid${path}`, init));
+      expect(response.headers.has('X-Mahoshojo-Arena-Companion-Protocol')).toBe(false);
+      return response;
+    });
+    await act(async () => current.handleGenerate());
+    expect(mocks.dispatch).toHaveBeenCalledOnce();
+    const state = useBattleStore.getState();
+    if (kind === 'failed') { expect(state.error).toContain('明确的生成失败'); expect(state.newsReport).toBeNull(); }
+    else {
+      expect(state.error).toBeFalsy(); expect(state.updatedCombatants).toEqual([]);
+      if (kind === 'structured') expect(state.newsReport).toMatchObject({ headline: '被替换 故事', article: { body: '被替换 正文', analysis: '独立点评' } });
+      else { expect(state.newsReport!.article.body).toBe(html); expect(state.resultWebReady).toBe(true); }
+      if (kind === 'package') { expect(state.resultWebPackage).toEqual(artifact); expect(state.newsReport).not.toHaveProperty('webHtml'); }
+    }
+  });
+});

@@ -104,6 +104,16 @@
       "types": "./src/desktop-arena-hosted.ts",
       "import": "./src/desktop-arena-hosted.ts",
       "default": "./src/desktop-arena-hosted.ts"
+    },
+    "./arena-companion": {
+      "types": "./src/arena-companion.ts",
+      "import": "./src/arena-companion.ts",
+      "default": "./src/arena-companion.ts"
+    },
+    "./desktop-arena-hosted-json": {
+      "types": "./src/desktop-arena-hosted-json.ts",
+      "import": "./src/desktop-arena-hosted-json.ts",
+      "default": "./src/desktop-arena-hosted-json.ts"
     }
   },
   "scripts": {

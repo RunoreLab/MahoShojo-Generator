@@ -1,0 +1,88 @@
+{
+  "createRequest": {
+    "operation": "create-json",
+    "product": "battle",
+    "requestId": "arena_request_1234",
+    "actor": {
+      "kind": "account",
+      "expectedUserId": 42
+    },
+    "body": {
+      "mode": "daily",
+      "reportFormat": "markdown",
+      "combatants": [
+        {
+          "type": "magical-girl",
+          "data": {
+            "name": "Synthetic"
+          }
+        }
+      ],
+      "writeArenaHistory": false,
+      "writeCurrentState": false,
+      "arenaFreeRankingEnabled": false
+    }
+  },
+  "legacyPointer": {
+    "version": 1,
+    "product": "battle",
+    "protocolVersion": "arena-hosted-sse-v1",
+    "requestId": "arena_request_1234",
+    "bodyHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "actor": {
+      "kind": "account",
+      "expectedUserId": 42
+    },
+    "format": "markdown",
+    "battleMode": "daily",
+    "state": "prepared",
+    "updatedAt": "2026-10-10T00:00:00.000Z"
+  },
+  "pointer": {
+    "version": 2,
+    "product": "battle",
+    "protocolVersion": "arena-companion-v1",
+    "requestId": "arena_request_1234",
+    "bodyHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "actor": {
+      "kind": "account",
+      "expectedUserId": 42
+    },
+    "format": "markdown",
+    "battleMode": "daily",
+    "state": "prepared",
+    "updatedAt": "2026-10-10T00:00:00.000Z",
+    "delivery": "non-stream"
+  },
+  "channelEvents": [
+    {
+      "kind": "json-response",
+      "requestId": "arena_request_1234",
+      "sequence": 0,
+      "status": 200,
+      "generationId": "arena_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "generationRequestId": "arena_request_1234",
+      "payloadHash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "recoveryCredentialState": "stored"
+    },
+    {
+      "kind": "json-fragment",
+      "requestId": "arena_request_1234",
+      "sequence": 1,
+      "text": "{\"version\":",
+      "final": false
+    },
+    {
+      "kind": "json-fragment",
+      "requestId": "arena_request_1234",
+      "sequence": 2,
+      "text": "\"arena-companion-v1\"}",
+      "final": true
+    },
+    {
+      "kind": "json-end",
+      "requestId": "arena_request_1234",
+      "sequence": 3
+    }
+  ]
+}

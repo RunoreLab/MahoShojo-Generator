@@ -1,3 +1,5 @@
+import { ARENA_COMPANION_PROTOCOL_HEADER, ARENA_COMPANION_PROTOCOL_VERSION, ArenaCompanionModelIdSchema } from '@mahoshojo/contracts/arena-companion';
+import { createArenaCompanionResponseWriter } from './response';
 import type { ArenaPostBattleImpact, ArenaPostBattleProjectionInput } from '@mahoshojo/domain/arena-post-battle';
 import {
   MAX_ARENA_CREATE_BODY_BYTES,
@@ -48,6 +50,7 @@ export type ArenaCompanionServiceOptions = {
 };
 
 export interface ArenaCompanionService {
+  readonly companionProtocolVersion?: typeof ARENA_COMPANION_PROTOCOL_VERSION;
   generate(_request: Request, _operation?: ArenaCompanionOperation): Promise<Response>;
 }
 
@@ -337,142 +340,168 @@ const rebuildRequest = (
 export const createArenaCompanionService = (
   options: ArenaCompanionServiceOptions,
 ): ArenaCompanionService => Object.freeze({
+  companionProtocolVersion: ARENA_COMPANION_PROTOCOL_VERSION,
   async generate(
     request: Request,
     requestedOperation?: ArenaCompanionOperation,
   ): Promise<Response> {
-    const parsedBody = await readArenaCompanionJsonPayload(request);
-    if (parsedBody instanceof Response) return parsedBody;
-    const { payload, bodyBytes } = parsedBody;
-    if ('generationRequestId' in payload && !isGenerationRequestId(payload.generationRequestId)) {
-      return jsonResponse({
-        code: 'INVALID_GENERATION_REQUEST_ID',
-        error: 'generationRequestId 无效',
-      }, 400);
-    }
-    const generationRequestId = isGenerationRequestId(payload.generationRequestId)
-      ? payload.generationRequestId.trim()
-      : options.createGenerationRequestId?.() ?? crypto.randomUUID();
-    const operation = requestedOperation ?? operationFromRequest(request);
-    const upstreamPayload: Record<string, unknown> = { ...payload, forceStreamMeta: true };
-    delete upstreamPayload.generationRequestId;
-    const upstream = options.generationService.createParsedSubscription
-      ? await options.generationService.createParsedSubscription(
-        rebuildRequest(request, upstreamPayload, generationRequestId, operation, false),
-        { generationRequestId, payload: upstreamPayload, bodyBytes },
-      )
-      : await options.generationService.createSubscription(
-        rebuildRequest(request, payload, generationRequestId, operation, true),
-      );
-    if (upstream instanceof Response) return upstream;
-    let collected: CollectedGeneration;
+    const optIn = request.headers.has(ARENA_COMPANION_PROTOCOL_HEADER);
+    const response = createArenaCompanionResponseWriter(optIn);
+    let deliveryHeaders: Readonly<Record<string, string>> = {};
+    let producerCompleted = false;
     try {
-      collected = await collectSubscription(upstream);
-    } catch {
-      return jsonResponse({
-        code: 'GENERATION_STREAM_FAILED',
-        error: 'Arena generation stream failed',
-        generationId: upstream.generationId,
-      }, 502, upstream.headers);
-    }
-    if (!collected.completed) {
-      return jsonResponse({
-        code: collected.terminalError ?? 'GENERATION_STREAM_INCOMPLETE',
-        error: collected.terminalErrorMessage ?? 'Arena generation failed',
-        generationId: upstream.generationId,
-      }, 502, upstream.headers);
-    }
+      if (optIn && request.headers.get(ARENA_COMPANION_PROTOCOL_HEADER) !== ARENA_COMPANION_PROTOCOL_VERSION) {
+        return response.write({ code: 'ARENA_COMPANION_PROTOCOL_UNSUPPORTED', error: 'Unsupported Arena companion protocol' }, 400);
+      }
+      const parsedBody = await readArenaCompanionJsonPayload(request);
+      if (parsedBody instanceof Response) return response.upstream(parsedBody);
+      const { payload, bodyBytes } = parsedBody;
+      if (optIn && (payload.writeArenaHistory !== false || payload.writeCurrentState !== false)) {
+        return response.write({ code: 'ARENA_COMPANION_REPORT_ONLY_REQUIRED', error: 'Arena companion protocol requires report-only generation' }, 400);
+      }
+      if ('generationRequestId' in payload && !isGenerationRequestId(payload.generationRequestId)) {
+        return response.write({
+          code: 'INVALID_GENERATION_REQUEST_ID',
+          error: 'generationRequestId 无效',
+        }, 400);
+      }
+      const generationRequestId = isGenerationRequestId(payload.generationRequestId)
+        ? payload.generationRequestId.trim()
+        : options.createGenerationRequestId?.() ?? crypto.randomUUID();
+      const operation = requestedOperation ?? operationFromRequest(request);
+      const upstreamPayload: Record<string, unknown> = { ...payload, forceStreamMeta: true };
+      delete upstreamPayload.generationRequestId;
+      const upstream = options.generationService.createParsedSubscription
+        ? await options.generationService.createParsedSubscription(
+          rebuildRequest(request, upstreamPayload, generationRequestId, operation, false),
+          { generationRequestId, payload: upstreamPayload, bodyBytes },
+        )
+        : await options.generationService.createSubscription(
+          rebuildRequest(request, payload, generationRequestId, operation, true),
+        );
+      if (upstream instanceof Response) return response.upstream(upstream);
+      deliveryHeaders = upstream.headers;
+      let collected: CollectedGeneration;
+      try {
+        collected = await collectSubscription(upstream);
+      } catch {
+        return response.write({
+          code: 'GENERATION_STREAM_FAILED',
+          error: 'Arena generation stream failed',
+          generationId: upstream.generationId,
+        }, 502, upstream.headers);
+      }
+      if (!collected.completed) {
+        return response.write({
+          code: collected.terminalError ?? 'GENERATION_STREAM_INCOMPLETE',
+          error: collected.terminalErrorMessage ?? 'Arena generation failed',
+          generationId: upstream.generationId,
+        }, 502, upstream.headers);
+      }
 
-    const headerMeta = parseHeaderMeta(upstream.headers);
-    const isWeb = isWebArenaOutputContract(headerMeta.outputContract) || Boolean(collected.webPackage);
-    const writeArenaHistory = booleanOf(payload.writeArenaHistory, true);
-    const writeCurrentState = booleanOf(payload.writeCurrentState, true);
-    const structuredReport = isWeb ? null : parseArenaStructuredReportJson(collected.markdown, {
-      enableImpacts: writeArenaHistory || writeCurrentState,
-      enableImpactText: writeArenaHistory,
-      enableCurrentState: writeCurrentState,
-    });
-    const expectsStructuredReport = headerMeta.outputContract === 'structured-report'
-      || !isWeb && collected.markdown.trimStart().startsWith('{');
-    if (expectsStructuredReport && !structuredReport) {
-      return jsonResponse({
-        code: 'ARENA_STRUCTURED_REPORT_INVALID',
-        error: 'Arena structured report validation failed',
-        generationId: upstream.generationId,
-      }, 502, upstream.headers);
-    }
-    const metaReport = recordOf(collected.meta.report) ?? {};
-    const structuredArticle = recordOf(structuredReport?.article);
-    const structuredOfficialReport = recordOf(structuredReport?.officialReport);
-    const headline = textOf(structuredReport?.headline)
-      || textOf(metaReport.headline)
-      || (isWeb ? '' : headlineFromMarkdown(collected.markdown));
-    const winner = textOf(structuredOfficialReport?.winner)
-      || textOf(metaReport.winner)
-      || (isWeb ? '' : section(collected.markdown, '(?:胜利者|winner)'));
-    const conclusion = textOf(structuredOfficialReport?.conclusion)
-      || (isWeb ? '' : section(collected.markdown, '(?:最终结果|final result)'));
-    const impacts = normalizeImpacts(structuredReport?.impacts ?? collected.meta.impacts);
-    const reporterInfo = recordOf(headerMeta.reporterInfo) ?? { name: '', publication: '' };
-    const usage = normalizeUsage(collected.telemetry.usage);
-    const telemetryReasoning = recordOf(collected.telemetry.reasoning);
-    const model = textOf(collected.telemetry.model);
-    const mode = textOf(payload.mode) || 'classic';
-    const report: Record<string, unknown> = {
-      ...(structuredReport ?? {}),
-      ...(isWeb ? { reportFormat: 'web', ...(collected.webPackage
-        ? { webPackage: collected.webPackage } : { webHtml: collected.markdown }) } : {}),
-      headline,
-      reporterInfo,
-      article: {
-        body: isWeb ? collected.markdown : textOf(structuredArticle?.body) || bodyFromMarkdown(collected.markdown),
-        analysis: isWeb ? '' : textOf(structuredArticle?.analysis) || analysisFromMarkdown(collected.markdown),
-      },
-      officialReport: { winner, conclusion },
-      mode,
-      ...(textOf(headerMeta.userGuidance) ? { userGuidance: textOf(headerMeta.userGuidance) } : {}),
-      ...(Array.isArray(headerMeta.characterGuidances)
-        ? { characterGuidances: headerMeta.characterGuidances }
-        : {}),
-      ...(usage ? { aiUsage: usage } : {}),
-      ...(model ? { aiModel: model } : {}),
-      ...(typeof headerMeta.narrativeHistoryReadCount === 'number'
-        ? { narrativeHistoryReadCount: headerMeta.narrativeHistoryReadCount }
-        : {}),
-      ...(telemetryReasoning
-        ? { aiReasoning: telemetryReasoning }
-        : collected.reasoning
-        ? { aiReasoning: { text: collected.reasoning, status: 'complete' } }
-        : {}),
-    };
-    let updatedCombatants: Array<Record<string, unknown>>;
-    try {
-      updatedCombatants = await options.projectUpdatedCombatants({
-        combatants: Array.isArray(payload.combatants) ? payload.combatants : [],
-        report,
-        impacts,
-        userGuidance: textOf(headerMeta.userGuidance) || null,
-        scenario: recordOf(payload.scenario),
-        writeArenaHistory,
-        writeCurrentState,
-        generationId: upstream.generationId,
-        occurredAt: collected.occurredAt ?? new Date(0).toISOString(),
+      producerCompleted = true;
+      const headerMeta = parseHeaderMeta(upstream.headers);
+      const isWeb = isWebArenaOutputContract(headerMeta.outputContract) || Boolean(collected.webPackage);
+      const writeArenaHistory = booleanOf(payload.writeArenaHistory, true);
+      const writeCurrentState = booleanOf(payload.writeCurrentState, true);
+      const structuredReport = isWeb ? null : parseArenaStructuredReportJson(collected.markdown, {
+        enableImpacts: writeArenaHistory || writeCurrentState,
+        enableImpactText: writeArenaHistory,
+        enableCurrentState: writeCurrentState,
       });
-    } catch {
-      return jsonResponse({
-        code: 'ARENA_COMPANION_PROJECTION_FAILED',
-        error: 'Arena companion projection failed',
+      const expectsStructuredReport = headerMeta.outputContract === 'structured-report'
+        || !isWeb && collected.markdown.trimStart().startsWith('{');
+      if (expectsStructuredReport && !structuredReport) {
+        return response.write({
+          code: 'ARENA_STRUCTURED_REPORT_INVALID',
+          error: 'Arena structured report validation failed',
+          generationId: upstream.generationId,
+        }, 502, upstream.headers, headerMeta, true);
+      }
+      const metaReport = recordOf(collected.meta.report) ?? {};
+      const structuredArticle = recordOf(structuredReport?.article);
+      const structuredOfficialReport = recordOf(structuredReport?.officialReport);
+      const headline = textOf(structuredReport?.headline)
+        || textOf(metaReport.headline)
+        || (isWeb ? '' : headlineFromMarkdown(collected.markdown));
+      const winner = textOf(structuredOfficialReport?.winner)
+        || textOf(metaReport.winner)
+        || (isWeb ? '' : section(collected.markdown, '(?:胜利者|winner)'));
+      const conclusion = textOf(structuredOfficialReport?.conclusion)
+        || (isWeb ? '' : section(collected.markdown, '(?:最终结果|final result)'));
+      const impacts = normalizeImpacts(structuredReport?.impacts ?? collected.meta.impacts);
+      const reporterInfo = recordOf(headerMeta.reporterInfo) ?? { name: '', publication: '' };
+      const usage = normalizeUsage(collected.telemetry.usage);
+      const telemetryReasoning = recordOf(collected.telemetry.reasoning);
+      const model = textOf(collected.telemetry.model);
+      if (optIn && collected.telemetry.model !== undefined
+        && !ArenaCompanionModelIdSchema.safeParse(collected.telemetry.model).success) {
+        return response.write({
+          code: 'ARENA_COMPANION_PROTOCOL_UNSUPPORTED',
+          error: 'Unsupported Arena companion model metadata',
+          generationId: upstream.generationId,
+        }, 502, upstream.headers, headerMeta, true);
+      }
+      const mode = textOf(payload.mode) || 'classic';
+      const report: Record<string, unknown> = {
+        ...(structuredReport ?? {}),
+        ...(isWeb ? { reportFormat: 'web', ...(collected.webPackage
+          ? { webPackage: collected.webPackage } : { webHtml: collected.markdown }) } : {}),
+        headline,
+        reporterInfo,
+        article: {
+          body: isWeb ? collected.markdown : textOf(structuredArticle?.body) || bodyFromMarkdown(collected.markdown),
+          analysis: isWeb ? '' : textOf(structuredArticle?.analysis) || analysisFromMarkdown(collected.markdown),
+        },
+        officialReport: { winner, conclusion },
+        mode,
+        ...(textOf(headerMeta.userGuidance) ? { userGuidance: textOf(headerMeta.userGuidance) } : {}),
+        ...(Array.isArray(headerMeta.characterGuidances)
+          ? { characterGuidances: headerMeta.characterGuidances }
+          : {}),
+        ...(usage ? { aiUsage: usage } : {}),
+        ...(model ? { aiModel: model } : {}),
+        ...(typeof headerMeta.narrativeHistoryReadCount === 'number'
+          ? { narrativeHistoryReadCount: headerMeta.narrativeHistoryReadCount }
+          : {}),
+        ...(telemetryReasoning
+          ? { aiReasoning: telemetryReasoning }
+          : collected.reasoning
+          ? { aiReasoning: { text: collected.reasoning, status: 'complete' } }
+          : {}),
+      };
+      let updatedCombatants: Array<Record<string, unknown>>;
+      try {
+        updatedCombatants = await options.projectUpdatedCombatants({
+          combatants: Array.isArray(payload.combatants) ? payload.combatants : [],
+          report,
+          impacts,
+          userGuidance: textOf(headerMeta.userGuidance) || null,
+          scenario: recordOf(payload.scenario),
+          writeArenaHistory,
+          writeCurrentState,
+          generationId: upstream.generationId,
+          occurredAt: collected.occurredAt ?? new Date(0).toISOString(),
+        });
+      } catch {
+        return response.write({
+          code: 'ARENA_COMPANION_PROJECTION_FAILED',
+          error: 'Arena companion projection failed',
+          generationId: upstream.generationId,
+        }, 500, upstream.headers, headerMeta, true);
+      }
+      return response.write({
+        report,
+        updatedCombatants,
         generationId: upstream.generationId,
-      }, 500, upstream.headers);
+        ...(Array.isArray(headerMeta.adjudicationResults)
+          ? { adjudicationResults: headerMeta.adjudicationResults }
+          : {}),
+        ...(impacts.length > 0 ? { impacts } : {}),
+      }, 200, upstream.headers, headerMeta, true);
+    } catch (error) {
+      if (!optIn) throw error;
+      return response.write({ code: 'ARENA_COMPANION_DELIVERY_FAILED', error: 'Arena companion delivery failed' }, 502, deliveryHeaders, undefined, producerCompleted);
     }
-    return jsonResponse({
-      report,
-      updatedCombatants,
-      generationId: upstream.generationId,
-      ...(Array.isArray(headerMeta.adjudicationResults)
-        ? { adjudicationResults: headerMeta.adjudicationResults }
-        : {}),
-      ...(impacts.length > 0 ? { impacts } : {}),
-    }, 200, upstream.headers);
   },
 });

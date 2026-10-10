@@ -1,3 +1,5 @@
+import { ARENA_COMPANION_PROTOCOL_HEADER, ARENA_COMPANION_PROTOCOL_VERSION } from '@mahoshojo/contracts/arena-companion';
+import { createArenaCompanionResponseWriter } from './response';
 import type {
   ArenaCompanionOperation,
   ArenaCompanionService,
@@ -16,6 +18,8 @@ export const configureArenaCompanionRouteService = (
   configuredService = service;
 };
 
+export const isArenaCompanionProtocolInstalled = (): boolean => configuredService?.companionProtocolVersion === ARENA_COMPANION_PROTOCOL_VERSION;
+
 const unavailable = (): Promise<Response> => Promise.resolve(new Response(JSON.stringify({
   code: 'ARENA_COMPANION_SERVICE_UNAVAILABLE',
   error: 'Arena companion service unavailable',
@@ -29,7 +33,7 @@ const unavailable = (): Promise<Response> => Promise.resolve(new Response(JSON.s
 
 export const registeredArenaCompanionRouteService: ArenaCompanionRouteService = Object.freeze({
   generate: (request: Request, operation?: ArenaCompanionOperation) => (
-    configuredService?.generate(request, operation) ?? unavailable()
+    configuredService?.generate(request, operation) ?? unavailable().then((response) => createArenaCompanionResponseWriter(request.headers.has(ARENA_COMPANION_PROTOCOL_HEADER)).upstream(response))
   ),
   generateNext: (request: Request) => configuredService?.generateNext(request) ?? unavailable(),
   repairCombatantMeta: (request: Request) => (

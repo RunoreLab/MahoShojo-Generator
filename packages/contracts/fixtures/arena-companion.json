@@ -1,0 +1,304 @@
+{
+  "limits": {
+    "wireBytes": 76711888,
+    "adjudicationNodes": 2100
+  },
+  "successEnvelopes": [
+    {
+      "version": "arena-companion-v1",
+      "body": {
+        "report": {
+          "headline": "结构化战报",
+          "reporterInfo": {
+            "name": "记者甲",
+            "publication": "魔法记录报"
+          },
+          "article": {
+            "body": "正文中自由出现\n## 胜利者\n不截断。",
+            "analysis": "独立点评"
+          },
+          "officialReport": {
+            "winner": "角色甲",
+            "conclusion": "约定延续"
+          },
+          "mode": "classic",
+          "userGuidance": "延续上一章",
+          "characterGuidances": [
+            {
+              "characterName": "角色甲",
+              "guidance": "守约"
+            }
+          ],
+          "aiUsage": {
+            "completionTokens": 18014398509481982,
+            "reasoningTokens": 9007199254740991,
+            "textTokens": 9007199254740991
+          },
+          "aiModel": "test-model",
+          "narrativeHistoryReadCount": 2,
+          "aiReasoning": {
+            "status": "done",
+            "source": "sdk",
+            "summary": "推理摘要",
+            "text": "推理内容",
+            "reasoningTokens": 8
+          }
+        },
+        "updatedCombatants": [],
+        "generationId": "arena_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "adjudicationResults": [
+          {
+            "depth": 0,
+            "description": "掷骰事件",
+            "type": "binary",
+            "roll": 100,
+            "outcome": "失败",
+            "details": "掷骰(100) vs 成功率(50%)"
+          }
+        ]
+      },
+      "metadata": {
+        "reportFormat": "markdown",
+        "outputContract": "structured-report",
+        "mode": "classic",
+        "scenarioDisplayName": "雨夜",
+        "language": "zh-CN",
+        "storyLength": "短篇",
+        "reporterInfo": {
+          "name": "记者甲",
+          "publication": "魔法记录报"
+        },
+        "userGuidance": "延续上一章",
+        "characterGuidances": [
+          {
+            "characterName": "角色甲",
+            "guidance": "守约"
+          }
+        ],
+        "adjudicationResults": [
+          {
+            "depth": 0,
+            "description": "掷骰事件",
+            "type": "binary",
+            "roll": 100,
+            "outcome": "失败",
+            "details": "掷骰(100) vs 成功率(50%)"
+          }
+        ],
+        "narrativeHistoryReadCount": 2
+      }
+    },
+    {
+      "version": "arena-companion-v1",
+      "body": {
+        "report": {
+          "headline": "结构化战报",
+          "reporterInfo": {
+            "name": "记者甲",
+            "publication": "魔法记录报"
+          },
+          "article": {
+            "body": " \n<!doctype html><html><body>原始故事</body></html>\n ",
+            "analysis": ""
+          },
+          "officialReport": {
+            "winner": "角色甲",
+            "conclusion": "约定延续"
+          },
+          "mode": "classic",
+          "userGuidance": "延续上一章",
+          "characterGuidances": [
+            {
+              "characterName": "角色甲",
+              "guidance": "守约"
+            }
+          ],
+          "aiUsage": {
+            "completionTokens": 18014398509481982,
+            "reasoningTokens": 9007199254740991,
+            "textTokens": 9007199254740991
+          },
+          "aiModel": "test-model",
+          "narrativeHistoryReadCount": 2,
+          "aiReasoning": {
+            "status": "complete",
+            "text": "raw reasoning"
+          },
+          "reportFormat": "web",
+          "webHtml": " \n<!doctype html><html><body>原始故事</body></html>\n "
+        },
+        "updatedCombatants": [],
+        "generationId": "arena_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "adjudicationResults": [
+          {
+            "depth": 0,
+            "description": "掷骰事件",
+            "type": "binary",
+            "roll": 100,
+            "outcome": "失败",
+            "details": "掷骰(100) vs 成功率(50%)"
+          }
+        ]
+      },
+      "metadata": {
+        "reportFormat": "web",
+        "outputContract": "web-document",
+        "mode": "classic",
+        "scenarioDisplayName": "雨夜",
+        "language": "zh-CN",
+        "storyLength": "短篇",
+        "reporterInfo": {
+          "name": "记者甲",
+          "publication": "魔法记录报"
+        },
+        "userGuidance": "延续上一章",
+        "characterGuidances": [
+          {
+            "characterName": "角色甲",
+            "guidance": "守约"
+          }
+        ],
+        "adjudicationResults": [
+          {
+            "depth": 0,
+            "description": "掷骰事件",
+            "type": "binary",
+            "roll": 100,
+            "outcome": "失败",
+            "details": "掷骰(100) vs 成功率(50%)"
+          }
+        ],
+        "narrativeHistoryReadCount": 2
+      }
+    },
+    {
+      "version": "arena-companion-v1",
+      "body": {
+        "report": {
+          "headline": "结构化战报",
+          "reporterInfo": {
+            "name": "记者甲",
+            "publication": "魔法记录报"
+          },
+          "article": {
+            "body": " {\"title\":\"测试\",\"scenes\":[{\"text\":\"故事\"}]}\n",
+            "analysis": ""
+          },
+          "officialReport": {
+            "winner": "角色甲",
+            "conclusion": "约定延续"
+          },
+          "mode": "classic",
+          "userGuidance": "延续上一章",
+          "characterGuidances": [
+            {
+              "characterName": "角色甲",
+              "guidance": "守约"
+            }
+          ],
+          "aiUsage": {
+            "completionTokens": 18014398509481982,
+            "reasoningTokens": 9007199254740991,
+            "textTokens": 9007199254740991
+          },
+          "aiModel": "test-model",
+          "narrativeHistoryReadCount": 2,
+          "aiReasoning": {
+            "status": "complete",
+            "text": "raw reasoning"
+          },
+          "reportFormat": "web",
+          "webPackage": {
+            "packageRef": {
+              "id": "test.fixture",
+              "version": "1.0.0",
+              "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "targetPath": "data/report.json",
+            "targetMediaType": "application/json",
+            "generatedDigest": "sha256:d7107fcecfaabbe4940c0d4b2d865b896b7378e7eb5f05a0eec0715718ece1f7"
+          }
+        },
+        "updatedCombatants": [],
+        "generationId": "arena_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "adjudicationResults": [
+          {
+            "depth": 0,
+            "description": "掷骰事件",
+            "type": "binary",
+            "roll": 100,
+            "outcome": "失败",
+            "details": "掷骰(100) vs 成功率(50%)"
+          }
+        ]
+      },
+      "metadata": {
+        "reportFormat": "web",
+        "outputContract": "web-package-target",
+        "mode": "classic",
+        "scenarioDisplayName": "雨夜",
+        "language": "zh-CN",
+        "storyLength": "短篇",
+        "reporterInfo": {
+          "name": "记者甲",
+          "publication": "魔法记录报"
+        },
+        "userGuidance": "延续上一章",
+        "characterGuidances": [
+          {
+            "characterName": "角色甲",
+            "guidance": "守约"
+          }
+        ],
+        "adjudicationResults": [
+          {
+            "depth": 0,
+            "description": "掷骰事件",
+            "type": "binary",
+            "roll": 100,
+            "outcome": "失败",
+            "details": "掷骰(100) vs 成功率(50%)"
+          }
+        ],
+        "narrativeHistoryReadCount": 2,
+        "webPackageRef": {
+          "id": "test.fixture",
+          "version": "1.0.0",
+          "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      }
+    }
+  ],
+  "errorEnvelopes": [
+    {
+      "version": "arena-companion-v1",
+      "body": {
+        "code": "UNAUTHORIZED",
+        "error": "Unauthorized"
+      },
+      "metadata": null
+    },
+    {
+      "version": "arena-companion-v1",
+      "body": {
+        "code": "ARENA_COMPANION_PROTOCOL_UNSUPPORTED",
+        "error": "Arena companion delivery is unavailable; recover the original generation.",
+        "generationId": "arena_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "generationRequestId": "request-12345678"
+      },
+      "metadata": null
+    }
+  ],
+  "boundaryRecipes": {
+    "outputBytes": 4194304,
+    "inputBytes": 12582912,
+    "resolvedNodes": 2100,
+    "fixedBytes": 65536,
+    "sdkReasoningUnits": 12000,
+    "sdkSummaryUnits": 80,
+    "modelIdUnits": 200,
+    "completionTokens": 18014398509481982,
+    "ipcBytes": 65536,
+    "ipcEscapedEnvelopeBytes": 524288
+  }
+}
