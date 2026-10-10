@@ -29,6 +29,11 @@
       "types": "./src/runner-policy.ts",
       "import": "./src/runner-policy.ts",
       "default": "./src/runner-policy.ts"
+    },
+    "./desktop-execution-policy": {
+      "types": "./src/desktop-execution-policy.ts",
+      "import": "./src/desktop-execution-policy.ts",
+      "default": "./src/desktop-execution-policy.ts"
     }
   },
   "scripts": {

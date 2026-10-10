@@ -33,7 +33,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Condvar, Mutex};
+use std::sync::{Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
@@ -87,9 +87,74 @@ pub const MAX_TITLE_LENGTH: usize = 128;
 /// Collecting 会话的存活时间。超时后下一次访问按 `webpkg-instance-stale` 失败并回收。
 pub const COLLECT_TTL: Duration = Duration::from_secs(300);
 
-/// `sandbox allow-scripts`：与 iframe restricted mode 同一语义的 HTTP 头形态。
-/// 只对 `text/html` 响应下发——对非文档资源加 CSP 没有意义，反而会干扰 Worker/媒体加载。
+/// Native 硬追加且不可由内容类型移除。其余 CSP 来自共享 owner 生成的固定清单。
 const HTML_SANDBOX_CSP: &str = "sandbox allow-scripts";
+const POLICY_MANIFEST: &str = include_str!("generated/web-execution-policies.json");
+
+/// 仅可信主 UI 在 begin 选择并冻结；旧调用缺省为包，包 manifest / open 不可改变它。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WebContentKind {
+    FreeHtml,
+    #[default]
+    WebPackage,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PolicyManifest {
+    version: u32,
+    resource_origins: Vec<String>,
+    policies: GeneratedPolicies,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GeneratedPolicies {
+    #[serde(rename = "free-html")]
+    free_html: String,
+    #[serde(rename = "web-package")]
+    web_package: String,
+}
+
+fn parse_policy_manifest(json: &str) -> Option<GeneratedPolicies> {
+    let manifest: PolicyManifest = serde_json::from_str(json).ok()?;
+    if manifest.version != 1
+        || manifest.resource_origins
+            != [
+                format!("{URI_SCHEME}://{RESOURCE_HOST}"),
+                format!("http://{WINDOWS_RESOURCE_HOST}"),
+            ]
+    {
+        return None;
+    }
+    let mut policies = manifest.policies;
+    for policy in [&mut policies.free_html, &mut policies.web_package] {
+        // Generated authority still fails closed if damaged; renderer never supplies this text.
+        if policy.is_empty()
+            || policy
+                .split(';')
+                .any(|part| part.trim().split_whitespace().next() == Some("sandbox"))
+            || http::HeaderValue::from_str(policy).is_err()
+        {
+            return None;
+        }
+        *policy = format!("{HTML_SANDBOX_CSP}; {policy}");
+    }
+    Some(policies)
+}
+
+/// 只返回编译进二进制的两种政策；清单无法解析时 begin / HTML resolver 均 fail closed。
+fn html_policy(kind: WebContentKind) -> Option<&'static str> {
+    static POLICIES: OnceLock<Option<GeneratedPolicies>> = OnceLock::new();
+    let policies = POLICIES
+        .get_or_init(|| parse_policy_manifest(POLICY_MANIFEST))
+        .as_ref()?;
+    Some(match kind {
+        WebContentKind::FreeHtml => &policies.free_html,
+        WebContentKind::WebPackage => &policies.web_package,
+    })
+}
 
 /// `encodeURIComponent` 留下的字符集：unreserved（A-Z a-z 0-9 - _ . ! ~ * ' ( )）。
 /// 与 `resource-space.ts` 的 `buildWebPackageInstanceUrl` 逐段编码同一规则——两侧对同一条
@@ -334,6 +399,17 @@ pub struct DeclaredResourceFile {
     pub byte_length: u64,
 }
 
+/// begin 的真实 IPC DTO。未知字段和显式 null / 非法 kind 均拒绝；省略 kind 兼容旧包调用。
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BeginWebPackageInstanceRequest {
+    pub entry: String,
+    pub title: String,
+    pub files: Vec<DeclaredResourceFile>,
+    #[serde(default)]
+    pub content_kind: WebContentKind,
+}
+
 #[derive(Debug)]
 struct StagedFile {
     media_type: String,
@@ -353,6 +429,7 @@ enum OpenPhase {
 #[derive(Debug)]
 enum InstanceState {
     Collecting {
+        content_kind: WebContentKind,
         title: String,
         entry: String,
         declared: HashMap<String, DeclaredResourceFile>,
@@ -360,6 +437,7 @@ enum InstanceState {
         deadline: Instant,
     },
     Open {
+        content_kind: WebContentKind,
         files: HashMap<String, StagedFile>,
         label: String,
         phase: OpenPhase,
@@ -478,8 +556,12 @@ impl WebPackageInstances {
         entry: &str,
         title: &str,
         files: Vec<DeclaredResourceFile>,
+        content_kind: WebContentKind,
         now: Instant,
     ) -> Result<BeginInstanceOutcome, WebpkgError> {
+        if html_policy(content_kind).is_none() {
+            return Err(WebpkgError::Failure);
+        }
         if files.is_empty() {
             return Err(WebpkgError::Invalid);
         }
@@ -533,6 +615,7 @@ impl WebPackageInstances {
         inner.instances.insert(
             id.clone(),
             InstanceState::Collecting {
+                content_kind,
                 title: title.to_string(),
                 entry: entry.to_string(),
                 declared,
@@ -633,10 +716,10 @@ impl WebPackageInstances {
         enum OpenStep {
             Focus(String),
             Wait,
-            Take(String, String, HashMap<String, StagedFile>),
+            Take(String, String, HashMap<String, StagedFile>, WebContentKind),
             Missing,
         }
-        let (title, entry, files) = loop {
+        let (title, entry, files, content_kind) = loop {
             let step = match inner.instances.get_mut(instance_id) {
                 Some(InstanceState::Open {
                     label,
@@ -648,6 +731,7 @@ impl WebPackageInstances {
                     ..
                 }) => OpenStep::Wait,
                 Some(InstanceState::Collecting {
+                    content_kind,
                     title,
                     entry,
                     declared,
@@ -665,7 +749,12 @@ impl WebPackageInstances {
                     if !complete {
                         return Err(WebpkgError::InstanceIncomplete);
                     }
-                    OpenStep::Take(title.clone(), entry.clone(), std::mem::take(received))
+                    OpenStep::Take(
+                        title.clone(),
+                        entry.clone(),
+                        std::mem::take(received),
+                        *content_kind,
+                    )
                 }
                 None => OpenStep::Missing,
             };
@@ -692,8 +781,8 @@ impl WebPackageInstances {
                         .wait(inner)
                         .map_err(|_| WebpkgError::Failure)?;
                 }
-                OpenStep::Take(taken_title, taken_entry, taken_files) => {
-                    break (taken_title, taken_entry, taken_files);
+                OpenStep::Take(taken_title, taken_entry, taken_files, taken_kind) => {
+                    break (taken_title, taken_entry, taken_files, taken_kind);
                 }
                 OpenStep::Missing => {
                     drop(inner);
@@ -716,6 +805,7 @@ impl WebPackageInstances {
         // resolver 此刻起也已经能服务资源（初始页面请求可能先于 .build() 返回）。
         if let Some(state) = inner.instances.get_mut(instance_id) {
             *state = InstanceState::Open {
+                content_kind,
                 files,
                 label: label.clone(),
                 phase: OpenPhase::Opening,
@@ -804,7 +894,12 @@ impl WebPackageInstances {
         let Ok(inner) = self.inner.lock() else {
             return ResolveOutcome::NotFound;
         };
-        let Some(InstanceState::Open { files, label, .. }) = inner.instances.get(instance_id)
+        let Some(InstanceState::Open {
+            files,
+            label,
+            content_kind,
+            ..
+        }) = inner.instances.get(instance_id)
         else {
             return ResolveOutcome::NotFound;
         };
@@ -833,6 +928,7 @@ impl WebPackageInstances {
                     .min(range.start + MAX_RESPONSE_BYTES - 1)
                     .min(total - 1);
                 ResolveOutcome::Found(StagedFileRef {
+                    content_kind: *content_kind,
                     media_type: file.media_type.clone(),
                     total,
                     start: range.start,
@@ -840,6 +936,7 @@ impl WebPackageInstances {
                 })
             }
             None => ResolveOutcome::Found(StagedFileRef {
+                content_kind: *content_kind,
                 media_type: file.media_type.clone(),
                 total,
                 start: 0,
@@ -864,6 +961,7 @@ enum ResolveOutcome {
 /// 持有（resolver 在 Tauri 协议线程上同步返回，借用会把锁变成请求级临界区）。Range
 /// 服务时 `bytes` 只是区间内的一段切片，`total`/`start` 供 `Content-Range` 拼接。
 struct StagedFileRef {
+    content_kind: WebContentKind,
     media_type: String,
     total: u64,
     start: u64,
@@ -974,7 +1072,10 @@ pub fn resolve_webpkg_request(
                 builder = builder.status(http::StatusCode::OK);
             }
             if file.media_type == "text/html" {
-                builder = builder.header("Content-Security-Policy", HTML_SANDBOX_CSP);
+                let Some(policy) = html_policy(file.content_kind) else {
+                    return not_found_response();
+                };
+                builder = builder.header("Content-Security-Policy", policy);
             }
             builder
                 .body(std::borrow::Cow::Owned(file.bytes))
@@ -1046,7 +1147,13 @@ mod tests {
         entry: &str,
         files: Vec<DeclaredResourceFile>,
     ) -> Result<BeginInstanceOutcome, WebpkgError> {
-        registry.begin(entry, "示例包", files, Instant::now())
+        registry.begin(
+            entry,
+            "示例包",
+            files,
+            WebContentKind::WebPackage,
+            Instant::now(),
+        )
     }
 
     /// resolver 测试默认构造 Wry 已还原的规范 URI。
@@ -1066,18 +1173,204 @@ mod tests {
     /// resolver 语义与窗口创建解耦单测。
     fn promote_to_open(registry: &WebPackageInstances, instance_id: &str, phase: OpenPhase) {
         let mut inner = registry.inner.lock().unwrap();
-        if let Some(InstanceState::Collecting { received, .. }) =
-            inner.instances.get_mut(instance_id)
+        if let Some(InstanceState::Collecting {
+            received,
+            content_kind,
+            ..
+        }) = inner.instances.get_mut(instance_id)
         {
             let files = std::mem::take(received);
+            let content_kind = *content_kind;
             inner.instances.insert(
                 instance_id.to_string(),
                 InstanceState::Open {
+                    content_kind,
                     files,
                     label: label_for_instance(instance_id),
                     phase,
                 },
             );
+        }
+    }
+
+    #[test]
+    fn 真实_begin_dto_兼容旧包请求且只接受固定内容类型() {
+        let fixture = fixture();
+        let example = fixture["beginRequestExample"].clone();
+        let old: BeginWebPackageInstanceRequest = serde_json::from_value(example.clone()).unwrap();
+        assert_eq!(old.content_kind, WebContentKind::WebPackage);
+        assert_eq!(fixture["defaultContentKind"], "web-package");
+        assert_eq!(
+            fixture["contentKinds"],
+            serde_json::json!(["free-html", "web-package"])
+        );
+        for (value, kind) in [
+            ("free-html", WebContentKind::FreeHtml),
+            ("web-package", WebContentKind::WebPackage),
+        ] {
+            let mut request = example.clone();
+            request["contentKind"] = serde_json::json!(value);
+            let parsed: BeginWebPackageInstanceRequest = serde_json::from_value(request).unwrap();
+            assert_eq!(parsed.content_kind, kind);
+        }
+        for value in [
+            serde_json::Value::Null,
+            serde_json::json!("same-origin"),
+            serde_json::json!("WEB-PACKAGE"),
+            serde_json::json!(true),
+            serde_json::json!({}),
+        ] {
+            let mut request = example.clone();
+            request["contentKind"] = value;
+            assert!(serde_json::from_value::<BeginWebPackageInstanceRequest>(request).is_err());
+        }
+        for name in ["csp", "url", "network", "allowSameOrigin"] {
+            let mut request = example.clone();
+            request[name] = serde_json::json!("untrusted");
+            assert!(serde_json::from_value::<BeginWebPackageInstanceRequest>(request).is_err());
+        }
+    }
+
+    #[test]
+    fn 生成政策清单固定来源且_native_始终硬追加_sandbox() {
+        let manifest: serde_json::Value = serde_json::from_str(POLICY_MANIFEST).unwrap();
+        assert_eq!(
+            HTML_SANDBOX_CSP,
+            fixture()["responseHeaders"]["htmlSandboxDirective"]
+                .as_str()
+                .unwrap()
+        );
+        for (name, kind) in [
+            ("free-html", WebContentKind::FreeHtml),
+            ("web-package", WebContentKind::WebPackage),
+        ] {
+            let policy = html_policy(kind).unwrap();
+            assert_eq!(
+                policy,
+                format!(
+                    "{HTML_SANDBOX_CSP}; {}",
+                    manifest["policies"][name].as_str().unwrap()
+                )
+            );
+            assert!(!policy.contains("allow-same-origin"));
+            assert!(policy.contains("upgrade-insecure-requests"));
+        }
+        for change in [
+            "version", "origin", "missing", "extra", "sandbox", "newline", "empty",
+        ] {
+            let mut changed = manifest.clone();
+            match change {
+                "version" => changed["version"] = serde_json::json!(2),
+                "origin" => {
+                    changed["resourceOrigins"][1] =
+                        serde_json::json!("http://maho-webpkg.localhost:80")
+                }
+                "missing" => {
+                    changed["policies"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("free-html");
+                }
+                "extra" => changed["policies"]["same-origin"] = serde_json::json!("default-src *"),
+                "sandbox" => {
+                    changed["policies"]["web-package"] =
+                        serde_json::json!("sandbox allow-same-origin")
+                }
+                "newline" => {
+                    changed["policies"]["web-package"] =
+                        serde_json::json!("default-src 'none'\r\nX-Evil: yes")
+                }
+                "empty" => changed["policies"]["free-html"] = serde_json::json!(""),
+                _ => unreachable!(),
+            }
+            assert!(
+                parse_policy_manifest(&changed.to_string()).is_none(),
+                "{change}"
+            );
+        }
+    }
+
+    #[test]
+    fn begin_类型冻结至全部_html_含_range_响应且非文档无_policy() {
+        for kind in [WebContentKind::FreeHtml, WebContentKind::WebPackage] {
+            for phase in [OpenPhase::Opening, OpenPhase::Serving] {
+                let registry = WebPackageInstances::default();
+                let begun = registry
+                    .begin(
+                        "index.html",
+                        "合成政策夹具",
+                        vec![
+                            declared("index.html", "text/html", 5),
+                            declared("next.html", "text/html", 5),
+                            declared("app.js", "application/javascript", 5),
+                        ],
+                        kind,
+                        Instant::now(),
+                    )
+                    .unwrap();
+                let label = label_for_instance(&begun.instance_id);
+                let path = format!("{INSTANCE_URL_PREFIX}{}/index.html", begun.instance_id);
+                assert_eq!(
+                    resolve_webpkg_request(&registry, &label, &request(&path, None)).status(),
+                    http::StatusCode::NOT_FOUND
+                );
+                for path in ["index.html", "next.html", "app.js"] {
+                    registry
+                        .append(&begun.instance_id, path, 0, b"hello", Instant::now())
+                        .unwrap();
+                }
+                {
+                    let inner = registry.inner.lock().unwrap();
+                    assert!(
+                        matches!(inner.instances.get(&begun.instance_id), Some(InstanceState::Collecting { content_kind, .. }) if *content_kind == kind)
+                    );
+                }
+                promote_to_open(&registry, &begun.instance_id, phase);
+                for path in ["index.html", "next.html"] {
+                    let path = format!("{INSTANCE_URL_PREFIX}{}/{path}", begun.instance_id);
+                    for range in [None, Some("bytes=1-3")] {
+                        let response =
+                            resolve_webpkg_request(&registry, &label, &request(&path, range));
+                        assert_eq!(
+                            response.status(),
+                            if range.is_some() {
+                                http::StatusCode::PARTIAL_CONTENT
+                            } else {
+                                http::StatusCode::OK
+                            }
+                        );
+                        assert_eq!(
+                            response.headers()["content-security-policy"],
+                            html_policy(kind).unwrap()
+                        );
+                        assert_eq!(
+                            response.body().as_ref(),
+                            if range.is_some() {
+                                b"ell".as_slice()
+                            } else {
+                                b"hello".as_slice()
+                            }
+                        );
+                    }
+                }
+                let js = format!("{INSTANCE_URL_PREFIX}{}/app.js", begun.instance_id);
+                assert!(
+                    resolve_webpkg_request(&registry, &label, &request(&js, None))
+                        .headers()
+                        .get("content-security-policy")
+                        .is_none()
+                );
+                assert_eq!(
+                    registry.append(
+                        &begun.instance_id,
+                        "index.html",
+                        0,
+                        b"other",
+                        Instant::now()
+                    ),
+                    Err(WebpkgError::InstanceMissing)
+                );
+            }
         }
     }
 
@@ -1211,6 +1504,7 @@ mod tests {
                 "index.html",
                 &format!("{}😀", "t".repeat(126)),
                 files(),
+                WebContentKind::WebPackage,
                 Instant::now(),
             )
             .expect("128 code-unit title must pass");
@@ -1220,6 +1514,7 @@ mod tests {
                     "index.html",
                     &format!("{}😀", "t".repeat(127)),
                     files(),
+                    WebContentKind::WebPackage,
                     Instant::now()
                 )
                 .unwrap_err(),
@@ -1595,6 +1890,7 @@ mod tests {
                 "index.html",
                 "t",
                 vec![declared("index.html", "text/html", 1)],
+                WebContentKind::WebPackage,
                 t0,
             )
             .expect("begin");
@@ -1627,6 +1923,7 @@ mod tests {
                     declared("index.html", "text/html", 1),
                     declared("app.js", "application/javascript", 1),
                 ],
+                WebContentKind::WebPackage,
                 t0,
             )
             .expect("begin");
@@ -1649,6 +1946,7 @@ mod tests {
                 "index.html",
                 "t",
                 vec![declared("index.html", "text/html", 1)],
+                WebContentKind::WebPackage,
                 t0,
             )
             .expect("begin 2");
@@ -1707,7 +2005,7 @@ mod tests {
         assert_eq!(response.status(), http::StatusCode::OK);
         assert_eq!(
             response.headers().get("content-security-policy").unwrap(),
-            HTML_SANDBOX_CSP
+            html_policy(WebContentKind::WebPackage).unwrap()
         );
         assert_eq!(
             response

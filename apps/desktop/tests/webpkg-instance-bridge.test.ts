@@ -98,10 +98,11 @@ describe('Web Package 受限 webview 桥接（D4b）', () => {
       '示例包',
     );
 
-    // begin 的声明表与 snapshot 逐文件对齐。
+    // begin 的声明表与 snapshot 逐文件对齐，策略固定为包类型。
     expect(ipc.structuredCalls[0]?.command).toBe(BEGIN_WEB_PACKAGE_INSTANCE_COMMAND);
     expect(ipc.structuredCalls[0]?.args).toEqual({
       request: {
+        contentKind: 'web-package',
         entry: 'index.html',
         title: '示例包',
         files: [
@@ -127,6 +128,26 @@ describe('Web Package 受限 webview 桥接（D4b）', () => {
     expect(ipc.structuredCalls[1]?.command).toBe(OPEN_WEB_PACKAGE_INSTANCE_COMMAND);
     expect(ipc.structuredCalls[1]?.args).toEqual({ request: { instanceId: 'wpk-7' } });
     expect(opened).toEqual({ instanceId: 'wpk-7', webviewLabel: 'webpkg-wpk-7' });
+  });
+
+  it('包快照的额外字段不能覆盖固定 contentKind 或注入执行策略', async () => {
+    const snapshot = Object.assign(
+      makeSnapshot([['index.html', 'text/html', encode('<html></html>')]]),
+      { contentKind: 'free-html', csp: 'default-src *', url: 'https://example.com', allowNetwork: true },
+    );
+    const ipc = makeIpc(okHandlers());
+
+    await openWebPackageInstanceInIsolatedWebview(ipc.invoke, ipc.rawInvoke, snapshot, 't');
+
+    expect(ipc.structuredCalls[0]?.args).toEqual({
+      request: {
+        contentKind: 'web-package',
+        entry: 'index.html',
+        title: 't',
+        files: [{ path: 'index.html', mediaType: 'text/html', byteLength: '<html></html>'.length }],
+      },
+    });
+    expect(ipc.structuredCalls[1]?.args).toEqual({ request: { instanceId: 'wpk-7' } });
   });
 
   it('资源路径按 encodeURIComponent 逐段编码进 header', async () => {

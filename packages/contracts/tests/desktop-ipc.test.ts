@@ -47,6 +47,7 @@ import {
   DesktopBeginWebPackageInstanceResponseSchema,
   DesktopOpenWebPackageInstanceRequestSchema,
   DesktopOpenWebPackageInstanceResponseSchema,
+  DesktopWebContentKindSchema,
   DesktopWebPackageInstanceErrorCodeSchema,
   DesktopWebPackageInstanceErrorSchema,
   DesktopWebPackageInstanceIdSchema,
@@ -566,6 +567,8 @@ interface WebpkgFixture {
   webviewLabelExample: string;
   entryUrlExample: string;
   windowsEntryUrlExample: string;
+  contentKinds: string[];
+  defaultContentKind: string;
   commands: { begin: string; append: string; open: string };
   headers: { instanceId: string; resourcePath: string; resourceOffset: string };
   budgets: {
@@ -581,7 +584,7 @@ interface WebpkgFixture {
   errorCodes: string[];
   responseHeaders: {
     base: [string, string][];
-    htmlContentSecurityPolicy: string;
+    htmlSandboxDirective: string;
     charsetRules: { prefixes: string[]; exact: string[]; suffixes: string[] };
     contentTypeCases: { mediaType: string; contentType: string }[];
   };
@@ -644,6 +647,13 @@ describe('Desktop Web Package 受限 webview IPC 契约（D4b）', () => {
     expect(MAX_DESKTOP_WEBPKG_TITLE_LENGTH).toBe(webpkgFixture.budgets.maxTitleLength);
   });
 
+  it('固定内容类型与旧包默认值同 native fixture 对齐', () => {
+    expect(DesktopWebContentKindSchema.options).toEqual(webpkgFixture.contentKinds);
+    expect(webpkgFixture.defaultContentKind).toBe('web-package');
+    expect(DesktopWebContentKindSchema.parse(webpkgFixture.defaultContentKind)).toBe('web-package');
+    expect(webpkgFixture.responseHeaders.htmlSandboxDirective).toBe('sandbox allow-scripts');
+  });
+
   it('错误码集合与 native 侧一致且顺序稳定', () => {
     expect(DesktopWebPackageInstanceErrorCodeSchema.options).toEqual(webpkgFixture.errorCodes);
     expect(
@@ -701,6 +711,56 @@ describe('Desktop Web Package 受限 webview IPC 契约（D4b）', () => {
     expect(
       DesktopOpenWebPackageInstanceResponseSchema.parse(webpkgFixture.openResponseExample),
     ).toEqual(webpkgFixture.openResponseExample);
+  });
+
+  it('旧 begin 请求保留省略 contentKind 的 wire 形状，由 native 采用包默认值', () => {
+    const parsed = DesktopBeginWebPackageInstanceRequestSchema.parse(webpkgFixture.beginRequestExample);
+    expect(parsed).toStrictEqual(webpkgFixture.beginRequestExample);
+    expect(parsed).not.toHaveProperty('contentKind');
+    expect(parsed.contentKind).toBeUndefined();
+  });
+
+  it('begin 显式接受两种固定内容类型，拒绝未知类型和 null', () => {
+    const example = DesktopBeginWebPackageInstanceRequestSchema.parse(webpkgFixture.beginRequestExample);
+    for (const contentKind of webpkgFixture.contentKinds) {
+      expect(DesktopBeginWebPackageInstanceRequestSchema.parse({ ...example, contentKind }))
+        .toStrictEqual({ ...example, contentKind });
+    }
+    for (const contentKind of ['', 'native', 'FREE-HTML', 'web-package ', null, 1, {}, []]) {
+      expect(
+        DesktopBeginWebPackageInstanceRequestSchema.safeParse({ ...example, contentKind }).success,
+        JSON.stringify(contentKind),
+      ).toBe(false);
+    }
+  });
+
+  it('begin 与 open 均拒绝自定义 CSP、URL 和联网策略字段', () => {
+    const example = DesktopBeginWebPackageInstanceRequestSchema.parse(webpkgFixture.beginRequestExample);
+    for (const override of [
+      { csp: 'default-src *' },
+      { contentSecurityPolicy: 'default-src *' },
+      { url: 'https://example.com' },
+      { networkPolicy: 'unrestricted' },
+      { allowNetwork: true },
+    ]) {
+      expect(
+        DesktopBeginWebPackageInstanceRequestSchema.safeParse({ ...example, ...override }).success,
+        JSON.stringify(override),
+      ).toBe(false);
+      expect(
+        DesktopOpenWebPackageInstanceRequestSchema.safeParse({ ...webpkgFixture.openRequestExample, ...override }).success,
+        JSON.stringify(override),
+      ).toBe(false);
+    }
+  });
+
+  it('open 不能覆写 begin 时冻结的内容类型，包括合法枚举值', () => {
+    for (const contentKind of [...webpkgFixture.contentKinds, 'native', null]) {
+      expect(
+        DesktopOpenWebPackageInstanceRequestSchema.safeParse({ ...webpkgFixture.openRequestExample, contentKind }).success,
+        JSON.stringify(contentKind),
+      ).toBe(false);
+    }
   });
 
   it('begin 请求拒绝未声明 entry、非 html entry、重复路径与越界字节表', () => {

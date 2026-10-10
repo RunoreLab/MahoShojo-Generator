@@ -740,19 +740,6 @@ async fn read_web_package_archive(
     .map_err(|_| web_package::SaveWebPackageError::Store(store::StoreError::Failure))?
 }
 
-/// `begin_web_package_instance` 的请求体。
-///
-/// renderer 只交**已声明的文件表**（逻辑路径 + mediaType + 字节数）：native 不读 ZIP、
-/// 不读 manifest、不接触文件系统——解包与 overlay 语义全部在 TypeScript 权威实现一侧
-/// 完成（`DESK-059`），这里的职责只有按声明接收字节并把它们钉进只读资源空间。
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct BeginWebPackageInstanceRequest {
-    entry: String,
-    title: String,
-    files: Vec<webpkg_instance::DeclaredResourceFile>,
-}
-
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct OpenWebPackageInstanceRequest {
@@ -772,12 +759,13 @@ struct OpenWebPackageInstanceRequest {
 fn begin_web_package_instance(
     app: tauri::AppHandle,
     instances: State<'_, webpkg_instance::WebPackageInstances>,
-    request: BeginWebPackageInstanceRequest,
+    request: webpkg_instance::BeginWebPackageInstanceRequest,
 ) -> Result<webpkg_instance::BeginInstanceOutcome, webpkg_instance::WebpkgError> {
     let begun = instances.begin(
         &request.entry,
         &request.title,
         request.files,
+        request.content_kind,
         std::time::Instant::now(),
     )?;
     let reaper_app = app.clone();

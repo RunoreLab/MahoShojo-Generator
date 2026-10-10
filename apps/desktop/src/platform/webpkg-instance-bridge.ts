@@ -141,6 +141,8 @@ export const openWebPackageInstanceInIsolatedWebview = async (
     byteLength: file.bytes.byteLength,
   }));
   const request = DesktopBeginWebPackageInstanceRequestSchema.parse({
+    // 此桥只消费已物化的包快照，策略类型不由调用方或快照的额外字段决定。
+    contentKind: 'web-package',
     entry: snapshot.entry,
     title,
     files: declaredFiles,

@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "resourceOrigins": [
+    "maho-webpkg://localhost",
+    "http://maho-webpkg.localhost"
+  ],
+  "policies": {
+    "free-html": "default-src 'self'; base-uri 'self' maho-webpkg://localhost http://maho-webpkg.localhost; frame-ancestors 'none'; form-action 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' maho-webpkg://localhost http://maho-webpkg.localhost; script-src-attr 'none'; style-src 'self' 'unsafe-inline' maho-webpkg://localhost http://maho-webpkg.localhost; img-src 'self' data: blob: https: maho-webpkg://localhost http://maho-webpkg.localhost; font-src 'self' data: maho-webpkg://localhost http://maho-webpkg.localhost; connect-src 'self' https: wss: maho-webpkg://localhost http://maho-webpkg.localhost; media-src 'self' data: blob: https: maho-webpkg://localhost http://maho-webpkg.localhost; frame-src 'self'; manifest-src 'self'; worker-src 'self' blob:; upgrade-insecure-requests",
+    "web-package": "default-src 'none'; base-uri maho-webpkg://localhost http://maho-webpkg.localhost; frame-ancestors 'none'; script-src 'unsafe-inline' blob: data: https: maho-webpkg://localhost http://maho-webpkg.localhost; script-src-attr 'unsafe-inline'; style-src 'unsafe-inline' data: blob: https: maho-webpkg://localhost http://maho-webpkg.localhost; img-src data: blob: https: maho-webpkg://localhost http://maho-webpkg.localhost; font-src data: blob: https: maho-webpkg://localhost http://maho-webpkg.localhost; media-src data: blob: https: maho-webpkg://localhost http://maho-webpkg.localhost; connect-src https: wss: data: blob: maho-webpkg://localhost http://maho-webpkg.localhost; frame-src 'none'; object-src 'none'; worker-src 'none'; form-action 'none'; manifest-src 'none'; upgrade-insecure-requests"
+  }
+}

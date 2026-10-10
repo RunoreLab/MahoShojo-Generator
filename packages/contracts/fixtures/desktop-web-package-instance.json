@@ -9,6 +9,8 @@
   "webviewLabelExample": "webpkg-wpk-7",
   "entryUrlExample": "maho-webpkg://localhost/__web-package__/instance/wpk-7/index.html",
   "windowsEntryUrlExample": "http://maho-webpkg.localhost/__web-package__/instance/wpk-7/index.html",
+  "contentKinds": ["free-html", "web-package"],
+  "defaultContentKind": "web-package",
   "commands": {
     "begin": "begin_web_package_instance",
     "append": "append_web_package_resource",
@@ -44,14 +46,14 @@
     "webpkg-failure"
   ],
   "responseHeaders": {
-    "$note": "与 packages/web-package/src/resource-space.ts 的安全响应头同一语义：ACAO * 是因为受限 origin 为 opaque；Content-Range 不在 CORS safelisted response headers 里，不暴露则受限 JS 的 Range reader 读不到它；charset 规则镜像 withCharset。",
+    "$note": "与 packages/web-package/src/resource-space.ts 的安全响应头同一语义：ACAO * 是因为受限 origin 为 opaque；Content-Range 不在 CORS safelisted response headers 里，不暴露则受限 JS 的 Range reader 读不到它；charset 规则镜像 withCharset。htmlSandboxDirective 只是 native 硬追加的 sandbox 指令，完整 CSP 由 contentKind 选择的共享策略生成。",
     "base": [
       ["Access-Control-Allow-Origin", "*"],
       ["Access-Control-Expose-Headers", "Content-Range"],
       ["Referrer-Policy", "no-referrer"],
       ["X-Content-Type-Options", "nosniff"]
     ],
-    "htmlContentSecurityPolicy": "sandbox allow-scripts",
+    "htmlSandboxDirective": "sandbox allow-scripts",
     "notFoundBody": "Not Found",
     "charsetRules": {
       "prefixes": ["text/"],

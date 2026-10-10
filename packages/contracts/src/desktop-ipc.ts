@@ -816,8 +816,14 @@ export const DesktopWebPackageInstanceFileSchema = z
   .strict();
 export type DesktopWebPackageInstanceFile = z.infer<typeof DesktopWebPackageInstanceFileSchema>;
 
+/** 只选择既定 Web 执行策略；不得由 renderer 提供 CSP 或任意联网权限。 */
+export const DesktopWebContentKindSchema = z.enum(['free-html', 'web-package']);
+export type DesktopWebContentKind = z.infer<typeof DesktopWebContentKindSchema>;
+
 export const DesktopBeginWebPackageInstanceRequestSchema = z
   .object({
+    /** begin 时冻结；缺省由 native 按 web-package 解释，保留旧请求的 wire 形状。 */
+    contentKind: DesktopWebContentKindSchema.optional(),
     /** 渲染入口。必须是文件表中的一个 `text/html` 文件。 */
     entry: WebPackagePathSchema,
     /** 窗口标题（通常取 `manifest.name`）。由渲染层提供，native 只按长度截断式校验。 */
@@ -871,6 +877,7 @@ export type DesktopAppendWebPackageResourceResponse = z.infer<
   typeof DesktopAppendWebPackageResourceResponseSchema
 >;
 
+/** 只打开已登记实例；不得覆盖 begin 时冻结的 contentKind 或执行策略。 */
 export const DesktopOpenWebPackageInstanceRequestSchema = z
   .object({ instanceId: DesktopWebPackageInstanceIdSchema })
   .strict();
