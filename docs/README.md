@@ -4,9 +4,9 @@
 
 2026-10-10 新增页对齐：[品牌与样式共源修复](./reports/2026-10-10_070600_Desktop新增页面品牌与样式共源修复.md)定位首页 / 战报模式资源缺失和 Desktop CSS 层序反转，抽取问卷 / 工坊真实 Web 页框供双端回用；源码独审、真实双端 CSS / Desktop production 与完整本地 CI 均通过；同批分列“我的数据卡”模态滚动修复，真实触屏 / Windows 视觉继续待验。
 
-2026-10-10 D5.1b C2 调查：[非流报告合同](./plans/2026-10-10_065400_DesktopHostedArena非流报告实施合同.md)与[完整JSON容量](./reports/2026-10-10_065400_Arena非流完整JSON容量调查.md)选择固定opt-in完整body/metadata封套，保既有角色写关闭与原actor恢复；当前仅调查/合同，未实施C2。现Hono公开readiness的无凭据GET已确认C1能力声明，真实凭据/生成和Windows仍未验。
+2026-10-10 D5.1b C2：[Hosted完整非流报告验收](./reports/2026-10-10_080500_DesktopHostedArena完整非流报告验收.md)已接通两页真实非流报告、完整 body/metadata、原 actor 恢复与显式保存；64组新JSON与原64组SSE矩阵、同一75,497,013B原件的server→Native→TS容量链及最终完整CI通过。原[调查/合同](./plans/2026-10-10_065400_DesktopHostedArena非流报告实施合同.md)保历史数据，签名角色、D4执行、真实凭据和Windows仍独立后继；本批另含独立规范资源来源修复，未开放包网络权限。
 
-2026-10-10 D5.1b C1-SSE：[Hosted Arena 流式纵切验收](./reports/2026-10-10_053300_DesktopHostedArena流式纵切验收.md)记录两产品真实共享客户端/Native/Hono 身份边界、显式原 actor 恢复、活动历史及本地保存；源码独审和完整本地 CI 已通过，真实 Rust loopback 与 Desktop 合成 IPC 证据分层列出。交付时生产服务能力部署尚待验；最新公开readiness证据见上方C2调查，真实凭据、Tauri/Windows 和 D4 执行仍待验。非流完整 JSON/权威角色更新继续独立后继。
+2026-10-10 D5.1b C1-SSE：[Hosted Arena 流式纵切验收](./reports/2026-10-10_053300_DesktopHostedArena流式纵切验收.md)记录两产品真实共享客户端/Native/Hono 身份边界、显式原 actor 恢复、活动历史及本地保存；源码独审和完整本地 CI 已通过，真实 Rust loopback 与 Desktop 合成 IPC 证据分层列出。交付时生产服务能力部署尚待验；最新公开readiness证据见上方C2调查，真实凭据、Tauri/Windows 和 D4 执行仍待验。C1交付时非流完整 JSON/权威角色更新保留后继；非流报告最新状态见上方C2，权威角色更新仍未接入。
 
 2026-10-10 D5.1b C0：[Arena 可恢复客户端共源验收](./reports/2026-10-10_041243_Arena可恢复客户端共源验收.md)完成显式 client-safe 核与真实 Web 回用，保 primary-only 独立取消及旧存储/恢复语义；固定金样、合成 Native-shaped 与完整本地 CI 已通过。C0 交付时，官方固定 Hono 目的地和限定凭据的后继设计已获维护者同意，但尚未冻结 C1 接线合同或开放 Desktop Hosted；后继源码状态见上方 C1-SSE 验收。
 
