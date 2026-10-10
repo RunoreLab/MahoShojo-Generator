@@ -1,5 +1,7 @@
 # 文档导航
 
+2026-10-10 D4 后继：[受限策略与确认共源合同](./plans/2026-10-10_075500_不可信Web内容受限策略与确认共源合同.md)冻结按内容类型共用 Web 既有政策、保主站环境差异和普通确认宿主记忆的窄方案；纯规则 / Web 真回用与诊断逐次确认之后，第二片已接固定 Native manifest / begin 类型冻结；真实 client 入口边界回归与正规完整 CI 已通过，新 Windows 策略仍按有限 S01–S04 待验，产品执行继续关闭。
+
 2026-10-10 D4b 有限收口：[规范来源与 Document / 关闭补验](./runbooks/2026-10-10_074400_D4b规范来源与Document关闭有限补验.md)接收 be802 Windows 表格报告，依据锁定 Wry/Tauri 映射收紧 resolver 完整 authority，保留 label-instance 隔离；真实模块 20 条与上游映射 2 条定向通过。新修复 Windows URI 采样、javascript 返回新 Document、页面 window.close 仍待补，网络共源与产品执行仍为独立后继。
 
 2026-10-10 新增页对齐：[品牌与样式共源修复](./reports/2026-10-10_070600_Desktop新增页面品牌与样式共源修复.md)定位首页 / 战报模式资源缺失和 Desktop CSS 层序反转，抽取问卷 / 工坊真实 Web 页框供双端回用；源码独审、真实双端 CSS / Desktop production 与完整本地 CI 均通过；同批分列“我的数据卡”模态滚动修复，真实触屏 / Windows 视觉继续待验。
