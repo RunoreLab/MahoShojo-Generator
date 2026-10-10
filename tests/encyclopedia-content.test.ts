@@ -96,6 +96,20 @@ const freshRoot = async () => {
 };
 
 describe('generated content from a clean output root', () => {
+  it('packages the report mode badges in both hosts without changing their bytes', async () => {
+    const outputRoot = await freshRoot();
+    await generate({ outputRoot });
+    for (const mode of ['classic', 'daily', 'kizuna', 'scenario']) {
+      const asset = `${mode}-mode.svg`;
+      for (const target of TARGETS) {
+        const publicRoot = path.join(outputRoot, target.app, 'public');
+        expect(await readdir(publicRoot), `${target.label} report badge ${asset}`).toContain(asset);
+        expect(await readFile(path.join(publicRoot, asset)))
+          .toEqual(await readFile(path.join(REPO_ROOT, 'content/brand', asset)));
+      }
+    }
+  });
+
   it('validates source without requiring or writing generated copies', async () => {
     const outputRoot = await freshRoot();
     await generate({ check: true, outputRoot });

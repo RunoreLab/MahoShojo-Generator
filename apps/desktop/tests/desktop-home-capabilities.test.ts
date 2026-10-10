@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { HOME_FEATURE_CATEGORIES } from '@mahoshojo/ui-web/home';
 
 import { readCapability } from '@mahoshojo/ui-web/capability';
 
@@ -8,6 +10,16 @@ import { DELIVERED_ROUTES } from '../src/app/delivered-routes';
 /** Desktop 能力声明不把 Web 首页功能清单当成交付承诺。 */
 describe('desktop capability snapshot', () => {
   const snapshot = buildCapabilitySnapshot();
+
+  it('includes every actually delivered homepage logo in the shared asset output', () => {
+    const { brand } = JSON.parse(readFileSync(new URL('../../../content/sync-manifest.json', import.meta.url), 'utf8')) as { brand: { shared: string[] } };
+    for (const feature of HOME_FEATURE_CATEGORIES.flatMap((category) => category.features)) {
+      if (readCapability(snapshot, feature.href).kind !== 'available') continue;
+      expect(brand.shared, `${feature.href} needs its homepage logo ${feature.assetFile}`).toContain(feature.assetFile);
+      // The repository generator tests independently verify that each shared entry reaches both outputs byte-for-byte.
+      expect(readFileSync(new URL(`../../../content/brand/${feature.assetFile}`, import.meta.url)).byteLength).toBeGreaterThan(0);
+    }
+  });
 
   it('covers every navigation entry, including external ones', () => {
     for (const href of DECLARED_PRODUCT_PATHS) {

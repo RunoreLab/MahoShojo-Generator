@@ -10,17 +10,23 @@
       "beast-logo-white.svg",
       "beast-logo.svg",
       "beast-title.svg",
+      "card-forge-white.svg",
       "character-manager-white.svg",
       "character-manager.svg",
+      "classic-mode.svg",
+      "daily-mode.svg",
       "encyclopedia.svg",
       "favicon.svg",
       "free-generator-white.svg",
       "globe.svg",
+      "kizuna-mode.svg",
       "logo-white-qrcode.svg",
       "logo-white.svg",
       "logo.svg",
+      "party-white.svg",
       "questionnaire-logo.svg",
       "questionnaire-title.svg",
+      "scenario-mode.svg",
       "scenario-shadow.webp",
       "scenario.webp",
       "sublimation-white.svg",
@@ -28,9 +34,7 @@
       "tavern-white.svg"
     ],
     "web": [
-      "card-forge-white.svg",
-      "magic-tea-party-white.svg",
-      "party-white.svg"
+      "magic-tea-party-white.svg"
     ]
   },
   "arenaPresets": {
