@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { CardForgeThemeEditor } from '@mahoshojo/ui-web/card-forge';
+import { CardForgeThemeEditor, CardForgePageView, CardForgeWorkspace } from '@mahoshojo/ui-web/card-forge';
 import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -541,19 +541,26 @@ export function CardForgePage() {
   };
 
   return (
-    <div className="card-forge-shell magic-background-white min-h-[100dvh] pb-12">
-      <div className="mx-auto px-4 max-w-7xl">
-        {/* 标题 */}
-        <div className="pt-8 pb-6 text-center">
-          <h1 className="text-3xl md:text-4xl font-bold mb-2 card-forge-title">
-            卡牌工坊
-          </h1>
-          <p className="text-sm text-[var(--app-text-muted)]">
-            将角色卡 / 情景卡数据转化为卡牌游戏风格的精美卡面
-          </p>
-        </div>
+    <CardForgePageView homeLink={<Link href="/" className="text-sm text-[var(--app-accent-strong)] hover:underline">返回首页</Link>} overlays={<>
+      <BattleDataModal
+        isOpen={isDataCardModalOpen}
+        onClose={() => setIsDataCardModalOpen(false)}
+        onSelectCard={handleSelectOnlineDataCard}
+        selectedType="all"
+        allowedTypes={[...ONLINE_DATA_CARD_TYPES]}
+        visibleTabs={['my', 'public', 'favorites']}
+        initialTab="public"
+        selectionMode="single"
+        titleOverride="选择数据卡"
+      />
 
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_minmax(380px,420px)] gap-6 items-start">
+      <ImagePreviewModal
+        isOpen={previewImageUrl !== null}
+        imageUrl={previewImageUrl}
+        onClose={() => setPreviewImageUrl(null)}
+      />
+    </>}>
+      <CardForgeWorkspace>
           {/* 左侧：输入区 */}
           <div className="space-y-4 min-w-0">
             {/* 数据卡输入 */}
@@ -939,32 +946,7 @@ export function CardForgePage() {
               )}
             </section>
           </div>
-        </div>
-
-        <div className="mt-8 text-center">
-          <Link href="/" className="text-sm text-[var(--app-accent-strong)] hover:underline">
-            返回首页
-          </Link>
-        </div>
-      </div>
-
-      <BattleDataModal
-        isOpen={isDataCardModalOpen}
-        onClose={() => setIsDataCardModalOpen(false)}
-        onSelectCard={handleSelectOnlineDataCard}
-        selectedType="all"
-        allowedTypes={[...ONLINE_DATA_CARD_TYPES]}
-        visibleTabs={['my', 'public', 'favorites']}
-        initialTab="public"
-        selectionMode="single"
-        titleOverride="选择数据卡"
-      />
-
-      <ImagePreviewModal
-        isOpen={previewImageUrl !== null}
-        imageUrl={previewImageUrl}
-        onClose={() => setPreviewImageUrl(null)}
-      />
-    </div>
+      </CardForgeWorkspace>
+    </CardForgePageView>
   );
 }

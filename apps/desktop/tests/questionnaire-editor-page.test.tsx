@@ -10,7 +10,7 @@ import type { LocalCardRecordV1 } from '@mahoshojo/local-library/record';
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), navigate: vi.fn(), blocker: (() => false) as () => boolean, close: ((_event: { preventDefault: () => void }) => {}) as (event: { preventDefault: () => void }) => void }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.invoke, isTauri: () => true }));
 vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ onCloseRequested: async (handler: typeof mocks.close) => { mocks.close = handler; return () => {}; } }) }));
-vi.mock('@tanstack/react-router', () => ({ useBlocker: ({ shouldBlockFn }: { shouldBlockFn: () => boolean }) => { mocks.blocker = shouldBlockFn; }, useRouter: () => ({ navigate: mocks.navigate }), Link: ({ children }: { children: ReactNode }) => <a>{children}</a> }));
+vi.mock('@tanstack/react-router', () => ({ useBlocker: ({ shouldBlockFn }: { shouldBlockFn: () => boolean }) => { mocks.blocker = shouldBlockFn; }, useRouter: () => ({ navigate: mocks.navigate }), Link: ({ to, children, className }: { to: string; children: ReactNode; className?: string }) => <a href={`#${to}`} className={className}>{children}</a> }));
 vi.mock('../src/features/external-links/external-links-provider', () => ({ useExternalLinks: () => ({ openFixed: vi.fn() }) }));
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
@@ -36,6 +36,13 @@ describe('Desktop questionnaire editor real host wiring', () => {
     const button = (name: string) => [...container.querySelectorAll('button')].find((item) => item.textContent === name)!;
     try {
       await act(async () => root.render(<DesktopQuestionnaireEditor />));
+      expect(container.querySelectorAll('.card > .text-center img[src="/questionnaire-title.svg"]')).toHaveLength(1);
+      expect(container.querySelector('h1')?.className).toBe('sr-only');
+      expect(container.querySelector('a[href="#/details"]')?.textContent).toBe('前往魔法少女问卷');
+      expect(container.querySelector('a[href="#/canshou"]')?.textContent).toBe('前往残兽问卷');
+      expect(container.querySelector('a[href="#/"]')?.textContent).toBe('返回首页');
+      expect(container.textContent).toContain('本地问卷库');
+      expect(container.textContent).not.toContain('云端问卷库');
       const input = container.querySelector('textarea')!;
       act(() => {
         Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, JSON.stringify({ id: 'q', kind: 'magical-girl', title: '问卷', nativeAllowed: true, signature: 'forged', custom: { keep: true }, questions: [{ id: 'q1', question: '题目' }] }));

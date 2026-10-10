@@ -2,3 +2,4 @@ export * from './questions';
 export * from './metadata';
 export * from './file';
 export * from './local-panel';
+export * from './QuestionnaireEditorPageView';

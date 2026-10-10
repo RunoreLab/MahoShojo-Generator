@@ -24,6 +24,10 @@ describe('Desktop local forge host journey', () => {
     const original = '\ufeff' + JSON.stringify({ faceData: face, imageUrl: 'https://example.com/private.png', sourceCardData: { extra: '保留' } }, null, 2);
     try {
       await act(async () => root.render(<DesktopCardForge />));
+      expect(container.querySelector('.card-forge-shell')?.className).toBe('card-forge-shell magic-background-white min-h-[100dvh] pb-12');
+      expect(container.querySelector('.max-w-7xl > .pt-8 > h1')?.textContent).toBe('卡牌工坊');
+      expect(container.querySelector('[class*="lg:grid-cols-[1fr_minmax(380px,420px)]"]')?.children).toHaveLength(2);
+      expect(container.textContent).toContain('卡面将在此处预览');
       const input = container.querySelector<HTMLInputElement>('[aria-label="导入卡牌 JSON"]')!;
       await act(async () => choose(input, inputFile(original)));
       expect(container.querySelector('.gc-name-text')?.textContent).toBe('原卡');

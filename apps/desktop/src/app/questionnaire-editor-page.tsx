@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Link, useRouter } from '@tanstack/react-router';
-import { LocalQuestionnairePanel } from '@mahoshojo/ui-web/questionnaire-editor';
+import { LocalQuestionnairePanel, QuestionnaireEditorPageView } from '@mahoshojo/ui-web/questionnaire-editor';
 import { ProductFooter } from '@mahoshojo/ui-web/shell';
 import { buildSafeFileName } from '@mahoshojo/ui-web/client';
 import { IpcLocalCardRepository } from '../platform/local-card-bridge';
@@ -25,9 +25,8 @@ export function DesktopQuestionnaireEditor() {
     '窗口关闭保护初始化失败，问卷编辑暂不可用，请重新打开页面。',
     () => !busy.current && window.confirm('问卷编辑或粘贴尚未保存，确认放弃并离开？'),
   );
-  return <div className="magic-background-white"><div className="container !max-w-[1100px]"><div className="card !max-w-none">
-    <h1 className="title text-center">问卷编辑器</h1>
-    <p className="subtitle text-center">把问卷当作可维护的创作工具箱</p>
+  return <QuestionnaireEditorPageView libraryLabel="本地问卷库" renderLink={({ href, ...props }) => <Link to={href} {...props} />}
+    footer={<ProductFooter className="footer" assetSource={{ baseUrl: '/' }} onNavigateInternal={(href) => navigateByProductHref(router, href)} resolveInternalHref={resolveInternalHrefForHashHistory} onNavigateExternal={openFixed} />}>
     <LocalQuestionnairePanel repository={repository} disabled={!guard.ready} onBusyChange={onBusyChange} onDirtyChange={onDirtyChange}
       confirmReplace={() => window.confirm('当前问卷或粘贴内容尚未保存，确认放弃并载入新来源？')}
       saveCard={async (data, title) => {
@@ -44,5 +43,5 @@ export function DesktopQuestionnaireEditor() {
       downloadText={(text, name) => downloadTextFile(buildSafeFileName(name, 'json', '问卷'), text)} />
     {guard.message ? <p role="alert">{guard.message}</p> : null}
     <div className="mt-8 text-center"><Link to="/" className="footer-link">返回首页</Link></div>
-  </div><ProductFooter className="footer" assetSource={{ baseUrl: '/' }} onNavigateInternal={(href) => navigateByProductHref(router, href)} resolveInternalHref={resolveInternalHrefForHashHistory} onNavigateExternal={openFixed} /></div></div>;
+  </QuestionnaireEditorPageView>;
 }

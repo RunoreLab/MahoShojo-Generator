@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useRouter } from '@tanstack/react-router';
-import { GameCardFace, ImageCropEditor, CardForgeThemeEditor, DEFAULT_IMAGE_TRANSFORM } from '@mahoshojo/ui-web/card-forge';
+import { CardForgePageView, CardForgeWorkspace, GameCardFace, ImageCropEditor, CardForgeThemeEditor, DEFAULT_IMAGE_TRANSFORM } from '@mahoshojo/ui-web/card-forge';
 import { buildSafeFileName, DENY_SNAPDOM_MEDIA } from '@mahoshojo/ui-web/client';
 import { ProductFooter } from '@mahoshojo/ui-web/shell';
 import { type GameCardForgeRuntimeState } from '@mahoshojo/domain/card-forge-document';
@@ -70,9 +70,11 @@ export function DesktopCardForge() {
     downloadForgeBlob(new Blob([json], { type: 'application/json' }), buildSafeFileName(state.faceData.cardName, 'json', '卡牌工坊'));
     setNotice('已发起工坊 JSON 下载，请确认系统保存完成；无法获知系统保存或取消结果，离开时仍会提醒未保存的编辑。');
   });
-  return <div className="magic-background-white"><div className="container !max-w-[1200px] card-forge-shell">
-    <h1 className="title card-forge-title text-center">卡牌工坊</h1>
-    <p className="subtitle text-center">本地卡面预览、主题色与插图裁剪</p>
+  return <CardForgePageView description="本地卡面预览、主题色与插图裁剪"
+    homeLink={<Link to="/" className="text-sm text-[var(--app-accent-strong)] hover:underline">返回首页</Link>}
+    footer={<ProductFooter className="footer" assetSource={{ baseUrl: '/' }} onNavigateInternal={(href) => navigateByProductHref(router, href)} resolveInternalHref={resolveInternalHrefForHashHistory} onNavigateExternal={openFixed} />}>
+    <CardForgeWorkspace>
+    <div className="space-y-4 min-w-0">
     <section className="card-forge-panel rounded-2xl p-5 space-y-3">
       <label className="block">导入工坊存档 / 卡面 / 旧版元数据 JSON（最大 32 MiB）
         <input aria-label="导入卡牌 JSON" type="file" accept=".json,application/json" disabled={busy || !guard.ready}
@@ -87,8 +89,7 @@ export function DesktopCardForge() {
       {notice ? <p role="status">{notice}</p> : null}
       {guard.message ? <p role="alert">{guard.message}</p> : null}
     </section>
-    {state ? <div className="grid lg:grid-cols-2 gap-6 mt-6">
-      <fieldset disabled={busy || !guard.ready} className="space-y-4 min-w-0">
+    {state ? <fieldset disabled={busy || !guard.ready} className="space-y-4 min-w-0">
         <section className="card-forge-panel rounded-2xl p-5 space-y-4">
           <h2 className="text-lg font-semibold">插图</h2>
           <label>选择本地插图<input aria-label="选择本地插图" type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => {
@@ -106,15 +107,20 @@ export function DesktopCardForge() {
             if (source) downloadForgeBlob(new Blob([source.original.slice().buffer], { type: 'application/json' }), buildSafeFileName(source.name.replace(/\.json$/i, ''), 'json', '原始卡牌'));
           })}>导出原始 JSON（完整原件）</button>
         </section>
-      </fieldset>
+      </fieldset> : null}
+    </div>
       <section className="card-forge-panel rounded-2xl p-5">
+        {state ?
         <GameCardFace faceData={state.faceData} imageUrl={state.imageUrl} imageAspectRatio={state.imageAspectRatio} imageTransform={state.imageTransform}
           disabled={busy || !guard.ready} canStartExport={() => !busyRef.current && guard.ready} mediaAdapter={DENY_SNAPDOM_MEDIA} logoUrl="/logo-white.svg" imageSaveMode="download"
           captureImage={captureLocalForgeImage} onExportStateChange={setWorking} onExportError={(cause) => { if (alive.current) setError(cause instanceof Error ? cause.message : 'PNG 导出失败，请重试。'); }}
           downloadImage={(blob, name) => { if (alive.current) downloadForgeBlob(blob, buildSafeFileName(name.replace(/\.png$/i, ''), 'png', '卡牌')); }} />
+        : <div className="flex flex-col items-center justify-center py-16 text-gray-400 dark:text-gray-500">
+          <span className="text-5xl mb-3">🎴</span>
+          <p className="text-sm">导入本地卡面或工坊存档</p>
+          <p className="text-xs mt-1">卡面将在此处预览</p>
+        </div>}
       </section>
-    </div> : null}
-    <div className="mt-8 text-center"><Link to="/" className="footer-link">返回首页</Link></div>
-    <ProductFooter className="footer" assetSource={{ baseUrl: '/' }} onNavigateInternal={(href) => navigateByProductHref(router, href)} resolveInternalHref={resolveInternalHrefForHashHistory} onNavigateExternal={openFixed} />
-  </div></div>;
+    </CardForgeWorkspace>
+  </CardForgePageView>;
 }

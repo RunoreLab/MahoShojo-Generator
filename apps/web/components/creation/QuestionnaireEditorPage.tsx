@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { buildEditableQuestionnaire, importEditableQuestionnaire, createEmptyQuestion, type EditableQuestion } from '@mahoshojo/domain/questionnaire-editor';
-import { QuestionnaireQuestionsEditor, QuestionnaireMetadataEditor, readQuestionnaireJsonFile } from '@mahoshojo/ui-web/questionnaire-editor';
+import { QuestionnaireEditorPageView, QuestionnaireQuestionsEditor, QuestionnaireMetadataEditor, readQuestionnaireJsonFile } from '@mahoshojo/ui-web/questionnaire-editor';
 import { downloadBlob } from '@/lib/client/blobUrl';
 import Link from 'next/link';
 import { useAppRouterAdapter } from '@/lib/app-router-adapter';
@@ -333,37 +333,7 @@ export const QuestionnaireEditorPage: React.FC = () => {
 
   return (
     <>
-      <div className="magic-background-white">
-        <div className="container !max-w-[1100px]">
-          <div className="card !max-w-none">
-            <h1 className="sr-only">问卷编辑器</h1>
-            <div className="text-center mb-6">
-              <div className="flex justify-center">
-                <div className="rounded-2xl bg-gradient-to-r from-pink-500 via-rose-500 to-fuchsia-500 px-6 py-3 shadow-lg">
-                  <img src="/questionnaire-title.svg" alt="问卷编辑器" className="h-8 w-auto" />
-                </div>
-              </div>
-              <p className="subtitle mt-3">把问卷当作可维护的创作工具箱</p>
-              <div className="mt-3 flex flex-wrap justify-center gap-2 text-xs">
-                <span className="rounded-full bg-pink-100 px-3 py-1 text-pink-700">条件显示 / 跳题</span>
-                <span className="rounded-full bg-amber-100 px-3 py-1 text-amber-700">云端问卷库</span>
-                <span className="rounded-full bg-indigo-100 px-3 py-1 text-indigo-700">JSON 导入 / 导出</span>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center justify-center gap-2 text-xs">
-              <Link
-                href="/details"
-                className="rounded-full border border-pink-200 bg-pink-50 px-3 py-1 text-pink-700 hover:border-pink-300 hover:bg-pink-100"
-              >
-                前往魔法少女问卷
-              </Link>
-              <Link
-                href="/canshou"
-                className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-rose-700 hover:border-rose-300 hover:bg-rose-100"
-              >
-                前往残兽问卷
-              </Link>
-            </div>
+      <QuestionnaireEditorPageView footer={<Footer />} renderLink={(props) => <Link {...props} />}>
             {actionMessage && (
               <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
                 {actionMessage}
@@ -542,10 +512,7 @@ export const QuestionnaireEditorPage: React.FC = () => {
 
             {(editorError || jsonError) && <ErrorMessage message={editorError || jsonError || '问卷格式错误'} />}
             <p className="mt-4 text-xs text-slate-400">提示：原生许可由管理员评估标记；自建问卷默认非原生。</p>
-          </div>
-          <Footer />
-        </div>
-      </div>
+      </QuestionnaireEditorPageView>
       <DataCardsModal
         isOpen={showDataCardsModal}
         onClose={() => {
