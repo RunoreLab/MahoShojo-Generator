@@ -1,8 +1,9 @@
 import {
   DESKTOP_ARENA_HOSTED_LIMITS,
-  DesktopArenaHostedRecoveryPointerSchema,
-  type DesktopArenaHostedRecoveryPointer,
 } from '@mahoshojo/contracts/desktop-arena-hosted';
+import { DesktopArenaHostedAnyRecoveryPointerSchema as DesktopArenaHostedRecoveryPointerSchema,
+  type DesktopArenaHostedAnyRecoveryPointer as DesktopArenaHostedRecoveryPointer,
+} from '@mahoshojo/contracts/desktop-arena-hosted-json';
 import type { GenerationDraftStorage } from '../generation/session';
 
 export const ARENA_HOSTED_RECOVERY_KEYS = Object.freeze({

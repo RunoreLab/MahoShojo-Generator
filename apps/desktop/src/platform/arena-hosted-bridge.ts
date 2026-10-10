@@ -30,7 +30,7 @@ export interface ArenaHostedChannel { onmessage: (value: unknown) => void }
 export class ArenaHostedBridgeError extends Error {
   constructor(readonly code: DesktopArenaHostedError['code'] | 'protocol' | 'transport', readonly dispatchState: 'not-dispatched' | 'unknown' = 'unknown', readonly intentOwnership: DesktopArenaHostedError['intentOwnership'] = 'unknown') {
     const messages: Partial<Record<DesktopArenaHostedError['code'] | 'protocol' | 'transport', string>> = {
-      'capability-unavailable': '服务器尚未声明所需身份保护协议，未开始生成。',
+      'capability-unavailable': '服务器尚未声明所选生成方式及身份保护所需协议，未开始生成。',
       'storage-unavailable': '原生恢复凭据无法保存或读取，请检查本机安全存储。',
       'scope-changed': '账号或当前请求身份已变化，原操作已停止。',
       'create-already-attempted': '该请求已尝试创建，请查找或续流，不重复创建。',
@@ -43,7 +43,7 @@ export class ArenaHostedBridgeError extends Error {
     this.name = 'ArenaHostedBridgeError';
   }
 }
-const normalizeFailure = (cause: unknown): ArenaHostedBridgeError => {
+export const normalizeArenaHostedBridgeFailure = (cause: unknown): ArenaHostedBridgeError => {
   const parsed = DesktopArenaHostedErrorSchema.safeParse(cause);
   return parsed.success ? new ArenaHostedBridgeError(parsed.data.code, parsed.data.dispatchState, parsed.data.intentOwnership) : new ArenaHostedBridgeError('transport');
 };
@@ -53,14 +53,14 @@ const abortError = () => new DOMException('已停止本机订阅；服务器终�
 export const detachArenaHosted = async (invoke: InvokeFn, scope: DesktopArenaHostedDetachRequest): Promise<void> => {
   const request = DesktopArenaHostedDetachRequestSchema.parse(scope);
   try { await invoke(ARENA_HOSTED_DETACH_COMMAND, { request }); }
-  catch (cause) { throw normalizeFailure(cause); }
+  catch (cause) { throw normalizeArenaHostedBridgeFailure(cause); }
 };
 
 export const controlArenaHosted = async (invoke: InvokeFn, request: DesktopArenaHostedControlRequest): Promise<DesktopArenaHostedControlResponse> => {
   const parsed = DesktopArenaHostedControlRequestSchema.parse(request);
   let raw: unknown;
   try { raw = await invoke(ARENA_HOSTED_CONTROL_COMMAND, { request: parsed }); }
-  catch (cause) { throw normalizeFailure(cause); }
+  catch (cause) { throw normalizeArenaHostedBridgeFailure(cause); }
   const result = DesktopArenaHostedControlResponseSchema.safeParse(raw);
   if (!result.success) throw new ArenaHostedBridgeError('protocol');
   return result.data;
@@ -71,7 +71,7 @@ export const readArenaHostedRecoveryHint = async (invoke: InvokeFn, value: Deskt
   const request = DesktopArenaHostedRecoveryHintRequestSchema.parse(value);
   let raw: unknown;
   try { raw = await invoke(ARENA_HOSTED_RECOVERY_HINT_COMMAND, { request }); }
-  catch (cause) { throw normalizeFailure(cause); }
+  catch (cause) { throw normalizeArenaHostedBridgeFailure(cause); }
   const parsed = DesktopArenaHostedRecoveryHintSchema.safeParse(raw);
   if (!parsed.success || parsed.data.product !== request.product) throw new ArenaHostedBridgeError('protocol');
   return parsed.data;
@@ -151,7 +151,7 @@ export const openArenaHostedStream = (
   if (options.signal?.aborted) { onAbort(); return result; }
   void invoke(ARENA_HOSTED_STREAM_COMMAND, { request, onEvent: channel }).then(
     () => { if (!ended) finish(new ArenaHostedBridgeError('protocol')); },
-    (cause: unknown) => { if (!ended) finish(normalizeFailure(cause)); },
+    (cause: unknown) => { if (!ended) finish(normalizeArenaHostedBridgeFailure(cause)); },
   );
   return result;
 };
