@@ -15,6 +15,11 @@
       "import": "./src/structured-json.ts",
       "default": "./src/structured-json.ts"
     },
+    "./stream-timeout": {
+      "types": "./src/stream-timeout.ts",
+      "import": "./src/stream-timeout.ts",
+      "default": "./src/stream-timeout.ts"
+    },
     "./stream-events": {
       "types": "./src/stream-events.ts",
       "import": "./src/stream-events.ts",

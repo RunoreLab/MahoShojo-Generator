@@ -1,6 +1,6 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 
 export type ArenaDataSettingsValue = {
   readArenaHistory: boolean;
@@ -17,10 +17,13 @@ export type ArenaDataSettingsPanelProps = {
   disabled?: boolean;
   combatantCountForEstimate?: number;
   footerNote?: ReactNode;
+  /** Host capability only; read controls and saved preferences stay independent. */
+  writeDisabledReason?: string;
 };
 
-export function ArenaDataSettingsPanel({ value, onChange, disabled, combatantCountForEstimate = 0, footerNote }: ArenaDataSettingsPanelProps) {
+export function ArenaDataSettingsPanel({ value, onChange, disabled, combatantCountForEstimate = 0, footerNote, writeDisabledReason }: ArenaDataSettingsPanelProps) {
   void combatantCountForEstimate;
+  const writeReasonId = useId();
 
   return (
     <div className="input-group">
@@ -44,7 +47,8 @@ export function ArenaDataSettingsPanel({ value, onChange, disabled, combatantCou
               className="h-4 w-4 mr-2 text-pink-600 border-gray-300 rounded"
               checked={value.writeArenaHistory}
               onChange={(e) => onChange({ writeArenaHistory: e.target.checked })}
-              disabled={disabled}
+              disabled={disabled || Boolean(writeDisabledReason)}
+              aria-describedby={writeDisabledReason ? writeReasonId : undefined}
             />
             战报后写入
           </label>
@@ -97,13 +101,15 @@ export function ArenaDataSettingsPanel({ value, onChange, disabled, combatantCou
               className="h-4 w-4 mr-2 text-pink-600 border-gray-300 rounded"
               checked={value.writeCurrentState}
               onChange={(e) => onChange({ writeCurrentState: e.target.checked })}
-              disabled={disabled}
+              disabled={disabled || Boolean(writeDisabledReason)}
+              aria-describedby={writeDisabledReason ? writeReasonId : undefined}
             />
             战报后写入
           </label>
           <p className="text-[11px] text-gray-500 mt-1">当前状态可记录角色身体状况、物品、人际等实时信息。</p>
         </fieldset>
       </div>
+      {writeDisabledReason ? <p id={writeReasonId} className="text-xs text-gray-500 mt-2">{writeDisabledReason}</p> : null}
       {footerNote ?? <p className="text-xs text-gray-500 mt-2">偏好会自动保存到浏览器，下次进入竞技场会沿用当前设置。</p>}
     </div>
   );

@@ -26,12 +26,15 @@ export function GenerationModeSwitcher(props: {
    * Markdown 时把 `stream` 标记为不可用并解释；不会静默改写当前选择。
    */
   disabledReasons?: Partial<Record<GenerationMode, string>>;
+  /** Host capability wording; absent values preserve the Web descriptions. */
+  optionDescriptions?: Partial<Record<GenerationMode, string>>;
 }) {
   const value = props.value;
   const disabled = props.disabled === true;
   const helper = props.helper;
 
-  const options: readonly SegmentedOption<GenerationMode>[] = MODE_OPTIONS.map((option) => {
+  const options: readonly SegmentedOption<GenerationMode>[] = MODE_OPTIONS.map((original) => {
+    const option = { ...original, description: props.optionDescriptions?.[original.value] ?? original.description };
     const reason = props.disabledReasons?.[option.value];
     return reason === undefined
       ? option

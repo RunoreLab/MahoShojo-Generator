@@ -281,7 +281,7 @@ export const openArenaGenerationStreamClient = async (
         cancelController.abort('cancel-confirmation-timeout');
         resolve(false);
       }, cancelConfirmationTimeoutMs);
-      timer.unref?.();
+      (timer as unknown as { unref?: () => void }).unref?.();
       void cancelRequest.then((confirmed) => {
         clearTimeout(timer);
         resolve(confirmed);
