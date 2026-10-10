@@ -1,15 +1,20 @@
+import { ARENA_COMPANION_PROTOCOL_VERSION, ArenaCompanionEnvelopeSchema, type ArenaCompanionEnvelope } from '@mahoshojo/contracts/arena-companion';
+import { DesktopArenaHostedJsonCreateRequestSchema } from '@mahoshojo/contracts/desktop-arena-hosted-json';
+import { runArenaHostedJson } from './hosted-json';
+import { validateHostedOutput, sameHostedPackageRef as sameRef } from './hosted-output';
+import { DesktopArenaHostedAnyRecoveryPointerSchema as DesktopArenaHostedRecoveryPointerSchema, type DesktopArenaHostedAnyRecoveryPointer as DesktopArenaHostedRecoveryPointer } from '@mahoshojo/contracts/desktop-arena-hosted-json';
 import { createStreamReadWithTimeout, buildStreamSoftTimeoutMessage, DEFAULT_STREAM_READ_IDLE_TIMEOUT_MS, DEFAULT_STREAM_READ_TOTAL_TIMEOUT_MS } from '@mahoshojo/ai-core/stream-timeout';
 import {
   buildArenaGenerationInputSnapshot, extractTitleFromBattleMarkdown, StreamUpdateMetaSchema,
-  type ArenaBattleReport, type ArenaGenerationInputSnapshot,
+  parseArenaStructuredReportJson, type ArenaBattleReport, type ArenaGenerationInputSnapshot,
 } from '@mahoshojo/ai-core/arena-generation';
 import {
   DESKTOP_ARENA_HOSTED_LIMITS, DESKTOP_ARENA_HOSTED_PROTOCOL_VERSION,
-  DesktopArenaHostedCreateRequestSchema, DesktopArenaHostedRecoveryPointerSchema, DesktopArenaHostedHeaderMetaSchema, DesktopArenaHostedSseEventSchema, DesktopArenaHostedTelemetrySchema,
+  DesktopArenaHostedCreateRequestSchema, DesktopArenaHostedHeaderMetaSchema, DesktopArenaHostedSseEventSchema, DesktopArenaHostedTelemetrySchema,
   parseDesktopArenaHostedSseBlock,
   type DesktopArenaHostedActor,
   type DesktopArenaHostedControlRequest,
-  type DesktopArenaHostedRecoveryPointer, type DesktopArenaHostedSseEvent,
+  type DesktopArenaHostedSseEvent,
   type DesktopArenaHostedStreamRequest,
 } from '@mahoshojo/contracts/desktop-arena-hosted';
 import type { DesktopHostedPresetConfig, DesktopHostedSystemConfig } from '@mahoshojo/contracts/desktop-cloud';
@@ -17,7 +22,7 @@ import type { AiExecutionUsage } from '@mahoshojo/contracts/ai-execution';
 import type { BattleReportRenderSnapshotV1 } from '@mahoshojo/contracts';
 import type { WebPackageRef } from '@mahoshojo/contracts/web-package';
 import {
-  buildWebPackagePromptProjection, createWebPackageOverlayFromBase, isBuiltinWebPackageRef,
+  buildWebPackagePromptProjection, isBuiltinWebPackageRef,
   type ResolvedWebPackage,
 } from '@mahoshojo/web-package';
 import {
@@ -33,7 +38,6 @@ export const ARENA_HOSTED_USER_STOP = 'arena-user-stop';
 export const ARENA_HOSTED_DETACH = 'arena-detach';
 const endpoint = '/api/arena/generate-stream';
 const encoder = new TextEncoder();
-const sameRef = (a: WebPackageRef, b: WebPackageRef) => a.id === b.id && a.version === b.version && a.digest === b.digest;
 
 export interface ArenaHostedDetails {
   connectionState: ArenaGenerationConnectionState;
@@ -48,6 +52,9 @@ export interface ArenaHostedDetails {
   validationMessage: string | null;
   restored: boolean;
   softTimeoutWarning?: string | null;
+  delivery?: 'stream' | 'non-stream';
+  companion?: ArenaCompanionEnvelope | null;
+  companionState?: 'complete' | 'recovered-model-only' | 'unavailable';
 }
 /** Draft data is public output only; parse it again without restoring execution authority. */
 export const parseArenaHostedDetails = (value: unknown): ArenaHostedDetails | null => {
@@ -61,6 +68,9 @@ export const parseArenaHostedDetails = (value: unknown): ArenaHostedDetails | nu
     || !strings('outputValidation', ['pending', 'valid', 'missing-base', 'invalid'])
     || !(v.serverStatus === null || typeof v.serverStatus === 'string')
     || !(v.validationMessage === null || typeof v.validationMessage === 'string') || typeof v.restored !== 'boolean') throw new Error('Hosted output');
+  if (v.delivery !== undefined && v.delivery !== 'stream' && v.delivery !== 'non-stream') throw new Error('Hosted delivery');
+  if (v.companionState !== undefined && (typeof v.companionState !== 'string' || !['complete', 'recovered-model-only', 'unavailable'].includes(v.companionState))) throw new Error('Hosted companion state');
+  const companion = v.companion == null ? null : ArenaCompanionEnvelopeSchema.parse(v.companion);
   const metaEvent = v.metaEvent === null ? null : DesktopArenaHostedSseEventSchema.parse(v.metaEvent);
   const terminal = v.terminal === null ? null : DesktopArenaHostedSseEventSchema.parse(v.terminal);
   if ((metaEvent && metaEvent.event !== 'meta' && metaEvent.event !== 'meta_error') || (terminal && terminal.event !== 'done' && terminal.event !== 'error')) throw new Error('Hosted output');
@@ -68,14 +78,16 @@ export const parseArenaHostedDetails = (value: unknown): ArenaHostedDetails | nu
     telemetry: v.telemetry === null ? null : DesktopArenaHostedTelemetrySchema.parse(v.telemetry),
     metadataState: v.metadataState as ArenaHostedDetails['metadataState'], headerMeta: v.headerMeta === null ? null : DesktopArenaHostedHeaderMetaSchema.parse(v.headerMeta),
     recoveryCredentialState: v.recoveryCredentialState as ArenaHostedDetails['recoveryCredentialState'], metaEvent, terminal,
-    outputValidation: v.outputValidation as ArenaHostedDetails['outputValidation'], validationMessage: v.validationMessage, restored: v.restored, softTimeoutWarning: null };
+    outputValidation: v.outputValidation as ArenaHostedDetails['outputValidation'], validationMessage: v.validationMessage, restored: v.restored, softTimeoutWarning: null,
+    ...(v.delivery ? { delivery: v.delivery as ArenaHostedDetails['delivery'] } : {}),
+    ...(v.companionState ? { companionState: v.companionState as ArenaHostedDetails['companionState'], companion } : {}) };
 };
 export interface ArenaHostedPartial {
   rawText: string; markdown: string; reasoning: string; usage?: AiExecutionUsage;
   hosted: ArenaHostedDetails;
 }
 export interface ArenaHostedIntent {
-  requestId: string; mode: 'hosted'; generationMode: 'stream'; modelId: string;
+  requestId: string; mode: 'hosted'; generationMode: 'stream' | 'non-stream'; modelId: string;
   systemConfig?: DesktopHostedSystemConfig; presetConfig?: DesktopHostedPresetConfig;
 }
 export interface ArenaHostedContext {
@@ -122,16 +134,19 @@ export const executeArenaHosted = async (
     if (!isBuiltinWebPackageRef(base.ref)) snapshot.webPackagePromptProjection = buildWebPackagePromptProjection(base);
   }
   // JSON serialization is the actual wire projection: undefined properties are absent.
-  const create = DesktopArenaHostedCreateRequestSchema.parse({ operation: 'create-stream', product: context.product,
+  const nonStream = frozen.intent.generationMode === 'non-stream';
+  const create = (nonStream ? DesktopArenaHostedJsonCreateRequestSchema : DesktopArenaHostedCreateRequestSchema).parse({ operation: nonStream ? 'create-json' : 'create-stream', product: context.product,
     requestId: frozen.intent.requestId, actor: frozen.actor, body: JSON.parse(JSON.stringify(snapshot)),
     systemConfig: frozen.intent.systemConfig, presetConfig: frozen.intent.presetConfig, replaceRequestId: context.replaceRequestId });
   const bodyHash = await digest({ body: create.body, systemConfig: create.systemConfig, presetConfig: create.presetConfig }); signal.throwIfAborted();
   if (context.isCurrent?.() === false) throw new ArenaHostedBridgeError('scope-changed', 'not-dispatched');
-  const pointer = DesktopArenaHostedRecoveryPointerSchema.parse({ version: 1, protocolVersion: DESKTOP_ARENA_HOSTED_PROTOCOL_VERSION,
+  const pointer = DesktopArenaHostedRecoveryPointerSchema.parse({ ...(nonStream ? { version: 2, delivery: 'non-stream', protocolVersion: ARENA_COMPANION_PROTOCOL_VERSION } : { version: 1, protocolVersion: DESKTOP_ARENA_HOSTED_PROTOCOL_VERSION }),
     product: context.product, requestId: frozen.intent.requestId, bodyHash, actor: frozen.actor,
     format: frozen.input.reportFormat, battleMode: frozen.input.battleMode, webPackageRef: frozen.input.webPackageRef ?? undefined,
     state: 'prepared', updatedAt: now() });
   if (!context.recovery.prepare(pointer, context.replaceRequestId, context.repair)) throw new Error(context.recovery.getSnapshot().error ?? '恢复指针未保存，未开始生成。');
+  if (create.operation === 'create-json') return runArenaHostedJson(options.invoke, pointer, create, context, signal, onPartial, base,
+    () => runHosted(options.invoke, pointer, context, signal, onPartial, undefined, base, true));
   return runHosted(options.invoke, pointer, context, signal, onPartial, create, base);
 };
 
@@ -144,16 +159,18 @@ export const resumeArenaHosted = (
 const runHosted = async (
   invoke: InvokeFn, pointer: DesktopArenaHostedRecoveryPointer, context: ArenaHostedContext,
   signal: AbortSignal, onPartial?: (partial: ArenaHostedPartial) => void,
-  create?: Extract<DesktopArenaHostedStreamRequest, { operation: 'create-stream' }>, frozenBase?: ResolvedWebPackage,
+  create?: Extract<DesktopArenaHostedStreamRequest, { operation: 'create-stream' }>, frozenBase?: ResolvedWebPackage, automaticRecovery = false,
 ): Promise<ArenaHostedOutcome> => {
   context = { ...context };
-  let explicitRestoreLookup = !create;
+  let explicitRestoreLookup = !create && !automaticRecovery;
+  const nonStream = pointer.version === 2 && pointer.delivery === 'non-stream';
   const scope = { product: pointer.product, requestId: pointer.requestId, actor: pointer.actor };
   let markdown = '', reasoning = '', generationId = pointer.generationId ?? null;
   let usage: AiExecutionUsage | undefined;
   let details: ArenaHostedDetails = { connectionState: create ? 'connecting' : 'resuming', serverStatus: null, telemetry: null,
     metadataState: 'missing', headerMeta: null, recoveryCredentialState: 'stored', metaEvent: null, terminal: null,
-    outputValidation: 'pending', validationMessage: null, restored: !create };
+    outputValidation: 'pending', validationMessage: null, restored: !create && !automaticRecovery,
+    ...(nonStream ? { delivery: 'non-stream', companionState: 'recovered-model-only', companion: null } as const : {}) };
   const partial = (): ArenaHostedPartial => ({ rawText: markdown, markdown, reasoning, usage, hosted: { ...details } });
   const common = (): Common => ({ ...partial(), hosted: { ...details, softTimeoutWarning: null }, requestId: pointer.requestId, scopeKey: context.scopeKey, generationId, mode: 'hosted' });
   const isCurrent = () => context.isCurrent?.() !== false;
@@ -272,41 +289,27 @@ const runHosted = async (
     const terminal = details.terminal;
     const parsedMeta = StreamUpdateMetaSchema.safeParse(details.metaEvent?.event === 'meta' ? details.metaEvent.data.meta : null);
     const meta = parsedMeta.success ? parsedMeta.data : null;
-    let renderSnapshot: BattleReportRenderSnapshotV1 | undefined;
-    details = { ...details, outputValidation: markdown.trim() ? 'valid' : 'invalid', validationMessage: markdown.trim() ? null : '服务器已完成，但未取得有效正文。' };
-    if (pointer.format === 'web') renderSnapshot = { version: 1, reportFormat: 'web' };
-    if (pointer.webPackageRef) {
-      const artifact = terminal.data.webPackage;
-      if (!artifact || !sameRef(artifact.packageRef, pointer.webPackageRef)) {
-        details = { ...details, outputValidation: 'invalid', validationMessage: '服务器已完成，但包身份或 Artifact 不匹配，不能确认目标正文。' };
-      } else {
-        renderSnapshot!.webPackage = artifact;
-        let base = frozenBase;
-        if (!base && context.resolveWebPackage) { try { base = await context.resolveWebPackage(pointer.webPackageRef); } catch { /* Missing Base is separate from server completion. */ } }
-        signal.throwIfAborted(); assertCurrent();
-        if (!base) details = { ...details, outputValidation: 'missing-base', validationMessage: '服务器已完成，精确 Base 缺失；原文与 Artifact 可完整导出。导包本身不会重新取得活动历史保存资格；若服务端仍保留结果，可导入精确版本后显式恢复复验。' };
-        else {
-          try {
-            const overlay = await createWebPackageOverlayFromBase(base, markdown); signal.throwIfAborted(); assertCurrent();
-            if (!sameRef(overlay.packageRef, artifact.packageRef) || overlay.targetPath !== artifact.targetPath
-              || overlay.targetMediaType !== artifact.targetMediaType || overlay.generatedDigest !== artifact.generatedDigest) throw new Error('artifact mismatch');
-          } catch (error) {
-            if (signal.aborted) throw error;
-            details = { ...details, outputValidation: 'invalid', validationMessage: '服务器已完成，但目标正文未通过精确包校验，原文仍可导出。' };
-          }
-        }
-      }
-    }
+    const checked = await validateHostedOutput(pointer, markdown, terminal.data.webPackage, context, signal, assertCurrent, frozenBase);
+    const { renderSnapshot, ...validation } = checked; details = { ...details, ...validation };
     const reporter = details.headerMeta?.reporterInfo;
-    const report: ArenaBattleReport = {
+    let report: ArenaBattleReport = {
       headline: meta?.report?.headline || extractTitleFromBattleMarkdown(markdown),
       reporterInfo: { name: typeof reporter?.name === 'string' ? reporter.name : '', publication: typeof reporter?.publication === 'string' ? reporter.publication : '' },
       article: { body: markdown, analysis: '' }, officialReport: { winner: meta?.report?.winner ?? '', conclusion: '' },
       mode: pointer.battleMode, reportFormat: pointer.format,
       ...(renderSnapshot?.webPackage ? { webPackage: renderSnapshot.webPackage } : {}),
     };
+    let displayMarkdown = markdown;
+    if (nonStream && pointer.format === 'markdown') {
+      const structured = parseArenaStructuredReportJson(markdown, { enableImpacts: false, enableImpactText: false, enableCurrentState: false });
+      if (structured) {
+        report = { ...report, headline: structured.headline as string, article: structured.article as ArenaBattleReport['article'], officialReport: structured.officialReport as ArenaBattleReport['officialReport'] };
+        displayMarkdown = report.article.body || markdown;
+      } else details = { ...details, outputValidation: 'invalid', validationMessage: '服务器已完成，但恢复内容不符合原非流式结构化报告协议；原文可完整导出。' };
+    }
+    if (nonStream && !details.validationMessage) details = { ...details, validationMessage: '已恢复原任务可用正文与终态；原完整非流式 JSON 和附加元数据未取得。' };
     assertCurrent(); signal.throwIfAborted();
-    return { ...common(), status: 'completed', report, renderSnapshot, canAppendHistory: Boolean(create) && details.outputValidation === 'valid' };
+    return { ...common(), markdown: displayMarkdown, status: 'completed', report, renderSnapshot, canAppendHistory: (Boolean(create) || automaticRecovery) && details.outputValidation === 'valid' };
   } catch (cause) {
     if (signal.aborted) return { ...common(), status: 'cancelled', message: '本机订阅已停止；服务器停止/完成状态尚需按原请求确认。' };
     return { ...common(), status: 'failed', message: cause instanceof ArenaHostedBridgeError ? cause.message : '连接或战报校验未完成，收到的原文仍可导出或按原请求恢复。' };

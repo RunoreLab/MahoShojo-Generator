@@ -1,3 +1,5 @@
+import { projectArenaCompanionReportForView } from './hosted-json';
+import type { DesktopArenaHostedAnyRecoveryPointer as DesktopArenaHostedRecoveryPointer } from '@mahoshojo/contracts/desktop-arena-hosted-json';
 import { parseBattleReportRenderSnapshotV1, type BattleReportRenderSnapshotV1 } from '@mahoshojo/contracts';
 import { WebPackageRefSchema, WebPackagePromptProjectionSchema } from '@mahoshojo/contracts/web-package';
 import { buildArenaGenerationInputSnapshot, type ArenaBattleReport } from '@mahoshojo/ai-core/arena-generation';
@@ -12,7 +14,7 @@ import { isLegacyAdjudicatorFormat } from '@mahoshojo/domain/arena-character-val
 import type { QuestionnaireSelection } from '@mahoshojo/domain/questionnaire-selection';
 import { buildArenaQuestionnaireRequest } from '@mahoshojo/domain/arena-questionnaire-request';
 import { appendNarrativeHistoryEntry, type NarrativeHistorySort } from '@mahoshojo/domain/narrative-history-operations';
-import { DesktopArenaHostedGenerationIdSchema, type DesktopArenaHostedActor, type DesktopArenaHostedRecoveryPointer } from '@mahoshojo/contracts/desktop-arena-hosted';
+import { DesktopArenaHostedGenerationIdSchema, type DesktopArenaHostedActor } from '@mahoshojo/contracts/desktop-arena-hosted';
 import { DesktopArenaHostedRecovery } from './hosted-recovery';
 import { ARENA_HOSTED_DETACH, ARENA_HOSTED_USER_STOP, executeArenaHosted, resumeArenaHosted, parseArenaHostedDetails, type ArenaHostedContext, type ArenaHostedDetails, type ArenaHostedIntent, type ArenaHostedOutcome } from './hosted';
 import { parseDesktopLoreSelections } from '../questionnaire/lore-source';
@@ -175,10 +177,11 @@ export class DesktopArenaSession {
     if (!this.pending || this.isBusy()) return;
     const saved = this.pending; this.pending = null; this.hostedResultScope = null;
     this.resultMode = saved.output?.executionMode === 'hosted' ? 'hosted' : saved.output?.executionMode === 'direct-remote' ? 'direct-remote' : saved.output?.executionMode === 'direct-local' ? 'direct-local' : undefined;
-    this.publish({ hosted: parseArenaHostedDetails(saved.output?.hosted), hostedGenerationId: typeof saved.output?.hostedGenerationId === 'string' ? saved.output.hostedGenerationId : null, draft: saved.draft, pendingRestore: false, restored: true, generation: null, draftSaved: true,
+    const hosted = parseArenaHostedDetails(saved.output?.hosted);
+    this.publish({ hosted, hostedGenerationId: typeof saved.output?.hostedGenerationId === 'string' ? saved.output.hostedGenerationId : null, draft: saved.draft, pendingRestore: false, restored: true, generation: null, draftSaved: true,
       rawText: String(saved.output?.rawText ?? ''), markdown: String(saved.output?.markdown ?? ''), reasoning: String(saved.output?.reasoning ?? ''),
       resultFormat: saved.output?.reportFormat === 'web' ? 'web' : 'markdown', renderSnapshot: parseBattleReportRenderSnapshotV1(saved.output?.renderSnapshot),
-      activeGenerationMode: saved.output?.generationMode === 'stream' ? 'stream' : 'non-stream', phase: saved.output?.phase as ArenaSessionPhase ?? 'idle', report: null, candidates: null,
+      activeGenerationMode: saved.output?.generationMode === 'stream' ? 'stream' : 'non-stream', phase: saved.output?.phase as ArenaSessionPhase ?? 'idle', report: hosted?.companion ? projectArenaCompanionReportForView(hosted.companion) : null, candidates: null,
       message: '已恢复本机草稿与原文，不会自动重新生成或写入本地库。' });
   }
   discardDraft() {
@@ -228,7 +231,7 @@ export class DesktopArenaSession {
   async generateHosted(options: Pick<DesktopAiExecutionOptions, 'invoke'>, input: ArenaDraft,
     intent: Omit<ArenaHostedIntent, 'requestId'>, actor: DesktopArenaHostedActor, replaceRequestId?: string, repair?: import('./hosted-recovery').ArenaHostedRecoveryReplacement): Promise<void> {
     if (this.disposed || this.isBusy() || this.state.pendingRestore || !this.scopeKey) return;
-    if (input.generationMode !== 'stream') { this.publish({ message: '服务器 Arena 当前仅接入流式输出，请明确选择流式；非流式 JSON 尚待后继接入。' }); return; }
+    if (input.generationMode !== intent.generationMode) { this.publish({ message: '输出方式与已选执行方式不一致，请重新确认。' }); return; }
     const error = arenaReadinessMessage(input, this.dependencies.product); if (error) { this.publish({ message: error }); return; }
     const requestId = (this.dependencies.requestId ?? (() => crypto.randomUUID()))();
     await this.runHosted(options, { ...clone(intent), requestId }, clone(actor), clone(input), undefined, replaceRequestId, repair);
@@ -243,7 +246,7 @@ export class DesktopArenaSession {
     const scope = this.scopeKey, epoch = this.epoch, controller = new AbortController();
     this.controller = controller; this.resultMode = 'hosted'; this.hostedResultScope = scope; this.dirty = true;
     const requestId = intent?.requestId ?? pointer!.requestId;
-    this.publish({ phase: 'generating', activeGenerationMode: 'stream', hosted: null, hostedGenerationId: null,
+    this.publish({ phase: 'generating', activeGenerationMode: intent?.generationMode ?? (pointer?.version === 2 ? pointer.delivery : 'stream'), hosted: null, hostedGenerationId: null,
       generation: frozen && intent ? { input: frozen, intent, scopeKey: scope, startedAt: (this.dependencies.now ?? (() => new Date().toISOString()))(), adjudicationResults: [], profileId: '', providerTarget: intent.presetConfig ? { kind: 'preset', providerId: intent.presetConfig.providerId } : { kind: 'system' } } : null,
       resultFormat: frozen?.reportFormat ?? pointer!.format, renderSnapshot: null, rawText: '', markdown: '', reasoning: '', report: null, usage: undefined,
       candidates: null, restored: Boolean(pointer), draftSaved: false, message: null, saveStatus: 'idle', saveError: null });
@@ -265,7 +268,11 @@ export class DesktopArenaSession {
         hosted: outcome.hosted, hostedGenerationId: outcome.generationId, draftSaved: false });
       if (controller.signal.aborted || outcome.status === 'cancelled') { this.publish({ phase: 'cancelled', message: outcome.status === 'cancelled' ? outcome.message : '停止状态尚未确认，请按原请求恢复。' }); return; }
       if (outcome.status !== 'completed') { this.publish({ phase: 'failed', message: outcome.message }); return; }
-      if (outcome.hosted.terminal?.event !== 'done' || outcome.hosted.terminal.data.status !== 'completed' || !outcome.hosted.terminal.data.ok) throw new Error('服务器终态不合法。');
+      const streamCompleted = outcome.hosted.terminal?.event === 'done' && outcome.hosted.terminal.data.status === 'completed' && outcome.hosted.terminal.data.ok;
+      const jsonCompleted = outcome.hosted.delivery === 'non-stream' && outcome.hosted.companionState === 'complete'
+        && outcome.hosted.serverStatus === 'completed' && outcome.hosted.companion && 'report' in outcome.hosted.companion.body
+        && outcome.hosted.companion.body.generationId === outcome.generationId;
+      if (!streamCompleted && !jsonCompleted) throw new Error('服务器终态不合法。');
       this.publish({ phase: 'completed', report: outcome.report, renderSnapshot: outcome.renderSnapshot ?? null,
         message: outcome.hosted.validationMessage ?? '服务器生成完成。角色签名更新尚未接入，原角色保持不变；本地保存需单独操作。' });
       if (frozen?.settings.writeNarrativeHistory && outcome.canAppendHistory) this.appendHostedHistory();

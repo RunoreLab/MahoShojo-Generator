@@ -122,7 +122,7 @@ export interface AdjudicatorEvent {
 export interface AdjudicationResult {
     depth: number;                      // 事件链的深度，根事件为0
     description: string;                // 判定的事件描述
-    type: 'binary' | 'custom';          // 判定类型
+    type: string;                       // 展示结果保留 resolver 的原类型；未知类型不改写成已知事件
     roll: number;                       // 掷骰的点数 (1-100)
     outcome: string;                    // 最终判定的结果名称
     details: string;                    // 详细的判定过程描述，例如 "掷骰(80) ≤ 成功率(60%)"

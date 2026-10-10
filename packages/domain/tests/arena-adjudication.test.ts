@@ -11,3 +11,8 @@ it('uses current runtime zero-probability, bounded rolls and chained outcome sem
 it('keeps depth 20 ceiling and never draws for non-arrays', () => {
   const random = vi.fn(() => 0.5); expect(resolveAdjudicationEvents(null, random)).toEqual([]); expect(resolveAdjudicationEvents([{}], random, 21)).toEqual([]); expect(random).not.toHaveBeenCalled();
 });
+
+it('preserves unknown result types for display without accepting a new event algorithm', () => {
+  const expected: import('../src/arena-types').AdjudicationResult = { depth: 0, description: '旧未知事件', type: 'legacy-unknown', roll: 51, outcome: '未知', details: '' };
+  expect(resolveAdjudicationEvents([{ type: expected.type, description: expected.description }], () => 0.5)).toEqual([expected]);
+});

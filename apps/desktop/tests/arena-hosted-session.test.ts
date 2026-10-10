@@ -60,9 +60,9 @@ describe('same Arena session with Hosted completion ownership', () => {
     expect(await f.session.save('characters')).toBe(false); expect(await f.session.save('history')).toBe(true); expect(await f.session.save('history')).toBe(true); expect(f.records.size).toBe(1);
     expect(JSON.parse(f.session.exportDocument()).result).toMatchObject({ rawText: body, reasoning: '独立推理', hostedGenerationId: generationId }); f.session.dispose();
   });
-  it('requires stream selection instead of silently translating JSON into streaming', async () => {
+  it('requires input and execution delivery to match rather than silently translating JSON into streaming', async () => {
     const f = fixture(), input = { ...draft(), generationMode: 'non-stream' as const };
-    await f.session.generateHosted({ invoke: f.invoke }, input, intent, actor); expect(f.invoke).not.toHaveBeenCalled(); expect(f.session.getSnapshot().message).toContain('仅接入流式'); f.session.dispose();
+    await f.session.generateHosted({ invoke: f.invoke }, input, intent, actor); expect(f.invoke).not.toHaveBeenCalled(); expect(f.session.getSnapshot().message).toContain('输出方式'); f.session.dispose();
   });
   it('a failed prewritten pointer means no Native create or local roll', async () => {
     const f = fixture(); f.saved.fail(); await f.session.generateHosted({ invoke: f.invoke }, draft(), intent, actor);

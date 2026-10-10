@@ -1,3 +1,4 @@
+import type { AdjudicationResult as ArenaPromptAdjudicationResult } from '@mahoshojo/domain/arena-types';
 import { GENERAL_SCENARIO_TEMPLATE_ID } from '@mahoshojo/domain/data-cards';
 import {
   STORY_PROMPT_CHARACTER_PARAMETERS_KEY, getStoryPromptCharacterParameters,
@@ -23,14 +24,7 @@ export type ArenaPromptAdjudicatorEvent = {
   }>;
 };
 
-export type ArenaPromptAdjudicationResult = {
-  depth: number;
-  description: string;
-  type: 'binary' | 'custom';
-  roll: number;
-  outcome: string;
-  details: string;
-};
+export type { AdjudicationResult as ArenaPromptAdjudicationResult } from '@mahoshojo/domain/arena-types';
 
 export type ArenaPromptHistory = {
   entries: Array<{
