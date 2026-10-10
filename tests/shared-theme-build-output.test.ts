@@ -63,11 +63,24 @@ const expectSharedOutput = (css: string, artifact: string): void => {
   const requireFromApp = createRequire(path.join(WEB_ROOT, 'package.json'));
   const postcss = createRequire(requireFromApp.resolve('@tailwindcss/postcss'))('postcss') as typeof import('postcss');
   const stylesheet = postcss.parse(css);
+  // CSS layers are ordered by first declaration, even when that first occurrence is a block.
+  // Loading Arena before Tailwind puts components below preflight: base's universal
+  // padding/border reset then wins over shared input-field/result-card declarations.
+  const layerOrder: string[] = [];
+  stylesheet.walkAtRules('layer', (rule) => {
+    if (rule.parent?.type !== 'root') return;
+    for (const name of rule.params.split(',').map((value) => value.trim())) {
+      if (!layerOrder.includes(name)) layerOrder.push(name);
+    }
+  });
+  expect(layerOrder.filter((name) => ['theme', 'base', 'components', 'utilities'].includes(name)),
+    `${artifact} must keep component padding/borders above the base reset`).toEqual(['theme', 'base', 'components', 'utilities']);
+
   const declarationsFor = (selector: string): Record<string, string> => {
     const declarations: Record<string, string> = {};
     const normalizeSelector = (value: string) => value.replace(/\[([^=\]]+)=['"]([^'"]+)['"]\]/g, '[$1=$2]');
     stylesheet.walkRules((rule) => {
-      if (normalizeSelector(rule.selector) === normalizeSelector(selector)) {
+      if (rule.selectors.some((value) => normalizeSelector(value) === normalizeSelector(selector))) {
         rule.walkDecls((declaration) => { declarations[declaration.prop] = declaration.value; });
       }
     });
@@ -96,6 +109,11 @@ const expectSharedOutput = (css: string, artifact: string): void => {
     });
     return layers;
   };
+  // Brand visibility must survive each actual host pipeline.
+  expect(declarationsFor('.theme-image-light').display, artifact).toBe('inline-block');
+  expect(declarationsFor('.theme-image-dark').display, artifact).toBe('none');
+  expect(declarationsFor(":root[data-color-mode='dark'] .theme-image-light").display, artifact).toBe('none');
+  expect(declarationsFor(":root[data-color-mode='dark'] .theme-image-dark").display, artifact).toBe('inline-block');
   expect(layersFor('body', 'font-family', 'var(--app-font-sans)'), artifact).toContain('base');
   expect(layersFor('pre', 'font-family', 'var(--app-font-mono)'), artifact).toContain('base');
   expect(layersFor('.font-mono', 'font-family', 'var(--app-font-mono)'), artifact).toContain('utilities');
