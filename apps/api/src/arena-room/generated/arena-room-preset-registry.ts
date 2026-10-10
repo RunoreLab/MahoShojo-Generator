@@ -35,7 +35,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "researcherNotes": "典型的‘卵’级残兽，威胁等级较低，但其喷射物的腐蚀性不容小觑。主要依靠本能行动，讨伐时建议保持距离，使用高能量攻击破坏其核心。",
       "specialAbility": "被动防御：厚实的黏液和脂肪层可以吸收大部分物理冲击。缓慢再生：在未受到持续攻击时，能够缓慢地修复损伤。"
     },
-    "sourcePath": "apps/web/public/presets/C01_egg.json"
+    "sourcePath": "content/presets/C01_egg.json"
   },
   {
     "id": "C02_pupa.json",
@@ -57,7 +57,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "researcherNotes": "‘蠖’级残兽，已具备初步的野兽智慧和战术能力。比‘卵’级危险得多，讨伐时需要注意其速度和毒雾。建议由擅长速度或拥有范围控制能力的魔法少女进行应对。",
       "specialAbility": "协同攻击：两个头颅可以协同作战，进行复杂的夹击战术。嗅觉追踪：拥有极其灵敏的嗅觉，一旦锁定目标，很难摆脱其追踪。"
     },
-    "sourcePath": "apps/web/public/presets/C02_pupa.json"
+    "sourcePath": "content/presets/C02_pupa.json"
   },
   {
     "id": "C03_choir_and_dancer.json",
@@ -79,7 +79,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "researcherNotes": "‘合唱团与舞者’展现了高度的智能和区域控制能力，其巢穴结构复杂，能够指挥复数低阶残兽进行协同作战，是蛹级残兽中极度危险的存在。其歌声不仅是攻击手段，更像是一种宣告自身存在的仪式。",
       "specialAbility": "其歌声能形成精神干扰，诱惑敌人。在巢穴中可以构建扭曲的空间，其蛹壳能瓦解和防护纯魔力攻击。"
     },
-    "sourcePath": "apps/web/public/presets/C03_choir_and_dancer.json"
+    "sourcePath": "content/presets/C03_choir_and_dancer.json"
   },
   {
     "id": "C04_flesh_spider_web.json",
@@ -101,7 +101,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "researcherNotes": "此残兽与其操控者‘蛛’形成了共生关系。残兽提供巢穴与捕食场，而‘蛛’则为其提供‘养料’，甚至通过巢穴规则强化自身。这种人与残兽的配合协同使其展现出了远超普通蛹级残兽的危险性。",
       "specialAbility": "巢穴拥有空间扭曲的特性，内部可以进行复杂的空间变换。蛛网本身拥有规则能力，在其笼罩范围内，敌人的行动会受到限制，关节会被生成的蛛丝缠绕。"
     },
-    "sourcePath": "apps/web/public/presets/C04_flesh_spider_web.json"
+    "sourcePath": "content/presets/C04_flesh_spider_web.json"
   },
   {
     "id": "C05_cinder_guard_spider.json",
@@ -123,7 +123,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "researcherNotes": "半蜕级的残兽已经初步掌握了‘规则’的力量，展现出远超蛹级的智慧与战斗力。其与人类的融合形态，使其兼具了残兽的强韧肉体和人类的战斗技巧，是极其危险的对手。其弱点似乎在于与巢穴的强关联性。",
       "specialAbility": "其巢穴拥有改变空间结构的能力，并附带有‘蛛网’规则。只要目标踩在蛛网的投影之上，就会被无形的蛛丝缠绕，限制行动与魔力运转。想要解除，必须意识到需要破坏的是头顶上蛛网的本体。当蛛网本体被破坏时，残兽会受到巨大伤害。"
     },
-    "sourcePath": "apps/web/public/presets/C05_cinder_guard_spider.json"
+    "sourcePath": "content/presets/C05_cinder_guard_spider.json"
   },
   {
     "id": "C06_moth.json",
@@ -145,7 +145,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "researcherNotes": "蜕级残兽‘蛾’展现了对魔力这一核心要素的绝对支配力。其巢穴规则极为霸道，能够直接剥夺敌人的战斗能力。战斗记录表明，它拥有极高的智能，能够迅速分析战场并采取最优策略。它的存在本身就是对现有魔法少女体系的巨大威胁，其核心情感‘悲伤’的来源，以及与‘王前烬侍’的关联，是研究黑烬黎明系残兽的重中之重。",
       "specialAbility": "其最核心的能力是魔力掠夺。在它的巢穴规则【影子最大的人，占据其他人的魔力】影响下，它可以强行夺取并支配领域内其他目标的魔力、修改对方的术式目标。这种掠夺是持续性的，能极大削弱对手，同时增强自身。"
     },
-    "sourcePath": "apps/web/public/presets/C06_moth.json"
+    "sourcePath": "content/presets/C06_moth.json"
   },
   {
     "id": "C07_returning_to_simplicity.json",
@@ -167,7 +167,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "researcherNotes": "一个极度危险的哲学类残兽。对抗它的关键并非力量的强弱，而是存在的‘复杂度’和‘意志的坚定性’。任何试图用复杂魔法或华丽技巧战胜它的想法都是徒劳的。或许，只有同样简单而纯粹的攻击，或者能颠覆其‘简化’逻辑的概念性能力，才能对其造成有效伤害。它并非在‘战斗’，而是在‘证明’一个理论——‘一切终将归于简单’。绝对不能让它接触到任何重要的设施或人员。",
       "specialAbility": "【归元】这是其核心能力的名称。归一之璞可以将任何复杂的结构（无论是物质、能量还是概念）还原。具体表现为：1. **魔法消解**：任何指向它的魔法攻击都会被迅速分解为纯粹、无害的魔力粒子消散在空中。2. **物质分解**：物理接触到的物体，无论是合金装甲还是魔法少女的武器，都会被从分子层面瓦解，失去原有的形态和功能。3. **存在剥离**：对于生命体，长时间的接触会导致目标的记忆、情感、乃至“魔法少女”这一概念本身被剥离，最终彻底失去自我，成为一具空壳。"
     },
-    "sourcePath": "apps/web/public/presets/C07_returning_to_simplicity.json"
+    "sourcePath": "content/presets/C07_returning_to_simplicity.json"
   },
   {
     "id": "C08_silent_worm.json",
@@ -189,7 +189,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "researcherNotes": "一个典型的“环境杀手”和“法师克星”。物理防御对它的效果甚微。对抗它需要专门的感官屏蔽或频率干扰装备。精神力强大的魔法少女能更好地抵抗其心智攻击。值得注意的是，它本身也可能存在一个“安全频率”或“致命频率”，如果能找到并反向利用，或许能对其造成巨大伤害。",
       "specialAbility": "【失调和弦】能够同时释放多种不同频率的振动波，形成一个混乱的“共振场”。在此区域内，魔法的结构会变得极不稳定，容易失控或直接失效。魔法少女的变身状态也可能因为魔力频率被干扰而强制解除。"
     },
-    "sourcePath": "apps/web/public/presets/C08_silent_worm.json"
+    "sourcePath": "content/presets/C08_silent_worm.json"
   },
   {
     "id": "M00_white_lily.json",
@@ -265,7 +265,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": "守护与净化"
       }
     },
-    "sourcePath": "apps/web/public/presets/M00_white_lily.json"
+    "sourcePath": "content/presets/M00_white_lily.json"
   },
   {
     "id": "M01_centaurea_legacy.json",
@@ -341,7 +341,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": "联结与守护"
       }
     },
-    "sourcePath": "apps/web/public/presets/M01_centaurea_legacy.json"
+    "sourcePath": "content/presets/M01_centaurea_legacy.json"
   },
   {
     "id": "M01_centaurea.json",
@@ -539,7 +539,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": "守护与审判"
       }
     },
-    "sourcePath": "apps/web/public/presets/M01_centaurea.json"
+    "sourcePath": "content/presets/M01_centaurea.json"
   },
   {
     "id": "M02_white_rose_legacy.json",
@@ -610,7 +610,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "rules": []
       }
     },
-    "sourcePath": "apps/web/public/presets/M02_white_rose_legacy.json"
+    "sourcePath": "content/presets/M02_white_rose_legacy.json"
   },
   {
     "id": "M02_white_rose.json",
@@ -787,7 +787,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": ""
       }
     },
-    "sourcePath": "apps/web/public/presets/M02_white_rose.json"
+    "sourcePath": "content/presets/M02_white_rose.json"
   },
   {
     "id": "M03_little_brocade_legacy.json",
@@ -857,7 +857,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "rules": []
       }
     },
-    "sourcePath": "apps/web/public/presets/M03_little_brocade_legacy.json"
+    "sourcePath": "content/presets/M03_little_brocade_legacy.json"
   },
   {
     "id": "M03_little_brocade.json",
@@ -1022,7 +1022,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": ""
       }
     },
-    "sourcePath": "apps/web/public/presets/M03_little_brocade.json"
+    "sourcePath": "content/presets/M03_little_brocade.json"
   },
   {
     "id": "M04_boxue_legacy.json",
@@ -1092,7 +1092,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "rules": []
       }
     },
-    "sourcePath": "apps/web/public/presets/M04_boxue_legacy.json"
+    "sourcePath": "content/presets/M04_boxue_legacy.json"
   },
   {
     "id": "M04_boxue.json",
@@ -1259,7 +1259,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": ""
       }
     },
-    "sourcePath": "apps/web/public/presets/M04_boxue.json"
+    "sourcePath": "content/presets/M04_boxue.json"
   },
   {
     "id": "M05_kite_legacy.json",
@@ -1328,7 +1328,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "name": ""
       }
     },
-    "sourcePath": "apps/web/public/presets/M05_kite_legacy.json"
+    "sourcePath": "content/presets/M05_kite_legacy.json"
   },
   {
     "id": "M05_kite.json",
@@ -1510,7 +1510,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": "规则强制 / 领域支配"
       }
     },
-    "sourcePath": "apps/web/public/presets/M05_kite.json"
+    "sourcePath": "content/presets/M05_kite.json"
   },
   {
     "id": "M06_sparrow.json",
@@ -1586,7 +1586,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": "未知"
       }
     },
-    "sourcePath": "apps/web/public/presets/M06_sparrow.json"
+    "sourcePath": "content/presets/M06_sparrow.json"
   },
   {
     "id": "M07_margaret_legacy.json",
@@ -1655,7 +1655,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "name": "未知"
       }
     },
-    "sourcePath": "apps/web/public/presets/M07_margaret_legacy.json"
+    "sourcePath": "content/presets/M07_margaret_legacy.json"
   },
   {
     "id": "M07_margaret.json",
@@ -1849,7 +1849,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": "情报与情绪影响"
       }
     },
-    "sourcePath": "apps/web/public/presets/M07_margaret.json"
+    "sourcePath": "content/presets/M07_margaret.json"
   },
   {
     "id": "M08_asagao_legacy.json",
@@ -1918,7 +1918,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "name": "未知"
       }
     },
-    "sourcePath": "apps/web/public/presets/M08_asagao_legacy.json"
+    "sourcePath": "content/presets/M08_asagao_legacy.json"
   },
   {
     "id": "M08_asagao.json",
@@ -2104,7 +2104,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": "信息/控制"
       }
     },
-    "sourcePath": "apps/web/public/presets/M08_asagao.json"
+    "sourcePath": "content/presets/M08_asagao.json"
   },
   {
     "id": "M09_pine_flower.json",
@@ -2179,7 +2179,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": "控制与守护"
       }
     },
-    "sourcePath": "apps/web/public/presets/M09_pine_flower.json"
+    "sourcePath": "content/presets/M09_pine_flower.json"
   },
   {
     "id": "M10_mugwort.json",
@@ -2254,7 +2254,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": "规则、契约"
       }
     },
-    "sourcePath": "apps/web/public/presets/M10_mugwort.json"
+    "sourcePath": "content/presets/M10_mugwort.json"
   },
   {
     "id": "M11_sunflower.json",
@@ -2328,7 +2328,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": "模仿、囚禁"
       }
     },
-    "sourcePath": "apps/web/public/presets/M11_sunflower.json"
+    "sourcePath": "content/presets/M11_sunflower.json"
   },
   {
     "id": "M12_greatness_in_simplicity.json",
@@ -2421,7 +2421,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": "颠覆性/瓦解型（反复杂）"
       }
     },
-    "sourcePath": "apps/web/public/presets/M12_greatness_in_simplicity.json"
+    "sourcePath": "content/presets/M12_greatness_in_simplicity.json"
   },
   {
     "id": "M13_greatness_in_complexity.json",
@@ -2510,7 +2510,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": "修正与秩序"
       }
     },
-    "sourcePath": "apps/web/public/presets/M13_greatness_in_complexity.json"
+    "sourcePath": "content/presets/M13_greatness_in_complexity.json"
   },
   {
     "id": "M14_centaurea_claw_marks.json",
@@ -2587,7 +2587,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": "破碎的守护与永恒的毁灭"
       }
     },
-    "sourcePath": "apps/web/public/presets/M14_centaurea_claw_marks.json"
+    "sourcePath": "content/presets/M14_centaurea_claw_marks.json"
   },
   {
     "id": "M15_centaurea_in_heart.json",
@@ -2664,7 +2664,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": "联结与守护"
       }
     },
-    "sourcePath": "apps/web/public/presets/M15_centaurea_in_heart.json"
+    "sourcePath": "content/presets/M15_centaurea_in_heart.json"
   },
   {
     "id": "M16_xuemo.json",
@@ -2764,7 +2764,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": "【日常】逃避型/放弃思考（反内卷）【战斗】颠覆性/瓦解型（反复杂）"
       }
     },
-    "sourcePath": "apps/web/public/presets/M16_xuemo.json"
+    "sourcePath": "content/presets/M16_xuemo.json"
   },
   {
     "id": "M90_goose.json",
@@ -2857,7 +2857,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": "（这只鹅不存在奇境规则）。"
       }
     },
-    "sourcePath": "apps/web/public/presets/M90_goose.json"
+    "sourcePath": "content/presets/M90_goose.json"
   },
   {
     "id": "U_CS_horde_strong.json",
@@ -2885,7 +2885,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "researcherNotes": "编写规范：用研究员口吻强调威胁，并给出建议战术（切断指挥链/破坏巢穴/救援优先等）；如需要，可给群体起一个具体称呼并全程一致（可在首次出场/确定胜利者时写“代号X（强大的残兽群）”）。在推演故事时，务必将编写好的设定写入历战记录和当前状态（如有），以便确保确定了的设定被固定下来。",
       "specialAbility": "自行编写：给出 1 个更接近规则的群体特殊能力（共享规则并扩散、标记者成为路标等），写明触发条件、限制与破解线索。"
     },
-    "sourcePath": "apps/web/public/presets/U_CS_horde_strong.json"
+    "sourcePath": "content/presets/U_CS_horde_strong.json"
   },
   {
     "id": "U_CS_horde_tide.json",
@@ -2913,7 +2913,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "researcherNotes": "编写规范：用研究员口吻强调兽潮的核心问题是“能救下多少”，给出优先级建议（撤离/护送/封堵/救援）。如需要，可给兽潮起一个具体称呼并全程一致（可在首次出场/确定胜利者时写“代号X（兽潮）”）。在推演故事时，务必将编写好的设定写入历战记录和当前状态（如有），以便确保确定了的设定被固定下来。",
       "specialAbility": "自行编写：给出一些接近环境规则的特异（道路变长、出口变远、呼救回声化、概念传播等其一），写明触发条件、限制与破解线索。"
     },
-    "sourcePath": "apps/web/public/presets/U_CS_horde_tide.json"
+    "sourcePath": "content/presets/U_CS_horde_tide.json"
   },
   {
     "id": "U_CS_horde_weak.json",
@@ -2941,7 +2941,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "researcherNotes": "编写规范：用研究员口吻说明“弱小但危险”的理由（易点燃恐慌、逼迫失误、拖住救援等），并给出建议战术。如需要，可给群体起一个具体称呼并全程一致（可在首次出场/确定胜利者时写“代号X（弱小的残兽群）”）。在推演故事时，务必将编写好的设定写入历战记录和当前状态（如有），以便确保确定了的设定被固定下来。",
       "specialAbility": "自行编写：给出 0~1 个群体特殊能力，写明触发条件与限制。"
     },
-    "sourcePath": "apps/web/public/presets/U_CS_horde_weak.json"
+    "sourcePath": "content/presets/U_CS_horde_weak.json"
   },
   {
     "id": "U_CS_horde.json",
@@ -2969,7 +2969,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "researcherNotes": "编写规范：用研究员口吻总结残兽群的危险点，并给出建议战术。如需要，可给群体起一个具体称呼并全程一致（可在首次出场/确定胜利者时写“代号X（残兽群）”）。在推演故事时，务必将编写好的设定写入历战记录和当前状态（如有），以便确保确定了的设定被固定下来。",
       "specialAbility": "自行编写：给出 1 个群体特殊能力，写明触发条件、限制与破解线索。"
     },
-    "sourcePath": "apps/web/public/presets/U_CS_horde.json"
+    "sourcePath": "content/presets/U_CS_horde.json"
   },
   {
     "id": "U_CS_solo_boss.json",
@@ -2997,7 +2997,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "researcherNotes": "编写规范：用研究员口吻总结“首领型危险点”（叙事权/统御/规则化压制），并给出建议战术。如需要，可给它起一个具体称呼并全程一致（可在首次出场/确定胜利者时写“名称X（残兽首领）”）。在推演故事时，务必将编写好的设定写入历战记录和当前状态（如有），以便确保确定了的设定被固定下来。",
       "specialAbility": "自行编写：给出 1~2 个特异能力，写明触发条件、限制与破解线索（必须可推演）。"
     },
-    "sourcePath": "apps/web/public/presets/U_CS_solo_boss.json"
+    "sourcePath": "content/presets/U_CS_solo_boss.json"
   },
   {
     "id": "U_CS_solo_strong.json",
@@ -3025,7 +3025,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "researcherNotes": "编写规范：用研究员口吻总结威胁等级、推荐战术与高风险点；正文不要原样输出“自行编写”等提示词。如需要，可给它起一个具体称呼并全程一致（可在首次出场/确定胜利者时写“名称X（强大的残兽）”）。在推演故事时，务必将编写好的设定写入历战记录和当前状态（如有），以便确保确定了的设定被固定下来。",
       "specialAbility": "自行编写：给出 1 个更接近规则的特异能力，并写明触发条件、限制与破解线索（必须可推演）。"
     },
-    "sourcePath": "apps/web/public/presets/U_CS_solo_strong.json"
+    "sourcePath": "content/presets/U_CS_solo_strong.json"
   },
   {
     "id": "U_CS_solo_weak.json",
@@ -3053,7 +3053,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "researcherNotes": "编写规范：用研究员口吻总结“为何仍不可轻视”（例如对新人致命、易制造失误、擅长偷袭等）；如需要，可给它起一个具体称呼并全程一致（可在首次出场/确定胜利者时写“名称X（弱小的残兽）”）。在推演故事时，务必将编写好的设定写入历战记录和当前状态（如有），以便确保确定了的设定被固定下来。",
       "specialAbility": "自行编写：给出 0~1 个特异能力（偏局部或短时效果），并写明触发条件、限制与破解线索。"
     },
-    "sourcePath": "apps/web/public/presets/U_CS_solo_weak.json"
+    "sourcePath": "content/presets/U_CS_solo_weak.json"
   },
   {
     "id": "U_CS_solo.json",
@@ -3081,7 +3081,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "researcherNotes": "编写规范：用“调查院/研究员记录”的口吻总结威胁等级、建议战术与注意事项。若需要，可在首次出场和确定胜利者时为残兽取一个具体称呼，并全程一致（可写“名称X（残兽）”）。在推演故事时，务必将编写好的设定写入历战记录和当前状态（如有），以便确保确定了的设定被固定下来。",
       "specialAbility": "自行编写：给出 1 个特异能力（可带规则/环境/心理层面），并写明触发条件、限制与破解线索。"
     },
-    "sourcePath": "apps/web/public/presets/U_CS_solo.json"
+    "sourcePath": "content/presets/U_CS_solo.json"
   },
   {
     "id": "U_MG_solo_strong.json",
@@ -3140,7 +3140,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": "自行编写：倾向（掌控/交换/追猎/压制/守护等）"
       }
     },
-    "sourcePath": "apps/web/public/presets/U_MG_solo_strong.json"
+    "sourcePath": "content/presets/U_MG_solo_strong.json"
   },
   {
     "id": "U_MG_solo_top.json",
@@ -3198,7 +3198,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": "自行编写：倾向（裁决/因果/终局/审判/交换等）"
       }
     },
-    "sourcePath": "apps/web/public/presets/U_MG_solo_top.json"
+    "sourcePath": "content/presets/U_MG_solo_top.json"
   },
   {
     "id": "U_MG_solo_weak.json",
@@ -3257,7 +3257,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": "自行编写：倾向（求生/逃离/保护/求助/自我牺牲等）"
       }
     },
-    "sourcePath": "apps/web/public/presets/U_MG_solo_weak.json"
+    "sourcePath": "content/presets/U_MG_solo_weak.json"
   },
   {
     "id": "U_MG_solo.json",
@@ -3316,7 +3316,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": "自行编写：倾向（联结/守护/追猎/交换/裁决/治愈/扭曲等）"
       }
     },
-    "sourcePath": "apps/web/public/presets/U_MG_solo.json"
+    "sourcePath": "content/presets/U_MG_solo.json"
   },
   {
     "id": "U_MG_team_strong.json",
@@ -3375,7 +3375,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": "自行编写：倾向（布局/压制/合击/守护等）"
       }
     },
-    "sourcePath": "apps/web/public/presets/U_MG_team_strong.json"
+    "sourcePath": "content/presets/U_MG_team_strong.json"
   },
   {
     "id": "U_MG_team_top.json",
@@ -3434,7 +3434,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": "自行编写：倾向（裁决/终局/因果/审判/交换等）"
       }
     },
-    "sourcePath": "apps/web/public/presets/U_MG_team_top.json"
+    "sourcePath": "content/presets/U_MG_team_top.json"
   },
   {
     "id": "U_MG_team_weak.json",
@@ -3493,7 +3493,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": "自行编写：倾向（求生/互救/硬撑/守护等）"
       }
     },
-    "sourcePath": "apps/web/public/presets/U_MG_team_weak.json"
+    "sourcePath": "content/presets/U_MG_team_weak.json"
   },
   {
     "id": "U_MG_team.json",
@@ -3552,7 +3552,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
         "tendency": "自行编写：倾向（联结/互补/合击/守护/压制等）"
       }
     },
-    "sourcePath": "apps/web/public/presets/U_MG_team.json"
+    "sourcePath": "content/presets/U_MG_team.json"
   },
   {
     "id": "S01_queen_will.json",
@@ -3567,7 +3567,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "templateId": "通用情景",
       "title": "谨遵女王之意"
     },
-    "sourcePath": "apps/web/public/scenario-presets/S01_queen_will.json"
+    "sourcePath": "content/scenario-presets/S01_queen_will.json"
   },
   {
     "id": "S02_multiverse_human_arena.json",
@@ -3730,7 +3730,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "scenario_type": "竞技比赛",
       "title": "竞技场：多维战区-人之战场"
     },
-    "sourcePath": "apps/web/public/scenario-presets/S02_multiverse_human_arena.json"
+    "sourcePath": "content/scenario-presets/S02_multiverse_human_arena.json"
   },
   {
     "id": "S03_arena_original_v1_1.json",
@@ -3862,7 +3862,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "scenario_type": "竞技比赛",
       "title": "公平竞技场：魔法少女的试炼"
     },
-    "sourcePath": "apps/web/public/scenario-presets/S03_arena_original_v1_1.json"
+    "sourcePath": "content/scenario-presets/S03_arena_original_v1_1.json"
   },
   {
     "id": "S04_kengan_gold_tournament_v3.json",
@@ -3916,7 +3916,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "scenario_type": "竞技比赛",
       "title": "拳愿八角笼：原始搏斗竞技·通用"
     },
-    "sourcePath": "apps/web/public/scenario-presets/S04_kengan_gold_tournament_v3.json"
+    "sourcePath": "content/scenario-presets/S04_kengan_gold_tournament_v3.json"
   },
   {
     "id": "S05_mirror_mundane_v2.json",
@@ -4192,7 +4192,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "scenario_type": "日常",
       "title": "镜中凡俗"
     },
-    "sourcePath": "apps/web/public/scenario-presets/S05_mirror_mundane_v2.json"
+    "sourcePath": "content/scenario-presets/S05_mirror_mundane_v2.json"
   },
   {
     "id": "S06_magical_girl_assessment_day.json",
@@ -4512,7 +4512,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "scenario_type": "综合评估",
       "title": "魔法少女综合评估日"
     },
-    "sourcePath": "apps/web/public/scenario-presets/S06_magical_girl_assessment_day.json"
+    "sourcePath": "content/scenario-presets/S06_magical_girl_assessment_day.json"
   },
   {
     "id": "S07_galgame_difficulty_analysis.json",
@@ -4578,7 +4578,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "scenario_type": "角色Galgame攻略难度分析报告输出",
       "title": "A[LI]CE_MSG_攻略难度报告"
     },
-    "sourcePath": "apps/web/public/scenario-presets/S07_galgame_difficulty_analysis.json"
+    "sourcePath": "content/scenario-presets/S07_galgame_difficulty_analysis.json"
   },
   {
     "id": "S08_alice_msg_review_daily.json",
@@ -4730,7 +4730,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "scenario_type": "角色卡评价与创作指导输出",
       "title": "A[LI]CE_MSG角色卡评价与创作指导-日常篇"
     },
-    "sourcePath": "apps/web/public/scenario-presets/S08_alice_msg_review_daily.json"
+    "sourcePath": "content/scenario-presets/S08_alice_msg_review_daily.json"
   },
   {
     "id": "S09_anko_anime_review_v3.json",
@@ -4779,7 +4779,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "scenario_type": "日常互动",
       "title": "安可的番剧鉴赏会"
     },
-    "sourcePath": "apps/web/public/scenario-presets/S09_anko_anime_review_v3.json"
+    "sourcePath": "content/scenario-presets/S09_anko_anime_review_v3.json"
   },
   {
     "id": "S10_everyday_streaming_v3_1.json",
@@ -5244,7 +5244,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "scenario_type": "日常",
       "title": "不变身魔法少女的日常直播 版本3.1"
     },
-    "sourcePath": "apps/web/public/scenario-presets/S10_everyday_streaming_v3_1.json"
+    "sourcePath": "content/scenario-presets/S10_everyday_streaming_v3_1.json"
   },
   {
     "id": "S11_mayfly_bossfight_v1.json",
@@ -5544,7 +5544,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "scenario_type": "BOSS战",
       "title": "朝生暮死，岂知晦朔"
     },
-    "sourcePath": "apps/web/public/scenario-presets/S11_mayfly_bossfight_v1.json"
+    "sourcePath": "content/scenario-presets/S11_mayfly_bossfight_v1.json"
   },
   {
     "id": "S12_system_core_meta_dialogue_v4_2.json",
@@ -5614,7 +5614,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "scenario_type": "调查",
       "title": "元对话：与系统核心的质询"
     },
-    "sourcePath": "apps/web/public/scenario-presets/S12_system_core_meta_dialogue_v4_2.json"
+    "sourcePath": "content/scenario-presets/S12_system_core_meta_dialogue_v4_2.json"
   },
   {
     "id": "S13_wastetrace_encounter.json",
@@ -5627,7 +5627,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "templateId": "通用情景",
       "title": "废土行迹·偶遇：同路人未必同行"
     },
-    "sourcePath": "apps/web/public/scenario-presets/S13_wastetrace_encounter.json"
+    "sourcePath": "content/scenario-presets/S13_wastetrace_encounter.json"
   },
   {
     "id": "S14_wastetrace_route_failure.json",
@@ -5640,7 +5640,7 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "templateId": "通用情景",
       "title": "废土行迹·调查探索：路标失效之后"
     },
-    "sourcePath": "apps/web/public/scenario-presets/S14_wastetrace_route_failure.json"
+    "sourcePath": "content/scenario-presets/S14_wastetrace_route_failure.json"
   },
   {
     "id": "S15_wastetrace_blockade_breakout.json",
@@ -5653,6 +5653,6 @@ export const GENERATED_ARENA_ROOM_PRESETS = [
       "templateId": "通用情景",
       "title": "废土行迹·战斗冲突：封路与突围"
     },
-    "sourcePath": "apps/web/public/scenario-presets/S15_wastetrace_blockade_breakout.json"
+    "sourcePath": "content/scenario-presets/S15_wastetrace_blockade_breakout.json"
   }
 ] as const satisfies readonly GeneratedArenaRoomPresetEntry[];

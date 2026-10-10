@@ -165,7 +165,7 @@ const CORE_GENERATED_PUBLIC_PATHS = Object.freeze({
  * 与 `generatedPublicPaths`（import 边界用的文件级清单）不同，这里要覆盖到目录本身——
  * Git 护栏按路径前缀判定。
  */
-export const GENERATED_PUBLIC_DIRECTORIES = Object.freeze(['encyclopedia', 'questionnaires/presets']);
+export const GENERATED_PUBLIC_DIRECTORIES = Object.freeze(['encyclopedia', 'questionnaires/presets', 'presets', 'scenario-presets']);
 export const GENERATED_PUBLIC_ROOT_FILES = Object.freeze(['languages.json', 'announcements.json']);
 
 /**

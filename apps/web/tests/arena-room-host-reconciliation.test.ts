@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ArenaRoomSharedConfig } from '@mahoshojo/contracts/arena-room';
 
 import { useBattleStore } from '@/components/arena/stores/useBattleStore';
-import M01Centaurea from '@/public/presets/M01_centaurea.json';
-import S01QueenWill from '@/public/scenario-presets/S01_queen_will.json';
+import M01Centaurea from '../../../content/presets/M01_centaurea.json';
+import S01QueenWill from '../../../content/scenario-presets/S01_queen_will.json';
 import {
   applyArenaRoomAuthorityToBattleStore,
 } from '@/lib/arena-room/host-reconciliation';

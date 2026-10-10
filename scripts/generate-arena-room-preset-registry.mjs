@@ -17,8 +17,8 @@ const hostedAuthorityOutputPath = path.join(
   'packages/hosted-runtime/src/arena-generation/generated/arena-preset-authority.ts',
 );
 const sources = [
-  { directory: 'apps/web/public/presets', kind: 'character' },
-  { directory: 'apps/web/public/scenario-presets', kind: 'scenario' },
+  { directory: 'content/presets', kind: 'character' },
+  { directory: 'content/scenario-presets', kind: 'scenario' },
 ];
 // `prototype` is a legitimate field in the accepted S11 scenario asset. The
 // parsed server-known registry never merges payload objects, so only keys that

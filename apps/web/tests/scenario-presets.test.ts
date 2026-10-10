@@ -6,9 +6,9 @@ import {
   getScenarioPresetByFilename,
   normalizeScenarioPresetFilename,
 } from '@/lib/scenario-presets';
-import wastetraceEncounter from '@/public/scenario-presets/S13_wastetrace_encounter.json';
-import wastetraceRouteFailure from '@/public/scenario-presets/S14_wastetrace_route_failure.json';
-import wastetraceBlockadeBreakout from '@/public/scenario-presets/S15_wastetrace_blockade_breakout.json';
+import wastetraceEncounter from '../../../content/scenario-presets/S13_wastetrace_encounter.json';
+import wastetraceRouteFailure from '../../../content/scenario-presets/S14_wastetrace_route_failure.json';
+import wastetraceBlockadeBreakout from '../../../content/scenario-presets/S15_wastetrace_blockade_breakout.json';
 
 const WASTETRACE_PRESETS = [
   {

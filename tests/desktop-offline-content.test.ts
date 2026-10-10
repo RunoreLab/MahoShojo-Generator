@@ -69,6 +69,8 @@ describe('the local-request guard actually rejects remote origins', () => {
     for (const url of [
       '/encyclopedia/site-guide.md',
       '/questionnaires/presets/magical-girl-default.json',
+      '/presets/M01_centaurea_legacy.json',
+      '/scenario-presets/S01_queen_will.json',
       '/assets/index-abc.css',
       './relative.js',
       'data:image/svg+xml;base64,AAA',
@@ -187,6 +189,24 @@ describe.skipIf(!REQUIRE_DESKTOP_DIST && !existsSync(DESKTOP_DIST))(
         .toEqual(readFileSync(path.join(REPO_ROOT, 'content/brand', questionnaire.logoUrl)));
       // 花名经 domain 静态打包，不再为 Desktop 提供第二份 public 资产。
       expect(existsSync(path.join(DESKTOP_DIST, 'flowers.json'))).toBe(false);
+    });
+
+    it('ships every Arena preset and shared brand byte while excluding Web-only brands', () => {
+      for (const directory of ['presets', 'scenario-presets']) {
+        const source = path.join(REPO_ROOT, 'content', directory);
+        const expected = readdirSync(source).sort();
+        expect(readdirSync(path.join(DESKTOP_DIST, directory)).sort()).toEqual(expected);
+        for (const file of expected) {
+          expect(readFileSync(path.join(DESKTOP_DIST, directory, file))).toEqual(readFileSync(path.join(source, file)));
+        }
+      }
+      const { brand } = JSON.parse(readFileSync(path.join(REPO_ROOT, 'content/sync-manifest.json'), 'utf8')) as {
+        brand: { shared: string[]; web: string[] };
+      };
+      for (const file of brand.shared) {
+        expect(readFileSync(path.join(DESKTOP_DIST, file))).toEqual(readFileSync(path.join(REPO_ROOT, 'content/brand', file)));
+      }
+      for (const file of brand.web) expect(existsSync(path.join(DESKTOP_DIST, file)), file).toBe(false);
     });
   },
 );

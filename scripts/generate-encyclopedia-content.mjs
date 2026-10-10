@@ -3,7 +3,7 @@
  *
  * ## 为什么需要它
  *
- * 百科正文、共享问卷与品牌资源要同时出现在两个产物里：Web 由 `public/` 提供，Desktop 由 Tauri 自定义协议
+ * 百科正文、共享问卷、Arena 预设与品牌资源要同时出现在两个产物里：Web 由 `public/` 提供，Desktop 由 Tauri 自定义协议
  * 伺服 `dist/`（`frontendDist` 目录会被递归嵌入）。而这两条路都不接受「从别处按需读取」——共享包里
  * 的 `import.meta.glob` 在本仓当前的 webpack `next build` 下不成立（dev 通过、build 静默失败），裸
  * `?raw` 是 Vite 专有语法。所以内容在**构建期**被复制到两个服务根，运行时只做同源的普通 fetch。
@@ -38,6 +38,11 @@ const BRAND_DIR = path.join(CONTENT_ROOT, 'brand');
 const ENCYCLOPEDIA_DIR = path.join(CONTENT_ROOT, 'encyclopedia');
 const QUESTIONNAIRE_DIR = path.join(CONTENT_ROOT, 'questionnaires', 'presets');
 const QUESTIONNAIRE_CATALOG_FILE = 'index.json';
+// 目录元数据在纯领域层，正文在 content/；legacyFiles 显式保留未进入 picker 的旧 URL。
+const ARENA_PRESET_CATALOGS = {
+  presets: { module: 'presets.ts', exportName: 'PRESET_LIST', typeField: 'type', kinds: ['magical-girl', 'canshou'] },
+  'scenario-presets': { module: 'scenario-presets.ts', exportName: 'SCENARIO_PRESET_LIST', typeField: 'template', kinds: ['scenario', 'general-scenario'] },
+};
 /**
  * 双端同源的根级 JSON 资产。
  *
@@ -69,8 +74,7 @@ const CATALOG_MODULE = path.join(
  * `public/` 落在**静态服务根**，而不是构建配置里的某个数组：Vite 的 `publicDir` 不支持数组（vite#16138），
  * 而 Next 的 `public/` 本来就是固定目录。两端在这里形状相同，脚本因此不需要分支。
  *
- * 注意 `apps/web/public/` 是共享命名空间：除品牌资源外还有 50 多个与本脚本无关的文件（JSON 种子、
- * 预设、favicon 等）。因此脚本**不**扫描并剪除整个根目录，而是只对 `sync-manifest.json` 登记过的文件名
+ * 注意 `apps/web/public/` 是共享命名空间：除品牌资源外还有 与本脚本无关的文件（其他 JSON 种子与图标等）。因此脚本**不**扫描并剪除整个根目录，而是只对 `sync-manifest.json` 登记过的文件名
  * 负责——否则一次 `rm` 就会删掉别人的资源。
  */
 /**
@@ -158,6 +162,75 @@ const readCatalogEntries = async () => {
     throw new Error(`目录数据没有导出 encyclopediaEntries：${CATALOG_MODULE}`);
   }
   return entries;
+};
+
+/** 只校验目录/类型，不 normalize 或重写卡片；签名字节原样复制。 */
+export const collectArenaPresetProblems = ({ directory, files, entries, legacyFiles, inferDataCardTemplate }) => {
+  const problems = [];
+  const config = ARENA_PRESET_CATALOGS[directory];
+  const filenames = entries.map((entry) => entry.filename);
+  const known = new Set(files.map((file) => file.name));
+  const safeFilename = (name) => typeof name === 'string' && /^[a-zA-Z0-9_-]+\.json$/.test(name);
+  if (filenames.some((name) => !safeFilename(name)) || new Set(filenames).size !== filenames.length) {
+    problems.push(`${directory} 目录文件名非法或重复`);
+  }
+  if (!Array.isArray(legacyFiles) || legacyFiles.some((name) => !safeFilename(name)) || new Set(legacyFiles).size !== legacyFiles.length) {
+    return [...problems, `${directory} 的 legacyFiles 必须是无重复的 JSON 文件名数组`];
+  }
+  for (const entry of entries) {
+    if (!known.has(entry.filename)) problems.push(`${directory} 目录引用缺失文件 ${entry.filename}`);
+    if (!config.kinds.includes(entry[config.typeField])) problems.push(`${directory}/${entry.filename} 目录类型非法`);
+  }
+  for (const name of legacyFiles) {
+    if (!known.has(name)) problems.push(`${directory} legacyFiles 引用缺失文件 ${name}`);
+    if (filenames.includes(name)) problems.push(`${directory}/${name} 不能同时属于目录和 legacyFiles`);
+  }
+  for (const { name, payload } of files) {
+    if (!safeFilename(name)) problems.push(`${directory}/${name} 不是安全的 JSON 文件名`);
+    if (!filenames.includes(name) && !legacyFiles.includes(name)) problems.push(`${directory}/${name} 未登记到目录或 legacyFiles`);
+    const kind = inferDataCardTemplate(payload);
+    const entry = entries.find((candidate) => candidate.filename === name);
+    if (!config.kinds.includes(kind) || (entry && entry[config.typeField] !== kind)) {
+      problems.push(`${directory}/${name} 正文类型 ${kind} 与目录不符`);
+    }
+  }
+  return problems;
+};
+
+const readArenaPresetFiles = async (manifest, problems) => {
+  if (!manifest.arenaPresets || Object.keys(manifest.arenaPresets).sort().join(',') !== Object.keys(ARENA_PRESET_CATALOGS).sort().join(',')) {
+    throw new Error('sync-manifest.arenaPresets 必须登记 presets 与 scenario-presets 两个共享目录');
+  }
+  const result = {};
+  for (const [directory, config] of Object.entries(ARENA_PRESET_CATALOGS)) {
+    const { outputFiles } = await build({
+      stdin: {
+        contents: `export { ${config.exportName} } from './${config.module}'; export { inferDataCardTemplate } from './data-cards.ts';`,
+        resolveDir: path.join(root, 'packages/domain/src'),
+        loader: 'ts',
+      },
+      bundle: true, platform: 'node', format: 'esm', write: false,
+    });
+    const module = await import(`data:text/javascript;base64,${Buffer.from(outputFiles[0].text).toString('base64')}`);
+    const from = path.join(CONTENT_ROOT, directory);
+    const names = (await readdir(from)).sort();
+    const files = [];
+    for (const name of names) {
+      const filePath = path.join(from, name);
+      if (!(await lstat(filePath)).isFile() || !name.endsWith('.json')) {
+        problems.push(`${path.relative(root, filePath)} 必须是普通 JSON 文件`);
+        continue;
+      }
+      files.push({ name, payload: JSON.parse(await readFile(filePath, 'utf8')) });
+    }
+    problems.push(...collectArenaPresetProblems({
+      directory, files, entries: module[config.exportName],
+      legacyFiles: manifest.arenaPresets[directory].legacyFiles,
+      inferDataCardTemplate: module.inferDataCardTemplate,
+    }));
+    result[directory] = names;
+  }
+  return result;
 };
 
 /**
@@ -298,6 +371,8 @@ export async function generate({ check = false, checkOutput = false, target = 'a
   const problems = [];
   const entries = await readCatalogEntries();
   const manifest = await readManifest();
+  const arenaPresetFiles = await readArenaPresetFiles(manifest, problems);
+  const arenaPresetCount = Object.values(arenaPresetFiles).reduce((total, files) => total + files.length, 0);
 
   const encyclopediaFiles = await listFiles(ENCYCLOPEDIA_DIR, '.md');
   const brandFiles = await listFiles(BRAND_DIR, '');
@@ -330,13 +405,20 @@ export async function generate({ check = false, checkOutput = false, target = 'a
   // 在写入前检查全部源文件；--check 不依赖开发机残留的 public/ 生成物，也不写磁盘。
   if (problems.length > 0) throw new Error(`百科内容源校验失败：\n- ${problems.join('\n- ')}`);
   if (check && !checkOutput) {
-    console.log(`content/ 源校验通过：${entries.length} 篇正文、${brandFiles.length} 个品牌资源、${questionnaireFiles.length - 1} 份预设问卷及花名/语言数据`);
+    console.log(`content/ 源校验通过：${entries.length} 篇正文、${brandFiles.length} 个品牌资源、${questionnaireFiles.length - 1} 份预设问卷、${arenaPresetCount} 份 Arena 预设及花名/语言数据`);
     return;
   }
 
   for (const { app, label, keys } of TARGETS) {
     if (target !== 'all' && app !== `apps/${target}`) continue;
     const publicRoot = path.join(outputRoot, app, 'public');
+
+    for (const [directory, files] of Object.entries(arenaPresetFiles)) {
+      await syncDirectory({
+        from: path.join(CONTENT_ROOT, directory), to: path.join(publicRoot, directory),
+        files, ownedFiles: files, exclusive: true, check: checkOutput, problems,
+      });
+    }
 
     // 预设目录全量由本脚本拥有：增删预设只改 content/，双端副本一致剪除。
     await syncDirectory({
@@ -388,7 +470,7 @@ export async function generate({ check = false, checkOutput = false, target = 'a
     });
 
     console.log(
-      `${label} 内容 ${checkOutput ? '已校验' : '已同步'}：${encyclopediaFiles.length} 篇正文、${keys.flatMap((key) => manifest.brand[key]).length} 个品牌资源、${questionnaireFiles.length - 1} 份预设问卷`,
+      `${label} 内容 ${checkOutput ? '已校验' : '已同步'}：${encyclopediaFiles.length} 篇正文、${keys.flatMap((key) => manifest.brand[key]).length} 个品牌资源、${questionnaireFiles.length - 1} 份预设问卷、${arenaPresetCount} 份 Arena 预设`,
     );
   }
 

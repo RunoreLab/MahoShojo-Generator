@@ -6,7 +6,7 @@ import { resolveArenaCombatantNativeAuthority } from '../src/arena-generation/na
 
 const loadPreset = async (filename: string): Promise<Record<string, unknown>> => (
   JSON.parse(await readFile(
-    new URL(`../../../apps/web/public/presets/${filename}`, import.meta.url),
+    new URL(`../../../content/presets/${filename}`, import.meta.url),
     'utf8',
   )) as Record<string, unknown>
 );

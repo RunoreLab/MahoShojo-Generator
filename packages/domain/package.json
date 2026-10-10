@@ -234,7 +234,9 @@
     "./questionnaire-logo": "./src/questionnaire-logo.ts",
     "./card-forge-document": "./src/card-forge-document.ts",
     "./game-card-image-crop": "./src/game-card-image-crop.ts",
-    "./game-card-presentation": "./src/game-card-presentation.ts"
+    "./game-card-presentation": "./src/game-card-presentation.ts",
+    "./presets": "./src/presets.ts",
+    "./scenario-presets": "./src/scenario-presets.ts"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",

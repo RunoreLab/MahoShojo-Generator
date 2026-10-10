@@ -1,10 +1,12 @@
 {
-  "$comment": "由 scripts/generate-encyclopedia-content.mjs 维护。它记录每个 app 的 public/ 根目录里由本脚本拥有哪些品牌资源，因此剪除已从 content/brand 删除或改名的文件时不会碰到 apps/web/public 下另外 40 多个无关文件。改动 content/brand/ 或 packages/ui-web/src/home/feature-catalog.ts 后由各宿主 dev/build 命令重新生成；生成副本不纳入 Git。",
+  "$comment": "由 scripts/generate-encyclopedia-content.mjs 维护。它记录每个 app 的 public/ 根目录里由本脚本拥有哪些品牌资源，以及共享 Arena 预设目录中未进入 picker 的 legacyFiles；因此剪除已从 content/brand 删除或改名的文件时不会碰到 apps/web/public 下另外 40 多个无关文件。改动 content/brand/ 或 packages/ui-web/src/home/feature-catalog.ts 后由各宿主 dev/build 命令重新生成；生成副本不纳入 Git。",
   "brand": {
     "shared": [
       "afdian-white.svg",
       "afdian.svg",
+      "arena-black.svg",
       "arena-card-white.webp",
+      "arena-white.svg",
       "beast-logo-white.svg",
       "beast-logo.svg",
       "beast-title.svg",
@@ -26,10 +28,26 @@
       "tavern-white.svg"
     ],
     "web": [
-      "arena-white.svg",
       "card-forge-white.svg",
       "magic-tea-party-white.svg",
       "party-white.svg"
     ]
+  },
+  "arenaPresets": {
+    "presets": {
+      "legacyFiles": [
+        "M00_white_lily.json",
+        "M01_centaurea_legacy.json",
+        "M02_white_rose_legacy.json",
+        "M03_little_brocade_legacy.json",
+        "M04_boxue_legacy.json",
+        "M05_kite_legacy.json",
+        "M07_margaret_legacy.json",
+        "M08_asagao_legacy.json"
+      ]
+    },
+    "scenario-presets": {
+      "legacyFiles": []
+    }
   }
 }

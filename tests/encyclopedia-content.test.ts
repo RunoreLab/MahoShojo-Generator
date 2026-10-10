@@ -24,7 +24,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { generate } from '../scripts/generate-encyclopedia-content.mjs';
+import { collectArenaPresetProblems, generate } from '../scripts/generate-encyclopedia-content.mjs';
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '..');
 const CONTENT_DIR = path.join(REPO_ROOT, 'content', 'encyclopedia');
@@ -121,6 +121,15 @@ describe('generated content from a clean output root', () => {
       }
       expect(await readFile(path.join(publicRoot, DEFAULT_QUESTIONNAIRE)))
         .toEqual(await readFile(path.join(REPO_ROOT, 'content', DEFAULT_QUESTIONNAIRE)));
+      for (const directory of ['presets', 'scenario-presets']) {
+        const source = path.join(REPO_ROOT, 'content', directory);
+        const files = (await readdir(source)).sort();
+        expect((await readdir(path.join(publicRoot, directory))).sort()).toEqual(files);
+        for (const file of files) {
+          // 原字节比较覆盖签名、legacy 与 URL 文件名，不做 JSON round-trip。
+          expect(await readFile(path.join(publicRoot, directory, file))).toEqual(await readFile(path.join(source, file)));
+        }
+      }
     }
     const web = path.join(outputRoot, 'apps/web/public');
     expect(await readFile(path.join(web, 'flowers.json')))
@@ -141,6 +150,15 @@ describe('generated content from a clean output root', () => {
       expect(await readdir(desktop)).not.toContain(asset);
       expect(await readFile(path.join(web, asset))).toEqual(await readFile(path.join(REPO_ROOT, 'content/brand', asset)));
     }
+    expect(brand.shared).toEqual(expect.arrayContaining(['arena-black.svg', 'arena-white.svg']));
+    for (const asset of ['arena-black.svg', 'arena-white.svg']) expect(brand.web).not.toContain(asset);
+    // 根目录精确区分 shared 与 Web-only，不能用“所有品牌资源”放宽 Desktop 排除门禁。
+    expect((await readdir(desktop)).sort()).toEqual([
+      ...brand.shared, 'announcements.json', 'encyclopedia', 'languages.json', 'presets', 'questionnaires', 'scenario-presets',
+    ].sort());
+    expect((await readdir(web)).sort()).toEqual([
+      ...brand.shared, ...brand.web, 'announcements.json', 'encyclopedia', 'flowers.json', 'languages.json', 'presets', 'questionnaires', 'scenario-presets',
+    ].sort());
     await writeFile(path.join(desktop, 'keep.txt'), 'unrelated');
     await writeFile(path.join(desktop, 'encyclopedia/stale.md'), 'retired');
     await writeFile(path.join(desktop, 'logo.svg'), 'drift');
@@ -148,6 +166,8 @@ describe('generated content from a clean output root', () => {
     // 目录外的无关文件（如 keep.txt）仍不受同步影响。
     await writeFile(path.join(web, 'questionnaires/presets/stale-preset.json'), 'stale preset');
     await writeFile(path.join(web, 'questionnaires/unrelated.json'), 'unrelated');
+    await writeFile(path.join(desktop, 'presets/stale.json'), '{}');
+    await writeFile(path.join(web, 'scenario-presets/stale.json'), '{}');
     await expect(generate({ outputRoot, checkOutput: true })).rejects.toThrow('不同步');
     await generate({ outputRoot });
     await generate({ outputRoot, checkOutput: true });
@@ -155,6 +175,8 @@ describe('generated content from a clean output root', () => {
     expect(await readdir(path.join(desktop, 'encyclopedia'))).not.toContain('stale.md');
     expect(await readdir(path.join(web, 'questionnaires/presets'))).not.toContain('stale-preset.json');
     expect(await readFile(path.join(web, 'questionnaires/unrelated.json'), 'utf8')).toBe('unrelated');
+    expect(await readdir(path.join(desktop, 'presets'))).not.toContain('stale.json');
+    expect(await readdir(path.join(web, 'scenario-presets'))).not.toContain('stale.json');
   });
 
   it('detects missing and stale questionnaire or flower copies and restores them', async () => {
@@ -180,5 +202,46 @@ describe('generated content from a clean output root', () => {
       expect(await readdir(path.join(outputRoot, 'apps'))).toEqual([target]);
     }
     await expect(generate({ target: 'typo' })).rejects.toThrow('未知同步目标');
+  });
+
+  it('detects missing and altered Arena preset copies in either runtime', async () => {
+    const outputRoot = await freshRoot();
+    await generate({ outputRoot });
+    for (const [app, directory, filename] of [
+      ['desktop', 'presets', 'M01_centaurea_legacy.json'],
+      ['web', 'scenario-presets', 'S01_queen_will.json'],
+    ]) {
+      const copy = path.join(outputRoot, 'apps', app, 'public', directory, filename);
+      await rm(copy);
+      await expect(generate({ outputRoot, checkOutput: true })).rejects.toThrow(`${filename} 缺失`);
+      await generate({ outputRoot });
+      await writeFile(copy, '{}');
+      await expect(generate({ outputRoot, checkOutput: true })).rejects.toThrow(`${filename} 与 content/ 不同步`);
+      await generate({ outputRoot });
+    }
+    await generate({ outputRoot, checkOutput: true });
+  });
+});
+
+describe('Arena source catalog completeness guard', () => {
+  const fixture = () => ({
+    directory: 'presets',
+    entries: [{ filename: 'current.json', type: 'magical-girl' }],
+    files: [{ name: 'current.json', payload: 'magical-girl' }, { name: 'legacy.json', payload: 'canshou' }],
+    legacyFiles: ['legacy.json'],
+    inferDataCardTemplate: (value: string) => value,
+  });
+  it('preserves explicit legacy files without promoting them into the picker', () => {
+    expect(collectArenaPresetProblems(fixture())).toEqual([]);
+  });
+  it('rejects missing, orphan, duplicated, unsafe and wrong-kind files', () => {
+    expect(collectArenaPresetProblems({ ...fixture(), files: [] }).join('\n')).toContain('引用缺失文件');
+    expect(collectArenaPresetProblems({ ...fixture(), legacyFiles: [] }).join('\n')).toContain('未登记');
+    expect(collectArenaPresetProblems({ ...fixture(), legacyFiles: ['legacy.json', 'legacy.json'] }).join('\n')).toContain('无重复');
+    expect(collectArenaPresetProblems({ ...fixture(), legacyFiles: ['../legacy.json'] }).join('\n')).toContain('JSON 文件名');
+    expect(collectArenaPresetProblems({ ...fixture(), entries: [{ filename: 'current.json', type: 'canshou' }] }).join('\n')).toContain('正文类型');
+    expect(collectArenaPresetProblems({ ...fixture(), legacyFiles: ['current.json', 'legacy.json'] }).join('\n')).toContain('不能同时');
+    expect(collectArenaPresetProblems({ ...fixture(), entries: [{ filename: 'current.json', type: 'scenario' }] }).join('\n')).toContain('目录类型非法');
+    expect(collectArenaPresetProblems({ ...fixture(), files: [{ name: 'current.json', payload: 'scenario' }] }).join('\n')).toContain('正文类型');
   });
 });

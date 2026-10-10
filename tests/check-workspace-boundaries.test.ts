@@ -105,6 +105,8 @@ describe('workspace dependency boundaries', () => {
         // 问卷迁入 content/ 后，目录级与根文件级规则必须同样拦下它们）。
         "import canshouQuestionnaire from '../public/questionnaires/presets/canshou-default.json';",
         "import languages from '@/public/languages.json';",
+        "import character from '@/public/presets/C01_egg.json';",
+        "import scenario from '@/public/scenario-presets/S01_queen_will.json';",
         "import appOwnedData from '@/public/journalists.json';",
         "import canonicalQuestionnaire from '../../../content/questionnaires/presets/magical-girl-default.json';",
         'void magicalQuestionnaire; void flowers; void canshouQuestionnaire;',
@@ -116,12 +118,14 @@ describe('workspace dependency boundaries', () => {
       (violation) => violation.rule === 'MONO-006-GENERATED-PUBLIC-IMPORT',
     );
 
-    expect(violations).toHaveLength(4);
+    expect(violations).toHaveLength(6);
     expect(violations.map((violation) => violation.module)).toEqual([
       '../public/questionnaires/presets/magical-girl-default.json',
       '@/public/flowers.json',
       '../public/questionnaires/presets/canshou-default.json',
       '@/public/languages.json',
+      '@/public/presets/C01_egg.json',
+      '@/public/scenario-presets/S01_queen_will.json',
     ]);
   });
 
@@ -145,7 +149,7 @@ describe('workspace dependency boundaries', () => {
         "import { readFileSync } from 'node:fs';",
         "const seeds = readFileSync('apps/web/public/journalists.json', 'utf8');",
         "const runtimeUrl = '/questionnaires/presets/index.json';",
-        "import specLike from '../public/presets/C01_egg.json';",
+        "import specLike from '../public/journalists.json';",
         'void seeds; void runtimeUrl; void specLike;',
       ].join('\n'),
     });

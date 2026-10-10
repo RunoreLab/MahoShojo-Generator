@@ -150,6 +150,23 @@ const collectModuleGraph = (entryFile: string): string[] => {
 };
 
 describe('server-safe shared entrypoints stay free of React hooks', () => {
+  // Web 服务端预设校验与 picker 共用纯 domain 目录；不能误归到 ui-web 的客户端列表。
+  for (const name of ['presets', 'scenario-presets']) {
+    it(`domain/${name} remains a pure, explicitly exported Web-consumed catalog`, async () => {
+      const domainRoot = path.resolve(PACKAGE_ROOT, '../domain');
+      const pkg = JSON.parse(readFileSync(path.join(domainRoot, 'package.json'), 'utf8'));
+      expect(pkg.exports[`./${name}`]).toBe(`./src/${name}.ts`);
+      const webPath = path.resolve(PACKAGE_ROOT, `../../apps/web/lib/${name}.ts`);
+      expect(readFileSync(webPath, 'utf8')).toContain(`export * from '@mahoshojo/domain/${name}'`);
+      const bundled = await build({ entryPoints: [webPath], bundle: true, platform: 'browser', format: 'esm', write: false, metafile: true });
+      const inputs = Object.keys(bundled.metafile!.inputs);
+      expect(inputs.some((file) => file.endsWith(`packages/domain/src/${name}.ts`))).toBe(true);
+      expect(inputs).toHaveLength(2);
+      expect(findHookCalls(bundled.outputFiles[0].text)).toEqual([]);
+      expect(bundled.outputFiles[0].text).not.toContain('fetch(');
+    });
+  }
+
   for (const [subpath, relativeFile] of Object.entries(SERVER_SAFE_ENTRYPOINTS)) {
     it(`${subpath} imports no React hook`, () => {
       const entryFile = path.join(SRC, relativeFile);

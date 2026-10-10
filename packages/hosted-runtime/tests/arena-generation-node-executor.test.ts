@@ -91,7 +91,7 @@ describe('Node Arena generation executor', () => {
 
   it('keeps canonical preset identity while deriving native authority on the server', async () => {
     const data = JSON.parse(await readFile(
-      new URL('../../../apps/web/public/presets/C01_egg.json', import.meta.url),
+      new URL('../../../content/presets/C01_egg.json', import.meta.url),
       'utf8',
     )) as Record<string, unknown>;
     const browserCombatants = [{
