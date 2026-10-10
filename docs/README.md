@@ -1,5 +1,7 @@
 # 文档导航
 
+2026-10-10 D5.1b b2-A：高级单次配置与活动历史编辑已明确有限范围，正在审查[实施合同](./plans/2026-10-10_003400_Arena高级单次配置与历史编辑实施合同.md)；尚未新增 `/arena` 路由。Web 格式/D4、Hosted、连续故事、插图和 Strict 继续独立后继，b1-B2 冻结与发布事务不受本合同改写。
+
 2026-10-10 D5.1b b1-B2：[Desktop Battle 薄宿主纵切](./reports/2026-10-10_001340_DesktopBattle薄宿主纵切与验收.md)已接通 `/battle` 四模式 × 两输出的 Direct、共源控件/结果、活动草稿与显式本地另存；最终源码独审及完整本地 CI 通过。`/arena` 完整版与 Hosted 仍未开放，Windows/Tauri/真实模型/视觉继续待验；不将 DOM + 合成 loopback 当作真实 IPC 验收。
 
 2026-10-09 D5.1b 前置：[Arena 纯逻辑共源](./reports/2026-10-09_215900_Arena纯逻辑共源与宿主边界.md)保持 Web 两页与 Hosted 生产回用、旧历史持久化和服务器权威；定向金样已验，整合完整 CI 待跑。此片未开放 Desktop Arena 或新的 Hosted 创建通道。
