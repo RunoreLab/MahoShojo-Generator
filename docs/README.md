@@ -1,5 +1,7 @@
 # 文档导航
 
+2026-10-10 D5.1b b1-B2：[Desktop Battle 薄宿主纵切](./reports/2026-10-10_001340_DesktopBattle薄宿主纵切与验收.md)已接通 `/battle` 四模式 × 两输出的 Direct、共源控件/结果、活动草稿与显式本地另存；最终源码独审及完整本地 CI 通过。`/arena` 完整版与 Hosted 仍未开放，Windows/Tauri/真实模型/视觉继续待验；不将 DOM + 合成 loopback 当作真实 IPC 验收。
+
 2026-10-09 D5.1b 前置：[Arena 纯逻辑共源](./reports/2026-10-09_215900_Arena纯逻辑共源与宿主边界.md)保持 Web 两页与 Hosted 生产回用、旧历史持久化和服务器权威；定向金样已验，整合完整 CI 待跑。此片未开放 Desktop Arena 或新的 Hosted 创建通道。
 2026-10-09 DESK-SET-007：[余下生成页设置偏好收口](./reports/2026-10-09_212600_余下生成页设置偏好收口.md)补齐 Creator、Scenario 与 Sublimation 既有偏好，修复 Scenario 双源反转，保留草稿/结果与未知扩展；独立审查及整合完整 CI 通过，Windows GUI 仍待验。
 
