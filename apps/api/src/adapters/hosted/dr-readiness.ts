@@ -1,5 +1,6 @@
 import { ARENA_RECONCILIATION_PROTOCOL_HEADER, ARENA_RECONCILIATION_PROTOCOL_VERSION } from '@mahoshojo/contracts/arena-reconciliation';
-import { isArenaCompanionProtocolInstalled, isArenaCompanionReconciliationProtocolInstalled } from '@mahoshojo/hosted-runtime/arena-companion';
+import { isArenaCompanionProtocolInstalled, isArenaCompanionReconciliationProtocolInstalled, isArenaStoryProtocolInstalled } from '@mahoshojo/hosted-runtime/arena-companion';
+import { ARENA_STORY_PROTOCOL_HEADER, ARENA_STORY_PROTOCOL_VERSION } from '@mahoshojo/contracts/arena-story';
 import { ARENA_COMPANION_PROTOCOL_HEADER, ARENA_COMPANION_PROTOCOL_VERSION } from '@mahoshojo/contracts/arena-companion';
 import {
   createHostedDrReadinessService,
@@ -15,6 +16,7 @@ export const createHonoDrReadinessHandler = (
   hasArenaIdentityAssertion: () => boolean = isArenaHostedIdentityAssertionInstalled,
   hasArenaCompanionProtocol: () => boolean = isArenaCompanionProtocolInstalled,
   hasArenaReconciliationProtocol: () => boolean = isArenaCompanionReconciliationProtocolInstalled,
+  hasArenaStoryProtocol: () => boolean = isArenaStoryProtocolInstalled,
 ): HostedDrReadinessService => {
   const shared = createHostedDrReadinessService({ placement: 'hono-primary', provider });
   return async (request) => {
@@ -22,6 +24,7 @@ export const createHonoDrReadinessHandler = (
     if (!response.ok || request.method !== 'GET' || !hasArenaIdentityAssertion()) return response;
     const payload = await response.json();
     const headers = new Headers(response.headers);
+    if (hasArenaStoryProtocol()) headers.set(ARENA_STORY_PROTOCOL_HEADER, ARENA_STORY_PROTOCOL_VERSION);
     if (hasArenaCompanionProtocol()) {
       headers.set(ARENA_COMPANION_PROTOCOL_HEADER, ARENA_COMPANION_PROTOCOL_VERSION);
       if (hasArenaReconciliationProtocol()) headers.set(ARENA_RECONCILIATION_PROTOCOL_HEADER, ARENA_RECONCILIATION_PROTOCOL_VERSION);

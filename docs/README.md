@@ -1,5 +1,7 @@
 # 文档导航
 
+2026-10-10 Hosted 连续故事前置：[版本化创建协议](./decisions/2026-10-10_161000_Hosted连续故事版本化创建协议.md)与 DESK-098 冻结同 Hono 路由的显式 `arena-story-v1`、可信故事身份及原 generation SSE/cursor；无 header 保旧 Web 包装/hash。服务端前置源码的 260 项定向、独立审查与完整原始 CI 均通过；未接 Native/IPC、Desktop capability、durable pending、角色同步或本地保存，角色失败语义仍待后继决定。真实服务需用户后续部署 Hono；未部署或验证真实模型/Windows/Tauri。
+
 2026-10-10 Direct 连续故事候选：[两页线性故事与原件旅程](./reports/2026-10-10_150900_DesktopDirect线性连续故事纵切候选.md)已接真实共享 Prompt/目录/阅读/动作和设备 owner；终版定向 222 项、源码独审与真实 owner→默认 binder→Native pipe/SQLite/全导出链通过。128 MiB 独立保存拒绝保全文，超长展示保护双端共用；修后同源完整本地 CI 已通过，首轮纯叶边界失败及修复保留记录；未发布，真实模型/Windows/Tauri 仍待验，七项实机交接清单已备。
 
 2026-10-10 历战编号后继：[新增编号共源与容量证据修正](./reports/2026-10-10_111500_历战新增编号共源与容量证据修正.md)统一四条真实写入路径的新 ID 分配，保留旧条目/扩展并规避重排碰号与安全整数溢出；真实近 12 MiB producer 与合成 16 MiB 传输防御分别通过 Native/TS 原件链，独审与正规完整本地 CI 通过。此前 C3 原件与历史验收保持，不再把旧字符串复制配方视为当前 producer 证据。

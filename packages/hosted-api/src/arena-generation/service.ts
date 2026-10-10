@@ -9,6 +9,7 @@ import { getPublicAiErrorMessage } from '../regular-generation';
 import { ARENA_RESOURCE_BUDGET } from './resource-budget';
 import { extractArenaMultiplayerParticipation, type ArenaMultiplayerParticipation } from '@mahoshojo/contracts/arena-room';
 import { WebPackageArtifactSchema, type WebPackageArtifact } from '@mahoshojo/contracts/web-package';
+import { ARENA_STORY_PROTOCOL_VERSION, ArenaStoryIdentitySchema, type ArenaStoryIdentity } from '@mahoshojo/contracts/arena-story';
 
 export const MAX_ARENA_CREATE_BODY_BYTES = ARENA_RESOURCE_BUDGET.hardBodyBytes;
 export const MAX_ARENA_CANCEL_BODY_BYTES = ARENA_RESOURCE_BUDGET.cancelBodyBytes;
@@ -535,6 +536,8 @@ export type ArenaGenerationCreateCommand = Readonly<{
   generationRequestId: string;
   payload: Record<string, unknown>;
   bodyBytes: number;
+  /** In-process authority only, supplied after strict story DTO validation. Never read from HTTP payload/headers. */
+  trustedStoryIdentity?: ArenaStoryIdentity;
 }>;
 
 export type ArenaGenerationServiceDependencies = {
@@ -635,6 +638,7 @@ export interface ArenaGenerationTrustedOwnedService {
 }
 
 export interface ArenaGenerationService {
+  readonly storyProtocolVersion?: typeof ARENA_STORY_PROTOCOL_VERSION;
   createSubscription(
     _request: Request,
   ): Promise<ArenaGenerationSubscription | Response>;
@@ -2757,6 +2761,7 @@ export const createArenaGenerationService = (
   };
 
   const service: ArenaGenerationApplicationService = {
+    storyProtocolVersion: ARENA_STORY_PROTOCOL_VERSION,
     async cancelOwned(input): Promise<ArenaGenerationOwnedCancelResult> {
       const result = await dependencies.store.requestCancel({
         generationId: input.generationId,
@@ -2936,10 +2941,16 @@ export const createArenaGenerationService = (
       }
       const payload = { ...command.payload };
       delete payload.generationRequestId;
+      const identity = command.trustedStoryIdentity === undefined
+        ? null : ArenaStoryIdentitySchema.safeParse(command.trustedStoryIdentity);
+      if (identity && !identity.success) {
+        return jsonResponse({ code: 'INVALID_STORY_IDENTITY', error: '故事请求身份无效' }, 400);
+      }
       parsedCreateCommands.set(request, {
         generationRequestId,
         payload,
         bodyBytes: command.bodyBytes,
+        ...(identity?.success ? { trustedStoryIdentity: Object.freeze(identity.data) } : {}),
       });
       try {
         return await service.createSubscription(request);
@@ -3012,6 +3023,12 @@ export const createArenaGenerationService = (
         semanticPayload = legacyPrepared.semanticPayload;
       }
 
+      if (parsed.trustedStoryIdentity) {
+        // Node preflight strips every __arenaServer field from untrusted semantic input.
+        // Add this one only AFTER preflight, without putting it into execution/model input.
+        // Legacy requests stay byte-for-byte on their existing hash path.
+        semanticPayload = { ...semanticPayload, __arenaServerStoryIdentityV1: parsed.trustedStoryIdentity };
+      }
       const generationId = await dependencies.deriveGenerationId({
         actorKey: actor.actorKey,
         generationRequestId: parsed.generationRequestId,

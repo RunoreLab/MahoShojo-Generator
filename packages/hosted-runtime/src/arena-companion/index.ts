@@ -66,6 +66,7 @@ export const createArenaCompanionRouteService = (input: {
   const session = createArenaSessionCompanionService({
     generationService: input.generationService,
     signatures: input.signatures,
+    storyProtocolEnabled: input.placement === 'hono-primary',
     acquireRateLimit: ({ request, ...rateInput }) => acquireArenaSessionSoftRateLimit({
       req: request,
       ...rateInput,
@@ -101,6 +102,7 @@ export const createArenaCompanionRouteService = (input: {
   };
   return Object.freeze({
     companionProtocolVersion: generation.companionProtocolVersion,
+    storyProtocolVersion: session.storyProtocolVersion,
     reconciliationProtocolVersion: generation.reconciliationProtocolVersion,
     generate: (request: Request, operation?: ArenaCompanionOperation) => {
       const resolvedOperation: ArenaCompanionOperation = operation

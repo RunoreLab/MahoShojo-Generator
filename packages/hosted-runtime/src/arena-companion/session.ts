@@ -5,12 +5,17 @@ import {
   validateBattleStoryGenerateNextInput,
 } from '@mahoshojo/domain/arena-battle-story-session';
 import { buildBattleStoryArenaRequest, projectBattleStoryArenaPayload } from '@mahoshojo/domain/arena-battle-story-request';
+import { BattleStoryCommitByteLimitError, countBattleStoryCommitJsonBytes } from '@mahoshojo/domain/arena-story-commit';
+import {
+  ARENA_STORY_PROTOCOL_HEADER, ARENA_STORY_PROTOCOL_VERSION,
+  ArenaStoryCreateRequestSchema, type ArenaStoryCreateRequest,
+} from '@mahoshojo/contracts/arena-story';
 import type {
   ArenaGenerationService,
   GenerationStreamEvent,
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import { ARENA_RESOURCE_BUDGET } from '@mahoshojo/hosted-api/arena-generation/resource-budget';
-import { encodeGenerationSseEvent } from '@mahoshojo/hosted-api/arena-generation/sse';
+import { encodeGenerationSseEvent, projectArenaGenerationEventForClient } from '@mahoshojo/hosted-api/arena-generation/sse';
 import type { SignatureService } from '../signature';
 import {
   ARENA_INTERNAL_GUIDANCE_SIGNATURE_HEADER,
@@ -107,6 +112,8 @@ export type ArenaSessionRateLimitResult =
 export type ArenaSessionCompanionOptions = {
   generationService: ArenaGenerationService;
   signatures: SignatureService;
+  /** Enabled only by Hono composition; no fallback to the legacy wire on unsupported runtimes. */
+  storyProtocolEnabled?: boolean;
   acquireRateLimit(_input: {
     request: Request;
     actionType: 'battle_story_session_continue' | 'battle_story_session_regenerate_chapter';
@@ -127,6 +134,7 @@ export type ArenaSessionCompanionOptions = {
 };
 
 export interface ArenaSessionCompanionService {
+  readonly storyProtocolVersion?: typeof ARENA_STORY_PROTOCOL_VERSION;
   generateNext(_request: Request): Promise<Response>;
 }
 
@@ -144,7 +152,7 @@ const jsonResponse = (
 });
 
 export const buildArenaSessionUpstreamRequestBody = (
-  payload: ArenaSessionRequest,
+  payload: ArenaSessionRequest | ArenaStoryCreateRequest,
   internalGuidance: string,
   customProvider: ArenaCustomProvider | null,
 ): Record<string, unknown> => ({
@@ -199,10 +207,25 @@ const createUpstreamRequest = (input: {
   });
 };
 
+const supportsArenaStoryProtocol = (options: ArenaSessionCompanionOptions): boolean => (
+  options.storyProtocolEnabled === true
+  && options.generationService.storyProtocolVersion === ARENA_STORY_PROTOCOL_VERSION
+  && typeof options.generationService.createParsedSubscription === 'function'
+);
+
 export const createArenaSessionCompanionService = (
   options: ArenaSessionCompanionOptions,
 ): ArenaSessionCompanionService => Object.freeze({
+  ...(supportsArenaStoryProtocol(options) ? { storyProtocolVersion: ARENA_STORY_PROTOCOL_VERSION } : {}),
   async generateNext(request: Request): Promise<Response> {
+    const supportsStoryProtocol = supportsArenaStoryProtocol(options);
+    const storyProtocol = request.headers.has(ARENA_STORY_PROTOCOL_HEADER);
+    if (storyProtocol && request.headers.get(ARENA_STORY_PROTOCOL_HEADER) !== ARENA_STORY_PROTOCOL_VERSION) {
+      return jsonResponse({ code: 'ARENA_STORY_PROTOCOL_UNSUPPORTED', error: '连续故事协议版本不支持' }, 400);
+    }
+    if (storyProtocol && !supportsStoryProtocol) {
+      return jsonResponse({ code: 'ARENA_STORY_PROTOCOL_UNAVAILABLE', error: '连续故事协议暂不可用' }, 503);
+    }
     const lifecycleStartedAt = Date.now();
     let lifecycleObserved = false;
     const observeLifecycleOnce = (outcome: 'success' | 'failure' | 'cancelled'): void => {
@@ -219,7 +242,9 @@ export const createArenaSessionCompanionService = (
     };
     const parsedBody = await readArenaCompanionJsonPayload(request);
     if (parsedBody instanceof Response) return parsedBody;
-    const parsed = SessionRequestSchema.safeParse(parsedBody.payload);
+    const parsed = storyProtocol
+      ? ArenaStoryCreateRequestSchema.safeParse(parsedBody.payload)
+      : SessionRequestSchema.safeParse(parsedBody.payload);
     if (!parsed.success) return jsonResponse({ error: '请求参数无效' }, 400);
     const payload = parsed.data;
     const customProviderResolution = resolveArenaCustomProvider(payload.customProvider);
@@ -235,10 +260,12 @@ export const createArenaSessionCompanionService = (
       sourceChapterId: payload.sourceChapterId,
       chapterIndex: payload.chapterIndex,
       chapterPlan: payload.chapterPlan,
-      recentChapters: payload.chapterContext.recentChapters.map((chapter) => ({
-        id: chapter.id,
-        index: chapter.index,
-      })),
+      recentChapters: 'recentWindow' in payload.chapterContext
+        ? payload.chapterContext.recentWindow.map((chapter) => ({ id: chapter.chapterId, index: chapter.chapterIndex }))
+        : payload.chapterContext.recentChapters.map((chapter) => ({
+          id: chapter.id,
+          index: chapter.index,
+        })),
     });
     if (!validation.ok) return jsonResponse({ error: validation.error }, 400);
     const chapterIndex = validation.chapterIndex;
@@ -247,6 +274,29 @@ export const createArenaSessionCompanionService = (
       internalGuidance = buildBattleStoryArenaRequest(payload).internalGuidance;
     } catch {
       return jsonResponse({ error: '连续故事章节输入无效' }, 400);
+    }
+    const customProviderPayload: ArenaCustomProvider | null = resolvedCustomProvider
+      ? {
+        providerId: resolvedCustomProvider.providerId,
+        modelId: resolvedCustomProvider.modelId,
+        apiKey: resolvedCustomProvider.apiKey,
+        ...(resolvedCustomProvider.maxOutputTokens !== undefined ? { maxOutputTokens: resolvedCustomProvider.maxOutputTokens } : {}),
+        ...(resolvedCustomProvider.generationOverrides ? { generationOverrides: resolvedCustomProvider.generationOverrides } : {}),
+      } : null;
+    // The incoming wrapper and the expanded Arena JSON are separate 12 MiB carriers.
+    // Count the actual shared producer output before any expanded clone/stringify or dispatch.
+    const storyUpstreamBody = storyProtocol
+      ? buildArenaSessionUpstreamRequestBody(payload, internalGuidance, customProviderPayload) : null;
+    let upstreamBodyBytes = parsedBody.bodyBytes;
+    if (storyUpstreamBody) {
+      try {
+        upstreamBodyBytes = countBattleStoryCommitJsonBytes(storyUpstreamBody, ARENA_RESOURCE_BUDGET.hardBodyBytes);
+      } catch (error) {
+        return jsonResponse({
+          code: error instanceof BattleStoryCommitByteLimitError ? 'ARENA_REQUEST_TOO_LARGE' : 'INVALID_REQUEST',
+          error: '展开后的连续故事请求超出预算或无效',
+        }, error instanceof BattleStoryCommitByteLimitError ? 413 : 400);
+      }
     }
     const guidanceSignature = await createArenaInternalGuidanceAuthority(options.signatures)
       .sign(internalGuidance);
@@ -276,29 +326,16 @@ export const createArenaSessionCompanionService = (
       released = true;
       rateLimit.release();
     };
-    let chapterId: string;
+    let chapterId: string | undefined;
     let subscription;
     try {
-      chapterId = await (options.deriveChapterId ?? deterministicChapterId)({
+      if (!storyProtocol) chapterId = await (options.deriveChapterId ?? deterministicChapterId)({
         sessionId: payload.sessionId,
         generationRequestId: payload.generationRequestId,
         chapterIndex,
       });
-      const customProviderPayload: ArenaCustomProvider | null = resolvedCustomProvider
-        ? {
-          providerId: resolvedCustomProvider.providerId,
-          modelId: resolvedCustomProvider.modelId,
-          apiKey: resolvedCustomProvider.apiKey,
-          ...(resolvedCustomProvider.maxOutputTokens !== undefined
-            ? { maxOutputTokens: resolvedCustomProvider.maxOutputTokens }
-            : {}),
-          ...(resolvedCustomProvider.generationOverrides
-            ? { generationOverrides: resolvedCustomProvider.generationOverrides }
-            : {}),
-        }
-        : null;
       options.recordActivity?.(request);
-      const upstreamBody = buildArenaSessionUpstreamRequestBody(
+      const upstreamBody = storyUpstreamBody ?? buildArenaSessionUpstreamRequestBody(
         payload,
         internalGuidance,
         customProviderPayload,
@@ -314,7 +351,12 @@ export const createArenaSessionCompanionService = (
         }), {
           generationRequestId: payload.generationRequestId,
           payload: parsedUpstreamPayload,
-          bodyBytes: parsedBody.bodyBytes,
+          bodyBytes: upstreamBodyBytes,
+          ...(storyProtocol ? { trustedStoryIdentity: {
+            version: 1 as const, sessionId: payload.sessionId,
+            action: payload.action as 'start' | 'continue', chapterIndex,
+            sourceChapterId: payload.sourceChapterId ?? null,
+          } } : {}),
         })
         : await options.generationService.createSubscription(createUpstreamRequest({
           request,
@@ -358,10 +400,11 @@ export const createArenaSessionCompanionService = (
       'Content-Type': 'text/event-stream; charset=utf-8',
       ...subscription.headers,
     });
+    if (storyProtocol) responseHeaders.set(ARENA_STORY_PROTOCOL_HEADER, ARENA_STORY_PROTOCOL_VERSION);
     const acceptedAt = (options.now?.() ?? new Date()).getTime();
     const body = new ReadableStream<Uint8Array>({
       async start(controller) {
-        controller.enqueue(encodeCompanionEvent('session_meta', {
+        if (!storyProtocol) controller.enqueue(encodeCompanionEvent('session_meta', {
           sessionId: payload.sessionId,
           chapterId,
           chapterIndex,
@@ -381,38 +424,42 @@ export const createArenaSessionCompanionService = (
             if (next.done) break;
             const event: GenerationStreamEvent = next.value;
             const data = recordOf(event.data) ?? {};
-            if (event.type === 'markdown' && typeof data.chunk === 'string') {
+            if (!storyProtocol && event.type === 'markdown' && typeof data.chunk === 'string') {
               markdown += data.chunk;
-            } else if (event.type === 'snapshot') {
+            } else if (!storyProtocol && event.type === 'snapshot') {
               if (typeof data.markdown === 'string') markdown = data.markdown;
-            } else if (event.type === 'meta') {
+            } else if (!storyProtocol && event.type === 'meta') {
               latestMeta = recordOf(data.meta) ?? latestMeta;
             } else if (event.type === 'done' && data.ok === true) {
               terminalOutcome = 'success';
-              const digest = buildBattleStoryDeterministicDigest({
-                markdown,
-                reportJson: latestMeta ? { report: latestMeta.report } : undefined,
-                impacts: latestMeta?.impacts,
-                chapterIndex,
-              });
-              controller.enqueue(encodeCompanionEvent('chapter_digest', {
-                chapterId,
-                sessionId: payload.sessionId,
-                chapterIndex,
-                chapterTitle: digest.chapterTitle,
-                ...(digest.winner ? { winner: digest.winner } : {}),
-                ...(digest.officialConclusion
-                  ? { officialConclusion: digest.officialConclusion }
-                  : {}),
-                ...(digest.bodyExcerpt ? { bodyExcerpt: digest.bodyExcerpt } : {}),
-                ...(digest.impactDigest ? { impactDigest: digest.impactDigest } : {}),
-              }));
+              if (!storyProtocol) {
+                const digest = buildBattleStoryDeterministicDigest({
+                  markdown,
+                  reportJson: latestMeta ? { report: latestMeta.report } : undefined,
+                  impacts: latestMeta?.impacts,
+                  chapterIndex,
+                });
+                controller.enqueue(encodeCompanionEvent('chapter_digest', {
+                  chapterId,
+                  sessionId: payload.sessionId,
+                  chapterIndex,
+                  chapterTitle: digest.chapterTitle,
+                  ...(digest.winner ? { winner: digest.winner } : {}),
+                  ...(digest.officialConclusion
+                    ? { officialConclusion: digest.officialConclusion }
+                    : {}),
+                  ...(digest.bodyExcerpt ? { bodyExcerpt: digest.bodyExcerpt } : {}),
+                  ...(digest.impactDigest ? { impactDigest: digest.impactDigest } : {}),
+                }));
+              }
             } else if (event.type === 'done') {
               terminalOutcome = data.status === 'cancelled' ? 'cancelled' : 'failure';
             } else if (event.type === 'error') {
               terminalOutcome = 'failure';
             }
-            controller.enqueue(encodeGenerationSseEvent(event));
+            controller.enqueue(storyProtocol
+              ? encodeGenerationSseEvent(projectArenaGenerationEventForClient(event))
+              : encodeGenerationSseEvent(event));
           }
           observeLifecycleOnce(terminalOutcome ?? 'failure');
           releaseOnce();

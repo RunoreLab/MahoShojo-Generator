@@ -1,4 +1,5 @@
 import { ARENA_RECONCILIATION_PROTOCOL_VERSION } from '@mahoshojo/contracts/arena-reconciliation';
+import { ARENA_STORY_PROTOCOL_VERSION } from '@mahoshojo/contracts/arena-story';
 import { ARENA_COMPANION_PROTOCOL_HEADER, ARENA_COMPANION_PROTOCOL_VERSION } from '@mahoshojo/contracts/arena-companion';
 import { createArenaCompanionResponseWriter } from './response';
 import type {
@@ -20,6 +21,8 @@ export const configureArenaCompanionRouteService = (
 };
 
 export const isArenaCompanionProtocolInstalled = (): boolean => configuredService?.companionProtocolVersion === ARENA_COMPANION_PROTOCOL_VERSION;
+
+export const isArenaStoryProtocolInstalled = (): boolean => configuredService?.storyProtocolVersion === ARENA_STORY_PROTOCOL_VERSION;
 
 export const isArenaCompanionReconciliationProtocolInstalled = (): boolean => isArenaCompanionProtocolInstalled()
   && configuredService?.reconciliationProtocolVersion === ARENA_RECONCILIATION_PROTOCOL_VERSION;

@@ -120,7 +120,12 @@
       "import": "./src/arena-reconciliation.ts",
       "default": "./src/arena-reconciliation.ts"
     },
-    "./desktop-arena-story": "./src/desktop-arena-story.ts"
+    "./desktop-arena-story": "./src/desktop-arena-story.ts",
+    "./arena-story": {
+      "types": "./src/arena-story.ts",
+      "import": "./src/arena-story.ts",
+      "default": "./src/arena-story.ts"
+    }
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",
