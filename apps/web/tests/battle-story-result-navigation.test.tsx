@@ -44,6 +44,12 @@ vi.mock('@/lib/ai-session/battle-story/storage', async (importOriginal) => {
   const original = await importOriginal<typeof storage>();
   return {
     ...original,
+    commitCompletedBattleStoryChapter: vi.fn(async (commit: storage.WebBattleStoryCompletedCommit) => {
+      fixture.sessions.set(commit.session.id, commit.session);
+      fixture.chapters.set(commit.chapter.id, commit.chapter);
+      for (const item of commit.checkpoints) fixture.checkpoints.set(item.id, item);
+      return { version: 1, operationId: commit.operationId, sessionId: commit.session.id, chapterId: commit.chapter.id, chapterIndex: commit.chapter.index, chapterCount: commit.session.chapterCount, checkpointIds: commit.checkpoints.map((item) => item.id), contentDigest: 'navigation-fixture' };
+    }),
     listBattleStorySessions: vi.fn(async () => [...fixture.sessions.values()]),
     getBattleStorySession: vi.fn(async (id: string) => fixture.sessions.get(id) ?? null),
     listBattleStoryChaptersBySession: vi.fn(async (id: string) => [...fixture.chapters.values()].filter((item) => item.sessionId === id)),

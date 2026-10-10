@@ -17,6 +17,8 @@ const allowedTransactionFiles = new Set([
   // 仅允许浏览器端 IndexedDB 存储模块使用 transaction。
   'lib/magic-tea-party/storage.ts',
   'lib/ai-session/battle-story/storage.ts',
+  // 连续故事完成章的三 store 原子提交，同样只使用浏览器 IndexedDB。
+  'lib/ai-session/battle-story/commit-storage.ts',
   'lib/public-card-cache/storage.ts',
   'lib/web-package/cache.ts',
   // 浏览器端 IndexedDB 本地库存储（ADR-local-library-data-ownership §4 / LIB-002）。

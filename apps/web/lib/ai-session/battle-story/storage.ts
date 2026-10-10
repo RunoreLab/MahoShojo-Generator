@@ -1,3 +1,4 @@
+import { digestBattleStoryCommitValue } from '@mahoshojo/domain/arena-story-commit';
 import { randomUUID } from '@/lib/crypto';
 import { openAiSessionDb, requestToPromise, transactionToPromise } from '@/lib/ai-session/storage';
 import { AI_SESSION_STORE_NAMES } from '@/lib/ai-session/types';
@@ -11,6 +12,9 @@ import type {
   BattleStorySessionListOptions,
   BattleStorySessionRecord,
 } from '@/lib/ai-session/battle-story/types';
+
+export { commitCompletedBattleStoryChapter, getBattleStoryOperationReceipt, BattleStoryCommitConflictError, BattleStoryCommitNotSavedError } from './commit-storage';
+export type { WebBattleStoryCompletedCommit } from './commit-storage';
 
 const DEFAULT_LIST_LIMIT = 50;
 
@@ -166,7 +170,8 @@ export const getBattleStorySession = async (sessionId: string): Promise<BattleSt
 
 export const updateBattleStorySession = async (
   sessionId: string,
-  updater: (session: BattleStorySessionRecord) => BattleStorySessionRecord
+  updater: (session: BattleStorySessionRecord) => BattleStorySessionRecord,
+  expectedSession?: BattleStorySessionRecord
 ): Promise<BattleStorySessionRecord> => {
   const db = await openAiSessionDb();
 
@@ -175,8 +180,10 @@ export const updateBattleStorySession = async (
     const store = transaction.objectStore(AI_SESSION_STORE_NAMES.battleStorySessions);
     const request = store.get(sessionId);
 
-    transaction.oncomplete = () => undefined;
-    transaction.onabort = () => reject(transaction.error ?? new Error('更新 battle story session 失败'));
+    let next: BattleStorySessionRecord | undefined;
+    let failure: unknown;
+    transaction.oncomplete = () => next ? resolve(next) : reject(new Error('更新会话没有结果'));
+    transaction.onabort = () => reject(failure ?? transaction.error ?? new Error('更新 battle story session 失败'));
     transaction.onerror = () => reject(transaction.error ?? new Error('更新 battle story session 失败'));
 
     request.onsuccess = () => {
@@ -186,9 +193,16 @@ export const updateBattleStorySession = async (
         return;
       }
 
-      const next = updater(current);
-      store.put(next);
-      resolve(next);
+      try {
+        if (expectedSession && digestBattleStoryCommitValue(current) !== digestBattleStoryCommitValue(expectedSession)) {
+          throw new Error('会话已变化，忽略过时的摘要更新');
+        }
+        next = updater(current);
+        store.put(next);
+      } catch (error) {
+        failure = error;
+        transaction.abort();
+      }
     };
 
     request.onerror = () => reject(request.error ?? new Error('读取 battle story session 失败'));

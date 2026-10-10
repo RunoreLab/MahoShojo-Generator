@@ -161,6 +161,16 @@ export function BattleStorySessionPanel(props: {
   const battleReportCardWidthPx = useBattleStore((state) => resolveBattleReportCardManualWidthPx(state.settings));
   const {
     isReady,
+    pendingCompletedChapter,
+    isSavingChapter,
+    hasUnreadSavedChapter,
+    handleReloadSavedChapter,
+    pendingSaveAsNewSession,
+    pendingSaveUnknown,
+    handleSavePendingAsNewSession,
+    handleRetrySaveChapter,
+    handleExportPendingChapter,
+    handleDiscardPendingChapter,
     storageError,
     actionError,
     notice,
@@ -385,7 +395,7 @@ export function BattleStorySessionPanel(props: {
             <button
               type="button"
               onClick={() => void handleStartSession()}
-              disabled={isGenerating || isDeletingSession || isCooldown || !canStartFromArena}
+              disabled={Boolean(pendingCompletedChapter) || isSavingChapter || isGenerating || isDeletingSession || isCooldown || !canStartFromArena}
               className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
               title={
                 isCooldown
@@ -400,7 +410,7 @@ export function BattleStorySessionPanel(props: {
             <button
               type="button"
               onClick={() => void handleContinueSession()}
-              disabled={isGenerating || isDeletingSession || isCooldown || !activeSession || !latestActiveChapter || hasReachedActiveChapterPlanLimit}
+              disabled={Boolean(pendingCompletedChapter) || isSavingChapter || isGenerating || isDeletingSession || isCooldown || !activeSession || !latestActiveChapter || hasReachedActiveChapterPlanLimit}
               className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
               title={
                 isCooldown
@@ -415,7 +425,7 @@ export function BattleStorySessionPanel(props: {
             <button
               type="button"
               onClick={() => void handleBranchSession()}
-              disabled={isGenerating || isDeletingSession || isCooldown || !activeSession || !latestActiveChapter || hasReachedActiveChapterPlanLimit}
+              disabled={Boolean(pendingCompletedChapter) || isSavingChapter || isGenerating || isDeletingSession || isCooldown || !activeSession || !latestActiveChapter || hasReachedActiveChapterPlanLimit}
               className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
               title={
                 isCooldown
@@ -430,7 +440,7 @@ export function BattleStorySessionPanel(props: {
             <button
               type="button"
               onClick={() => void handleRewriteLastChapter()}
-              disabled={isGenerating || isDeletingSession || isCooldown || !activeSession || !latestActiveChapter}
+              disabled={Boolean(pendingCompletedChapter) || isSavingChapter || isGenerating || isDeletingSession || isCooldown || !activeSession || !latestActiveChapter}
               className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
               title={
                 isCooldown
@@ -453,7 +463,7 @@ export function BattleStorySessionPanel(props: {
             <button
               type="button"
               onClick={() => void handleDeleteSession(activeSession?.id)}
-              disabled={isGenerating || isDeletingSession || !activeSession}
+              disabled={Boolean(pendingCompletedChapter) || isSavingChapter || isGenerating || isDeletingSession || !activeSession}
               className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
               title={activeSession ? '删除当前选中的连续战报会话及其全部章节' : '请先选择一个会话'}
             >
@@ -490,6 +500,35 @@ export function BattleStorySessionPanel(props: {
 
           {storageError ? (
             <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{storageError}</div>
+          ) : null}
+
+          {pendingCompletedChapter ? (
+            <section className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status">
+              <div className="font-semibold">{isSavingChapter ? '正在保存已完成的章节...' : pendingSaveUnknown ? '生成完成，保存状态待确认' : '生成完成，本章尚未保存'}</div>
+              <div className="mt-1">《{pendingCompletedChapter.title}》暂存在当前页面，离开或刷新会丢失。可以重试保存，或先导出正文。</div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {pendingSaveAsNewSession ? (
+                  <button type="button" disabled={isSavingChapter} onClick={() => void handleSavePendingAsNewSession()}
+                    className="rounded-lg border border-amber-300 bg-white px-3 py-2 font-semibold disabled:opacity-60">另存为新会话</button>
+                ) : (
+                  <button type="button" disabled={isSavingChapter} onClick={() => void handleRetrySaveChapter()}
+                    className="rounded-lg border border-amber-300 bg-white px-3 py-2 font-semibold disabled:opacity-60">{pendingSaveUnknown ? '查询保存结果' : '重试保存'}</button>
+                )}
+                <button type="button" onClick={handleExportPendingChapter}
+                  className="rounded-lg border border-amber-300 bg-white px-3 py-2 font-semibold">导出本章</button>
+                <button type="button" disabled={isSavingChapter} onClick={handleDiscardPendingChapter}
+                  className="rounded-lg border border-amber-300 bg-white px-3 py-2 disabled:opacity-60">丢弃本章</button>
+              </div>
+              <details className="mt-3">
+                <summary className="cursor-pointer">查看未保存的章节</summary>
+                <div className="mt-3"><ChapterPreviewSection chapter={pendingCompletedChapter} snapshot={pendingCompletedChapter.cardSnapshot ?? null} onSaveImage={onSaveImage} cardWidthPx={battleReportCardWidthPx} /></div>
+              </details>
+            </section>
+          ) : null}
+
+          {hasUnreadSavedChapter ? (
+            <button type="button" onClick={() => void handleReloadSavedChapter()}
+              className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900">重新读取已保存章节</button>
           ) : null}
 
           {actionError ? (
@@ -734,7 +773,7 @@ export function BattleStorySessionPanel(props: {
                       <button
                         type="button"
                         onClick={() => void handleBranchSelectedChapter()}
-                        disabled={isGenerating || isDeletingSession || isCooldown || !selectedChapter || Boolean(selectedBranchDisabledReason)}
+                        disabled={Boolean(pendingCompletedChapter) || isSavingChapter || isGenerating || isDeletingSession || isCooldown || !selectedChapter || Boolean(selectedBranchDisabledReason)}
                         className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                         title={
                           isCooldown
@@ -749,7 +788,7 @@ export function BattleStorySessionPanel(props: {
                       <button
                         type="button"
                         onClick={() => void handleRewriteSelectedChapter()}
-                        disabled={isGenerating || isDeletingSession || isCooldown || !selectedChapter || Boolean(selectedRewriteDisabledReason)}
+                        disabled={Boolean(pendingCompletedChapter) || isSavingChapter || isGenerating || isDeletingSession || isCooldown || !selectedChapter || Boolean(selectedRewriteDisabledReason)}
                         className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
                         title={
                           isCooldown
@@ -764,7 +803,7 @@ export function BattleStorySessionPanel(props: {
                       <button
                         type="button"
                         onClick={() => void handleDeleteSelectedChapter()}
-                        disabled={isGenerating || isDeletingSession || !selectedChapter || Boolean(selectedDeleteDisabledReason)}
+                        disabled={Boolean(pendingCompletedChapter) || isSavingChapter || isGenerating || isDeletingSession || !selectedChapter || Boolean(selectedDeleteDisabledReason)}
                         className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-60"
                         title={selectedDeleteDisabledReason ?? '删除当前所选章节；若不是最后一章，会同时删除其后续章节'}
                       >

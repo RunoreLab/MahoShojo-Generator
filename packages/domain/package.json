@@ -252,7 +252,8 @@
     "./arena-adjudication": "./src/arena-adjudication.ts",
     "./arena-questionnaire-request": "./src/arena-questionnaire-request.ts",
     "./arena-adjudication-events": "./src/arena-adjudication-events.ts",
-    "./arena-reconciliation": "./src/arena-reconciliation.ts"
+    "./arena-reconciliation": "./src/arena-reconciliation.ts",
+    "./arena-story-commit": "./src/arena-story-commit.ts"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",
@@ -262,7 +263,8 @@
   "dependencies": {
     "@mahoshojo/contracts": "workspace:*",
     "zod": "^4.1.13",
-    "fflate": "^0.8.2"
+    "fflate": "^0.8.2",
+    "@noble/hashes": "2.3.0"
   },
   "devDependencies": {
     "@types/node": "^20",

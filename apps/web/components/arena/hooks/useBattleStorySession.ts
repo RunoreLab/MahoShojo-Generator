@@ -1,5 +1,7 @@
 'use client';
 
+import { advanceBattleStorySaveEvidence, type BattleStorySaveEvidence, buildCompletedBattleStoryCommit, captureBattleStoryCommitExpected, digestBattleStoryCommitValue, createBattleStoryCommitReceipt, freezeBattleStoryCommit } from '@mahoshojo/domain/arena-story-commit';
+
 import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
 import { createBattleStorySessionReader, type BattleStorySessionReader } from '@mahoshojo/ui-web/arena-story-session-read';
 
@@ -7,6 +9,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { buildCustomProviderRequestPayload } from '@/lib/ai/custom-provider';
 import {
+  commitCompletedBattleStoryChapter,
+  getBattleStoryOperationReceipt,
+  BattleStoryCommitConflictError,
+  BattleStoryCommitNotSavedError,
+  type WebBattleStoryCompletedCommit,
   createBattleStoryCheckpointRecord,
   createBattleStoryChapterRecord,
   createBattleStorySessionRecord,
@@ -91,6 +98,13 @@ import {
 const ACTIVE_SESSION_STORAGE_KEY = 'arena.battleStory.activeSessionId';
 const PENDING_CHAPTER_PLAN_STORAGE_KEY = 'arena.battleStory.pendingChapterPlan.v1';
 const SUMMARY_REFRESH_MIN_PENDING_CHAPTERS = 3;
+type PendingCompletedChapter = {
+  commit: WebBattleStoryCompletedCommit;
+  chapters: BattleStoryChapterRecord[];
+  warning?: string;
+  saveEvidence?: BattleStorySaveEvidence;
+  requiresNewSession?: boolean;
+};
 
 const normalizeErrorMessage = (error: unknown, fallback: string): string => {
   if (error instanceof Error && error.message.trim()) return error.message.trim();
@@ -343,6 +357,12 @@ export function useBattleStorySession() {
   const [chapters, setChapters] = useState<BattleStoryChapterRecord[]>([]);
   const [checkpoints, setCheckpoints] = useState<BattleStoryCheckpointRecord[]>([]);
   const [pendingStartSession, setPendingStartSession] = useState<BattleStorySessionRecord | null>(null);
+  const [pendingCompletedChapter, setPendingCompletedChapter] = useState<PendingCompletedChapter | null>(null);
+  const [isSavingChapter, setIsSavingChapter] = useState(false);
+  const [unreadSavedSessionId, setUnreadSavedSessionId] = useState<string | null>(null);
+  const pendingCompletedChapterRef = useRef<PendingCompletedChapter | null>(null);
+  const chapterOperationBusyRef = useRef(false);
+  const legacyDeletionCountRef = useRef(0);
   const [selectedChapterId, setSelectedChapterId] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatingAction, setGeneratingAction] = useState<BattleStorySessionAction | null>(null);
@@ -705,12 +725,15 @@ export function useBattleStorySession() {
             mode: payload.fallback ? 'deterministic-fallback' : 'ai',
           },
           updatedAt: Date.now(),
-        }));
+        }), sessionRecord);
 
-        await refreshSessionList();
-        if (activeSessionRef.current?.id === updatedSession.id) {
+        // Patch only the still-matching displayed session, before any further async refresh.
+        // A summary refresh must not reset the user's selected chapter to the current head.
+        if (activeSessionRef.current?.id === updatedSession.id
+          && digestBattleStoryCommitValue(activeSessionRef.current) === digestBattleStoryCommitValue(sessionRecord)) {
           setActiveSession(updatedSession);
         }
+        await refreshSessionList();
       } catch {
         // 摘要刷新失败不阻断主流程
       } finally {
@@ -1172,17 +1195,140 @@ export function useBattleStorySession() {
     ]
   );
 
+  const persistCompletedChapter = useCallback(async (pending: PendingCompletedChapter, retry = false) => {
+    setIsSavingChapter(true);
+    setActionError(null);
+    let committed = false;
+    let attemptedCommit = false;
+    try {
+      const expectedReceipt = createBattleStoryCommitReceipt(pending.commit);
+      const previousReceipt = retry ? await getBattleStoryOperationReceipt(pending.commit.operationId) : null;
+      if (previousReceipt && previousReceipt.contentDigest !== expectedReceipt.contentDigest) {
+        throw new BattleStoryCommitConflictError('保存操作与已有章节不一致，请先导出本章。');
+      }
+      if (!previousReceipt && retry && pending.commit.action === 'start' && pending.saveEvidence !== 'not-written') {
+        pending.requiresNewSession = true;
+        setPendingCompletedChapter({ ...pending });
+        setActionError('无法确认这章是否曾保存。请导出正文，或另存为新会话。');
+        return;
+      }
+      if (!previousReceipt) {
+        attemptedCommit = true;
+        await commitCompletedBattleStoryChapter(pending.commit);
+      }
+      committed = true;
+      pendingCompletedChapterRef.current = null;
+      setPendingCompletedChapter(null);
+      setPendingStartSession(null);
+      await refreshSessionList();
+      await loadSession(pending.commit.session.id);
+      setUnreadSavedSessionId(null);
+      if (pending.warning) setNotice(pending.warning);
+      void refreshSummaryIfNeeded(pending.commit.session, pending.chapters);
+    } catch (error) {
+      if (committed) {
+        setUnreadSavedSessionId(pending.commit.session.id);
+        setActionError('本章已保存，但暂时无法读取。请点击重新读取，无需重新生成。');
+        return;
+      }
+      // Only this writer's explicit preflight/abort error proves that no records committed.
+      // A generic lost reply cannot authorize resurrecting a subsequently deleted first chapter.
+      if (!retry || attemptedCommit) {
+        pending.saveEvidence = advanceBattleStorySaveEvidence(pending.saveEvidence,
+          error instanceof BattleStoryCommitNotSavedError ? 'not-written' : 'unknown');
+      }
+      if (pendingCompletedChapterRef.current === pending) setPendingCompletedChapter({ ...pending });
+      setActionError(normalizeErrorMessage(error, '本章保存失败，请重试保存或导出本章。'));
+    } finally {
+      setIsSavingChapter(false);
+    }
+  }, [loadSession, refreshSessionList, refreshSummaryIfNeeded]);
+
+  const handleReloadSavedChapter = useCallback(async () => {
+    if (!unreadSavedSessionId) return;
+    try {
+      await refreshSessionList();
+      await loadSession(unreadSavedSessionId);
+      setUnreadSavedSessionId(null);
+      setActionError(null);
+    } catch { setActionError('本章已保存，但暂时无法读取，请稍后再试。'); }
+  }, [loadSession, refreshSessionList, unreadSavedSessionId]);
+
+  const retainCompletedChapter = useCallback((pending: PendingCompletedChapter) => {
+    // Own the complete result before the first storage attempt; retries never enter runGeneration.
+    pendingCompletedChapterRef.current = pending;
+    setPendingCompletedChapter(pending);
+    freezeBattleStoryCommit(pending.commit);
+  }, []);
+
+  const handleRetrySaveChapter = useCallback(async () => {
+    const pending = pendingCompletedChapterRef.current;
+    if (!pending || chapterOperationBusyRef.current) return;
+    chapterOperationBusyRef.current = true;
+    try { await persistCompletedChapter(pending, true); }
+    finally { chapterOperationBusyRef.current = false; }
+  }, [persistCompletedChapter]);
+
+  const handleSavePendingAsNewSession = useCallback(async () => {
+    const pending = pendingCompletedChapterRef.current;
+    if (!pending || pending.commit.action !== 'start' || !pending.requiresNewSession || chapterOperationBusyRef.current) return;
+    if (!window.confirm('将保留的首章另存为新会话？不会重新生成内容。')) return;
+    chapterOperationBusyRef.current = true;
+    try {
+      const sessionId = secureRandomUUID();
+      const chapterId = secureRandomUUID();
+      const commit: WebBattleStoryCompletedCommit = {
+        ...pending.commit, operationId: chapterId,
+        session: { ...pending.commit.session, id: sessionId, lastChapterId: chapterId },
+        chapter: { ...pending.commit.chapter, id: chapterId, sessionId },
+        checkpoints: pending.commit.checkpoints.map((checkpoint) => ({
+          ...checkpoint, id: secureRandomUUID(), sessionId,
+          ...(checkpoint.chapterId ? { chapterId } : {}),
+        })),
+      };
+      const next: PendingCompletedChapter = { commit, chapters: [commit.chapter], warning: pending.warning };
+      retainCompletedChapter(next);
+      await persistCompletedChapter(next);
+    } catch (error) { setActionError(normalizeErrorMessage(error, '另存为新会话失败，原章节仍保留。')); } finally { chapterOperationBusyRef.current = false; }
+  }, [persistCompletedChapter, retainCompletedChapter]);
+
+  const handleExportPendingChapter = useCallback(() => {
+    const pending = pendingCompletedChapterRef.current;
+    if (!pending) return;
+    downloadBlob(new Blob([pending.commit.chapter.markdown], { type: 'text/markdown;charset=utf-8' }),
+      `${pending.commit.chapter.title || '未保存章节'}.md`);
+  }, []);
+
+  const handleDiscardPendingChapter = useCallback(() => {
+    if (chapterOperationBusyRef.current || !pendingCompletedChapterRef.current) return;
+    if (!window.confirm('丢弃尚未保存的章节？请先导出需要保留的正文。')) return;
+    pendingCompletedChapterRef.current = null;
+    setPendingCompletedChapter(null);
+    setPendingStartSession(null);
+    setActionError(null);
+  }, []);
+
+  useEffect(() => {
+    if (!pendingCompletedChapter) return;
+    const beforeUnload = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', beforeUnload);
+    return () => window.removeEventListener('beforeunload', beforeUnload);
+  }, [pendingCompletedChapter]);
+
   const handleStartSession = useCallback(async () => {
+    if (chapterOperationBusyRef.current || legacyDeletionCountRef.current > 0 || pendingCompletedChapterRef.current) return;
     if (!startSessionCheck.canStart) {
       setActionError(startSessionCheck.reason);
       return;
     }
 
+    chapterOperationBusyRef.current = true;
     try {
       await handleResolveRandomPlaceholders();
       const state = useBattleStore.getState();
       const readableCombatants = toReadableCombatants(state.combatants);
-      const snapshot = buildBattleStorySessionSeedSnapshot({
+      // Detach the initial, unamplified input before generation; freezing pending results must not freeze arena drafts.
+      const snapshot = structuredClone(buildBattleStorySessionSeedSnapshot({
         combatants: readableCombatants,
         battleMode: state.battleMode,
         scenario: state.scenario,
@@ -1197,7 +1343,7 @@ export function useBattleStorySession() {
         providerMode: customProviderPayload?.providerId === 'system' || !customProviderPayload ? 'system' : 'custom',
         providerId: customProviderPayload?.providerId ?? 'system',
         modelId: customProviderPayload?.modelId,
-      });
+      }));
 
       const sessionDraft = createBattleStorySessionRecord({
         title: snapshot.titleHint,
@@ -1226,66 +1372,27 @@ export function useBattleStorySession() {
         return;
       }
 
-      const chapter = createBattleStoryChapterRecord({
-        sessionId: sessionDraft.id,
-        index: generated.chapterIndex,
-        action: 'start',
-        title: generated.digest.chapterTitle,
-        markdown: generated.markdown,
-        reportJson: generated.reportJson,
-        cardSnapshot: generated.cardSnapshot ?? undefined,
-        deterministicDigest: generated.digest,
-        generationId: generated.generationId ?? undefined,
+      const commit = buildCompletedBattleStoryCommit({
+        action: 'start', session: sessionDraft, expected: null,
+        operationId: secureRandomUUID(), checkpointId: secureRandomUUID(), initialCheckpointId: secureRandomUUID(),
+        now: Date.now(), source: snapshot.source, inputCombatants: snapshot.workingCombatants, generated,
       });
-      const initialCheckpoint = createBattleStoryCheckpointRecord({
-        sessionId: sessionDraft.id,
-        boundaryIndex: 0,
-        combatants: snapshot.workingCombatants,
-      });
-      const postChapterCheckpoint = createBattleStoryCheckpointRecord({
-        sessionId: sessionDraft.id,
-        boundaryIndex: generated.chapterIndex,
-        chapterId: chapter.id,
-        combatants: generated.nextWorkingCombatants,
-      });
-
-      const sessionToSave: BattleStorySessionRecord = {
-        ...sessionDraft,
-        title: generated.digest.chapterTitle || sessionDraft.title,
-        source: snapshot.source,
-        workingCombatants: generated.nextWorkingCombatants,
-        lastChapterInputCombatants: snapshot.workingCombatants,
-        lastChapterId: chapter.id,
-        chapterCount: 1,
-        updatedAt: Date.now(),
-      };
-
-      await putBattleStorySession(sessionToSave);
-      await putBattleStoryChapter(chapter);
-      await putBattleStoryCheckpoints([initialCheckpoint, postChapterCheckpoint]);
-      await refreshSessionList();
-      await loadSession(sessionToSave.id);
-      setPendingStartSession(null);
-      if (generated.warning) {
-        setNotice(generated.warning);
-      }
-      void refreshSummaryIfNeeded(sessionToSave, [chapter]);
+      const pending = { commit, chapters: [commit.chapter], warning: generated.warning };
+      retainCompletedChapter(pending);
+      await persistCompletedChapter(pending);
     } catch (error) {
       setActionError(normalizeErrorMessage(error, '创建连续战报会话失败。'));
-      setPendingStartSession(null);
+      if (!pendingCompletedChapterRef.current) setPendingStartSession(null);
+    } finally {
+      chapterOperationBusyRef.current = false;
     }
   }, [
-    customProviderPayload,
-    draftChapterPlan,
-    handleResolveRandomPlaceholders,
-    loadSession,
-    refreshSessionList,
-    refreshSummaryIfNeeded,
-    runGeneration,
-    startSessionCheck,
+    customProviderPayload, draftChapterPlan, handleResolveRandomPlaceholders,
+    persistCompletedChapter, retainCompletedChapter, runGeneration, startSessionCheck,
   ]);
 
   const handleContinueSession = useCallback(async () => {
+    if (chapterOperationBusyRef.current || legacyDeletionCountRef.current > 0 || pendingCompletedChapterRef.current) return;
     const sessionRecord = activeSessionRef.current;
     const activeChapters = getActiveBattleStoryChapters(chaptersRef.current);
     const latestChapter = getLatestBattleStoryChapter(activeChapters);
@@ -1301,7 +1408,12 @@ export function useBattleStorySession() {
       return;
     }
 
+    chapterOperationBusyRef.current = true;
     try {
+      const expected = captureBattleStoryCommitExpected({
+        session: sessionRecord, chapters: activeChapters,
+        checkpoint: getBattleStoryCheckpointForBoundary(checkpointsRef.current, latestChapter!.index),
+      });
       const nextSource = buildProviderSource(sessionRecord.source, customProviderPayload);
       const generated = await runGeneration({
         sessionId: sessionRecord.id,
@@ -1328,62 +1440,24 @@ export function useBattleStorySession() {
           ? (sessionRecord.workingCombatants as Array<Record<string, unknown>>)
           : (sessionRecord.seed.combatants as Array<Record<string, unknown>>);
 
-      const chapter = createBattleStoryChapterRecord({
-        sessionId: sessionRecord.id,
-        index: generated.chapterIndex,
-        action: 'continue',
-        title: generated.digest.chapterTitle,
-        markdown: generated.markdown,
-        reportJson: generated.reportJson,
-        cardSnapshot: generated.cardSnapshot ?? undefined,
-        deterministicDigest: generated.digest,
-        sourceChapterId: sessionRecord.lastChapterId ?? undefined,
-        generationId: generated.generationId ?? undefined,
+      const commit = buildCompletedBattleStoryCommit({
+        action: 'continue', session: sessionRecord, expected,
+        operationId: secureRandomUUID(), checkpointId: secureRandomUUID(), now: Date.now(),
+        source: nextSource, inputCombatants: previousWorkingCombatants, generated,
       });
-
-      await putBattleStoryChapter(chapter);
-      await putBattleStoryCheckpoint(
-        createBattleStoryCheckpointRecord({
-          sessionId: sessionRecord.id,
-          boundaryIndex: generated.chapterIndex,
-          chapterId: chapter.id,
-          combatants: generated.nextWorkingCombatants,
-        })
-      );
-
-      const sessionToSave = await updateBattleStorySession(sessionRecord.id, (current) => ({
-        ...current,
-        source: nextSource,
-        title:
-          current.title === '未命名连续战报' && generated.digest.chapterTitle
-            ? generated.digest.chapterTitle
-            : current.title,
-        workingCombatants: generated.nextWorkingCombatants,
-        lastChapterInputCombatants: previousWorkingCombatants,
-        lastChapterId: chapter.id,
-        chapterCount: activeChapters.length + 1,
-        updatedAt: Date.now(),
-      }));
-      const nextChapters = sortBattleStoryChapters([...activeChapters, chapter]);
-
-      await refreshSessionList();
-      await loadSession(sessionRecord.id);
-      if (generated.warning) {
-        setNotice(generated.warning);
-      }
-      void refreshSummaryIfNeeded(sessionToSave, nextChapters);
+      const pending = { commit, chapters: sortBattleStoryChapters([...activeChapters, commit.chapter]), warning: generated.warning };
+      retainCompletedChapter(pending);
+      await persistCompletedChapter(pending);
     } catch (error) {
       setActionError(normalizeErrorMessage(error, '续写连续战报失败。'));
+    } finally {
+      chapterOperationBusyRef.current = false;
     }
-  }, [
-    customProviderPayload,
-    loadSession,
-    refreshSessionList,
-    refreshSummaryIfNeeded,
-    runGeneration,
+  }, [customProviderPayload, persistCompletedChapter, retainCompletedChapter, runGeneration,
   ]);
 
   const handleBranchFromChapter = useCallback(async (targetChapterId?: string | null) => {
+    if (chapterOperationBusyRef.current || legacyDeletionCountRef.current > 0 || pendingCompletedChapterRef.current) return;
     const sessionRecord = activeSessionRef.current;
     const activeChapters = getActiveBattleStoryChapters(chaptersRef.current);
     const checkpointRecords = sortBattleStoryCheckpoints(checkpointsRef.current);
@@ -1417,6 +1491,7 @@ export function useBattleStorySession() {
       return;
     }
 
+    chapterOperationBusyRef.current = true;
     try {
       const nextSource = buildProviderSource(sessionRecord.source, customProviderPayload);
       const prefixChapters = activeChapters.filter((chapter) => chapter.index <= targetChapter.index);
@@ -1542,6 +1617,8 @@ export function useBattleStorySession() {
       void refreshSummaryIfNeeded(branchSession, nextChapters);
     } catch (error) {
       setActionError(normalizeErrorMessage(error, '创建分支会话失败。'));
+    } finally {
+      chapterOperationBusyRef.current = false;
     }
   }, [customProviderPayload, loadSession, refreshSessionList, refreshSummaryIfNeeded, runGeneration]);
 
@@ -1555,6 +1632,7 @@ export function useBattleStorySession() {
   }, [handleBranchFromChapter, selectedChapterId]);
 
   const handleRewriteChapter = useCallback(async (targetChapterId?: string | null) => {
+    if (chapterOperationBusyRef.current || legacyDeletionCountRef.current > 0 || pendingCompletedChapterRef.current) return;
     const sessionRecord = activeSessionRef.current;
     const activeChapters = getActiveBattleStoryChapters(chaptersRef.current);
     const checkpointRecords = sortBattleStoryCheckpoints(checkpointsRef.current);
@@ -1579,6 +1657,7 @@ export function useBattleStorySession() {
       return;
     }
 
+    chapterOperationBusyRef.current = true;
     try {
       const nextSource = buildProviderSource(sessionRecord.source, customProviderPayload);
       const anchoredChapters = activeChapters.filter((chapter) => chapter.index <= targetChapter.index);
@@ -1668,6 +1747,8 @@ export function useBattleStorySession() {
       void refreshSummaryIfNeeded(nextSession, nextChapters);
     } catch (error) {
       setActionError(normalizeErrorMessage(error, '重写章节失败。'));
+    } finally {
+      chapterOperationBusyRef.current = false;
     }
   }, [customProviderPayload, loadSession, refreshSessionList, refreshSummaryIfNeeded, runGeneration]);
 
@@ -1681,6 +1762,7 @@ export function useBattleStorySession() {
   }, [handleRewriteChapter, selectedChapterId]);
 
   const handleDeleteSelectedChapter = useCallback(async () => {
+    if (chapterOperationBusyRef.current || pendingCompletedChapterRef.current) return;
     const reloadSelection = sessionReaderRef.current?.captureSelection();
     const sessionRecord = activeSessionRef.current;
     const activeChapters = getActiveBattleStoryChapters(chaptersRef.current);
@@ -1706,6 +1788,7 @@ export function useBattleStorySession() {
     }
 
     if (targetChapter.index === 1) {
+      legacyDeletionCountRef.current += 1;
       setIsDeletingSession(true);
       try {
         await deleteBattleStorySession(sessionRecord.id);
@@ -1716,7 +1799,8 @@ export function useBattleStorySession() {
       } catch (error) {
         setActionError(normalizeErrorMessage(error, '删除连续战报会话失败。'));
       } finally {
-        setIsDeletingSession(false);
+        legacyDeletionCountRef.current -= 1;
+        setIsDeletingSession(legacyDeletionCountRef.current > 0);
       }
       return;
     }
@@ -1751,6 +1835,7 @@ export function useBattleStorySession() {
       invalidateWhenCoveredAtOrBeyond: true,
     });
 
+    legacyDeletionCountRef.current += 1;
     setIsDeletingSession(true);
     try {
       await deleteBattleStoryChaptersFromIndex({
@@ -1786,7 +1871,8 @@ export function useBattleStorySession() {
     } catch (error) {
       setActionError(normalizeErrorMessage(error, '删除章节失败。'));
     } finally {
-      setIsDeletingSession(false);
+      legacyDeletionCountRef.current -= 1;
+      setIsDeletingSession(legacyDeletionCountRef.current > 0);
     }
   }, [refreshSessionList, refreshSummaryIfNeeded, selectedChapterId]);
 
@@ -1803,6 +1889,7 @@ export function useBattleStorySession() {
 
   const handleDeleteSession = useCallback(
     async (sessionId?: string) => {
+      if (chapterOperationBusyRef.current || pendingCompletedChapterRef.current) return;
       const reloadSelection = sessionReaderRef.current?.captureSelection();
       const targetId =
         typeof sessionId === 'string' && sessionId.trim()
@@ -1826,6 +1913,7 @@ export function useBattleStorySession() {
 
       setActionError(null);
       setNotice(null);
+      legacyDeletionCountRef.current += 1;
       setIsDeletingSession(true);
 
       try {
@@ -1841,7 +1929,8 @@ export function useBattleStorySession() {
       } catch (error) {
         setActionError(normalizeErrorMessage(error, '删除连续战报会话失败。'));
       } finally {
-        setIsDeletingSession(false);
+        legacyDeletionCountRef.current -= 1;
+        setIsDeletingSession(legacyDeletionCountRef.current > 0);
       }
     },
     [refreshSessionList, sessions]
@@ -1866,6 +1955,16 @@ export function useBattleStorySession() {
 
   return {
     isReady,
+    pendingCompletedChapter: pendingCompletedChapter?.commit.chapter ?? null,
+    isSavingChapter,
+    hasUnreadSavedChapter: Boolean(unreadSavedSessionId),
+    handleReloadSavedChapter,
+    pendingSaveAsNewSession: Boolean(pendingCompletedChapter?.requiresNewSession),
+    pendingSaveUnknown: pendingCompletedChapter?.saveEvidence === 'unknown',
+    handleSavePendingAsNewSession,
+    handleRetrySaveChapter,
+    handleExportPendingChapter,
+    handleDiscardPendingChapter,
     storageError,
     actionError,
     notice,
