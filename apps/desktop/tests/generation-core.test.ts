@@ -14,7 +14,7 @@ import {
   DesktopGenerationSession,
   type GenerationSessionFamily,
 } from '../src/features/generation/session';
-import { STREAM_DIRECT_AI_COMMAND } from '../src/platform/direct-ai-bridge';
+import { STREAM_DIRECT_AI_COMMAND, type DesktopAiExecutionOptions } from '../src/platform/direct-ai-bridge';
 import { HOSTED_AI_REQUEST_COMMAND, STREAM_HOSTED_AI_COMMAND } from '../src/platform/cloud-bridge';
 
 /**
@@ -158,7 +158,7 @@ describe('通用生成执行器（家族无关语义）', () => {
     // fake 家族 hosted 请求体固定为 {prompt, extra:null}，JSON 包装开销 26 字节。
     const overhead = JSON.stringify({ prompt: '', extra: null }).length;
     const run = (
-      invoke: ReturnType<typeof vi.fn>,
+      invoke: DesktopAiExecutionOptions['invoke'],
       prompt: string,
       jsonRouteId: 'generate-scenario' | 'generate-free',
     ) => executeDesktopGeneration(
@@ -193,7 +193,7 @@ describe('通用生成执行器（家族无关语义）', () => {
 
   it('路由预算计的是线上 UTF-8 字节：多字节字符与 JSON 转义如实计费', async () => {
     const overhead = JSON.stringify({ prompt: '', extra: null }).length;
-    const run = (invoke: ReturnType<typeof vi.fn>, prompt: string) =>
+    const run = (invoke: DesktopAiExecutionOptions['invoke'], prompt: string) =>
       executeDesktopGeneration(
         { ...fakeExecutorFamily(), jsonRouteId: 'generate-scenario' },
         { invoke, profileId: '' },

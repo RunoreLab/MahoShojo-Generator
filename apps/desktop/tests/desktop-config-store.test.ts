@@ -17,6 +17,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { DESKTOP_CONFIG_DEFAULTS } from '@mahoshojo/contracts/desktop-config';
+import { DesktopConfigWriteRequestSchema } from '@mahoshojo/contracts/desktop-ipc';
 
 import { DesktopConfigStore } from '../src/features/config/desktop-config-store';
 
@@ -272,13 +273,11 @@ describe('desktop config store — read projection', () => {
   });
 
   it('createDefaultConfig recovers a quarantined-missing file and clears the degraded bit', async () => {
-    let captured: { expectedRevision?: string | null; content?: string } | null = null;
-    const invoke = makeInvoke(async (command, args) => {
+    const invoke = makeInvoke(async (command) => {
       if (command === 'desktop_config_read') {
         return { ...readResult({ status: 'missing' }), invalidPresent: true };
       }
       if (command === 'desktop_config_write') {
-        captured = (args?.request ?? null) as typeof captured;
         return { revision: REV_B };
       }
       return undefined;
@@ -293,8 +292,11 @@ describe('desktop config store — read projection', () => {
     });
 
     // no-clobber 首写：不携带 revision，不覆盖 `.invalid` 或外部新文件。
-    expect(captured?.expectedRevision).toBeNull();
-    const doc = JSON.parse(captured?.content ?? '{}') as Record<string, unknown>;
+    const writes = invoke.mock.calls.filter(([command]) => command === 'desktop_config_write');
+    expect(writes).toHaveLength(1);
+    const captured = DesktopConfigWriteRequestSchema.parse(writes[0]?.[1]?.request);
+    expect(captured.expectedRevision).toBeNull();
+    const doc = JSON.parse(captured.content) as Record<string, unknown>;
     expect(doc.version).toBe(1);
     expect(doc.publicLibraryCache).toMatchObject({
       captureEnabled: true,
@@ -334,11 +336,9 @@ describe('desktop config store — write semantics', () => {
   it('write request carries expectedRevision and preserves unregistered keys', async () => {
     const original =
       '{"version":1,"announcements":{"checkPolicy":"on-launch","futureKey":42},"custom":true}';
-    let captured: { expectedRevision?: string | null; content?: string } | null = null;
-    const invoke = makeInvoke(async (command, args) => {
+    const invoke = makeInvoke(async (command) => {
       if (command === 'desktop_config_read') return readResult(okFile(original));
       if (command === 'desktop_config_write') {
-        captured = (args?.request ?? null) as typeof captured;
         return { revision: REV_B };
       }
       return undefined;
@@ -353,8 +353,11 @@ describe('desktop config store — write semantics', () => {
       ).toHaveLength(1);
     });
 
-    expect(captured?.expectedRevision).toBe(REV_A);
-    const doc = JSON.parse(captured?.content ?? '{}') as Record<string, unknown>;
+    const captured = DesktopConfigWriteRequestSchema.parse(
+      invoke.mock.calls.find(([command]) => command === 'desktop_config_write')?.[1]?.request,
+    );
+    expect(captured.expectedRevision).toBe(REV_A);
+    const doc = JSON.parse(captured.content) as Record<string, unknown>;
     expect(doc).toMatchObject({
       version: 1,
       announcements: { checkPolicy: 'manual', futureKey: 42 },
@@ -426,15 +429,13 @@ describe('desktop config store — write semantics', () => {
     const externalContent = '{"version":1,"announcements":{"checkPolicy":"manual"}}';
     let reads = 0;
     let writes = 0;
-    let lastWrite: { expectedRevision?: string | null; content?: string } | null = null;
-    const invoke = makeInvoke(async (command, args) => {
+    const invoke = makeInvoke(async (command) => {
       if (command === 'desktop_config_read') {
         reads += 1;
         return readResult(reads === 1 ? okFile('{"version":1}') : okFile(externalContent, REV_C));
       }
       if (command === 'desktop_config_write') {
         writes += 1;
-        lastWrite = (args?.request ?? null) as typeof lastWrite;
         if (writes === 1) {
           throw { code: 'config-conflict', message: '配置文件已被外部修改；请重新加载后重试' };
         }
@@ -464,8 +465,11 @@ describe('desktop config store — write semantics', () => {
     });
 
     // delta 合到磁盘基底：外部改动不被回滚，只补刚才未落盘的字段。
-    expect(lastWrite?.expectedRevision).toBe(REV_C);
-    const doc = JSON.parse(lastWrite?.content ?? '{}') as {
+    const lastWrite = DesktopConfigWriteRequestSchema.parse(
+      invoke.mock.calls.filter(([command]) => command === 'desktop_config_write').at(-1)?.[1]?.request,
+    );
+    expect(lastWrite.expectedRevision).toBe(REV_C);
+    const doc = JSON.parse(lastWrite.content) as {
       announcements?: { checkPolicy?: string };
       externalLinks?: { confirmContentLinks?: boolean };
     };
@@ -514,8 +518,7 @@ describe('desktop config store — write semantics', () => {
   });
 
   it('edits made while a write is in flight merge over the in-flight target instead of the stale base', async () => {
-    let releaseFirst: (() => void) | null = null;
-    let releaseSecond: (() => void) | null = null;
+    const release: { first?: () => void; second?: () => void } = {};
     let writes = 0;
     const contents: string[] = [];
     const invoke = makeInvoke((command, args) => {
@@ -528,12 +531,12 @@ describe('desktop config store — write semantics', () => {
         if (writes === 1) {
           // 卡住第一次 IPC，制造「在途写」窗口。
           return new Promise((resolve) => {
-            releaseFirst = () => resolve({ revision: REV_B });
+            release.first = () => resolve({ revision: REV_B });
           });
         }
         // 第二笔同样卡住：钉住在途期间 saving 不提前回落。
         return new Promise((resolve) => {
-          releaseSecond = () => resolve({ revision: REV_C });
+          release.second = () => resolve({ revision: REV_C });
         });
       }
       return Promise.resolve(undefined);
@@ -548,7 +551,8 @@ describe('desktop config store — write semantics', () => {
     // 写 1 已取走 pending 但尚未落盘：此刻的第二个编辑必须从在途目标
     // 合并，否则写 1 的改动会被旧 base 静默吞掉。
     store.setField('confirmContentLinks', false);
-    releaseFirst?.();
+    if (!release.first) throw new Error('第一笔配置写入尚未进入在途状态');
+    release.first();
 
     await vi.waitFor(() => {
       expect(writes).toBe(2);
@@ -561,7 +565,8 @@ describe('desktop config store — write semantics', () => {
     };
     expect(second.announcements?.checkPolicy).toBe('manual');
     expect(second.externalLinks?.confirmContentLinks).toBe(false);
-    releaseSecond?.();
+    if (!release.second) throw new Error('第二笔配置写入尚未进入在途状态');
+    release.second();
     await vi.waitFor(() => {
       expect(store.getSnapshot().saving).toBe(false);
     });
@@ -794,13 +799,11 @@ describe('desktop config store — write semantics', () => {
   });
 
   it('explicit resetToDefaults writes defaults with the real revision on a fatal file', async () => {
-    let captured: { expectedRevision?: string | null; content?: string } | null = null;
-    const invoke = makeInvoke(async (command, args) => {
+    const invoke = makeInvoke(async (command) => {
       if (command === 'desktop_config_read') {
         return readResult(okFile('{"version":2,"anything":true}'));
       }
       if (command === 'desktop_config_write') {
-        captured = (args?.request ?? null) as typeof captured;
         return { revision: REV_B };
       }
       return undefined;
@@ -814,8 +817,11 @@ describe('desktop config store — write semantics', () => {
       expect(store.getSnapshot().saving).toBe(false);
     });
 
-    expect(captured?.expectedRevision).toBe(REV_A);
-    const doc = JSON.parse(captured?.content ?? '{}') as { version?: number; anything?: unknown };
+    const writes = invoke.mock.calls.filter(([command]) => command === 'desktop_config_write');
+    expect(writes).toHaveLength(1);
+    const captured = DesktopConfigWriteRequestSchema.parse(writes[0]?.[1]?.request);
+    expect(captured.expectedRevision).toBe(REV_A);
+    const doc = JSON.parse(captured.content) as { version?: number; anything?: unknown };
     expect(doc.version).toBe(1);
     // 恢复默认不保留未知键——显式动作，不是静默覆盖。
     expect(doc.anything).toBeUndefined();

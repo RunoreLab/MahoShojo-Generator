@@ -35,12 +35,10 @@ const nativeBusinessArgNames = (command: string): string[] => {
     path.resolve(import.meta.dirname, '..', 'src-tauri', 'src', 'lib.rs'),
     'utf8',
   );
-  const signature = libSource.match(
-    new RegExp(`(?:async\\s+)?fn\\s+${command}\\s*\\(`, 'u'),
-  );
-  expect(signature, `lib.rs 中必须存在 ${command} 命令函数`).not.toBeNull();
+  const signature = new RegExp(`(?:async\\s+)?fn\\s+${command}\\s*\\(`, 'u').exec(libSource);
+  if (signature === null) throw new Error(`lib.rs 中必须存在 ${command} 命令函数`);
   // 提取配对括号内的参数列表。
-  const rest = libSource.slice(signature!.index + signature![0].length);
+  const rest = libSource.slice(signature.index + signature[0].length);
   let depth = 1;
   let end = 0;
   while (end < rest.length && depth > 0) {

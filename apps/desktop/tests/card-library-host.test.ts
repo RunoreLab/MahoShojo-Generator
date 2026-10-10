@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { DesktopCardLibraryRequestSchema, type DesktopCardLibraryRequest } from '@mahoshojo/contracts/desktop-cloud';
 
 import { createDesktopCardLibraryOnlinePort } from '../src/platform/card-library-host';
 import { CARD_LIBRARY_REQUEST_COMMAND } from '../src/platform/card-library-bridge';
@@ -7,11 +8,9 @@ const signal = () => new AbortController().signal;
 
 const summaryPage = { success: true as const, cards: [], total: 0, nextOffset: null };
 
-type CardRequest = { routeId: string; query?: Record<string, string>; body?: unknown };
-
-const makeInvoke = (impl: (request: CardRequest) => unknown) =>
+const makeInvoke = (impl: (request: DesktopCardLibraryRequest) => unknown) =>
   vi.fn(async (_command: string, args?: Record<string, unknown>) =>
-    impl((args as { request: CardRequest }).request));
+    impl(DesktopCardLibraryRequestSchema.parse(args?.request)));
 
 describe('createDesktopCardLibraryOnlinePort', () => {
   it('「我的/收藏」摘要分页走对应固定路由并透传查询', async () => {
