@@ -83,6 +83,17 @@ describe('Arena post-battle actual Hosted/legacy full-payload parity', () => {
       const options = { signatures, now: () => new Date(fixedTime) };
       const expected = await createLegacyProjector(options)(input);
       const actual = await createArenaPostBattleProjector(options)(input);
+      if (kind === 'legacy-history' && writeArenaHistory) {
+        // Intentional correction: the frozen legacy implementation discarded opaque entries.
+        // Keep that fixture unchanged; only restore the source entries in this explicit oracle
+        // and sign the corrected result with the same real service, never copying actual output.
+        const expectedHistory = expected[0]!.arena_history as { entries: unknown[] };
+        expectedHistory.entries = [
+          ...(first.arena_history as { entries: unknown[] }).entries,
+          expectedHistory.entries.at(-1),
+        ];
+        expected[0]!.signature = await signatures.generateSignature(expected[0]);
+      }
       // Includes world-line IDs, unknown/legacy fields and real HMAC signatures, not a mocked summary.
       expect(actual).toEqual(expected);
       expect(JSON.stringify(actual)).toBe(JSON.stringify(expected));

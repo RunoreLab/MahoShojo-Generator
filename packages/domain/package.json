@@ -238,6 +238,7 @@
     "./presets": "./src/presets.ts",
     "./scenario-presets": "./src/scenario-presets.ts",
     "./arena-post-battle": "./src/arena-post-battle.ts",
+    "./arena-history-id": "./src/arena-history-id.ts",
     "./arena-post-battle-candidates": "./src/arena-post-battle-candidates.ts",
     "./story-length": "./src/story-length.ts",
     "./arena-file-parser": "./src/arena-file-parser.ts",

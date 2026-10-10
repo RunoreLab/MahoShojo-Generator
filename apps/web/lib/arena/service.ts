@@ -2,6 +2,7 @@ import { getLogger } from '@/lib/logger';
 import { NewsReport } from '@/components/BattleReportCard';
 import { ArenaHistoryEntry } from '@/types/arena';
 import { inferCharacterKind, inferTemplateId } from '@mahoshojo/domain/data-cards';
+import { getNextArenaHistoryEntryId } from '@mahoshojo/domain/arena-history-id';
 import { generateSignature, verifySignature } from '@/lib/signature';
 import { randomUUID } from '@/lib/crypto';
 
@@ -101,28 +102,29 @@ export const applyPostBattleUpdates = async (
             let history = characterData.arena_history;
 
             if (!history || !history.attributes || !history.entries) {
+                const previousHistory = history && typeof history === 'object' && !Array.isArray(history) ? history : {};
                 history = {
-                    attributes: {
+                    ...previousHistory,
+                    attributes: previousHistory.attributes && typeof previousHistory.attributes === 'object' && !Array.isArray(previousHistory.attributes) ? previousHistory.attributes : {
                         world_line_id: randomUUID(),
                         created_at: nowISO,
                         updated_at: nowISO,
                         sublimation_count: 0,
                         last_sublimation_at: null,
                     },
-                    entries: [],
+                    entries: Array.isArray(previousHistory.entries) ? previousHistory.entries : [],
                 };
             }
             const alreadyApplied = generationId && history.entries.some(
-                (entry: ArenaHistoryEntry) => entry.metadata?.generation_id === generationId
+                (entry: ArenaHistoryEntry) => entry?.metadata?.generation_id === generationId
             );
             if (!alreadyApplied) {
                 history.attributes.updated_at = nowISO;
-                const lastEntryId = history.entries.length > 0 ? history.entries[history.entries.length - 1].id : 0;
                 const characterImpact = impacts[combatantIndex]?.impact
                     || "在此次事件中获得了成长。";
 
                 const newEntry: ArenaHistoryEntry = {
-                    id: lastEntryId + 1,
+                    id: getNextArenaHistoryEntryId(history.entries),
                     type: report.mode as ArenaHistoryEntry['type'] || 'classic',
                     title: report.headline,
                     participants: participantNames,

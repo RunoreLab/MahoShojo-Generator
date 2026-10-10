@@ -1,4 +1,5 @@
 import { randomUUID } from '@/lib/crypto';
+import { getNextArenaHistoryEntryId } from '@mahoshojo/domain/arena-history-id';
 import type { MagicTeaPartyRole, MagicTeaPartyUpdateDraft } from '@/lib/magic-tea-party/types';
 
 export type MagicTeaPartyUpdateSummaryMeta = {
@@ -77,13 +78,12 @@ export const applyMagicTeaPartyUpdateDrafts = (params: MagicTeaPartyApplyUpdates
       const entries = Array.isArray(history.entries) ? [...(history.entries as any[])] : [];
       const attributes = toRecord(history.attributes);
 
-      const lastEntryId =
-        entries.length > 0 && typeof entries[entries.length - 1]?.id === 'number' ? entries[entries.length - 1].id : 0;
       const hasWinner = Boolean(draft.hasWinner && readString(draft.winner));
       const winner = hasWinner ? readString(draft.winner) : '不适用';
       const impact = impactText;
 
       const nextAttributes = {
+        ...attributes,
         world_line_id: typeof attributes.world_line_id === 'string' ? attributes.world_line_id : worldLineId(),
         created_at: typeof attributes.created_at === 'string' ? attributes.created_at : now,
         updated_at: now,
@@ -92,7 +92,7 @@ export const applyMagicTeaPartyUpdateDrafts = (params: MagicTeaPartyApplyUpdates
       };
 
       const entry = {
-        id: lastEntryId + 1,
+        id: getNextArenaHistoryEntryId(entries),
         type: 'tea-party',
         title: readString(sessionTitle) || '魔法茶会',
         participants: participantNames,
@@ -111,7 +111,7 @@ export const applyMagicTeaPartyUpdateDrafts = (params: MagicTeaPartyApplyUpdates
       };
 
       entries.push(entry);
-      card.arena_history = { attributes: nextAttributes, entries };
+      card.arena_history = { ...history, attributes: nextAttributes, entries };
       didMutate = true;
     }
 

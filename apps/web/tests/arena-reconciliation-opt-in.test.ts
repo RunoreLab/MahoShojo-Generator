@@ -64,6 +64,13 @@ const request = (body: unknown = { generationId, combatants: cards }, headers: H
 });
 const accountHeaders = { Authorization: 'Bearer synthetic-bearer-42', [ARENA_EXPECTED_USER_ID_HEADER]: 'v1:42' };
 const send = (req: Request) => appRouteHandler(req as never);
+const assertExternalArtifactDirectory = (directory: string) => {
+  const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+  const output = resolve(directory);
+  const relativeOutput = relative(repositoryRoot, output);
+  expect(relativeOutput === '..' || relativeOutput.startsWith(`..${sep}`) || isAbsolute(relativeOutput)).toBe(true);
+  return output;
+};
 const originalAnonymousToken = async () => {
   const issued = await createArenaGenerationActorResolvers({
     env: { HONO_AUTH_MODE: 'bearer' }, signatures, getD1Client: () => client as never,
@@ -271,113 +278,105 @@ describe('Next arena-reconciliation-v1 boundary with real actor, D1 ownership re
     expect(ports.resolveActor).not.toHaveBeenCalled();
   });
 
-  it('actual producer can amplify a legal open-JSON input beyond 16 MiB: unavailable, no partial cards or model retry', async () => {
-    // Existing producer copies lastEntryId + 1 into the new entry; an open-JSON string ID doubles.
-    // This documents why the receive budget is not a proven upper bound for every 12 MiB request.
-    const data = { ...cards[0]!.data, arena_history: { attributes: {}, entries: [{ id: 'x'.repeat(9 * 1024 * 1024) }] } };
+  it('real producer preserves a legacy 9 MiB ID within a near-12 MiB request without duplicating it', async () => {
+    const artifactDirectory = process.env.MAHOSHOJO_ARENA_RECONCILIATION_CAPACITY_DIR;
+    const byteLength = (value: string) => new TextEncoder().encode(value).byteLength;
+    const legacyId = 'x'.repeat(9 * 1024 * 1024);
+    const data = { ...cards[0]!.data, arena_history: { attributes: {}, entries: [{ id: legacyId }] }, padding: '' };
     const body = { generationId, combatants: [{ ...cards[0], data }] };
-    expect(new TextEncoder().encode(JSON.stringify(body)).byteLength).toBeLessThan(ARENA_RECONCILIATION_LIMITS.requestBodyBytes);
+    data.padding = 'p'.repeat(ARENA_RECONCILIATION_LIMITS.requestBodyBytes - byteLength(JSON.stringify(body)) - 1);
+    const inputBytes = byteLength(JSON.stringify(body));
+    expect(inputBytes).toBe(ARENA_RECONCILIATION_LIMITS.requestBodyBytes - 1);
     const response = await send(request(body, accountHeaders));
-    expect(response.status).toBe(503);
-    const result = parseArenaReconciliationResponse(await response.text(), generationId, 1);
-    expect(result).toMatchObject({ code: 'ARENA_RECONCILIATION_RESPONSE_TOO_LARGE' });
-    expect(result).not.toHaveProperty('updatedCombatants');
-    expect(data.arena_history.entries).toHaveLength(1);
+    const raw = await response.text();
+    expect(response.status).toBe(200);
+    const result = parseArenaReconciliationResponse(raw, generationId, 1);
+    expect(result).toMatchObject({ success: true, updatedCombatants: [{ data: {
+      arena_history: { entries: [{ id: legacyId }, { id: 1 }] }, padding: data.padding,
+    } }] });
+    expect(byteLength(raw)).toBeLessThan(inputBytes + 8192);
+    expect(byteLength(raw)).toBeLessThan(ARENA_RECONCILIATION_LIMITS.responseBodyBytes);
+    expect(data.arena_history.entries).toEqual([{ id: legacyId }]);
     expect(query).toHaveBeenCalledTimes(2);
     expect(ports.resolveActor).toHaveBeenCalledTimes(1);
+    if (artifactDirectory) {
+      const output = assertExternalArtifactDirectory(artifactDirectory);
+      await mkdir(output, { recursive: true });
+      const filename = 'response-near-request-limit.json';
+      await writeFile(resolve(output, filename), raw, 'utf8');
+      await writeFile(resolve(output, 'producer-manifest.json'), `${JSON.stringify({
+        version: 2, recipe: 'real producer near-12MiB request; no legacy-ID amplification',
+        protocolVersion: ARENA_RECONCILIATION_PROTOCOL_VERSION, generationId, combatantCount: 1,
+        inputBytes, legacyIdCodeUnits: legacyId.length,
+        fixtures: [{ filename, bytes: byteLength(raw), sha256: await sha256(raw), httpStatus: 200, source: 'actual-opt-in-handler-and-unmodified-producer' }],
+      }, null, 2)}\n`, 'utf8');
+    }
   });
 
-  it('capacity recipe produces exact 16 MiB and +1 byte from the same real handler/producer chain', async () => {
-    // Optional replay artifacts stay outside the repository. No checked-in large blob or credentials.
-    // The Native and TS stages consume these exact raw bytes, not a separately reconstructed fixture.
+  it('synthetic expanded reply probes the real handler and parser at exact 16 MiB and +1 byte', async () => {
+    // The fixed producer no longer amplifies legacy IDs. This is explicitly a transport
+    // defense fixture, not evidence that a legal request reaches the producer's 16 MiB limit.
+    // Real near-12 MiB producer bytes are emitted by the independent test above.
     const artifactDirectory = process.env.MAHOSHOJO_ARENA_RECONCILIATION_CAPACITY_DIR;
-    const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
-    if (artifactDirectory) {
-      const relativeOutput = relative(repositoryRoot, resolve(artifactDirectory));
-      expect(relativeOutput === '..' || relativeOutput.startsWith(`..${sep}`) || isAbsolute(relativeOutput)).toBe(true);
-    }
+    const output = artifactDirectory ? assertExternalArtifactDirectory(artifactDirectory) : null;
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-10-10T00:00:00.000Z'));
     const byteLength = (value: string) => new TextEncoder().encode(value).byteLength;
-    const originalIdCodeUnits = 8 * 1024 * 1024 - 32 * 1024;
-    const data = {
-      ...cards[0]!.data,
-      arena_history: { attributes: {}, entries: [{ id: 'x'.repeat(originalIdCodeUnits) }] },
-      padding: '',
-    };
-    const bodyFor = (padding: string) => ({ generationId, combatants: [{ ...cards[0], data: { ...data, padding } }] });
     const actualProducer = arenaService.applyPostBattleUpdates;
-    let producerRaw = '';
+    let padding = '', expandedRaw = '';
     const producer = vi.spyOn(arenaService, 'applyPostBattleUpdates').mockImplementation(async (...args) => {
       const updatedCombatants = await actualProducer(...args);
-      producerRaw = JSON.stringify({
+      updatedCombatants[0]!.data.transportBoundaryPadding = padding;
+      expandedRaw = JSON.stringify({
         version: ARENA_RECONCILIATION_PROTOCOL_VERSION,
-        generationId,
-        updatedCombatants,
-        warnings: [],
-        success: true,
+        generationId, updatedCombatants, warnings: [], success: true,
       });
       return updatedCombatants;
     });
     try {
-      const baseline = await send(request(bodyFor(''), accountHeaders));
+      const baseline = await send(request(undefined, accountHeaders));
       expect(baseline.status).toBe(200);
       const remaining = ARENA_RECONCILIATION_LIMITS.responseBodyBytes - byteLength(await baseline.text());
       expect(remaining).toBeGreaterThan(0);
-      const padding = 'p'.repeat(remaining);
-      const atLimitInput = bodyFor(padding);
-      const atLimitInputBytes = byteLength(JSON.stringify(atLimitInput));
-      expect(atLimitInputBytes).toBeLessThan(ARENA_RECONCILIATION_LIMITS.requestBodyBytes);
-      const atLimit = await send(request(atLimitInput, accountHeaders));
+      padding = 'p'.repeat(remaining);
+      const atLimit = await send(request(undefined, accountHeaders));
       expect(atLimit.status).toBe(200);
       const atLimitRaw = await atLimit.text();
       expect(byteLength(atLimitRaw)).toBe(ARENA_RECONCILIATION_LIMITS.responseBodyBytes);
-      expect(await sha256(producerRaw)).toBe(await sha256(atLimitRaw));
+      expect(await sha256(expandedRaw)).toBe(await sha256(atLimitRaw));
       expect(parseArenaReconciliationResponse(atLimitRaw, generationId, 1)).toMatchObject({ success: true });
 
-      const overLimitInput = bodyFor(`${padding}p`);
-      const overLimitInputBytes = byteLength(JSON.stringify(overLimitInput));
-      expect(overLimitInputBytes).toBe(atLimitInputBytes + 1);
-      const overLimit = await send(request(overLimitInput, accountHeaders));
+      padding += 'p';
+      const overLimit = await send(request(undefined, accountHeaders));
       const overLimitRaw = await overLimit.text();
-      const overLimitProducerRaw = producerRaw;
-      expect(byteLength(overLimitProducerRaw)).toBe(ARENA_RECONCILIATION_LIMITS.responseBodyBytes + 1);
+      const overLimitExpandedRaw = expandedRaw;
+      expect(byteLength(overLimitExpandedRaw)).toBe(ARENA_RECONCILIATION_LIMITS.responseBodyBytes + 1);
       expect(overLimit.status).toBe(503);
       const error = parseArenaReconciliationResponse(overLimitRaw, generationId, 1);
       expect(error).toMatchObject({ code: 'ARENA_RECONCILIATION_RESPONSE_TOO_LARGE' });
       expect(error).not.toHaveProperty('updatedCombatants');
-      expect(() => parseArenaReconciliationResponse(overLimitProducerRaw, generationId, 1)).toThrow('RESPONSE_TOO_LARGE');
-      expect(data.arena_history.entries).toHaveLength(1);
+      expect(() => parseArenaReconciliationResponse(overLimitExpandedRaw, generationId, 1)).toThrow('RESPONSE_TOO_LARGE');
       expect(producer).toHaveBeenCalledTimes(3);
       expect(ports.resolveActor).toHaveBeenCalledTimes(3);
       expect(query).toHaveBeenCalledTimes(6);
 
-      if (artifactDirectory) {
-        const output = resolve(artifactDirectory);
+      if (output) {
         await mkdir(output, { recursive: true });
         const fixtures = [
-          { filename: 'response-at-limit.json', raw: atLimitRaw, httpStatus: 200, source: 'actual-opt-in-handler' },
-          { filename: 'producer-over-limit.json', raw: overLimitProducerRaw, httpStatus: null, source: 'actual-applyPostBattleUpdates-result-before-handler-budget-rejection' },
-          { filename: 'response-over-limit.json', raw: overLimitRaw, httpStatus: 503, source: 'actual-opt-in-handler' },
+          { filename: 'transport-at-limit.json', raw: atLimitRaw, httpStatus: 200, source: 'synthetic-expanded-reply-through-actual-handler' },
+          { filename: 'transport-over-limit.json', raw: overLimitExpandedRaw, httpStatus: null, source: 'synthetic-expanded-reply-before-handler-budget-rejection' },
+          { filename: 'response-over-limit.json', raw: overLimitRaw, httpStatus: 503, source: 'actual-handler-rejection-of-synthetic-expanded-reply' },
         ];
         const records = [];
         for (const fixture of fixtures) {
           await writeFile(resolve(output, fixture.filename), fixture.raw, 'utf8');
           records.push({ filename: fixture.filename, bytes: byteLength(fixture.raw), sha256: await sha256(fixture.raw), httpStatus: fixture.httpStatus, source: fixture.source });
         }
-        await writeFile(resolve(output, 'manifest.json'), `${JSON.stringify({
-          version: 1,
-          recipe: 'apps/web/tests/arena-reconciliation-opt-in.test.ts: capacity recipe',
-          protocolVersion: ARENA_RECONCILIATION_PROTOCOL_VERSION,
-          generationId,
-          requestId: 'arena_request_1234',
-          combatantCount: 1,
-          frozenTime: new Date().toISOString(),
-          originalIdCodeUnits,
-          paddingCodeUnits: remaining,
-          atLimitInputBytes,
-          overLimitInputBytes,
-          fixtures: records,
+        await writeFile(resolve(output, 'transport-manifest.json'), `${JSON.stringify({
+          version: 2, recipe: 'synthetic expanded reply for transport defense, not evidence of a producer-reachable size',
+          protocolVersion: ARENA_RECONCILIATION_PROTOCOL_VERSION, generationId,
+          requestId: 'arena_request_1234', combatantCount: 1, frozenTime: new Date().toISOString(),
+          paddingCodeUnits: remaining, fixtures: records,
         }, null, 2)}\n`, 'utf8');
       }
     } finally {

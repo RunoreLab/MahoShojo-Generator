@@ -1,4 +1,5 @@
 import { inferTemplateId } from './data-cards';
+import { getNextArenaHistoryEntryId } from './arena-history-id';
 
 export type ArenaPostBattleImpact = Readonly<{
   characterName: string;
@@ -44,13 +45,13 @@ const combatantsOf = (values: readonly unknown[]) => values.flatMap((value, inde
 const historyOf = (data: Record<string, unknown>, generationId: string) => {
   const history = recordOf(data.arena_history);
   const entries = Array.isArray(history?.entries)
-    ? history.entries.flatMap((entry) => recordOf(entry) ? [recordOf(entry)!] : [])
+    ? history.entries
     : [];
   return {
     history,
     entries,
     attributes: recordOf(history?.attributes) ?? {},
-    alreadyApplied: entries.some((entry) => matchesAppliedRevision(recordOf(entry.metadata), generationId)),
+    alreadyApplied: entries.some((entry) => matchesAppliedRevision(recordOf(recordOf(entry)?.metadata), generationId)),
   };
 };
 
@@ -99,11 +100,6 @@ export const projectArenaPostBattleCharacters = (
       if (!alreadyApplied) {
         const worldLineId = textOf(attributes.world_line_id) || context.worldLineIds[item.index];
         if (!worldLineId) throw new Error('Missing fixed Arena world-line ID');
-        const lastId = entries.reduce((maximum, entry) => (
-          typeof entry.id === 'number' && Number.isFinite(entry.id)
-            ? Math.max(maximum, Math.floor(entry.id))
-            : maximum
-        ), 0);
         const guidance = textOf(item.combatant.characterGuidance).slice(0, 100);
         data.arena_history = {
           ...(history ?? {}),
@@ -117,7 +113,7 @@ export const projectArenaPostBattleCharacters = (
             last_sublimation_at: attributes.last_sublimation_at ?? null,
           },
           entries: [...entries, {
-            id: lastId + 1,
+            id: getNextArenaHistoryEntryId(entries),
             type: reportMode,
             title: headline,
             participants,

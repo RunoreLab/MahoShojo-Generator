@@ -1,3 +1,5 @@
+import { getNextArenaHistoryEntryId } from './arena-history-id';
+
 export const MAX_ARENA_CHARACTER_REPAIR_TEXT_CODE_POINTS = 2_000;
 
 export type ArenaCharacterRepairField = 'impact' | 'currentStateSummary';
@@ -104,11 +106,6 @@ const failure = (
   reason: ArenaCharacterRepairFailureReason,
   issues: readonly ArenaCharacterRepairIssue[],
 ) => ({ ok: false, reason, issues }) as const;
-
-const maxNumericEntryId = (entries: readonly unknown[]): number => entries.reduce<number>((maximum, entry) => {
-  const id = recordOf(entry)?.id;
-  return typeof id === 'number' && Number.isSafeInteger(id) && id > maximum ? id : maximum;
-}, 0);
 
 const validatePatchShape = (
   patch: ArenaCharacterRepairPatch,
@@ -226,7 +223,7 @@ export const patchGenerationCharacterEffect = (input: Readonly<{
         generation_id: generationId,
       };
       entries.push({
-        id: maxNumericEntryId(entries) + 1,
+        id: getNextArenaHistoryEntryId(entries),
         type: context.type,
         title: context.title,
         participants: [...context.participants],

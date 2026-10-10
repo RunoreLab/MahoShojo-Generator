@@ -1,4 +1,4 @@
-/** Optional real Next producer → Rust loopback/IPC → production TS bridge capacity evidence. */
+/** Real near-12MiB producer and synthetic 16MiB transport → Rust/IPC → production TS bridge. */
 import { createReadStream, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createInterface } from 'node:readline';
@@ -8,7 +8,9 @@ import { ARENA_RECONCILIATION_LIMITS } from '@mahoshojo/contracts/arena-reconcil
 import { reconcileArenaHosted } from '../src/platform/arena-reconciliation-bridge';
 import type { ArenaHostedChannel } from '../src/platform/arena-hosted-bridge';
 const maximum = process.env.MAHO_ARENA_RECONCILIATION_NATIVE_JSONL;
-const producer = process.env.MAHO_ARENA_RECONCILIATION_PRODUCER_JSON;
+const transport = process.env.MAHO_ARENA_RECONCILIATION_TRANSPORT_JSON;
+const realProducer = process.env.MAHO_ARENA_RECONCILIATION_REAL_PRODUCER_JSON;
+const realProducerChannel = process.env.MAHO_ARENA_RECONCILIATION_REAL_PRODUCER_JSONL;
 const failure = process.env.MAHO_ARENA_RECONCILIATION_ERROR_JSONL;
 const overflow = process.env.MAHO_ARENA_RECONCILIATION_OVERFLOW_JSONL;
 const generationId = `arena_${'a'.repeat(64)}`;
@@ -40,17 +42,30 @@ async function consume(path: string) {
   const result = await observed; if ('error' in result) throw result.error;
   return { ...result, byteCount, events, invokeCount, sha256: hash.digest('hex') };
 }
-describe('actual bounded role wire across all three runtimes', () => {
-  it.skipIf(!maximum || !producer)('reassembles the exact 16MiB real producer response and applies through the shared domain seam', async () => {
-    const expectedHash = await fileHash(producer!); expect(statSync(producer!).size).toBe(ARENA_RECONCILIATION_LIMITS.responseBodyBytes);
+describe('bounded role wire across all three runtimes with explicit fixture provenance', () => {
+  it.skipIf(!realProducer || !realProducerChannel)('reassembles the actual near-12MiB producer response without changing legacy IDs', async () => {
+    const expectedBytes = statSync(realProducer!).size;
+    expect(expectedBytes).toBeGreaterThan(ARENA_RECONCILIATION_LIMITS.requestBodyBytes - 1);
+    expect(expectedBytes).toBeLessThan(ARENA_RECONCILIATION_LIMITS.responseBodyBytes);
+    const value = await consume(realProducerChannel!);
+    expect(value.byteCount).toBe(expectedBytes);
+    expect(value.sha256).toBe(await fileHash(realProducer!));
+    expect(value.invokeCount).toBe(1);
+    if (!('success' in value.reply)) throw new Error('producer result missing');
+    const updated = applyArenaReconciliationUpdates([{ data: { name: 'original' } }], value.reply.updatedCombatants);
+    expect(updated.updatedCombatants[0]).toMatchObject({ arena_history: { entries: [{ id: 'x'.repeat(9 * 1024 * 1024) }, { id: 1 }] } });
+  }, 120_000);
+  it.skipIf(!maximum || !transport)('reassembles the exact 16MiB synthetic transport fixture and applies through the shared domain seam', async () => {
+    const expectedHash = await fileHash(transport!); expect(statSync(transport!).size).toBe(ARENA_RECONCILIATION_LIMITS.responseBodyBytes);
     const value = await consume(maximum!); expect(value.byteCount).toBe(ARENA_RECONCILIATION_LIMITS.responseBodyBytes); expect(value.sha256).toBe(expectedHash); expect(value.invokeCount).toBe(1);
     if (!('success' in value.reply)) throw new Error('producer result missing');
+    expect(value.reply.updatedCombatants[0]!.data.transportBoundaryPadding).toEqual(expect.any(String));
     const original = [{ type: 'general-character', data: { name: 'original' }, isValid: false }];
     const updated = applyArenaReconciliationUpdates(original, value.reply.updatedCombatants);
     expect(updated.updatedCombatants).toHaveLength(1); expect(updated.combatants[0]!.data).toEqual(value.reply.updatedCombatants[0]!.data); expect(original[0]!.data).toEqual({ name: 'original' });
   }, 120_000);
-  it.skipIf(!failure)('retains the real producer +1 rejection without partially applying any update', async () => {
+  it.skipIf(!failure)('retains the real handler rejection of synthetic +1 output without partially applying any update', async () => {
     const value = await consume(failure!); expect(value.reply).toMatchObject({ code: 'ARENA_RECONCILIATION_RESPONSE_TOO_LARGE' }); expect(value.reply).not.toHaveProperty('updatedCombatants'); expect(value.invokeCount).toBe(1);
   });
-  it.skipIf(!overflow)('Native independently rejects the +1 raw producer body with zero IPC to apply', () => { expect(statSync(overflow!).size).toBe(0); });
+  it.skipIf(!overflow)('Native independently rejects the synthetic +1 raw body with zero IPC to apply', () => { expect(statSync(overflow!).size).toBe(0); });
 });

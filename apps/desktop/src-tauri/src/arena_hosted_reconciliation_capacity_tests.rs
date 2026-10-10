@@ -1,5 +1,6 @@
-//! Opt-in serial recipe for the exact Next producer wire -> Native -> TS artifact chain.
-//! The producer's files stay outside Git. No remote endpoint, real credential, or model is used.
+//! Opt-in serial recipe for exact JSON wire -> Native -> TS artifact chains.
+//! Real near-12 MiB producer and synthetic 16 MiB transport fixtures are separate evidence.
+//! Files stay outside Git. No remote endpoint, real credential, or model is used.
 use super::*;
 use std::io::{Read, Write};
 
@@ -89,22 +90,22 @@ fn file_sha256(path: &std::path::Path) -> String {
 }
 
 /// Required environment:
-/// - ARENA_RECONCILIATION_CAPACITY_INPUT: the Next handler/producer's original JSON file
+/// - ARENA_RECONCILIATION_CAPACITY_INPUT: an original JSON wire file, with provenance in its manifest
 /// - ARENA_RECONCILIATION_CAPACITY_OUTPUT: destination NDJSON of actual Native Channel events
 /// Optional ARENA_RECONCILIATION_CAPACITY_STATUS is 200 (default), or 503 for the handler's
-/// explicit RESPONSE_TOO_LARGE error. A producer wire above 16 MiB must yield zero IPC.
-/// All producer fixtures use arena_<64 a>, one readable combatant, and synthetic identities.
+/// explicit RESPONSE_TOO_LARGE error. Any wire above 16 MiB must yield zero IPC.
+/// All fixtures use arena_<64 a>, one readable combatant, and synthetic identities.
 #[tokio::test]
-#[ignore = "explicit serial window; env-selected original Next producer fixture and NDJSON output"]
-async fn reconciliation_producer_fixture_crosses_native_channel_byte_exact() {
+#[ignore = "explicit serial window; env-selected JSON fixture and NDJSON output"]
+async fn reconciliation_wire_fixture_crosses_native_channel_byte_exact() {
     let input = std::path::PathBuf::from(
-        std::env::var("ARENA_RECONCILIATION_CAPACITY_INPUT").expect("producer fixture required"),
+        std::env::var("ARENA_RECONCILIATION_CAPACITY_INPUT").expect("wire fixture required"),
     );
     let output = std::path::PathBuf::from(
         std::env::var("ARENA_RECONCILIATION_CAPACITY_OUTPUT")
             .expect("Channel NDJSON output required"),
     );
-    assert_ne!(input, output, "never replace the original producer fixture");
+    assert_ne!(input, output, "never replace the original wire fixture");
     let http_status: u16 = std::env::var("ARENA_RECONCILIATION_CAPACITY_STATUS")
         .unwrap_or_else(|_| "200".into())
         .parse()
@@ -190,7 +191,7 @@ async fn reconciliation_producer_fixture_crosses_native_channel_byte_exact() {
         assert_eq!(result.unwrap_err().code, "reconciliation-output-too-large");
         assert_eq!(captured.sequence, 0);
         assert_eq!(std::fs::metadata(output).unwrap().len(), 0);
-        eprintln!("ARENA_RECONCILIATION_PRODUCER_CHAIN rejected_bytes={expected_bytes} source_sha256={expected_hash} channel_messages=0");
+        eprintln!("ARENA_RECONCILIATION_WIRE_CHAIN rejected_bytes={expected_bytes} source_sha256={expected_hash} channel_messages=0");
     } else {
         result.unwrap();
         assert_eq!(captured.bytes, expected_bytes);
@@ -200,6 +201,6 @@ async fn reconciliation_producer_fixture_crosses_native_channel_byte_exact() {
             format!("{:x}", captured.hasher.clone().finalize()),
             expected_hash
         );
-        eprintln!("ARENA_RECONCILIATION_PRODUCER_CHAIN status={http_status} bytes={expected_bytes} sha256={expected_hash} channel_messages={}", captured.sequence);
+        eprintln!("ARENA_RECONCILIATION_WIRE_CHAIN status={http_status} bytes={expected_bytes} sha256={expected_hash} channel_messages={}", captured.sequence);
     }
 }
