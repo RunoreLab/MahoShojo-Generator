@@ -37,7 +37,7 @@ export { importWebPackageArchive, WebPackageImportError } from './import';
 export { buildGenerationReadinessHints } from './generation-readiness';
 export type { WebPackageImportErrorCode, WebPackageImportResult } from './import';
 export { MAX_ARCHIVE_ENTRIES, MAX_ARCHIVE_EXPANDED_BYTES } from './archive';
-export { resolveWebPackageMediaType, WEB_PACKAGE_MEDIA_TYPES, WEB_PACKAGE_OPAQUE_MEDIA_TYPE } from './media-types';
+export { resolveWebPackageMediaType, resolveWebPackageTargetExtension, WEB_PACKAGE_MEDIA_TYPES, WEB_PACKAGE_OPAQUE_MEDIA_TYPE } from './media-types';
 export { assertJsonSchema202012 } from './json-schema';
 export { normalizeJsonTargetContent } from './target-normalize';
 export type { WebPackageJsonNormalization, WebPackageJsonTargetIssue } from './target-normalize';
@@ -355,6 +355,15 @@ export const createWebPackageOverlay = async (
   { maxBytes = DEFAULT_MAX_OUTPUT_BYTES }: { maxBytes?: number } = {},
 ): Promise<WebPackageOverlay> => {
   const base = await resolveWebPackage(ref);
+  return createWebPackageOverlayFromBase(base, generatedContent, { maxBytes });
+};
+
+/** Use the exact already-verified base captured by the host; never re-resolve staging. */
+export const createWebPackageOverlayFromBase = async (
+  base: ResolvedWebPackage,
+  generatedContent: string,
+  { maxBytes = DEFAULT_MAX_OUTPUT_BYTES }: { maxBytes?: number } = {},
+): Promise<WebPackageOverlay> => {
   const { content, bytes } = validateTargetContent(
     generatedContent,
     base.manifest.generation.mediaType,
@@ -485,6 +494,13 @@ export const findWebPackageCandidateById = async (
   return candidates.length === 1 ? candidates[0] : null;
 };
 
+export type WebPackageReplaySources = Readonly<{
+  /** Return only an already-verified exact revision, or null when missing/deleted. */
+  resolveExact: (_ref: WebPackageRef) => Promise<ResolvedWebPackage | null>;
+  /** Return already-verified candidates visible in this host's current library scope. */
+  findCandidatesById: (_packageId: string) => Promise<readonly ResolvedWebPackage[]>;
+}>;
+
 /**
  * Exact restore by default; compatibility only after explicit user choice.
  * Historical provenance stays on the caller's artifact — only the working
@@ -496,6 +512,9 @@ export const prepareWebPackageReplay = async (input: {
   allowCompatibility?: boolean;
   compatibilityRef?: WebPackageRef;
   maxBytes?: number;
+}, sources: WebPackageReplaySources = {
+  resolveExact: resolveWebPackage,
+  findCandidatesById: findWebPackageCandidatesById,
 }): Promise<WebPackageReplayOutcome> => {
   const artifact = WebPackageArtifactSchema.parse(input.artifact);
   const historicalOverlay = WebPackageOverlaySchema.parse({
@@ -507,7 +526,7 @@ export const prepareWebPackageReplay = async (input: {
 
   let exactBase: ResolvedWebPackage | null = null;
   try {
-    exactBase = await resolveWebPackage(artifact.packageRef);
+    exactBase = await sources.resolveExact(artifact.packageRef);
   } catch {
     exactBase = null;
   }
@@ -526,7 +545,9 @@ export const prepareWebPackageReplay = async (input: {
   }
 
   // Offer only candidates whose target contract matches the historical target.
-  const allCandidates = await findWebPackageCandidatesById(artifact.packageRef.id);
+  const allCandidates = (await sources.findCandidatesById(artifact.packageRef.id))
+    .filter((candidate) => candidate.ref.id === artifact.packageRef.id)
+    .sort((left, right) => compareLabels(left.ref.version, right.ref.version) || compareLabels(left.ref.digest, right.ref.digest));
   const compatibleCandidates = allCandidates.filter((candidate) => (
     candidate.manifest.generation.target === artifact.targetPath
     && candidate.manifest.generation.mediaType === artifact.targetMediaType

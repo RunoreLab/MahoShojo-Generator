@@ -8,6 +8,8 @@ import {
   resolveWebDisplayTitle,
 } from '@/lib/arena/battle-report-display-title';
 
+import { resolveWebDisplayTitle as sharedResolveWebDisplayTitle, resolveBattleReportDisplayTitle as sharedResolveBattleReportDisplayTitle } from '@mahoshojo/ai-core/arena-generation';
+
 const NOW = new Date(2026, 8, 22, 8, 39);
 const html = (inner: string): string => `<!doctype html><html><head>${inner}</head><body><p>正文</p></body></html>`;
 
@@ -51,6 +53,10 @@ describe('extractMetaHeadlineFromContent', () => {
 });
 
 describe('resolveWebDisplayTitle', () => {
+  it('uses the shared display-only implementation', () => {
+    expect(resolveWebDisplayTitle).toBe(sharedResolveWebDisplayTitle);
+    expect(resolveBattleReportDisplayTitle).toBe(sharedResolveBattleReportDisplayTitle);
+  });
   it('meta headline 优先于 HTML title（冲突时不自动纠正）', () => {
     const content = [
       html('<title>页面标题</title>'),

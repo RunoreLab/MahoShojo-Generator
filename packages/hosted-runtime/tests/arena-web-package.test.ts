@@ -45,6 +45,35 @@ const createLocalProjectionPackage = async (overrides: Record<string, unknown> =
 };
 
 describe('Web Package hosted generation', () => {
+  it.each([
+    [content, ''],
+    [content, '<!-- MAHOSHOJO_ARENA_META {broken} -->'],
+    ['<html><body>尚无完整文档', ''],
+  ])('preserves free Web completion without adopting the package meta/document gate', async (source, suffix) => {
+    const generate = vi.fn(async () => ({ body: new Response(source + suffix).body!, telemetry: { finishReason: 'stop' } }));
+    const finalize = vi.fn(async () => ({ resultRef: 'r2:free', ranking: null }));
+    const runtime = createArenaGenerationRuntime({
+      checkSafety: async () => null, buildPrompt: buildArenaGenerationPrompt, generate, finalize,
+    });
+    const prepared = await runtime.prepare!({
+      request: new Request('https://example.test/api/arena/generate-stream'), actorKey: 'user:42',
+      generationRequestId: 'free-request', payload: { ...payload, webPackageRef: undefined },
+    });
+    if (prepared instanceof Response || isArenaGenerationAuditableRejection(prepared)) throw new Error('unexpected rejection');
+    const events: Array<{ type: string; data: unknown }> = [];
+    const terminal = await runtime.execute({
+      generationId: 'free-generation', generationRequestId: 'free-request', actorKey: 'user:42',
+      producerToken: 'producer', payloadHash: 'hash', payload: prepared.executionPayload,
+      signal: new AbortController().signal, emit: async event => { events.push(event); },
+      claimFinalization: async () => ({ kind: 'claimed' }),
+    });
+    expect(terminal.status).toBe('completed');
+    expect(terminal.webPackage).toBeUndefined();
+    expect(generate).toHaveBeenCalledOnce();
+    expect(finalize).toHaveBeenCalledWith(expect.objectContaining({ status: 'completed', markdown: source }));
+    expect(events.find(event => event.type === 'meta_error')).toBeDefined();
+  });
+
   it('projects the news HTML target consistently for stream and non-stream generation', async () => {
     const ref = BUILTIN_ARENA_NEWS_PACKAGE_REF;
     const results = await Promise.all(['stream', 'non-stream'].map((deliveryMode) => buildArenaGenerationPrompt({

@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { createArenaStreamProjector } from '../src/arena-generation/stream-projector';
+import { createArenaStreamProjector as sharedCreateArenaStreamProjector } from '@mahoshojo/ai-core/arena-generation';
 
 describe('Arena stream projector', () => {
+  it('uses the shared projector, including strict package trailers', () => {
+    expect(createArenaStreamProjector).toBe(sharedCreateArenaStreamProjector);
+  });
   it('HTML/JS/CSS 跨 token 保留原始字节且仅分离机器 meta', () => {
     const source = '<!doctype html><html><style>.a{color:red}</style><script>const x="<b>";</script>你好</html>\n';
     const output = source + '<!-- MAHOSHOJO_ARENA_META {"version":1,"report":{"winner":"A"}} -->';

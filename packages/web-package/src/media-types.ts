@@ -1,3 +1,5 @@
+import type { WebPackageArtifact } from '@mahoshojo/contracts/web-package';
+
 /**
  * Extension → media type for derived file tables.
  *
@@ -103,3 +105,22 @@ const SCAN_OPAQUE_MEDIA_TYPES: ReadonlySet<string> = new Set([
 
 export const isWebPackageBinaryMediaType = (type: string): boolean =>
   SCAN_OPAQUE_MEDIA_TYPES.has(type);
+
+/** Canonical suffixes for generated target downloads, extracted from Arena Web. */
+const WEB_PACKAGE_TARGET_EXTENSIONS = Object.freeze({
+  'application/json': 'json',
+  'text/html': 'html',
+  'text/plain': 'txt',
+  'text/markdown': 'md',
+  'text/css': 'css',
+  'text/javascript': 'js',
+  'application/javascript': 'js',
+  'image/svg+xml': 'svg',
+} satisfies Record<WebPackageArtifact['targetMediaType'], string>);
+
+/** Filename hint only; does not change MIME, validate contents or grant execution. */
+export const resolveWebPackageTargetExtension = (mediaType: string): string => (
+  Object.prototype.hasOwnProperty.call(WEB_PACKAGE_TARGET_EXTENSIONS, mediaType)
+    ? WEB_PACKAGE_TARGET_EXTENSIONS[mediaType as WebPackageArtifact['targetMediaType']]
+    : 'txt'
+);

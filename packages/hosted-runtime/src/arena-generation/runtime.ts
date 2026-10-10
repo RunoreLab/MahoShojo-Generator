@@ -28,7 +28,8 @@ import type {
 } from '@mahoshojo/hosted-api/arena-generation/service';
 import { createArenaStreamProjector } from './stream-projector';
 import { assertStreamCompletion } from './completion';
-import { WebPackageRefSchema, type WebPackageArtifact } from '@mahoshojo/contracts/web-package';
+import { WebPackageRefSchema, type WebPackageArtifact, type WebPackagePromptProjection } from '@mahoshojo/contracts/web-package';
+import { ArenaWebPackageQualificationError, qualifyArenaWebPackageOutput } from '@mahoshojo/ai-core/arena-generation';
 import { createWebPackageOverlay, createWebPackageOverlayFromProjection, isWebPackageTargetError } from '@mahoshojo/web-package';
 import { isWebArenaOutputContract } from './output-contract';
 
@@ -848,40 +849,24 @@ export const createArenaGenerationRuntime = (
       assertStreamCompletion(telemetry);
       if (prepared.metadata.webPackageRef) {
         const eventData = metaEvent?.type === 'meta' ? metaEvent.data as Record<string, unknown> : null;
-        const meta = eventData?.meta as Record<string, unknown> | undefined;
-        const report = meta?.report as Record<string, unknown> | undefined;
-        if (meta?.version !== 1 || !report || typeof report.headline !== 'string' || !report.headline.trim()
-          || typeof report.winner !== 'string' || !report.winner.trim()) {
-          throw webPackageOutputError('ARENA_WEB_PACKAGE_OUTPUT_INVALID');
-        }
         try {
-          const projection = prepared.metadata.webPackagePromptProjection;
-          const overlay = projection !== undefined
-            ? await createWebPackageOverlayFromProjection(
-              projection as Parameters<typeof createWebPackageOverlayFromProjection>[0],
-              markdown,
-              { maxBytes: ARENA_RESOURCE_BUDGET.maxOutputBytes },
-            )
-            : await createWebPackageOverlay(
-              WebPackageRefSchema.parse(prepared.metadata.webPackageRef),
-              markdown,
-              { maxBytes: ARENA_RESOURCE_BUDGET.maxOutputBytes },
-            );
-          const expectedRef = WebPackageRefSchema.parse(prepared.metadata.webPackageRef);
-          if (overlay.packageRef.id !== expectedRef.id
-            || overlay.packageRef.version !== expectedRef.version
-            || overlay.packageRef.digest !== expectedRef.digest) {
-            throw new Error('Web Package overlay 与请求 ref 不匹配');
-          }
-          webPackage = {
-            packageRef: overlay.packageRef,
-            targetPath: overlay.targetPath,
-            targetMediaType: overlay.targetMediaType,
-            generatedDigest: overlay.generatedDigest,
-          };
+          const projection = prepared.metadata.webPackagePromptProjection as WebPackagePromptProjection | undefined;
+          const { artifact } = await qualifyArenaWebPackageOutput({
+            ref: WebPackageRefSchema.parse(prepared.metadata.webPackageRef),
+            projection,
+            content: markdown,
+            meta: eventData?.meta,
+            createOverlay: (content, options) => projection !== undefined
+              ? createWebPackageOverlayFromProjection(projection, content, options)
+              : createWebPackageOverlay(WebPackageRefSchema.parse(prepared.metadata.webPackageRef), content, options),
+          });
+          webPackage = artifact;
           executionMetadata.webPackage = webPackage;
           if (eventData) eventData.webPackage = webPackage;
         } catch (error) {
+          if (error instanceof ArenaWebPackageQualificationError && error.failure === 'meta') {
+            throw webPackageOutputError('ARENA_WEB_PACKAGE_OUTPUT_INVALID');
+          }
           // The failure kind travels in the code, not in the message: the model
           // output is already retained as plain text, so routing it through the
           // error channel would only widen that surface for no new information.

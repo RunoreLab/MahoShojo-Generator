@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { normalizeArenaWebOutput } from '@/lib/arena/web-output';
+import { normalizeArenaWebOutput as sharedNormalizeArenaWebOutput } from '@mahoshojo/ai-core/arena-generation';
 
 describe('normalizeArenaWebOutput', () => {
+  it('uses the shared framing implementation', () => {
+    expect(normalizeArenaWebOutput).toBe(sharedNormalizeArenaWebOutput);
+  });
   it('extracts the canonical HTML document and keeps surrounding text as notes', () => {
     const result = normalizeArenaWebOutput([
       '下面是本场特别战报。',
