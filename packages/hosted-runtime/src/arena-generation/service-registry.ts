@@ -5,11 +5,18 @@ import type {
 } from '@mahoshojo/hosted-api/arena-generation/service';
 
 let configuredService: ArenaGenerationService | null = null;
+let expectedUserIdAssertionInstalled = false;
+
+/** Only the Hono production composition supplies this assertion capability. */
+export const isArenaHostedIdentityAssertionInstalled = (): boolean =>
+  configuredService !== null && expectedUserIdAssertionInstalled;
 
 export const configureArenaGenerationService = (
   service: ArenaGenerationService | null,
+  options: Readonly<{ expectedUserIdAssertionInstalled?: boolean }> = {},
 ): void => {
   configuredService = service;
+  expectedUserIdAssertionInstalled = service !== null && options.expectedUserIdAssertionInstalled === true;
 };
 
 const unavailable = (): Response => new Response(JSON.stringify({

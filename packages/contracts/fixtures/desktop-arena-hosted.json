@@ -1,0 +1,344 @@
+{
+  "version": 1,
+  "protocolVersion": "arena-hosted-sse-v1",
+  "capability": {
+    "ok": true,
+    "contractVersion": "g25e1-v1",
+    "placement": "hono-primary",
+    "databaseProvider": "hono-d1-primary",
+    "consistency": "replica-ok",
+    "arenaHosted": {
+      "contractVersion": "arena-hosted-sse-v1",
+      "expectedUserIdAssertion": "v1",
+      "stream": "sse-v1"
+    }
+  },
+  "limits": {
+    "requestBodyBytes": 12582912,
+    "outputContentBytes": 4194304,
+    "eventWireBytes": 25231360,
+    "ipcTextBytes": 65536,
+    "ipcEnvelopeBytes": 524288,
+    "headerEncodedBytes": 65536,
+    "headerDecodedBytes": 65536,
+    "recoveryPointerCodeUnits": 16384
+  },
+  "validOperations": [
+    {
+      "operation": "create-stream",
+      "product": "battle",
+      "requestId": "arena_request_1234",
+      "actor": {
+        "kind": "account",
+        "expectedUserId": 42
+      },
+      "body": {
+        "mode": "daily",
+        "reportFormat": "markdown",
+        "combatants": [
+          {
+            "type": "magical-girl",
+            "data": {
+              "name": "Synthetic"
+            }
+          }
+        ],
+        "writeArenaHistory": false,
+        "writeCurrentState": false,
+        "arenaFreeRankingEnabled": false
+      }
+    },
+    {
+      "operation": "lookup-request",
+      "product": "battle",
+      "requestId": "arena_request_1234",
+      "actor": {
+        "kind": "account",
+        "expectedUserId": 42
+      }
+    },
+    {
+      "operation": "status",
+      "product": "battle",
+      "requestId": "arena_request_1234",
+      "actor": {
+        "kind": "account",
+        "expectedUserId": 42
+      },
+      "generationId": "arena_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "operation": "resume",
+      "product": "battle",
+      "requestId": "arena_request_1234",
+      "actor": {
+        "kind": "account",
+        "expectedUserId": 42
+      },
+      "generationId": "arena_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "after": "123-0"
+    },
+    {
+      "operation": "stop",
+      "product": "battle",
+      "requestId": "arena_request_1234",
+      "actor": {
+        "kind": "account",
+        "expectedUserId": 42
+      },
+      "reason": "user"
+    },
+    {
+      "operation": "stop",
+      "product": "battle",
+      "requestId": "arena_request_1234",
+      "actor": {
+        "kind": "account",
+        "expectedUserId": 42
+      },
+      "generationId": "arena_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "reason": "content_policy"
+    },
+    {
+      "operation": "lookup-request",
+      "product": "battle",
+      "requestId": "arena_request_1234",
+      "actor": {
+        "kind": "account",
+        "expectedUserId": 42
+      },
+      "restoreSession": true
+    }
+  ],
+  "validSseEvents": [
+    {
+      "id": "1-0",
+      "event": "markdown",
+      "data": {
+        "chunk": "正文\n"
+      }
+    },
+    {
+      "id": "1-1",
+      "event": "reasoning",
+      "data": {
+        "chunk": "推理"
+      }
+    },
+    {
+      "id": "1-2",
+      "event": "reasoning_done",
+      "data": {
+        "source": "sdk",
+        "status": "done"
+      }
+    },
+    {
+      "id": "1-3",
+      "event": "telemetry",
+      "data": {
+        "version": 1,
+        "aiModel": "synthetic-model",
+        "usage": {
+          "completionTokens": 8,
+          "textTokens": 5,
+          "reasoningTokens": 3,
+          "completionTokensIncludesReasoning": true
+        }
+      }
+    },
+    {
+      "id": "1-4",
+      "event": "meta",
+      "data": {
+        "parseOk": true,
+        "meta": {
+          "report": {
+            "headline": "报告"
+          }
+        },
+        "raw": "<!-- MAHOSHOJO_ARENA_META {} -->",
+        "rawTruncated": false
+      }
+    },
+    {
+      "id": "1-5",
+      "event": "meta_error",
+      "data": {
+        "parseOk": false,
+        "error": "missing"
+      }
+    },
+    {
+      "id": "1-6",
+      "event": "snapshot",
+      "data": {
+        "status": "completed",
+        "markdown": "正文\n",
+        "reasoning": "",
+        "lastEventId": null,
+        "updatedAt": "2026-10-10T00:00:00.000Z",
+        "telemetry": {
+          "version": 1,
+          "aiModel": "synthetic"
+        }
+      }
+    },
+    {
+      "id": "1-7",
+      "event": "done",
+      "data": {
+        "ok": true,
+        "status": "completed"
+      }
+    },
+    {
+      "id": "1-8",
+      "event": "error",
+      "data": {
+        "ok": false,
+        "status": "failed",
+        "code": "GENERATION_FAILED"
+      }
+    },
+    {
+      "id": "1-9",
+      "event": "telemetry",
+      "data": {
+        "errorClass": "TypeError"
+      }
+    }
+  ],
+  "boundaryRecipes": {
+    "snapshot": {
+      "character": "\u0001",
+      "repeat": 4194304,
+      "id": "9999999999999-0",
+      "updatedAt": "2026-10-10T00:00:00.000Z"
+    },
+    "ipc": {
+      "character": "\u0001",
+      "repeat": 65536
+    },
+    "unicodeIpc": {
+      "character": "😀",
+      "repeat": 16384
+    },
+    "references": {
+      "historyCount": 51,
+      "questionnaireCount": 51,
+      "maxCombined": 256
+    },
+    "meta": {
+      "headlineCharacter": "x",
+      "headlineRepeat": 4194248,
+      "sourceBytes": 4194304,
+      "rawCodeUnits": 8000,
+      "id": "2-0",
+      "wireBytes": 4202360
+    }
+  },
+  "pointer": {
+    "version": 1,
+    "product": "battle",
+    "protocolVersion": "arena-hosted-sse-v1",
+    "requestId": "arena_request_1234",
+    "bodyHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "actor": {
+      "kind": "account",
+      "expectedUserId": 42
+    },
+    "format": "markdown",
+    "battleMode": "daily",
+    "state": "prepared",
+    "updatedAt": "2026-10-10T00:00:00.000Z"
+  },
+  "validErrors": [
+    {
+      "code": "storage-unavailable",
+      "message": "Arena local state unavailable",
+      "dispatchState": "not-dispatched",
+      "intentOwnership": "prior-retained"
+    },
+    {
+      "code": "storage-unavailable",
+      "message": "Arena local state unavailable",
+      "dispatchState": "not-dispatched",
+      "intentOwnership": "current-owned"
+    },
+    {
+      "code": "storage-unavailable",
+      "message": "Arena local state unavailable",
+      "dispatchState": "not-dispatched",
+      "intentOwnership": "unknown"
+    },
+    {
+      "code": "storage-unavailable",
+      "message": "Arena local state unavailable",
+      "dispatchState": "unknown",
+      "intentOwnership": "prior-retained"
+    },
+    {
+      "code": "storage-unavailable",
+      "message": "Arena local state unavailable",
+      "dispatchState": "unknown",
+      "intentOwnership": "current-owned"
+    },
+    {
+      "code": "storage-unavailable",
+      "message": "Arena local state unavailable",
+      "dispatchState": "unknown",
+      "intentOwnership": "unknown"
+    }
+  ],
+  "validRecoveryHintRequests": [
+    {
+      "product": "battle"
+    },
+    {
+      "product": "arena"
+    }
+  ],
+  "validRecoveryHints": [
+    {
+      "product": "battle",
+      "state": "none"
+    },
+    {
+      "product": "battle",
+      "state": "unavailable"
+    },
+    {
+      "product": "arena",
+      "state": "none"
+    },
+    {
+      "product": "arena",
+      "state": "unavailable"
+    },
+    {
+      "product": "battle",
+      "state": "available",
+      "requestId": "arena_request_1234",
+      "actorKind": "account"
+    },
+    {
+      "product": "battle",
+      "state": "expired",
+      "requestId": "arena_request_1234",
+      "actorKind": "account"
+    },
+    {
+      "product": "arena",
+      "state": "available",
+      "requestId": "arena_request_1234",
+      "actorKind": "anonymous"
+    },
+    {
+      "product": "arena",
+      "state": "expired",
+      "requestId": "arena_request_1234",
+      "actorKind": "anonymous"
+    }
+  ]
+}

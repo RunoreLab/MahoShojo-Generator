@@ -132,7 +132,7 @@ export const configureHonoArenaGenerationRuntime = (
       },
     },
   });
-  configureArenaGenerationService(generationService);
+  configureArenaGenerationService(generationService, { expectedUserIdAssertionInstalled: true });
   const repairMetaService = createNodeArenaRepairMetaService({
     resolveActor: actorResolvers.resolveActor,
     readProvenance: async (input) => {

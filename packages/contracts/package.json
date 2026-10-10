@@ -99,6 +99,11 @@
       "types": "./src/provider-target.ts",
       "import": "./src/provider-target.ts",
       "default": "./src/provider-target.ts"
+    },
+    "./desktop-arena-hosted": {
+      "types": "./src/desktop-arena-hosted.ts",
+      "import": "./src/desktop-arena-hosted.ts",
+      "default": "./src/desktop-arena-hosted.ts"
     }
   },
   "scripts": {

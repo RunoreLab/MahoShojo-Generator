@@ -293,3 +293,16 @@ POSIX 工具。`.env.hono` 必须是当前部署用户所有、权限为 `0600` 
 同源相对路径，旧 Next API 至少保留两个发布周期用于回滚。Arena generation 的 create 与后续 control 请求在一次 generation
 内不得跨 runtime 盲目 replay；回滚时应先把 `arena/generate-stream` 移回 exited manifest，并同步撤销三个 control surface 的
 入口转发，再回滚 Web resume。当前阶段不提供 `/ws`。
+
+### Desktop Arena SSE 期望账号断言
+
+Arena create、lookup、status、resume 与两种 stop 共用实际 actor 认证；可选
+`X-Mahoshojo-Arena-Expected-User-Id: v1:<userId>` 要求认证结果是严格相同的正安全整数账号。
+声明不授予身份；无效、缺失或失效的认证不能降级为匿名。未携声明的旧 Web 请求仍保留既有语义。
+
+只有本 Hono 运行时已装配断言实现且原 readiness 成功时，公开
+`GET /api/hosted/dr-readiness` 才附带
+`arenaHosted={contractVersion:"arena-hosted-sse-v1",expectedUserIdAssertion:"v1",stream:"sse-v1"}`。
+Native 必须在创建及跨重启首次恢复前以不携 Cookie、actor token、Provider Key 的 GET 验证该证据，
+旧服务缺少该字段即不可派发；Next 不声明此能力，也没有兜底创建。此声明不是生成健康保证，
+实际创建仍独立执行 Redis、签名及 durable finalization readiness。本片代码不代表线上部署。

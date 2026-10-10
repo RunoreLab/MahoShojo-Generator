@@ -1,3 +1,4 @@
+import { ARENA_EXPECTED_USER_ID_HEADER, parseArenaExpectedUserIdAssertion } from '@mahoshojo/contracts/desktop-arena-hosted';
 import {
   type ArenaGenerationActor,
 } from '@mahoshojo/hosted-api/arena-generation/service';
@@ -164,7 +165,15 @@ export const createArenaGenerationActorResolvers = (
   };
 
   const resolveActor = async (request: Request): Promise<ArenaGenerationActor | null> => {
+    const assertion = request.headers.get(ARENA_EXPECTED_USER_ID_HEADER);
+    const expectedUserId = assertion === null ? null : parseArenaExpectedUserIdAssertion(assertion);
+    if (assertion !== null && expectedUserId === null) return null;
     const authentication = await resolveAuthentication(request);
+    if (assertion !== null && (
+      authentication.status !== 'authenticated'
+      || authentication.userId !== expectedUserId
+      || request.headers.has(ARENA_PVP_GENERATION_SIGNATURE_HEADER)
+    )) return null;
     if (authentication.status === 'denied') return null;
     const userId = authentication.status === 'authenticated'
       ? authentication.userId
