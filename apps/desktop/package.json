@@ -21,6 +21,7 @@
     "@mahoshojo/ai-direct": "workspace:*",
     "@mahoshojo/contracts": "workspace:*",
     "@mahoshojo/domain": "workspace:*",
+    "@mahoshojo/hosted-api": "workspace:*",
     "@mahoshojo/local-library": "workspace:*",
     "@mahoshojo/ui-web": "workspace:*",
     "@mahoshojo/web-package": "workspace:*",
