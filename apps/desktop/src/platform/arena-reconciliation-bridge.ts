@@ -5,16 +5,31 @@ import {
 import { DesktopArenaHostedScopeSchema, type DesktopArenaHostedScope } from '@mahoshojo/contracts/desktop-arena-hosted';
 import { DesktopArenaHostedJsonChannelEventSchema } from '@mahoshojo/contracts/desktop-arena-hosted-json';
 import { ARENA_HOSTED_STREAM_COMMAND, ArenaHostedBridgeError, detachArenaHosted, normalizeArenaHostedBridgeFailure, type ArenaHostedChannel } from './arena-hosted-bridge';
+import type { DesktopArenaHostedStoryReconcileRequest } from '@mahoshojo/contracts/desktop-arena-story-transport';
 import type { InvokeFn } from './cloud-bridge';
+
+export interface ArenaReconciliationChannelOptions { signal?: AbortSignal; createChannel?: () => ArenaHostedChannel }
 
 export const reconcileArenaHosted = (
   invoke: InvokeFn,
   scope: DesktopArenaHostedScope,
   value: unknown,
-  options: { signal?: AbortSignal; createChannel?: () => ArenaHostedChannel } = {},
+  options: ArenaReconciliationChannelOptions = {},
 ): Promise<ReturnType<typeof parseArenaReconciliationResponse>> => {
   const payload = ArenaReconciliationRequestSchema.parse(value);
-  const request = { operation: 'reconcile', ...DesktopArenaHostedScopeSchema.parse(scope), ...payload };
+  const request = { operation: 'reconcile' as const, ...DesktopArenaHostedScopeSchema.parse(scope), ...payload };
+  return receiveArenaReconciliationChannel(invoke, request, payload.combatants.length, options);
+};
+
+/** Shared receiver for already validated requests. Native owns the exact story role source. */
+export const receiveArenaReconciliationChannel = (
+  invoke: InvokeFn,
+  request: (DesktopArenaHostedScope & ReturnType<typeof ArenaReconciliationRequestSchema.parse> & { operation: 'reconcile' }) | DesktopArenaHostedStoryReconcileRequest,
+  expectedCombatantCount: number,
+  options: ArenaReconciliationChannelOptions = {},
+): Promise<ReturnType<typeof parseArenaReconciliationResponse>> => {
+  if (!Number.isInteger(expectedCombatantCount) || expectedCombatantCount < 1
+    || expectedCombatantCount > ARENA_RECONCILIATION_LIMITS.maxCombatants) throw new ArenaHostedBridgeError('invalid-request', 'not-dispatched');
   const abortError = () => new DOMException('本机角色同步已停止；战报与原卡仍保留。', 'AbortError');
   if (options.signal?.aborted) return Promise.reject(abortError());
   return new Promise((resolve, reject) => {
@@ -45,7 +60,7 @@ export const reconcileArenaHosted = (
           if (wireBytes > ARENA_RECONCILIATION_LIMITS.responseBodyBytes) throw new ArenaHostedBridgeError('protocol');
           fragments.push(event.text);
           if (event.final) {
-            response = parseArenaReconciliationResponse(fragments.join(''), request.generationId, request.combatants.length); fragments = [];
+            response = parseArenaReconciliationResponse(fragments.join(''), request.generationId, expectedCombatantCount); fragments = [];
             if ((status >= 200 && status < 300) !== ('success' in response && response.success === true)) throw new ArenaHostedBridgeError('protocol');
           }
         } else {

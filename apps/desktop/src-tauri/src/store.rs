@@ -102,7 +102,7 @@ pub fn scalar_i64(connection: &Connection, sql: &str) -> Result<i64, StoreError>
 /// D1 引入 `provider_profile`（版本 1）；D2.0 在**同一个库**上增加本地卡（版本 2）；
 /// D2.1 增加内容寻址 blob 与 Web 包记录（版本 3、4）。刻意不新开数据库文件：Profile、
 /// 本地卡、Web 包与 blob 同属一台设备上的用户资产，分库会让备份、迁移与"重开应用"各自多一套路径。
-pub const SCHEMA_VERSION: i64 = 6;
+pub const SCHEMA_VERSION: i64 = 7;
 
 /// 单条文档的 UTF-8 字节上限。
 ///
@@ -256,6 +256,10 @@ const MIGRATION_STEPS: &[MigrationStep] = &[
     MigrationStep {
         version: 6,
         sql: crate::arena_story::pending::MIGRATION_6,
+    },
+    MigrationStep {
+        version: 7,
+        sql: crate::arena_story::pending::MIGRATION_7,
     },
 ];
 
@@ -644,7 +648,7 @@ mod tests {
 
         let versions = applied_migrations(&store.connection.lock().expect("lock"))
             .expect("migration journal must be readable");
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7]);
 
         // 重复打开同一个库不会重复执行迁移。
         let reopened = LocalStore::open_in_memory().expect("reopen");
@@ -693,7 +697,7 @@ mod tests {
         );
         let versions = applied_migrations(&store.connection.lock().expect("lock"))
             .expect("migration journal must be readable");
-        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]);
+        assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7]);
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -787,7 +791,7 @@ mod tests {
             assert_eq!(store.schema_version().expect("version"), SCHEMA_VERSION);
             let versions = applied_migrations(&store.connection.lock().expect("lock"))
                 .expect("journal must be readable");
-            assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]);
+            assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7]);
         }
 
         // 第三次打开：全部已完成，不重复执行。
@@ -795,7 +799,7 @@ mod tests {
             let store = LocalStore::open(&LocalStorePaths::under(&root)).expect("third open");
             assert_eq!(
                 applied_migrations(&store.connection.lock().expect("lock")).expect("journal"),
-                vec![1, 2, 3, 4, 5, 6]
+                vec![1, 2, 3, 4, 5, 6, 7]
             );
         }
 

@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 
+use crate::arena_story::{pending as story_pending, StoryStore};
 use crate::cloud::{self, CloudHostedPresetConfig, CloudHostedSystemConfig, CloudState};
 use crate::secret::{SecretStore, MAX_SECRET_VALUE_BYTES};
 
@@ -133,6 +134,28 @@ pub enum ArenaRequest {
         #[serde(default, deserialize_with = "non_null")]
         replace_request_id: Option<String>,
     },
+    CreateStoryStream {
+        product: Product,
+        request_id: String,
+        actor: Actor,
+        pending_revision: u64,
+        input_digest: String,
+        client_body_hash: String,
+        #[serde(default, deserialize_with = "non_null")]
+        system_config: Option<CloudHostedSystemConfig>,
+        #[serde(default, deserialize_with = "non_null")]
+        preset_config: Option<CloudHostedPresetConfig>,
+        #[serde(default, deserialize_with = "non_null")]
+        replace_request_id: Option<String>,
+    },
+    ReconcileStory {
+        product: Product,
+        request_id: String,
+        actor: Actor,
+        pending_revision: u64,
+        input_digest: String,
+        generation_id: String,
+    },
     Reconcile {
         product: Product,
         request_id: String,
@@ -204,6 +227,18 @@ impl ArenaRequest {
                 actor,
                 ..
             }
+            | Self::CreateStoryStream {
+                product,
+                request_id,
+                actor,
+                ..
+            }
+            | Self::ReconcileStory {
+                product,
+                request_id,
+                actor,
+                ..
+            }
             | Self::Reconcile {
                 product,
                 request_id,
@@ -240,12 +275,14 @@ impl ArenaRequest {
         match self {
             Self::Status { generation_id, .. }
             | Self::Resume { generation_id, .. }
-            | Self::Reconcile { generation_id, .. } => Some(generation_id),
+            | Self::Reconcile { generation_id, .. }
+            | Self::ReconcileStory { generation_id, .. } => Some(generation_id),
             Self::Stop { generation_id, .. } => generation_id.as_deref(),
             _ => None,
         }
     }
     fn validate(&self) -> Result<(), ArenaError> {
+        story::validate_request(self)?;
         let (_, id, actor) = self.scope();
         if !request_id_valid(id) {
             return Err(invalid());
@@ -373,6 +410,7 @@ struct AnonymousRecord {
     token_expires_at: Option<u64>,
 }
 struct Flight {
+    story: Option<story::Binding>,
     request_id: String,
     actor: Actor,
     account_fingerprint: String,
@@ -496,13 +534,16 @@ pub enum RecoveryHint {
 }
 
 pub struct ArenaState {
+    stories: Arc<StoryStore>,
+    #[cfg(test)]
+    test_root: Option<tempfile::TempDir>,
     http: reqwest::Client,
     origin: String,
     reconciliation_origin: String,
     flights: Mutex<HashMap<Product, Arc<Mutex<Flight>>>>,
 }
 impl ArenaState {
-    pub fn new() -> Result<Self, ArenaError> {
+    pub fn new(stories: Arc<StoryStore>) -> Result<Self, ArenaError> {
         let http = reqwest::Client::builder()
             // Fixed credential-bearing origins must not inherit a third-party environment proxy.
             .no_proxy()
@@ -511,6 +552,9 @@ impl ArenaState {
             .build()
             .map_err(|_| network())?;
         Ok(Self {
+            stories,
+            #[cfg(test)]
+            test_root: None,
             http,
             origin: ORIGIN.to_string(),
             reconciliation_origin: reconciliation::ORIGIN.to_string(),
@@ -518,11 +562,19 @@ impl ArenaState {
         })
     }
     #[cfg(test)]
+    fn isolated() -> Self {
+        let root = tempfile::tempdir().unwrap();
+        let library = crate::library::LocalLibrary::open(root.path()).unwrap();
+        let mut state = Self::new(library.shared_stories()).unwrap();
+        state.test_root = Some(root);
+        state
+    }
+    #[cfg(test)]
     fn with_origin(origin: String) -> Self {
         assert!(origin.starts_with("http://127.0.0.1:"));
         Self {
             origin,
-            ..Self::new().unwrap()
+            ..Self::isolated()
         }
     }
     fn is_current(
@@ -556,12 +608,30 @@ impl ArenaState {
         cloud: &CloudState,
         secrets: &dyn SecretStore,
     ) -> Result<Arc<Mutex<Flight>>, ArenaError> {
+        let (product, _, _) = request.scope();
+        let guard = self
+            .stories
+            .pending_admission(story::product(product))
+            .map_err(story::storage_error)?;
+        story::admit(self, &guard, request, false)?;
+        let flight = self.prepare_unchecked(request, cloud, secrets)?;
+        story::bind_existing(self, &guard, request, &flight)?;
+        Ok(flight)
+    }
+    fn prepare_unchecked(
+        &self,
+        request: &ArenaRequest,
+        cloud: &CloudState,
+        secrets: &dyn SecretStore,
+    ) -> Result<Arc<Mutex<Flight>>, ArenaError> {
         request.validate()?;
         let (product, request_id, actor) = request.scope();
         let snapshot = cloud::arena_account_snapshot(cloud, secrets).map_err(|_| stale())?;
         let create = matches!(
             request,
-            ArenaRequest::CreateStream { .. } | ArenaRequest::CreateJson { .. }
+            ArenaRequest::CreateStream { .. }
+                | ArenaRequest::CreateJson { .. }
+                | ArenaRequest::CreateStoryStream { .. }
         );
         if let Actor::Account { expected_user_id } = actor {
             if snapshot.user_id != Some(*expected_user_id) {
@@ -609,6 +679,7 @@ impl ArenaState {
                         secrets_to_redact.push(cookie.clone());
                     }
                     let next = Arc::new(Mutex::new(Flight {
+                        story: old.story.clone(),
                         request_id: old.request_id.clone(),
                         actor: old.actor.clone(),
                         account_fingerprint: snapshot.fingerprint,
@@ -639,6 +710,9 @@ impl ArenaState {
                 }
                 | ArenaRequest::CreateJson {
                     replace_request_id, ..
+                }
+                | ArenaRequest::CreateStoryStream {
+                    replace_request_id, ..
                 } => replace_request_id.as_deref(),
                 _ => None,
             };
@@ -660,6 +734,9 @@ impl ArenaState {
                         replace_request_id, ..
                     }
                     | ArenaRequest::CreateJson {
+                        replace_request_id, ..
+                    }
+                    | ArenaRequest::CreateStoryStream {
                         replace_request_id, ..
                     } => replace_request_id.as_deref(),
                     _ => None,
@@ -693,6 +770,9 @@ impl ArenaState {
                             replace_request_id, ..
                         }
                         | ArenaRequest::CreateJson {
+                            replace_request_id, ..
+                        }
+                        | ArenaRequest::CreateStoryStream {
                             replace_request_id, ..
                         } => replace_request_id.as_deref(),
                         _ => None,
@@ -742,6 +822,7 @@ impl ArenaState {
             }))
             .collect();
         let flight = Arc::new(Mutex::new(Flight {
+            story: None,
             request_id: request_id.to_string(),
             actor: actor.clone(),
             account_fingerprint: snapshot.fingerprint,
@@ -779,6 +860,21 @@ impl ArenaState {
                 return Ok(());
             }
         }
+        let json_capable = self
+            .probe_capability(require_json, require_json_reconciliation, false)
+            .await?;
+        self.is_current(product, flight, cloud, secrets)?;
+        let mut f = flight.lock().map_err(|_| stale())?;
+        f.capability_verified = true;
+        f.json_capability_verified = json_capable;
+        Ok(())
+    }
+    async fn probe_capability(
+        &self,
+        require_json: bool,
+        require_json_reconciliation: bool,
+        require_story: bool,
+    ) -> Result<bool, ArenaError> {
         // Deliberately a fresh public GET: no Cookie, actor token, Provider Key or renderer headers.
         let response = self
             .http
@@ -787,7 +883,6 @@ impl ArenaState {
             .send()
             .await
             .map_err(|_| error("capability-unavailable", "Arena 服务能力未确认，未派发创建"))?;
-        self.is_current(product, flight, cloud, secrets)?;
         if response.status().as_u16() != 200 {
             return Err(error(
                 "capability-unavailable",
@@ -819,6 +914,18 @@ impl ArenaState {
                 "Arena 完整报告服务尚未支持冻结角色写入选择",
             ));
         }
+        if require_story
+            && response
+                .headers()
+                .get(story::PROTOCOL_HEADER)
+                .and_then(|v| v.to_str().ok())
+                != Some(story::PROTOCOL_VERSION)
+        {
+            return Err(error(
+                "capability-unavailable",
+                "Arena 服务尚未支持连续故事创建协议",
+            ));
+        }
         let value = read_json(response, HEADER_BYTES).await?;
         let expected = json!({"contractVersion":"arena-hosted-sse-v1","expectedUserIdAssertion":"v1","stream":"sse-v1"});
         if value.get("ok") != Some(&Value::Bool(true))
@@ -833,11 +940,7 @@ impl ArenaState {
                 "Arena 服务尚未支持本客户端的身份协议",
             ));
         }
-        self.is_current(product, flight, cloud, secrets)?;
-        let mut f = flight.lock().map_err(|_| stale())?;
-        f.capability_verified = true;
-        f.json_capability_verified = json_capable;
-        Ok(())
+        Ok(json_capable)
     }
     fn authenticated(
         &self,
@@ -1476,6 +1579,9 @@ impl ArenaState {
             return Err(protocol());
         }
         accept_control_identity(&body, flight)?;
+        if let Some(id) = body.get("generationId").and_then(Value::as_str) {
+            story::observe(self, product, flight, id, None)?;
+        }
         Ok(ControlResponse {
             status,
             body,
@@ -1515,6 +1621,8 @@ pub async fn control(
         request,
         ArenaRequest::CreateStream { .. }
             | ArenaRequest::CreateJson { .. }
+            | ArenaRequest::CreateStoryStream { .. }
+            | ArenaRequest::ReconcileStory { .. }
             | ArenaRequest::Resume { .. }
             | ArenaRequest::Reconcile { .. }
     ) {
@@ -1600,6 +1708,10 @@ pub fn detach(state: &ArenaState, request: DetachRequest) -> Result<bool, ArenaE
     if !request_id_valid(&request.request_id) {
         return Err(invalid());
     }
+    let _admission = state
+        .stories
+        .pending_cancel_admission(story::product(request.product))
+        .map_err(story::storage_error)?;
     let flights = state.flights.lock().map_err(|_| stale())?;
     let Some(flight) = flights.get(&request.product) else {
         return Ok(false);
@@ -2381,68 +2493,96 @@ async fn stream_inner(
     sink: &dyn EventSink,
 ) -> Result<(), ArenaError> {
     request.validate()?;
-    if matches!(&request, ArenaRequest::Reconcile { .. }) {
+    if matches!(
+        &request,
+        ArenaRequest::Reconcile { .. } | ArenaRequest::ReconcileStory { .. }
+    ) {
         return reconciliation::run(state, cloud, secrets, request, sink).await;
     }
     let (product, id, _) = request.scope();
     let request_id = id.to_string();
     // Capture provider selection and plaintext before the first network await; never re-resolve on controls.
-    let (body, key_guard) = if let ArenaRequest::CreateStream {
-        body,
-        system_config,
-        preset_config,
-        reconciliation_version,
-        ..
-    }
-    | ArenaRequest::CreateJson {
-        body,
-        system_config,
-        preset_config,
-        reconciliation_version,
-        ..
-    } = &request
-    {
-        if reconciliation_version.is_some() {
-            validate_body_with_reconciliation(body, true)?;
-        } else {
-            validate_body(body)?;
+    let (body, key_guard, flight, mut story_permit, preflight_token) =
+        if let ArenaRequest::CreateStream {
+            body,
+            system_config,
+            preset_config,
+            reconciliation_version,
+            ..
         }
-        let provider =
-            cloud::arena_provider_config(system_config.clone(), preset_config.clone(), secrets)
-                .map_err(|_| invalid())?;
-        let key_guard = if let Some(config) = preset_config {
-            Some((
-                crate::provider_target::preset_secret_ref(&config.provider_id)
-                    .map_err(|_| invalid())?,
-                provider
-                    .as_ref()
-                    .and_then(|v| v.get("apiKey"))
-                    .and_then(Value::as_str)
-                    .ok_or_else(invalid)?
-                    .to_string(),
-            ))
+        | ArenaRequest::CreateJson {
+            body,
+            system_config,
+            preset_config,
+            reconciliation_version,
+            ..
+        } = &request
+        {
+            if reconciliation_version.is_some() {
+                validate_body_with_reconciliation(body, true)?;
+            } else {
+                validate_body(body)?;
+            }
+            let provider =
+                cloud::arena_provider_config(system_config.clone(), preset_config.clone(), secrets)
+                    .map_err(|_| invalid())?;
+            let key_guard = if let Some(config) = preset_config {
+                Some((
+                    crate::provider_target::preset_secret_ref(&config.provider_id)
+                        .map_err(|_| invalid())?,
+                    provider
+                        .as_ref()
+                        .and_then(|v| v.get("apiKey"))
+                        .and_then(Value::as_str)
+                        .ok_or_else(invalid)?
+                        .to_string(),
+                ))
+            } else {
+                None
+            };
+            let mut body = body.clone();
+            body["generationRequestId"] = json!(request_id);
+            if let Some(provider) = provider {
+                body["customProvider"] = provider;
+            }
+            if serialized_size(&body)? > INPUT_BYTES {
+                return Err(invalid());
+            }
+            let wire = serde_json::to_vec(&body).map_err(|_| invalid())?;
+            (
+                Some(wire),
+                key_guard,
+                state.prepare(&request, cloud, secrets)?,
+                None,
+                None,
+            )
+        } else if matches!(&request, ArenaRequest::CreateStoryStream { .. }) {
+            let prepared = story::prepare(state, cloud, secrets, &request).await?;
+            (
+                Some(prepared.wire),
+                prepared.key_guard,
+                prepared.flight,
+                Some(prepared.permit),
+                Some(prepared.token),
+            )
+        } else if matches!(request, ArenaRequest::Resume { .. }) {
+            (
+                None,
+                None,
+                state.prepare(&request, cloud, secrets)?,
+                None,
+                None,
+            )
         } else {
-            None
-        };
-        let mut body = body.clone();
-        body["generationRequestId"] = json!(request_id);
-        if let Some(provider) = provider {
-            body["customProvider"] = provider;
-        }
-        if serialized_size(&body)? > INPUT_BYTES {
             return Err(invalid());
-        }
-        (Some(body), key_guard)
-    } else if matches!(request, ArenaRequest::Resume { .. }) {
-        (None, None)
-    } else {
-        return Err(invalid());
-    };
-    let flight = state.prepare(&request, cloud, secrets)?;
-    let token = Arc::new(CancellationToken::new());
+        };
+    let token = preflight_token.unwrap_or_else(|| Arc::new(CancellationToken::new()));
     {
         let mut f = flight.lock().map_err(|_| stale())?;
-        if f.subscription.is_some() {
+        if f.subscription
+            .as_ref()
+            .is_some_and(|active| !Arc::ptr_eq(active, &token))
+        {
             return Err(error("subscription-in-progress", "此请求已有本机订阅"));
         }
         if let ArenaRequest::Resume {
@@ -2519,24 +2659,34 @@ async fn stream_inner(
             }
         }
         let builder = match &request {
-            ArenaRequest::CreateStream { .. } | ArenaRequest::CreateJson { .. } => {
-                let mut f = flight.lock().map_err(|_| stale())?;
-                if f.dispatched {
-                    return Err(invalid());
+            ArenaRequest::CreateStream { .. }
+            | ArenaRequest::CreateJson { .. }
+            | ArenaRequest::CreateStoryStream { .. } => {
+                story::dispatch(
+                    state,
+                    cloud,
+                    secrets,
+                    &request,
+                    &flight,
+                    story_permit.take(),
+                )?;
+                let is_story = matches!(&request, ArenaRequest::CreateStoryStream { .. });
+                let path = if is_story {
+                    story::CREATE_PATH.to_string()
+                } else if is_json {
+                    json_delivery::CREATE_PATH.to_string()
+                } else {
+                    format!("{CREATE_PATH}?format=sse")
+                };
+                let builder = state
+                    .authenticated(reqwest::Method::POST, &path, &flight)?
+                    .header(reqwest::header::CONTENT_TYPE, "application/json")
+                    .body(body.as_ref().ok_or_else(invalid)?.clone());
+                if is_story {
+                    builder.header(story::PROTOCOL_HEADER, story::PROTOCOL_VERSION)
+                } else {
+                    builder
                 }
-                f.dispatched = true;
-                drop(f);
-                state
-                    .authenticated(
-                        reqwest::Method::POST,
-                        &if is_json {
-                            json_delivery::CREATE_PATH.to_string()
-                        } else {
-                            format!("{CREATE_PATH}?format=sse")
-                        },
-                        &flight,
-                    )?
-                    .json(body.as_ref().ok_or_else(invalid)?)
             }
             ArenaRequest::Resume {
                 generation_id,
@@ -2587,6 +2737,15 @@ async fn stream_inner(
         if (300..400).contains(&status) {
             return Err(protocol());
         }
+        if matches!(&request, ArenaRequest::CreateStoryStream { .. })
+            && response
+                .headers()
+                .get(story::PROTOCOL_HEADER)
+                .and_then(|value| value.to_str().ok())
+                != Some(story::PROTOCOL_VERSION)
+        {
+            return Err(protocol());
+        }
         let generation_id = checked_header(
             response.headers(),
             "x-mahoshojo-generation-id",
@@ -2617,6 +2776,7 @@ async fn stream_inner(
                 &json!({"generationId":id,"generationRequestId":request_id}),
                 &flight,
             )?;
+            story::observe(state, product, &flight, id, payload_hash.as_deref())?;
         }
         if is_json {
             return json_delivery::deliver(
@@ -2784,3 +2944,15 @@ mod json_delivery;
 
 #[path = "arena_hosted_reconciliation.rs"]
 mod reconciliation;
+
+#[path = "arena_hosted_story.rs"]
+mod story;
+
+/// Pending publication and Flight creation share the same product admission gate.
+pub(crate) fn seal_story_pending(
+    state: &ArenaState,
+    stories: &StoryStore,
+    token: &str,
+) -> Result<story_pending::PendingSnapshot, crate::arena_story::StoryError> {
+    story::seal_pending(state, stories, token)
+}

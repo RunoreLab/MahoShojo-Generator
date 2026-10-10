@@ -886,9 +886,10 @@ fn query_arena_story_pending_upload(
 #[tauri::command(async)]
 fn seal_arena_story_pending(
     library: State<'_, LocalLibrary>,
+    arena: State<'_, arena_hosted::ArenaState>,
     token: String,
 ) -> Result<arena_story::pending::PendingSnapshot, arena_story::StoryError> {
-    library.stories().pending_seal(&token)
+    arena_hosted::seal_story_pending(&arena, library.stories(), &token)
 }
 #[tauri::command(async)]
 fn abort_arena_story_pending_upload(
@@ -1752,7 +1753,9 @@ pub fn run() {
             // D5.1-K1：公开持久缓存与正式本地库共用同一数据目录，但独立
             // SQLite 文件、独立连接、独立 schema 版本——损坏/未知版本只让
             // 缓存停用，绝不拖垮启动。惰性打开：首个公开读取才建文件。
-            app.manage(arena_hosted::ArenaState::new().map_err(|error| std::io::Error::other(error.message))?);
+            let arena = arena_hosted::ArenaState::new(library.shared_stories())
+                .map_err(|error| std::io::Error::other(error.message))?;
+            app.manage(arena);
             app.manage(public_cache::PublicReadCache::at(&data_root));
 
             app.manage(instance);

@@ -67,6 +67,11 @@ pub(super) async fn capability(
     secrets: &dyn SecretStore,
 ) -> Result<(), ArenaError> {
     state.is_current(product, flight, cloud, secrets)?;
+    probe_capability(state).await?;
+    state.is_current(product, flight, cloud, secrets)?;
+    Ok(())
+}
+pub(super) async fn probe_capability(state: &ArenaState) -> Result<(), ArenaError> {
     // Never cached: a server rollback must close the gate on every new POST.
     // This client has no cookie store or default authorization headers.
     let response = state
@@ -76,14 +81,12 @@ pub(super) async fn capability(
         .send()
         .await
         .map_err(|_| unavailable())?;
-    state.is_current(product, flight, cloud, secrets)?;
     if response.status().as_u16() != 200 || !json_content_type(&response) {
         return Err(unavailable());
     }
     let value = read_json(response, HEADER_BYTES)
         .await
         .map_err(|_| unavailable())?;
-    state.is_current(product, flight, cloud, secrets)?;
     if value
         != json!({
             "ok":true,
@@ -352,17 +355,27 @@ pub(super) async fn run(
     request: ArenaRequest,
     sink: &dyn EventSink,
 ) -> Result<(), ArenaError> {
-    let flight = state.prepare(&request, cloud, secrets)?;
-    let ArenaRequest::Reconcile {
-        product,
-        request_id,
-        generation_id,
-        combatants,
-        ..
-    } = request
-    else {
-        return Err(invalid());
+    let (product, request_id, _) = request.scope();
+    let request_id = request_id.to_string();
+    let generation_id = request.generation_id().ok_or_else(invalid)?.to_string();
+    let is_story = matches!(&request, ArenaRequest::ReconcileStory { .. });
+    let input = if is_story {
+        story::role_input(state, &request)?
+    } else {
+        let ArenaRequest::Reconcile { combatants, .. } = &request else {
+            return Err(invalid());
+        };
+        validate_input(&generation_id, combatants)?;
+        story::RoleInput {
+            wire: serde_json::to_vec(
+                &json!({"generationId":generation_id,"combatants":combatants}),
+            )
+            .map_err(|_| invalid())?,
+            count: combatants.len(),
+            accepted: None,
+        }
     };
+    let flight = state.prepare(&request, cloud, secrets)?;
     let token = Arc::new(CancellationToken::new());
     {
         let mut f = flight.lock().map_err(|_| stale())?;
@@ -387,48 +400,63 @@ pub(super) async fn run(
     };
     let mut dispatched = false;
     let operation = async {
-        state
-            .capability(product, &flight, cloud, secrets, false, false)
-            .await?;
-        // Always bind through the original request. This also captures its signed token when
-        // only bootstrap remains, without handing bootstrap to Next or minting another actor.
-        let lookup = state.lookup_bound(product, &flight, cloud, secrets).await?;
-        if lookup.status != 200 {
-            return Err(error(
-                "generation-unavailable",
-                "原生成尚未找到，角色更新未派发",
-            ));
-        }
-        state
-            .bind_generation(product, &generation_id, &flight, cloud, secrets)
-            .await?;
-        capability(state, product, &flight, cloud, secrets).await?;
-        check()?;
-        let builder = authenticated(state, &flight)?
-            .json(&json!({"generationId":generation_id,"combatants":combatants}))
-            .timeout(SHORT_TIMEOUT);
-        check()?;
-        dispatched = true;
-        let response = builder.send().await.map_err(|_| network())?;
-        check()?;
-        let status = response.status().as_u16();
-        if (300..400).contains(&status)
-            || !json_content_type(&response)
-            || response
-                .headers()
-                .get(PROTOCOL_HEADER)
-                .and_then(|v| v.to_str().ok())
-                != Some(PROTOCOL_VERSION)
-        {
-            return Err(protocol());
-        }
-        let wire = read_wire(response, check).await?;
+        let (status, wire) = if let Some(accepted) = input.accepted.as_ref() {
+            (200, accepted.clone())
+        } else {
+            state
+                .capability(product, &flight, cloud, secrets, false, false)
+                .await?;
+            // Always bind through the original request. This also captures its signed token when
+            // only bootstrap remains, without handing bootstrap to Next or minting another actor.
+            let lookup = state.lookup_bound(product, &flight, cloud, secrets).await?;
+            if lookup.status != 200 {
+                return Err(error(
+                    "generation-unavailable",
+                    "原生成尚未找到，角色更新未派发",
+                ));
+            }
+            state
+                .bind_generation(product, &generation_id, &flight, cloud, secrets)
+                .await?;
+            capability(state, product, &flight, cloud, secrets).await?;
+            check()?;
+            if is_story {
+                if lookup.body.get("status").and_then(Value::as_str) != Some("completed") {
+                    return Err(error(
+                        "generation-unavailable",
+                        "原故事模型尚未确认完成，角色更新未派发",
+                    ));
+                }
+                story::recheck_role(state, &request)?;
+            }
+            let builder = authenticated(state, &flight)?
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .body(input.wire.clone())
+                .timeout(SHORT_TIMEOUT);
+            check()?;
+            dispatched = true;
+            let response = builder.send().await.map_err(|_| network())?;
+            check()?;
+            let status = response.status().as_u16();
+            if (300..400).contains(&status)
+                || !json_content_type(&response)
+                || response
+                    .headers()
+                    .get(PROTOCOL_HEADER)
+                    .and_then(|v| v.to_str().ok())
+                    != Some(PROTOCOL_VERSION)
+            {
+                return Err(protocol());
+            }
+            let wire = read_wire(response, check).await?;
+            (status, wire)
+        };
         check()?;
         validate_response(
             &wire,
             (200..300).contains(&status),
             &generation_id,
-            combatants.len(),
+            input.count,
         )?;
         json_delivery::reject_json_secret_echo(&wire, &flight)?;
         check()?;

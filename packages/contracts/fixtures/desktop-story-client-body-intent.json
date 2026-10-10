@@ -1,0 +1,274 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "implicit-system",
+      "input": {
+        "inputDigest": "sha256:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+      },
+      "encodedHex": "6465736b746f702d6172656e612d73746f72792d636c69656e742d626f64792d7631006172656e612d73746f72792d763100000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f000000000673797374656d0000000764656661756c7400",
+      "clientBodyHash": "6e6239772aa2c894c57487bba3768e58040ddc1b3ad54e138f025262cab29b21"
+    },
+    {
+      "name": "system-default",
+      "input": {
+        "inputDigest": "sha256:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "funding": {
+          "mode": "system",
+          "providerId": "system",
+          "modelId": "default"
+        }
+      },
+      "encodedHex": "6465736b746f702d6172656e612d73746f72792d636c69656e742d626f64792d7631006172656e612d73746f72792d763100000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f000000000673797374656d0000000764656661756c7400",
+      "clientBodyHash": "6e6239772aa2c894c57487bba3768e58040ddc1b3ad54e138f025262cab29b21"
+    },
+    {
+      "name": "empty-overrides",
+      "input": {
+        "inputDigest": "sha256:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "funding": {
+          "mode": "system",
+          "providerId": "system",
+          "modelId": "default",
+          "generationOverrides": {}
+        }
+      },
+      "encodedHex": "6465736b746f702d6172656e612d73746f72792d636c69656e742d626f64792d7631006172656e612d73746f72792d763100000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f000000000673797374656d0000000764656661756c7400",
+      "clientBodyHash": "6e6239772aa2c894c57487bba3768e58040ddc1b3ad54e138f025262cab29b21"
+    },
+    {
+      "name": "preset-normalized-alias",
+      "input": {
+        "inputDigest": "sha256:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "funding": {
+          "mode": "preset",
+          "providerId": "deepseek",
+          "modelId": "deepseek-v4-flash"
+        }
+      },
+      "encodedHex": "6465736b746f702d6172656e612d73746f72792d636c69656e742d626f64792d7631006172656e612d73746f72792d763100000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0100000008646565707365656b00000011646565707365656b2d76342d666c61736800",
+      "clientBodyHash": "2f538682c063492199e739591b13aff9790b40affa8f0118ddd40c89a9bed5de"
+    },
+    {
+      "name": "system-all-overrides",
+      "input": {
+        "inputDigest": "sha256:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "funding": {
+          "mode": "system",
+          "providerId": "system",
+          "modelId": "系统模型🪄",
+          "generationOverrides": {
+            "maxOutputTokens": 1000000,
+            "temperature": 0.125,
+            "thinking": {
+              "mode": "enabled",
+              "effort": "xhigh"
+            }
+          }
+        }
+      },
+      "encodedHex": "6465736b746f702d6172656e612d73746f72792d636c69656e742d626f64792d7631006172656e612d73746f72792d763100000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f000000000673797374656d00000010e7b3bbe7bb9fe6a8a1e59e8bf09faa8407000f42403fc00000000000000205",
+      "clientBodyHash": "f07971de24fe8a359c78cfd8f31408afb4cd062f75e685e75dd85b89f460966b"
+    },
+    {
+      "name": "custom-model-utf8",
+      "input": {
+        "inputDigest": "sha256:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "funding": {
+          "mode": "preset",
+          "providerId": "openai",
+          "modelId": "模型/é/𝌆",
+          "generationOverrides": {
+            "temperature": 1.7976931348623157e+308
+          }
+        }
+      },
+      "encodedHex": "6465736b746f702d6172656e612d73746f72792d636c69656e742d626f64792d7631006172656e612d73746f72792d763100000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f01000000066f70656e61690000000ee6a8a1e59e8b2fc3a92ff09d8c86027fefffffffffffff",
+      "clientBodyHash": "f0413ce8c2bc94cf558b470830e37000bb711e4f3ed8f15fa3c8b78a26a52b50"
+    },
+    {
+      "name": "zero-temperature",
+      "input": {
+        "inputDigest": "sha256:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "funding": {
+          "mode": "system",
+          "providerId": "system",
+          "modelId": "default",
+          "generationOverrides": {
+            "temperature": 0
+          }
+        }
+      },
+      "encodedHex": "6465736b746f702d6172656e612d73746f72792d636c69656e742d626f64792d7631006172656e612d73746f72792d763100000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f000000000673797374656d0000000764656661756c74020000000000000000",
+      "clientBodyHash": "9dee7b7a5e0a447a33da5e69090b3fae0e1ef046b894ab6d9267aec4f555f7c2"
+    },
+    {
+      "name": "thinking-default",
+      "input": {
+        "inputDigest": "sha256:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "funding": {
+          "mode": "system",
+          "providerId": "system",
+          "modelId": "default",
+          "generationOverrides": {
+            "thinking": {
+              "mode": "default"
+            }
+          }
+        }
+      },
+      "encodedHex": "6465736b746f702d6172656e612d73746f72792d636c69656e742d626f64792d7631006172656e612d73746f72792d763100000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f000000000673797374656d0000000764656661756c740400",
+      "clientBodyHash": "57eeed6f6ef23de0e7f68bab6cbefc9d5258c2e99c14f0747ac3d8be116953be"
+    },
+    {
+      "name": "thinking-disabled",
+      "input": {
+        "inputDigest": "sha256:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "funding": {
+          "mode": "system",
+          "providerId": "system",
+          "modelId": "default",
+          "generationOverrides": {
+            "thinking": {
+              "mode": "disabled"
+            }
+          }
+        }
+      },
+      "encodedHex": "6465736b746f702d6172656e612d73746f72792d636c69656e742d626f64792d7631006172656e612d73746f72792d763100000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f000000000673797374656d0000000764656661756c740401",
+      "clientBodyHash": "ed884fd0cc82f43c064665c4f5b8300fa26c2d00fc2e986d05445d4ddab8866b"
+    },
+    {
+      "name": "thinking-enabled",
+      "input": {
+        "inputDigest": "sha256:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "funding": {
+          "mode": "system",
+          "providerId": "system",
+          "modelId": "default",
+          "generationOverrides": {
+            "thinking": {
+              "mode": "enabled"
+            }
+          }
+        }
+      },
+      "encodedHex": "6465736b746f702d6172656e612d73746f72792d636c69656e742d626f64792d7631006172656e612d73746f72792d763100000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f000000000673797374656d0000000764656661756c74040200",
+      "clientBodyHash": "c97175ccaf98f6a49b45cab1b8f43ec3f19b11c94069143ab48b9801730b95a4"
+    },
+    {
+      "name": "effort-minimal",
+      "input": {
+        "inputDigest": "sha256:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "funding": {
+          "mode": "preset",
+          "providerId": "deepseek",
+          "modelId": "deepseek-v4-flash",
+          "generationOverrides": {
+            "thinking": {
+              "mode": "enabled",
+              "effort": "minimal"
+            }
+          }
+        }
+      },
+      "encodedHex": "6465736b746f702d6172656e612d73746f72792d636c69656e742d626f64792d7631006172656e612d73746f72792d763100000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0100000008646565707365656b00000011646565707365656b2d76342d666c617368040201",
+      "clientBodyHash": "76a5eedbb3fe03a609e57c95f0e5b49955471f12250d70fd28ba70c5c2f967b0"
+    },
+    {
+      "name": "effort-low",
+      "input": {
+        "inputDigest": "sha256:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "funding": {
+          "mode": "preset",
+          "providerId": "deepseek",
+          "modelId": "deepseek-v4-flash",
+          "generationOverrides": {
+            "thinking": {
+              "mode": "enabled",
+              "effort": "low"
+            }
+          }
+        }
+      },
+      "encodedHex": "6465736b746f702d6172656e612d73746f72792d636c69656e742d626f64792d7631006172656e612d73746f72792d763100000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0100000008646565707365656b00000011646565707365656b2d76342d666c617368040202",
+      "clientBodyHash": "cec799365ac44497e290be7d3ead39489bef5aa8181f1c3b8e1ba7939e9bf89b"
+    },
+    {
+      "name": "effort-medium",
+      "input": {
+        "inputDigest": "sha256:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "funding": {
+          "mode": "preset",
+          "providerId": "deepseek",
+          "modelId": "deepseek-v4-flash",
+          "generationOverrides": {
+            "thinking": {
+              "mode": "enabled",
+              "effort": "medium"
+            }
+          }
+        }
+      },
+      "encodedHex": "6465736b746f702d6172656e612d73746f72792d636c69656e742d626f64792d7631006172656e612d73746f72792d763100000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0100000008646565707365656b00000011646565707365656b2d76342d666c617368040203",
+      "clientBodyHash": "5962b11023f8e07f32451a4278c9a14e1ebbf5cf08088382d5e99341d8022224"
+    },
+    {
+      "name": "effort-high",
+      "input": {
+        "inputDigest": "sha256:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "funding": {
+          "mode": "preset",
+          "providerId": "deepseek",
+          "modelId": "deepseek-v4-flash",
+          "generationOverrides": {
+            "thinking": {
+              "mode": "enabled",
+              "effort": "high"
+            }
+          }
+        }
+      },
+      "encodedHex": "6465736b746f702d6172656e612d73746f72792d636c69656e742d626f64792d7631006172656e612d73746f72792d763100000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0100000008646565707365656b00000011646565707365656b2d76342d666c617368040204",
+      "clientBodyHash": "3a7a0c3e2fd09c551f3519fc3eaeeb1e4c79abb215823cfcaff1fa801175df79"
+    },
+    {
+      "name": "effort-xhigh",
+      "input": {
+        "inputDigest": "sha256:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "funding": {
+          "mode": "preset",
+          "providerId": "deepseek",
+          "modelId": "deepseek-v4-flash",
+          "generationOverrides": {
+            "thinking": {
+              "mode": "enabled",
+              "effort": "xhigh"
+            }
+          }
+        }
+      },
+      "encodedHex": "6465736b746f702d6172656e612d73746f72792d636c69656e742d626f64792d7631006172656e612d73746f72792d763100000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0100000008646565707365656b00000011646565707365656b2d76342d666c617368040205",
+      "clientBodyHash": "6b055da91163830834a899328c1dbaf16665794e05c82e0edcfe6993bc712d4c"
+    },
+    {
+      "name": "effort-max",
+      "input": {
+        "inputDigest": "sha256:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "funding": {
+          "mode": "preset",
+          "providerId": "deepseek",
+          "modelId": "deepseek-v4-flash",
+          "generationOverrides": {
+            "thinking": {
+              "mode": "enabled",
+              "effort": "max"
+            }
+          }
+        }
+      },
+      "encodedHex": "6465736b746f702d6172656e612d73746f72792d636c69656e742d626f64792d7631006172656e612d73746f72792d763100000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f0100000008646565707365656b00000011646565707365656b2d76342d666c617368040206",
+      "clientBodyHash": "b83b44071fb81badcd4d35d229f703b2a65ade06616d57afe81aad4bd5a8e04c"
+    }
+  ]
+}

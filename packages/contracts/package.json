@@ -125,7 +125,8 @@
       "types": "./src/arena-story.ts",
       "import": "./src/arena-story.ts",
       "default": "./src/arena-story.ts"
-    }
+    },
+    "./desktop-arena-story-transport": "./src/desktop-arena-story-transport.ts"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",

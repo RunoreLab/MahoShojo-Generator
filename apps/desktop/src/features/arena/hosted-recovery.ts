@@ -4,6 +4,7 @@ import {
 import { DesktopArenaHostedAnyRecoveryPointerSchema as DesktopArenaHostedRecoveryPointerSchema,
   type DesktopArenaHostedAnyRecoveryPointer as DesktopArenaHostedRecoveryPointer,
 } from '@mahoshojo/contracts/desktop-arena-hosted-json';
+import { DesktopArenaHostedStoryRecoveryPointerSchema, type DesktopArenaHostedStoryRecoveryPointer } from '@mahoshojo/contracts/desktop-arena-story-transport';
 import type { GenerationDraftStorage } from '../generation/session';
 
 export const ARENA_HOSTED_RECOVERY_KEYS = Object.freeze({
@@ -13,6 +14,8 @@ export const ARENA_HOSTED_RECOVERY_KEYS = Object.freeze({
 type Product = keyof typeof ARENA_HOSTED_RECOVERY_KEYS;
 export interface ArenaHostedRecoveryState {
   pointer: DesktopArenaHostedRecoveryPointer | null;
+  /** A foreign owner in the same public slot. Never handed to the single-report owner. */
+  storyPointer: DesktopArenaHostedStoryRecoveryPointer | null;
   pendingRestore: boolean;
   blocked: boolean;
   saved: boolean;
@@ -23,11 +26,12 @@ export interface ArenaHostedRecoveryReplacement { expectedPreviousRequestId: str
 
 /** One public pointer per product; no credentials, output body or new persistence backend. */
 export class DesktopArenaHostedRecovery {
-  private state: ArenaHostedRecoveryState = { pointer: null, pendingRestore: false, blocked: false, saved: true, error: null };
+  private state: ArenaHostedRecoveryState = { pointer: null, storyPointer: null, pendingRestore: false, blocked: false, saved: true, error: null };
   private listeners = new Set<() => void>();
   private readonly key: string;
   private revision = 0;
   private persistedRaw: string | null = null;
+  private readOnlyOriginal = false;
   private preparedBackup: { requestId: string; state: ArenaHostedRecoveryState; raw: string | null } | null = null;
 
   constructor(private readonly storage: GenerationDraftStorage, private readonly product: Product) {
@@ -35,12 +39,29 @@ export class DesktopArenaHostedRecovery {
     try {
       const raw = storage.getItem(this.key); this.persistedRaw = raw;
       if (raw !== null) {
-        if (raw.length > DESKTOP_ARENA_HOSTED_LIMITS.recoveryPointerCodeUnits) throw new Error('pointer length');
-        const pointer = this.validate(JSON.parse(raw));
-        this.state = { pointer, pendingRestore: true, blocked: false, saved: true, error: null };
+        if (raw.length > DESKTOP_ARENA_HOSTED_LIMITS.recoveryPointerCodeUnits) {
+          // Do not parse an unbounded original just to guess whether a different owner owns it.
+          this.readOnlyOriginal = true;
+          this.state = { pointer: null, storyPointer: null, pendingRestore: false, blocked: true, saved: false,
+            error: '原恢复记录超过读取上限，原件已保留。无法安全确认归属，单次战报不能恢复、替换或清除此记录。' };
+          return;
+        }
+        const value: unknown = JSON.parse(raw);
+        // Recognize purpose before validation: malformed story originals are also not ours to delete.
+        this.readOnlyOriginal = Boolean(value && typeof value === 'object'
+          && ('version' in value && value.version === 4 || 'purpose' in value && value.purpose === 'story'));
+        if (this.readOnlyOriginal) {
+          const storyPointer = DesktopArenaHostedStoryRecoveryPointerSchema.parse(value);
+          if (storyPointer.product !== this.product) throw new Error('pointer product');
+          this.state = { pointer: null, storyPointer, pendingRestore: false, blocked: false, saved: true,
+            error: '此恢复记录属于连续故事，原件已保留；单次战报不能恢复、替换或清除此记录。' };
+        } else {
+          const pointer = this.validate(value);
+          this.state = { pointer, storyPointer: null, pendingRestore: true, blocked: false, saved: true, error: null };
+        }
       }
     } catch {
-      this.state = { pointer: null, pendingRestore: false, blocked: true, saved: false,
+      this.state = { pointer: null, storyPointer: null, pendingRestore: false, blocked: true, saved: false,
         error: '原服务器恢复指针无法读取，原件已保留。清除本机指针不会清除原生恢复身份；旧任务可能仍在运行，无法确认归属时不会重新创建。' };
     }
   }
@@ -63,6 +84,7 @@ export class DesktopArenaHostedRecovery {
 
   /** Must succeed before any native create; replacement consent names the exact old intent. */
   prepare(value: DesktopArenaHostedRecoveryPointer, replaceRequestId?: string, repair?: ArenaHostedRecoveryReplacement): boolean {
+    if (this.readOnlyOriginal) return false;
     // Repair is an explicit local CAS, independent of the Native exact replacement identity.
     if (repair && (!replaceRequestId || !this.isReplacementCurrent(repair))) {
       this.publish({ error: '本机恢复记录已变化，请重新检查身份并确认。' }); return false;
@@ -93,7 +115,7 @@ export class DesktopArenaHostedRecovery {
   /** Only a checked Native prior-retained proof may restore the exact prewritten original. */
   rollbackPrepared(requestId: string): boolean {
     const prior = this.preparedBackup;
-    if (!prior || prior.requestId !== requestId || this.state.pointer?.requestId !== requestId) return false;
+    if (this.readOnlyOriginal || !prior || prior.requestId !== requestId || this.state.pointer?.requestId !== requestId) return false;
     this.preparedBackup = null;
     try {
       if (this.storage.getItem(this.key) !== this.persistedRaw) {
@@ -109,7 +131,7 @@ export class DesktopArenaHostedRecovery {
 
   /** Post-dispatch persistence failure does not erase the live identity or restart the model. */
   update(requestId: string, patch: Partial<Pick<DesktopArenaHostedRecoveryPointer, 'generationId' | 'cursor' | 'state' | 'updatedAt'>>): boolean {
-    if (this.state.blocked || !this.state.pointer || this.state.pointer.requestId !== requestId) return false;
+    if (this.readOnlyOriginal || this.state.blocked || !this.state.pointer || this.state.pointer.requestId !== requestId) return false;
     let pointer: DesktopArenaHostedRecoveryPointer;
     try { pointer = this.validate({ ...this.state.pointer, ...patch }); }
     catch { this.publish({ saved: false, error: '恢复状态不符合协议，保留上一次有效指针与已收到正文。' }); return false; }
@@ -126,15 +148,24 @@ export class DesktopArenaHostedRecovery {
 
   /** UI acknowledgement only. The native adapter still verifies the original actor. */
   acceptRestore(requestId: string): DesktopArenaHostedRecoveryPointer | null {
-    if (this.state.blocked || this.state.pointer?.requestId !== requestId) return null;
+    if (this.readOnlyOriginal || this.state.blocked || this.state.pointer?.requestId !== requestId) return null;
+    try {
+      if (this.storage.getItem(this.key) !== this.persistedRaw) throw new Error('local original changed');
+    } catch {
+      this.publish({ saved: false, error: '本机恢复记录已变化或无法读取，原件已保留；请重新打开页面读取。' }); return null;
+    }
     this.publish({ pendingRestore: false }); return structuredClone(this.state.pointer);
   }
 
   /** Caller obtains explicit discard consent, including for an unreadable original. */
   discard(): boolean {
+    if (this.readOnlyOriginal) return false;
     try {
+      if (this.storage.getItem(this.key) !== this.persistedRaw) {
+        this.publish({ error: '本机恢复记录已在外部变化，原件已保留；请重新打开页面读取。' }); return false;
+      }
       this.storage.removeItem(this.key); this.persistedRaw = null; this.preparedBackup = null;
-      this.publish({ pointer: null, pendingRestore: false, blocked: false, saved: true, error: null }); return true;
+      this.publish({ pointer: null, storyPointer: null, pendingRestore: false, blocked: false, saved: true, error: null }); return true;
     } catch {
       this.publish({ error: '恢复指针清除失败，原数据仍受保护。' }); return false;
     }

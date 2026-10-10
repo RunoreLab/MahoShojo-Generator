@@ -179,11 +179,15 @@ const warning = z.enum(['OUTPUT_NOT_ARCHIVED', 'PERSISTENCE_UNAVAILABLE']);
 const publicCode = z.string().max(128).regex(/^[A-Z][A-Z0-9_]+$/u);
 const shortText = z.string().max(2048);
 const tokenCount = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).nullable().optional();
-export const DesktopArenaHostedTelemetrySchema = z.union([z.object({
+export const DesktopArenaHostedSuccessTelemetrySchema = z.object({
   version: z.literal(1).optional(), aiModel: z.string().optional(),
   usage: z.object({ promptTokens: tokenCount, completionTokens: tokenCount, reasoningTokens: tokenCount, totalTokens: tokenCount, cachedTokens: tokenCount, textTokens: tokenCount, completionTokensIncludesReasoning: z.boolean().optional() }).strict().optional(),
   narrativeHistoryReadCount: z.number().int().nonnegative().optional(),
-}).strict(), z.object({ errorClass: z.string().min(1).max(256) }).strict()]);
+}).strict();
+export type DesktopArenaHostedSuccessTelemetry = z.infer<typeof DesktopArenaHostedSuccessTelemetrySchema>;
+export const DesktopArenaHostedTelemetrySchema = z.union([
+  DesktopArenaHostedSuccessTelemetrySchema, z.object({ errorClass: z.string().min(1).max(256) }).strict(),
+]);
 const terminal = {
   ok: z.boolean().optional(), status: TerminalStatusSchema, code: publicCode.optional(),
   error: shortText.optional(), message: shortText.optional(), resultRef: shortText.nullable().optional(),

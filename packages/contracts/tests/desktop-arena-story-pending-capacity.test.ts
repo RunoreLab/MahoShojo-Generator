@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   STORY_PENDING_LIMITS, StoryPendingInputSchema, StoryPendingHeaderSchema,
-  StoryPendingMetaSchema, StoryPendingRoleResponseSchema,
+  StoryPendingMetaSchema, StoryPendingRoleResponseSchema, StoryPendingTelemetrySchema,
 } from '../src/desktop-arena-story';
 
 const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
@@ -17,6 +17,13 @@ const input = (userGuidance: string) => ({
 /** Real serialized carrier boundaries, separate from tiny declaration tests so
  * memory-heavy Native capacity runs can use their own reserved execution window. */
 describe('durable pending exact original JSON capacity', () => {
+  it('retains a success telemetry original at the event budget, rejecting the next byte', () => {
+    const telemetry = (aiModel: string) => ({ aiModel, usage: { promptTokens: null, completionTokensIncludesReasoning: false } });
+    const model = 'x'.repeat(STORY_PENDING_LIMITS.telemetryBytes - bytes(telemetry('')));
+    expect(bytes(telemetry(model))).toBe(STORY_PENDING_LIMITS.telemetryBytes);
+    expect(StoryPendingTelemetrySchema.safeParse(telemetry(model)).success).toBe(true);
+    expect(StoryPendingTelemetrySchema.safeParse(telemetry(model + 'x')).success).toBe(false);
+  });
   it.each(['x', '雪', '\u0000', '\ud800'])('keeps the exact 12 MiB input boundary and rejects +1 for %j', (character) => {
     const available = STORY_PENDING_LIMITS.inputBytes - bytes(input(''));
     const unitBytes = bytes(character) - 2;

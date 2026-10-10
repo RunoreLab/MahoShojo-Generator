@@ -1,5 +1,7 @@
 # 文档导航
 
+2026-10-10 Hosted 故事 Native 后继：[传输与创建围栏 ADR](./decisions/2026-10-10_180600_Hosted连续故事Native传输与创建围栏决策.md) 与 DESK-100 已接受同一 command 的故事 create/reconcile、schema7 单 create_claim、同 product 准入、v4 pointer 与窄 telemetry 原件。本片底座定向验证、独审与正式完整 CI 通过，分轮结果、失败留痕及修复见[验收报告](./reports/2026-10-10_182000_Hosted连续故事Native传输与创建围栏验收.md)，待发布，不代表两页 Hosted 用户旅程已可用；不接两页 owner/UI capability，不新增 active discard，Hosted 待处理作品导出仍待接线；未做真实外部或发布。claim 后即使 POST 前失败也只查原 request；完整旅程仍留后继。
+
 2026-10-10 Hosted故事存储后继：[非秘密耐久候选底座](./reports/2026-10-10_164500_Hosted连续故事耐久候选存储底座.md)对应DESK-099，新增原product两槽SQLite BLOB、共享上传预算、save-attempt/receipt和旧备份恢复围栏；当前定向验证和独审通过、完整CI待统一执行，未接Hosted网络/两页UI，未发布。
 
 2026-10-10 Hosted 连续故事前置：[版本化创建协议](./decisions/2026-10-10_161000_Hosted连续故事版本化创建协议.md)与 DESK-098 冻结同 Hono 路由的显式 `arena-story-v1`、可信故事身份及原 generation SSE/cursor；无 header 保旧 Web 包装/hash。服务端前置源码的 260 项定向、独立审查与完整原始 CI 均通过；未接 Native/IPC、Desktop capability、durable pending、角色同步或本地保存，角色失败语义仍待后继决定。真实服务需用户后续部署 Hono；未部署或验证真实模型/Windows/Tauri。

@@ -4,12 +4,13 @@ import {
   StoryPendingSnapshotSchema, StoryPendingBeginOutcomeSchema, StoryPendingAppendOutcomeSchema,
   StoryPendingUploadSchema, StoryPendingSavePreparationSchema, StoryPendingSaveRequestSchema,
   StoryPendingSaveAttemptRequestSchema, StoryNativeFailureSchema,
-  StoryPendingHeaderSchema, StoryPendingMetaSchema, StoryPendingRoleResponseSchema, StoryPendingRoleSyncSchema,
+  StoryPendingHeaderSchema, StoryPendingMetaSchema, StoryPendingRoleResponseSchema, StoryPendingRoleSyncSchema, StoryPendingTelemetrySchema, StoryPendingCreateClaimSnapshotSchema,
   type StoryPendingManifest, type StoryPendingPartKind,
 } from '../src/desktop-arena-story';
 import { ArenaStoryCreateRequestSchema } from '../src/arena-story';
 import { DesktopArenaHostedSseEventSchema } from '../src/desktop-arena-hosted';
 import contentGolden from '../fixtures/desktop-story-pending-content.json';
+import telemetryGolden from '../fixtures/desktop-story-pending-telemetry.json';
 
 const digest = `sha256:${'0'.repeat(64)}`;
 const otherDigest = `sha256:${'1'.repeat(64)}`;
@@ -51,7 +52,7 @@ describe('durable story pending closed contracts', () => {
     expect(STORY_PENDING_LIMITS).toEqual({
       slotBytes: 128 * 1024 * 1024, activeSlots: 2, sharedUploadBytes: 128 * 1024 * 1024, sharedUploadCount: 2,
       metadataBytes: 64 * 1024, inputBytes: 12 * 1024 * 1024, outputContentBytes: 4 * 1024 * 1024,
-      metaBytes: 24 * 1024 * 1024 + 64 * 1024, headerBytes: 64 * 1024, roleResponseBytes: 16 * 1024 * 1024,
+      metaBytes: 24 * 1024 * 1024 + 64 * 1024, telemetryBytes: 24 * 1024 * 1024 + 64 * 1024, headerBytes: 64 * 1024, roleResponseBytes: 16 * 1024 * 1024,
     });
   });
   it.each(['customProvider', 'apiKey', 'token', 'accessToken', 'anonymousBootstrap', 'bootstrap', 'cookie', 'headers', 'url'])('rejects %s at every control boundary', (field) => {
@@ -90,7 +91,7 @@ describe('durable story pending closed contracts', () => {
     }
   });
   it.each([
-    ['input', STORY_PENDING_LIMITS.inputBytes], ['meta', STORY_PENDING_LIMITS.metaBytes], ['header', STORY_PENDING_LIMITS.headerBytes],
+    ['input', STORY_PENDING_LIMITS.inputBytes], ['meta', STORY_PENDING_LIMITS.metaBytes], ['header', STORY_PENDING_LIMITS.headerBytes], ['telemetry', STORY_PENDING_LIMITS.telemetryBytes],
   ] as const)('enforces exact %s declaration ceiling without allocating the payload', (kind, limit) => {
     const parts = kind === 'input' ? [part(kind, limit)] : [part('input'), part(kind, limit)];
     expect(StoryPendingManifestSchema.safeParse({ ...manifest(), parts }).success).toBe(true);
@@ -135,12 +136,26 @@ describe('durable story pending closed contracts', () => {
     value.commitManifest!.parts.find((item) => item.kind === 'chapter')!.byteLength += 1;
     expect(StoryPendingManifestSchema.safeParse(value).success).toBe(false);
   });
+  it('inserts one telemetry part without changing legacy order or increasing the shared slot budget', () => {
+    const value = frozen();
+    value.parts.splice(1, 0, part('telemetry', STORY_PENDING_LIMITS.telemetryBytes));
+    const chapterBytes = STORY_PENDING_LIMITS.slotBytes - STORY_PENDING_LIMITS.telemetryBytes - 5;
+    value.parts.find((item) => item.kind === 'chapter')!.byteLength = chapterBytes;
+    value.commitManifest!.parts.find((item) => item.kind === 'chapter')!.byteLength = chapterBytes;
+    expect(StoryPendingManifestSchema.safeParse(value).success).toBe(true);
+    const over = structuredClone(value);
+    over.parts.find((item) => item.kind === 'chapter')!.byteLength += 1;
+    over.commitManifest!.parts.find((item) => item.kind === 'chapter')!.byteLength += 1;
+    expect(StoryPendingManifestSchema.safeParse(over).success).toBe(false);
+    expect(StoryPendingManifestSchema.safeParse({ ...manifest(), parts: [part('input'), part('telemetry'), part('header')] }).success).toBe(false);
+    expect(StoryPendingManifestSchema.safeParse({ ...manifest(), parts: [part('input'), part('telemetry'), part('telemetry')] }).success).toBe(false);
+  });
   it('closes snapshots, keys, attempt markers and upload offset readback', () => {
     const value = manifest(); const key = { product: value.product, requestId: value.requestId, pendingRevision: 1 };
     expect(StoryPendingKeySchema.parse(key)).toEqual(key);
     expect(StoryPendingKeySchema.safeParse({ ...key, pendingRevision: 0 }).success).toBe(false);
     expect(StoryPendingKeySchema.safeParse({ ...key, actor: value.actor }).success).toBe(false);
-    expect(StoryPendingSnapshotSchema.parse({ manifest: value, saveAttemptId: token, restored: true }).saveAttemptId).toBe(token);
+    expect(StoryPendingSnapshotSchema.parse({ manifest: value, saveAttemptId: token, restored: true, createClaim: null }).saveAttemptId).toBe(token);
     expect(StoryPendingSnapshotSchema.safeParse({ manifest: value, saveAttemptId: null }).success).toBe(false);
     expect(StoryPendingSavePreparationSchema.parse({ attemptId: token })).toEqual({ attemptId: token });
     expect(StoryPendingSavePreparationSchema.safeParse({ attemptId: 'reusable' }).success).toBe(false);
@@ -210,6 +225,17 @@ describe('durable story pending non-secret canonical input', () => {
 });
 
 describe('durable story pending public original carriers', () => {
+  it.each(telemetryGolden.cases)('retains the successful telemetry original: $name', ({ originals }) => {
+    expect(StoryPendingTelemetrySchema.parse(originals.telemetry)).toEqual(originals.telemetry);
+  });
+  it.each(telemetryGolden.invalidTelemetry)('rejects telemetry outside the existing successful branch %#', (value) => {
+    expect(StoryPendingTelemetrySchema.safeParse(value).success).toBe(false);
+  });
+  it('has no independent model-name cap and preserves all JSON token/null/boolean values', () => {
+    const value = { aiModel: '雪'.repeat(30_000), usage: { promptTokens: null, completionTokens: 0, totalTokens: Number.MAX_SAFE_INTEGER, completionTokensIncludesReasoning: false } };
+    expect(StoryPendingTelemetrySchema.parse(value)).toEqual(value);
+    expect(StoryPendingTelemetrySchema.safeParse({ ...value, usage: { promptTokens: undefined } }).success).toBe(false);
+  });
   it.each(contentGolden.cases)('accepts every cross-runtime golden original and compact role outcome: $name', ({ originals, expected }) => {
     expect(StoryPendingInputSchema.parse(originals.input)).toEqual(originals.input);
     if (originals.header) expect(StoryPendingHeaderSchema.parse(originals.header)).toEqual(originals.header);
@@ -278,5 +304,33 @@ describe('durable story pending public original carriers', () => {
       { ...value, updatedCombatants: [{ ...value.updatedCombatants[0], data: { signature: '' } }] },
       { ...value, updatedCombatants: [...value.updatedCombatants, ...value.updatedCombatants] },
     ]) expect(StoryPendingRoleResponseSchema.safeParse(response).success).toBe(false);
+  });
+});
+
+describe('read-only Native create claim evidence', () => {
+  const claim = () => ({
+    version: 1, attemptId: token, storyProtocolVersion: 'arena-story-v1', inputDigest: digest,
+    clientBodyHash: 'b'.repeat(64), funding: { mode: 'system', providerId: 'system', modelId: 'default' }, observedGeneration: null,
+  });
+  it('accepts Native-owned claim and original generation observation only in snapshot readback', () => {
+    const value = claim();
+    expect(StoryPendingCreateClaimSnapshotSchema.parse(value)).toEqual(value);
+    expect(Object.isFrozen(StoryPendingCreateClaimSnapshotSchema.parse(value))).toBe(true);
+    expect(StoryPendingSnapshotSchema.parse({ manifest: manifest(), saveAttemptId: null, restored: false, createClaim: value }).createClaim).toEqual(value);
+    expect(StoryPendingCreateClaimSnapshotSchema.parse({ ...value, observedGeneration: { generationId: `arena_${'c'.repeat(64)}`, serverPayloadHash: null } }).observedGeneration?.serverPayloadHash).toBe(null);
+    expect(StoryPendingManifestSchema.safeParse({ ...manifest(), createClaim: value }).success).toBe(false);
+  });
+  it('closes claim, funding and observation and refuses cross-input binding', () => {
+    for (const key of ['state', 'createdAt', 'body', 'secretRef', 'retryAllowed', 'notSent', 'modelCompletedProof']) {
+      expect(StoryPendingCreateClaimSnapshotSchema.safeParse({ ...claim(), [key]: 'unexpected' }).success).toBe(false);
+    }
+    for (const patch of [{ version: 2 }, { attemptId: 'renderer-choice' }, { clientBodyHash: digest },
+      { funding: { ...claim().funding, apiKey: 'secret' } },
+      { funding: { mode: 'preset', providerId: 'system', modelId: 'default' } },
+      { observedGeneration: { generationId: `arena_${'c'.repeat(64)}`, serverPayloadHash: 'short' } },
+      { observedGeneration: { generationId: `arena_${'c'.repeat(64)}`, serverPayloadHash: null, completed: true } }]) {
+      expect(StoryPendingCreateClaimSnapshotSchema.safeParse({ ...claim(), ...patch }).success).toBe(false);
+    }
+    expect(StoryPendingSnapshotSchema.safeParse({ manifest: manifest(), saveAttemptId: null, restored: false, createClaim: { ...claim(), inputDigest: otherDigest } }).success).toBe(false);
   });
 });

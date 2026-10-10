@@ -505,7 +505,7 @@ fn maximum_source_backed_snapshot_and_escaped_ipc_are_bounded_and_lossless() {
         budget.accept(&mut overflow).unwrap_err().code,
         "output-too-large"
     );
-    let state = ArenaState::new().unwrap();
+    let state = ArenaState::isolated();
     let cloud = CloudState::new().unwrap();
     let secrets = Secrets::default();
     let flight = state
@@ -704,7 +704,7 @@ async fn redirect_and_error_diagnostics_do_not_leak_or_follow() {
 fn persisted_actor_corruption_expiry_and_scope_cas_do_not_replace_credentials() {
     let cloud = CloudState::new().unwrap();
     let secrets = Secrets::default();
-    let state = ArenaState::new().unwrap();
+    let state = ArenaState::isolated();
     let first = state
         .prepare(&create(false, false), &cloud, &secrets)
         .unwrap();
@@ -765,7 +765,7 @@ fn input_twelve_mib_boundary_is_independent_from_provider_envelope() {
 #[test]
 fn async_production_operations_are_send_for_tauri() {
     fn check<T: Send>(_: T) {}
-    let state = ArenaState::new().unwrap();
+    let state = ArenaState::isolated();
     let cloud = CloudState::new().unwrap();
     let secrets = Secrets::default();
     let sink = Sink::default();
@@ -1293,7 +1293,7 @@ async fn explicit_same_actor_restore_rebinds_scope_without_lending_new_cookie_to
 }
 #[test]
 fn explicit_restore_keeps_memory_only_signed_actor_instead_of_old_bootstrap_slot() {
-    let state = ArenaState::new().unwrap();
+    let state = ArenaState::isolated();
     let cloud = CloudState::new().unwrap();
     let secrets = Secrets::default();
     let prior = state
@@ -1452,7 +1452,7 @@ async fn prepared_pointer_rollback_requires_proven_prior_ownership_not_dispatch_
 }
 #[tokio::test]
 async fn uncertain_credential_read_does_not_claim_prior_pointer_can_be_restored() {
-    let state = ArenaState::new().unwrap();
+    let state = ArenaState::isolated();
     let cloud = CloudState::new().unwrap();
     let secrets = Secrets::default();
     state
@@ -1528,7 +1528,7 @@ async fn concurrent_product_replacement_never_authorizes_rolling_back_an_older_p
 }
 #[test]
 fn recovery_hint_projects_only_fixed_public_identity_and_keeps_account_isolation() {
-    let state = ArenaState::new().unwrap();
+    let state = ArenaState::isolated();
     let cloud = CloudState::new().unwrap();
     let secrets = Secrets::default();
     assert_eq!(
@@ -1610,7 +1610,7 @@ fn recovery_hint_projects_only_fixed_public_identity_and_keeps_account_isolation
 async fn lost_public_pointer_can_hint_exact_anonymous_id_then_replace_with_explicit_consent() {
     let secrets = Secrets::default();
     let cloud = CloudState::new().unwrap();
-    let original = ArenaState::new().unwrap();
+    let original = ArenaState::isolated();
     original
         .prepare(&create(false, false), &cloud, &secrets)
         .unwrap();
@@ -1674,7 +1674,7 @@ async fn lost_public_pointer_can_hint_exact_anonymous_id_then_replace_with_expli
 }
 #[test]
 fn recovery_hint_expired_and_unavailable_never_mutate_or_expose_actor_credentials() {
-    let state = ArenaState::new().unwrap();
+    let state = ArenaState::isolated();
     let cloud = CloudState::new().unwrap();
     let secrets = Secrets::default();
     let f = state
@@ -1705,7 +1705,7 @@ fn recovery_hint_expired_and_unavailable_never_mutate_or_expose_actor_credential
         secrets.resolve(Product::Battle.slot()).unwrap().unwrap(),
         raw
     );
-    let empty = ArenaState::new().unwrap();
+    let empty = ArenaState::isolated();
     secrets
         .set(Product::Arena.slot(), "corrupt-SYNTHETIC-secret")
         .unwrap();
@@ -1883,3 +1883,6 @@ async fn source_limit_meta_recipe_traverses_real_http_and_channel_without_loss()
 
 #[path = "arena_hosted_json_tests.rs"]
 mod json_tests;
+
+#[path = "arena_hosted_story_tests.rs"]
+mod story_tests;

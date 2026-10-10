@@ -19,6 +19,9 @@ import {
   type DesktopArenaHostedDetachRequest,
   type DesktopArenaHostedStreamRequest,
 } from '@mahoshojo/contracts/desktop-arena-hosted';
+import {
+  DesktopArenaHostedStoryCreateRequestSchema, type DesktopArenaHostedStoryCreateRequest,
+} from '@mahoshojo/contracts/desktop-arena-story-transport';
 import type { InvokeFn } from './cloud-bridge';
 
 export const ARENA_HOSTED_STREAM_COMMAND = 'arena_hosted_stream';
@@ -82,10 +85,12 @@ export const readArenaHostedRecoveryHint = async (invoke: InvokeFn, value: Deskt
 /** Native transport adapter only; C0 owns cursor deduplication and all reconnect decisions. */
 export const openArenaHostedStream = (
   invoke: InvokeFn,
-  value: DesktopArenaHostedStreamRequest,
+  value: DesktopArenaHostedStreamRequest | DesktopArenaHostedStoryCreateRequest,
   options: { signal?: AbortSignal; onResponse?: (response: ArenaHostedHandshake) => void; createChannel?: () => ArenaHostedChannel } = {},
 ): Promise<Response> => {
-  const request = DesktopArenaHostedStreamRequestSchema.parse(value);
+  const request = value.operation === 'create-story-stream'
+    ? DesktopArenaHostedStoryCreateRequestSchema.parse(value)
+    : DesktopArenaHostedStreamRequestSchema.parse(value);
   if (options.signal?.aborted) return Promise.reject(abortError());
   const encoder = new TextEncoder();
   let nextSequence = 0, fragmentBytes = 0, fragment = '';

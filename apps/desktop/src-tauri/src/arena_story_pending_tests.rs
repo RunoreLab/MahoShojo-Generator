@@ -1156,10 +1156,15 @@ fn golden_candidates() -> Vec<(PendingManifest, Vec<(PendingKind, String)>)> {
         "../../../../packages/contracts/fixtures/desktop-story-pending-storage.json"
     ))
     .unwrap();
+    let telemetry: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../packages/contracts/fixtures/desktop-story-pending-telemetry.json"
+    ))
+    .unwrap();
     golden["cases"]
         .as_array()
         .unwrap()
         .iter()
+        .chain(telemetry["cases"].as_array().unwrap().iter())
         .map(|case| {
             let commit: CommitManifest = serde_json::from_value(case["manifest"].clone()).unwrap();
             let original = &case["originals"];
@@ -1177,6 +1182,7 @@ fn golden_candidates() -> Vec<(PendingManifest, Vec<(PendingKind, String)>)> {
                 (PendingKind::Meta, "meta"),
                 (PendingKind::Header, "header"),
                 (PendingKind::RoleResponse, "roleResponse"),
+                (PendingKind::Telemetry, "telemetry"),
             ] {
                 if original.get(name).is_some() {
                     parts.push((kind, original[name].to_string()));
@@ -1542,5 +1548,864 @@ fn opaque_user_json_duplicate_keys_and_lone_surrogates_remain_original_bytes() {
             .pending_read(&m.key(), PendingKind::Input, 0, document.len())
             .unwrap(),
         document.as_bytes()
+    );
+}
+
+fn unstarted(product: Product) -> (PendingManifest, Vec<(PendingKind, String)>) {
+    let (mut m, parts) = candidate(product, false);
+    m.model_completed = false;
+    (m, parts)
+}
+fn native_funding() -> NativeFunding {
+    NativeFunding {
+        mode: FundingMode::System,
+        provider_id: "system".into(),
+        model_id: "default".into(),
+        generation_overrides: None,
+    }
+}
+#[test]
+fn native_claim_is_single_use_durable_and_survives_revision_without_token_binding() {
+    let (root, lib) = fixture();
+    let store = lib.stories();
+    let (m, parts) = unstarted(Product::Battle);
+    let token = upload(store, &m, &parts);
+    store.pending_seal(&token).unwrap();
+    let guard = store.pending_admission(m.product).unwrap();
+    let original = store
+        .pending_native_input(&guard, &m.key(), &m.actor, &m.input_digest)
+        .unwrap();
+    assert_eq!(original.input, parts[0].1);
+    let permit = store
+        .pending_claim_create(
+            &guard,
+            &m.key(),
+            &m.actor,
+            &m.input_digest,
+            &"a".repeat(64),
+            native_funding(),
+        )
+        .unwrap();
+    assert_eq!(
+        store
+            .pending_claim_create(
+                &guard,
+                &m.key(),
+                &m.actor,
+                &m.input_digest,
+                &"a".repeat(64),
+                native_funding()
+            )
+            .err(),
+        Some(StoryError::Conflict)
+    );
+    let claim = store
+        .pending_consume_create(&guard, &m.key(), &m.actor, &m.input_digest, permit)
+        .unwrap();
+    drop(guard);
+    let mut next = m.clone();
+    next.pending_revision = 2;
+    let token2 = upload(store, &next, &parts);
+    assert_ne!(token, token2);
+    let snapshot = store.pending_seal(&token2).unwrap();
+    assert_eq!(snapshot.create_claim, Some(claim.clone()));
+    let guard = store.pending_admission(m.product).unwrap();
+    assert_eq!(
+        store
+            .pending_native_input(&guard, &m.key(), &m.actor, &m.input_digest)
+            .err(),
+        Some(StoryError::Stale)
+    );
+    let observed = store
+        .pending_observe_generation(
+            &guard,
+            &next.key(),
+            &m.actor,
+            &m.input_digest,
+            &claim.attempt_id,
+            ("generation-story-1", Some(&"b".repeat(64))),
+        )
+        .unwrap();
+    assert_eq!(
+        store.pending_observe_generation(
+            &guard,
+            &next.key(),
+            &m.actor,
+            &m.input_digest,
+            &claim.attempt_id,
+            ("generation-other", None)
+        ),
+        Err(StoryError::Conflict)
+    );
+    assert_eq!(
+        store.pending_observe_generation(
+            &guard,
+            &next.key(),
+            &m.actor,
+            &m.input_digest,
+            &claim.attempt_id,
+            ("generation-story-1", Some(&"c".repeat(64)))
+        ),
+        Err(StoryError::Conflict)
+    );
+    assert_eq!(
+        store
+            .pending_observe_generation(
+                &guard,
+                &next.key(),
+                &m.actor,
+                &m.input_digest,
+                &claim.attempt_id,
+                ("generation-story-1", None)
+            )
+            .unwrap(),
+        observed
+    );
+    drop(guard);
+    drop(lib);
+    let reopened = LocalLibrary::open(root.path()).unwrap();
+    let store = reopened.stories();
+    let guard = store.pending_admission(m.product).unwrap();
+    assert_eq!(
+        store
+            .pending_describe_admitted(&guard)
+            .unwrap()
+            .unwrap()
+            .create_claim,
+        Some(observed)
+    );
+    assert_eq!(
+        store
+            .pending_claim_create(
+                &guard,
+                &next.key(),
+                &m.actor,
+                &m.input_digest,
+                &"a".repeat(64),
+                native_funding()
+            )
+            .err(),
+        Some(StoryError::Conflict)
+    );
+}
+#[test]
+fn native_claim_before_post_failure_never_reissues_permit_and_checks_identity() {
+    let (_root, lib) = fixture();
+    let store = lib.stories();
+    let (m, parts) = unstarted(Product::Arena);
+    let token = upload(store, &m, &parts);
+    store.pending_seal(&token).unwrap();
+    let wrong_guard = store.pending_admission(Product::Battle).unwrap();
+    assert_eq!(
+        store
+            .pending_native_input(&wrong_guard, &m.key(), &m.actor, &m.input_digest)
+            .err(),
+        Some(StoryError::Stale)
+    );
+    drop(wrong_guard);
+    let guard = store.pending_admission(m.product).unwrap();
+    assert_eq!(
+        store
+            .pending_native_input(
+                &guard,
+                &m.key(),
+                &Actor::Account {
+                    expected_user_id: 7
+                },
+                &m.input_digest
+            )
+            .err(),
+        Some(StoryError::Stale)
+    );
+    let permit = store
+        .pending_claim_create(
+            &guard,
+            &m.key(),
+            &m.actor,
+            &m.input_digest,
+            &"a".repeat(64),
+            native_funding(),
+        )
+        .unwrap();
+    drop(permit); // Failure after durable claim, before even one POST.
+    assert_eq!(
+        store
+            .pending_claim_create(
+                &guard,
+                &m.key(),
+                &m.actor,
+                &m.input_digest,
+                &"a".repeat(64),
+                native_funding()
+            )
+            .err(),
+        Some(StoryError::Conflict)
+    );
+}
+#[test]
+fn native_claim_metadata_budget_is_checked_before_any_write() {
+    let (_root, lib) = fixture();
+    let store = lib.stories();
+    let (m, parts) = unstarted(Product::Battle);
+    let token = upload(store, &m, &parts);
+    store.pending_seal(&token).unwrap();
+    let mut metadata = serde_json::to_string(&m).unwrap();
+    metadata.push_str(&" ".repeat(METADATA_BYTES - metadata.len()));
+    lock_connection(lib.connection())
+        .unwrap()
+        .execute(
+            "UPDATE arena_story_pending SET metadata=?2 WHERE token=?1",
+            params![token, metadata],
+        )
+        .unwrap();
+    let before = store.pending_describe(m.product).unwrap();
+    let guard = store.pending_admission(m.product).unwrap();
+    assert_eq!(
+        store
+            .pending_claim_create(
+                &guard,
+                &m.key(),
+                &m.actor,
+                &m.input_digest,
+                &"a".repeat(64),
+                native_funding()
+            )
+            .err(),
+        Some(StoryError::TooLarge)
+    );
+    assert_eq!(store.pending_describe_admitted(&guard).unwrap(), before);
+    let raw: String = lock_connection(lib.connection())
+        .unwrap()
+        .query_row(
+            "SELECT metadata FROM arena_story_pending WHERE token=?1",
+            [&token],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(raw, metadata);
+}
+#[test]
+fn schema_six_active_pending_audits_without_new_column_then_migrates() {
+    let (_root, lib) = fixture();
+    let (m, parts) = unstarted(Product::Battle);
+    let token = upload(lib.stories(), &m, &parts);
+    lib.stories().pending_seal(&token).unwrap();
+    let old = Connection::open_in_memory().unwrap();
+    crate::store::migrate_to_version_for_test(&old, 6);
+    old.execute("INSERT INTO arena_story_pending(token,product,request_id,revision,active,metadata,total_bytes) VALUES(?1,'battle',?2,1,1,?3,?4)", params![token,m.request_id,serde_json::to_string(&m).unwrap(),m.validate().unwrap()]).unwrap();
+    for (kind, body) in parts {
+        old.execute("INSERT INTO arena_story_pending_part(token,kind,byte_length,received_bytes,digest,payload) VALUES(?1,?2,?3,?3,?4,?5)", params![token,kind.sql(),body.len() as u64,digest(body.as_bytes()),body.as_bytes()]).unwrap();
+    }
+    audit(&old).unwrap();
+    crate::store::migrate(&old).unwrap();
+    audit(&old).unwrap();
+    assert!(active(&old, Product::Battle)
+        .unwrap()
+        .unwrap()
+        .snapshot
+        .create_claim
+        .is_none());
+}
+
+#[test]
+fn telemetry_preserves_original_shape_null_boolean_and_success_only_domain() {
+    let m = candidate(Product::Battle, false).0;
+    for raw in [
+        r#"{}"#,
+        r#"{"version":1,"aiModel":"custom / arbitrary model","usage":{"promptTokens":null,"completionTokens":0,"reasoningTokens":2e1,"cachedTokens":9007199254740991,"completionTokensIncludesReasoning":false},"narrativeHistoryReadCount":0}"#,
+        r#"{"aiModel":"\ud800"}"#,
+        r#"{"narrativeHistoryReadCount":1e30}"#,
+    ] {
+        validate_carrier(raw.as_bytes(), PendingKind::Telemetry, &m).unwrap();
+    }
+    for raw in [
+        r#"{"reportFormat":"markdown","narrativeHistoryReadCount":1e30}"#,
+        r#"{"reportFormat":"markdown","narrativeHistoryReadCount":2e1}"#,
+    ] {
+        validate_carrier(raw.as_bytes(), PendingKind::Header, &m).unwrap();
+    }
+    let big_model = json!({"aiModel":"m".repeat(65537)}).to_string();
+    validate_carrier(big_model.as_bytes(), PendingKind::Telemetry, &m).unwrap();
+    for raw in [
+        r#"{"errorClass":"upstream"}"#,
+        r#"{"usage":{"promptTokens":-1}}"#,
+        r#"{"usage":{"totalTokens":9007199254740992}}"#,
+        r#"{"usage":{"completionTokensIncludesReasoning":null}}"#,
+        r#"{"version":2}"#,
+        r#"{"usage":{"apiKey":"SECRET"}}"#,
+        r#"{"aiModel":null}"#,
+        r#"{"narrativeHistoryReadCount":null}"#,
+        r#"{"usage":{"promptTokens":1,"promptTokens":2}}"#,
+    ] {
+        assert!(
+            validate_carrier(raw.as_bytes(), PendingKind::Telemetry, &m).is_err(),
+            "{raw}"
+        );
+    }
+}
+fn telemetry_candidate(frozen: bool, count: u64) -> (PendingManifest, Vec<(PendingKind, String)>) {
+    let (mut m, mut parts) = candidate(Product::Battle, frozen);
+    let telemetry = json!({"version":1,"aiModel":"m".repeat(300),"usage":{"promptTokens":null,"completionTokens":2,"completionTokensIncludesReasoning":false},"narrativeHistoryReadCount":count});
+    parts.push((
+        PendingKind::Header,
+        json!({"reportFormat":"markdown","narrativeHistoryReadCount":4}).to_string(),
+    ));
+    parts.push((PendingKind::Telemetry, telemetry.to_string()));
+    if frozen {
+        let chapter = parts
+            .iter_mut()
+            .find(|(k, _)| *k == PendingKind::Chapter)
+            .unwrap();
+        let mut document: serde_json::Value = serde_json::from_str(&chapter.1).unwrap();
+        document["cardSnapshot"]["aiModel"] = telemetry["aiModel"].clone();
+        document["cardSnapshot"]["aiUsage"] = telemetry["usage"].clone();
+        document["cardSnapshot"]["narrativeHistoryReadCount"] =
+            telemetry["narrativeHistoryReadCount"].clone();
+        chapter.1 = document.to_string();
+    }
+    parts.sort_by_key(|(kind, _)| kind.order());
+    refresh(&mut m, &parts);
+    (m, parts)
+}
+#[test]
+fn telemetry_coverage_rejects_missing_null_boolean_or_conflicting_count_without_replacing_originals(
+) {
+    for mutation in ["none", "aiModel", "null", "boolean", "count"] {
+        let (_root, lib) = fixture();
+        let store = lib.stories();
+        let (m, parts) = telemetry_candidate(false, if mutation == "count" { 5 } else { 4 });
+        let token = upload(store, &m, &parts);
+        let before = store.pending_seal(&token).unwrap();
+        let (mut next, mut next_parts) =
+            telemetry_candidate(true, if mutation == "count" { 5 } else { 4 });
+        next.pending_revision = 2;
+        let chapter = next_parts
+            .iter_mut()
+            .find(|(k, _)| *k == PendingKind::Chapter)
+            .unwrap();
+        let mut document: serde_json::Value = serde_json::from_str(&chapter.1).unwrap();
+        match mutation {
+            "aiModel" => {
+                document["cardSnapshot"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("aiModel");
+            }
+            "null" => {
+                document["cardSnapshot"]["aiUsage"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("promptTokens");
+            }
+            "boolean" => {
+                document["cardSnapshot"]["aiUsage"]["completionTokensIncludesReasoning"] =
+                    json!(true);
+            }
+            _ => {}
+        }
+        chapter.1 = document.to_string();
+        refresh(&mut next, &next_parts);
+        let token = upload(store, &next, &next_parts);
+        if mutation == "none" {
+            store.pending_seal(&token).unwrap();
+            let wire = next
+                .commit_manifest
+                .as_ref()
+                .unwrap()
+                .wire_digest()
+                .unwrap();
+            let attempt = store.pending_prepare_save(&next.key(), &wire).unwrap();
+            store
+                .pending_save(&next.key(), &wire, &attempt.attempt_id)
+                .unwrap();
+        } else {
+            assert_eq!(
+                store.pending_seal(&token),
+                Err(StoryError::OriginalsUncovered),
+                "{mutation}"
+            );
+            assert_eq!(
+                store.pending_describe(Product::Battle).unwrap(),
+                Some(before)
+            );
+        }
+    }
+}
+
+#[test]
+fn native_exact_input_retains_lone_surrogate_json_bytes() {
+    let (_root, lib) = fixture();
+    let (mut m, mut parts) = unstarted(Product::Battle);
+    parts[0].1 = parts[0].1.replace("角色", r"角色\ud800");
+    refresh(&mut m, &parts);
+    let token = upload(lib.stories(), &m, &parts);
+    lib.stories().pending_seal(&token).unwrap();
+    let guard = lib.stories().pending_admission(m.product).unwrap();
+    let input = lib
+        .stories()
+        .pending_native_input(&guard, &m.key(), &m.actor, &m.input_digest)
+        .unwrap();
+    assert_eq!(input.input.as_bytes(), parts[0].1.as_bytes());
+}
+#[test]
+fn restored_backup_retains_native_claim_and_never_authorizes_another_create() {
+    let (root, lib) = fixture();
+    let (m, parts) = unstarted(Product::Battle);
+    let token = upload(lib.stories(), &m, &parts);
+    lib.stories().pending_seal(&token).unwrap();
+    let guard = lib.stories().pending_admission(m.product).unwrap();
+    let permit = lib
+        .stories()
+        .pending_claim_create(
+            &guard,
+            &m.key(),
+            &m.actor,
+            &m.input_digest,
+            &"a".repeat(64),
+            native_funding(),
+        )
+        .unwrap();
+    drop(permit);
+    let claim = lib
+        .stories()
+        .pending_describe_admitted(&guard)
+        .unwrap()
+        .unwrap()
+        .create_claim;
+    drop(guard);
+    let backup = crate::backup::create_backup(&lib).unwrap();
+    let prepared = crate::restore::prepare_restore(&lib, &backup.backup_id).unwrap();
+    drop(prepared);
+    drop(lib);
+    run_boundary_child(root.path(), "restore");
+    let lib = LocalLibrary::open(root.path()).unwrap();
+    let guard = lib.stories().pending_admission(m.product).unwrap();
+    let snapshot = lib
+        .stories()
+        .pending_describe_admitted(&guard)
+        .unwrap()
+        .unwrap();
+    assert!(snapshot.restored);
+    assert_eq!(snapshot.create_claim, claim);
+    assert_eq!(
+        lib.stories()
+            .pending_claim_create(
+                &guard,
+                &m.key(),
+                &m.actor,
+                &m.input_digest,
+                &"a".repeat(64),
+                native_funding()
+            )
+            .err(),
+        Some(StoryError::CommitUnknown)
+    );
+    // Read-only evidence/original access remains possible after the restore fence.
+    assert_eq!(
+        lib.stories()
+            .pending_native_input(&guard, &m.key(), &m.actor, &m.input_digest)
+            .unwrap()
+            .input,
+        parts[0].1
+    );
+}
+
+#[test]
+fn native_claim_guard_is_store_bound_and_serializes_only_its_product() {
+    let (_root, lib) = fixture();
+    let (_other_root, other) = fixture();
+    let store = lib.stories();
+    let guard = store.pending_admission(Product::Battle).unwrap();
+    assert_eq!(
+        other.stories().pending_describe_admitted(&guard),
+        Err(StoryError::Stale)
+    );
+    let arena = store.pending_admission(Product::Arena).unwrap();
+    assert_eq!(arena.product(), Product::Arena);
+    drop(arena);
+    std::thread::scope(|scope| {
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (admitted_tx, admitted_rx) = std::sync::mpsc::channel();
+        scope.spawn(move || {
+            started_tx.send(()).unwrap();
+            let _next = store.pending_admission(Product::Battle).unwrap();
+            admitted_tx.send(()).unwrap();
+        });
+        started_rx.recv().unwrap();
+        assert!(admitted_rx.recv_timeout(Duration::from_millis(20)).is_err());
+        drop(guard);
+        admitted_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    });
+}
+#[test]
+fn native_claim_backup_audit_rejects_hidden_authority_and_unpublished_claims() {
+    for fault in [
+        "unknown",
+        "duplicate",
+        "null",
+        "input",
+        "inactive",
+        "budget",
+    ] {
+        let (_root, lib) = fixture();
+        let store = lib.stories();
+        let (m, parts) = unstarted(Product::Battle);
+        let token = upload(store, &m, &parts);
+        store.pending_seal(&token).unwrap();
+        let guard = store.pending_admission(m.product).unwrap();
+        drop(
+            store
+                .pending_claim_create(
+                    &guard,
+                    &m.key(),
+                    &m.actor,
+                    &m.input_digest,
+                    &"a".repeat(64),
+                    native_funding(),
+                )
+                .unwrap(),
+        );
+        drop(guard);
+        let connection = lock_connection(lib.connection()).unwrap();
+        let original: String = connection
+            .query_row(
+                "SELECT create_claim FROM arena_story_pending WHERE token=?1",
+                [&token],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let mut value: serde_json::Value = serde_json::from_str(&original).unwrap();
+        match fault {
+            "unknown" => value["funding"]["apiKey"] = json!("SECRET_CANARY"),
+            "null" => value["funding"]["generationOverrides"] = serde_json::Value::Null,
+            "input" => value["inputDigest"] = json!(format!("sha256:{}", "f".repeat(64))),
+            _ => {}
+        }
+        let document = if fault == "duplicate" {
+            original.replace("\"modelId\":\"default\"", "\"modelId\":\"default\",\"generationOverrides\":{\"temperature\":\"SECRET_CANARY\",\"temperature\":1}")
+        } else if fault == "budget" {
+            format!("{original}{}", " ".repeat(METADATA_BYTES))
+        } else {
+            value.to_string()
+        };
+        connection
+            .execute(
+                "UPDATE arena_story_pending SET create_claim=?2 WHERE token=?1",
+                params![token, document],
+            )
+            .unwrap();
+        if fault == "inactive" {
+            connection
+                .execute(
+                    "UPDATE arena_story_pending SET active=0 WHERE token=?1",
+                    [&token],
+                )
+                .unwrap();
+        }
+        assert!(audit(&connection).is_err(), "{fault}");
+    }
+}
+
+#[test]
+fn inherited_claim_budget_rejection_preserves_both_previous_active_and_upload() {
+    let (_root, lib) = fixture();
+    let store = lib.stories();
+    let (m, parts) = unstarted(Product::Battle);
+    let token = upload(store, &m, &parts);
+    store.pending_seal(&token).unwrap();
+    let guard = store.pending_admission(m.product).unwrap();
+    drop(
+        store
+            .pending_claim_create(
+                &guard,
+                &m.key(),
+                &m.actor,
+                &m.input_digest,
+                &"a".repeat(64),
+                native_funding(),
+            )
+            .unwrap(),
+    );
+    let before = store.pending_describe_admitted(&guard).unwrap();
+    drop(guard);
+    let mut next = m.clone();
+    next.pending_revision = 2;
+    let next_token = upload(store, &next, &parts);
+    let mut metadata = serde_json::to_string(&next).unwrap();
+    metadata.push_str(&" ".repeat(METADATA_BYTES - metadata.len()));
+    lock_connection(lib.connection())
+        .unwrap()
+        .execute(
+            "UPDATE arena_story_pending SET metadata=?2 WHERE token=?1",
+            params![next_token, metadata],
+        )
+        .unwrap();
+    assert_eq!(store.pending_seal(&next_token), Err(StoryError::TooLarge));
+    assert_eq!(store.pending_describe(m.product).unwrap(), before);
+    assert_eq!(store.pending_upload(&next_token).unwrap().manifest, next);
+}
+#[test]
+fn native_accepted_role_originals_remain_readable_when_frozen_or_restored() {
+    let (_root, lib) = fixture();
+    let store = lib.stories();
+    let (m, parts) = golden_candidates().remove(0);
+    assert_eq!(m.role_state, RoleState::Accepted);
+    let expected = &parts
+        .iter()
+        .find(|(k, _)| *k == PendingKind::RoleResponse)
+        .unwrap()
+        .1;
+    let token = upload(store, &m, &parts);
+    store.pending_seal(&token).unwrap();
+    let guard = store.pending_admission(m.product).unwrap();
+    assert_eq!(
+        store
+            .pending_native_input(&guard, &m.key(), &m.actor, &m.input_digest)
+            .unwrap()
+            .role_response
+            .as_deref(),
+        Some(expected.as_str())
+    );
+    lock_connection(lib.connection())
+        .unwrap()
+        .execute(
+            "UPDATE arena_story_pending SET restored=1 WHERE token=?1",
+            [&token],
+        )
+        .unwrap();
+    assert_eq!(
+        store
+            .pending_native_input(&guard, &m.key(), &m.actor, &m.input_digest)
+            .unwrap()
+            .role_response
+            .as_deref(),
+        Some(expected.as_str())
+    );
+}
+
+#[test]
+fn native_claim_reserves_unknown_generation_and_hash_before_any_dispatch() {
+    let (_root, lib) = fixture();
+    let store = lib.stories();
+    let (m, parts) = unstarted(Product::Battle);
+    let token = upload(store, &m, &parts);
+    store.pending_seal(&token).unwrap();
+    let hypothetical = CreateClaim {
+        version: 1,
+        attempt_id: format!("{}-{}", "0".repeat(32), "0".repeat(32)),
+        story_protocol_version: "arena-story-v1".into(),
+        input_digest: m.input_digest.clone(),
+        client_body_hash: "a".repeat(64),
+        funding: native_funding(),
+        observed_generation: None,
+    };
+    let actual_claim_length = serde_json::to_string(&hypothetical).unwrap().len();
+    let mut metadata = serde_json::to_string(&m).unwrap();
+    metadata.push_str(&" ".repeat(METADATA_BYTES - actual_claim_length - metadata.len()));
+    assert_eq!(metadata.len() + actual_claim_length, METADATA_BYTES);
+    lock_connection(lib.connection())
+        .unwrap()
+        .execute(
+            "UPDATE arena_story_pending SET metadata=?2 WHERE token=?1",
+            params![token, metadata],
+        )
+        .unwrap();
+    let guard = store.pending_admission(m.product).unwrap();
+    assert_eq!(
+        store
+            .pending_claim_create(
+                &guard,
+                &m.key(),
+                &m.actor,
+                &m.input_digest,
+                &"a".repeat(64),
+                native_funding()
+            )
+            .err(),
+        Some(StoryError::TooLarge)
+    );
+    assert!(store
+        .pending_describe_admitted(&guard)
+        .unwrap()
+        .unwrap()
+        .create_claim
+        .is_none());
+    // Exactly enough reserved space remains usable for the maximum observation.
+    let mut reserved = serde_json::to_value(&hypothetical).unwrap();
+    reserved["observedGeneration"] =
+        json!({"generationId":"g".repeat(128),"serverPayloadHash":"b".repeat(64)});
+    let reserve_length = reserved.to_string().len();
+    let mut metadata = serde_json::to_string(&m).unwrap();
+    metadata.push_str(&" ".repeat(METADATA_BYTES - reserve_length - metadata.len()));
+    lock_connection(lib.connection())
+        .unwrap()
+        .execute(
+            "UPDATE arena_story_pending SET metadata=?2 WHERE token=?1",
+            params![token, metadata],
+        )
+        .unwrap();
+    let permit = store
+        .pending_claim_create(
+            &guard,
+            &m.key(),
+            &m.actor,
+            &m.input_digest,
+            &"a".repeat(64),
+            native_funding(),
+        )
+        .unwrap();
+    let claim = store
+        .pending_consume_create(&guard, &m.key(), &m.actor, &m.input_digest, permit)
+        .unwrap();
+    store
+        .pending_observe_generation(
+            &guard,
+            &m.key(),
+            &m.actor,
+            &m.input_digest,
+            &claim.attempt_id,
+            (&"g".repeat(128), Some(&"b".repeat(64))),
+        )
+        .unwrap();
+}
+
+#[test]
+fn native_observed_generation_binds_accepted_roles_and_frozen_chapter() {
+    for fault in [
+        "none",
+        "missing-observation",
+        "different-observation",
+        "chapter-only",
+        "accepted-unfrozen",
+        "accepted-foreign-unfrozen",
+    ] {
+        let (_root, lib) = fixture();
+        let store = lib.stories();
+        let (mut final_manifest, mut final_parts) = golden_candidates().remove(0);
+        let role: serde_json::Value = serde_json::from_str(
+            &final_parts
+                .iter()
+                .find(|(k, _)| *k == PendingKind::RoleResponse)
+                .unwrap()
+                .1,
+        )
+        .unwrap();
+        let generation = role["generationId"].as_str().unwrap();
+        let mut initial = final_manifest.clone();
+        initial.model_completed = false;
+        initial.role_state = RoleState::NotRequested;
+        initial.role_input_digest = None;
+        initial.commit_manifest = None;
+        let originals: Vec<_> = final_parts
+            .iter()
+            .filter(|(k, _)| k.commit().is_none() && *k != PendingKind::RoleResponse)
+            .cloned()
+            .collect();
+        refresh(&mut initial, &originals);
+        let token = upload(store, &initial, &originals);
+        store.pending_seal(&token).unwrap();
+        let guard = store.pending_admission(initial.product).unwrap();
+        drop(
+            store
+                .pending_claim_create(
+                    &guard,
+                    &initial.key(),
+                    &initial.actor,
+                    &initial.input_digest,
+                    &"a".repeat(64),
+                    native_funding(),
+                )
+                .unwrap(),
+        );
+        let claim = store
+            .pending_describe_admitted(&guard)
+            .unwrap()
+            .unwrap()
+            .create_claim
+            .unwrap();
+        if !matches!(fault, "missing-observation" | "accepted-unfrozen") {
+            let id = if matches!(fault, "different-observation" | "accepted-foreign-unfrozen") {
+                "generation-other"
+            } else {
+                generation
+            };
+            store
+                .pending_observe_generation(
+                    &guard,
+                    &initial.key(),
+                    &initial.actor,
+                    &initial.input_digest,
+                    &claim.attempt_id,
+                    (id, None),
+                )
+                .unwrap();
+        }
+        let before = store.pending_describe_admitted(&guard).unwrap();
+        drop(guard);
+        if fault == "chapter-only" {
+            let chapter = final_parts
+                .iter_mut()
+                .find(|(k, _)| *k == PendingKind::Chapter)
+                .unwrap();
+            let mut document: serde_json::Value = serde_json::from_str(&chapter.1).unwrap();
+            document["generationId"] = json!("generation-other");
+            chapter.1 = document.to_string();
+        }
+        if matches!(fault, "accepted-unfrozen" | "accepted-foreign-unfrozen") {
+            final_manifest.commit_manifest = None;
+            final_parts.retain(|(kind, _)| kind.commit().is_none());
+        }
+        final_manifest.pending_revision = 2;
+        refresh(&mut final_manifest, &final_parts);
+        let token = upload(store, &final_manifest, &final_parts);
+        if fault == "none" {
+            store.pending_seal(&token).unwrap();
+        } else {
+            assert_eq!(
+                store.pending_seal(&token),
+                Err(StoryError::OriginalsUncovered),
+                "{fault}"
+            );
+            assert_eq!(store.pending_describe(initial.product).unwrap(), before);
+        }
+    }
+}
+
+#[test]
+fn native_memory_cancellation_uses_same_admission_during_maintenance() {
+    let (_root, lib) = fixture();
+    let store = lib.stories();
+    let maintenance = lib.enter_maintenance("backup").unwrap();
+    let cancel = store.pending_cancel_admission(Product::Battle).unwrap();
+    assert!(matches!(
+        store.pending_admission[0].try_lock(),
+        Err(std::sync::TryLockError::WouldBlock)
+    ));
+    let other_product = store.pending_cancel_admission(Product::Arena).unwrap();
+    drop(other_product);
+    drop(cancel);
+    assert_eq!(
+        store.pending_admission(Product::Battle).err(),
+        Some(StoryError::Maintenance)
+    );
+    drop(maintenance);
+    assert!(store.pending_admission(Product::Battle).is_ok());
+}
+
+#[test]
+fn raw_role_projection_keeps_selected_bytes_and_uses_json_parse_member_semantics() {
+    let text = r#"{"\ud800":1,"\ud800":2,"data":{"name":"old"},"d\u0061ta":{"name":"new\ud800","apiKey":"business","x":1,"x":2},"isNative":false,"isNative":true,"extension":{"token":"opaque"}}"#;
+    let raw = parse_raw(text).unwrap();
+    let fields = raw_projection_fields(raw, &["data", "isNative", "source"]).unwrap();
+    assert_eq!(fields.len(), 2);
+    assert_eq!(
+        fields["data"].get(),
+        r#"{"name":"new\ud800","apiKey":"business","x":1,"x":2}"#
+    );
+    assert_eq!(fields["isNative"].get(), "true");
+    assert!(raw_projection_fields(parse_raw("[]").unwrap(), &["data"]).is_err());
+    assert!(
+        raw_object(raw).is_err(),
+        "closed authority parsing must still reject duplicate keys"
     );
 }

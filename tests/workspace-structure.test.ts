@@ -874,6 +874,13 @@ it('runs maintenance commands off the IPC thread and inside a maintenance window
       managedStates.filter((call) => /library/iu.test(call)),
       'apps/desktop must manage exactly one local library state',
     ).toEqual(['app.manage(library)']);
+    // Hosted transport and storage binder must share the one StoryStore/admission,
+    // rather than opening an independent library or a second per-product gate.
+    expect(libSource).toContain('let arena = arena_hosted::ArenaState::new(library.shared_stories())');
+    expect(managedStates).toContain('app.manage(arena)');
+    const librarySource = readFileSync(path.join(tauriDirectory, 'src', 'library.rs'), 'utf8');
+    expect(librarySource).toContain('pub(crate) fn shared_stories(&self) -> Arc<crate::arena_story::StoryStore>');
+    expect(librarySource).toContain('Arc::clone(&self.stories)');
 
     // 单实例必须在打开库**之前**获取：反过来两个进程可能都已建连接，第二个才失败，
     // 而它已经跑完迁移阶梯，可能留下一个迁移了一半的库。

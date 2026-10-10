@@ -67,7 +67,7 @@ fn rec_state(hono: String, next: String) -> ArenaState {
 #[test]
 fn reconciliation_request_is_narrow_and_legacy_create_writes_stay_closed() {
     assert_eq!(
-        ArenaState::new().unwrap().reconciliation_origin,
+        ArenaState::isolated().reconciliation_origin,
         "https://mahoshojo.colanns.me"
     );
     assert_eq!(rec::PATH, "/api/arena/update-combatants-after-stream");
@@ -504,7 +504,7 @@ async fn original_bootstrap_recovers_signed_token_on_hono_after_login_and_never_
     .await;
     let secrets = Secrets::default();
     let cloud = CloudState::new().unwrap();
-    let prior = ArenaState::new().unwrap();
+    let prior = ArenaState::isolated();
     prior
         .prepare(&create(false, false), &cloud, &secrets)
         .unwrap();

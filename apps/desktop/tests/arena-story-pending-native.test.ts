@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
-import { STORY_CANDIDATE_FRAME_BYTES, type StoryPendingKey, type StoryPendingManifest, type StoryPendingPartKind } from '@mahoshojo/contracts/desktop-arena-story';
+import { STORY_CANDIDATE_FRAME_BYTES, StoryPendingSnapshotSchema, type StoryPendingKey, type StoryPendingManifest, type StoryPendingPartKind } from '@mahoshojo/contracts/desktop-arena-story';
 import { createIpcStoryPendingPort, STORY_PENDING_IPC } from '../src/platform/arena-story-pending-native';
 import { STORY_IPC, type StoryInvoke } from '../src/platform/arena-story-native';
 
@@ -15,6 +15,8 @@ const manifest: StoryPendingManifest = {
   modelCompleted: false, roleState: 'not-requested', roleInputDigest: null,
   parts: [{ kind: 'input', byteLength: 3, digest }], commitManifest: null,
 };
+
+const snapshot = StoryPendingSnapshotSchema.parse({ manifest, saveAttemptId: null, restored: false, createClaim: null });
 
 const rawCarriers = JSON.parse(readFileSync(new URL('../../../packages/contracts/fixtures/desktop-story-pending-content.json', import.meta.url), 'utf8')) as {
   invalidRawCarriers: Array<{ name: string; kind: StoryPendingPartKind; document: string }>;
@@ -44,9 +46,12 @@ describe('storage-only durable pending raw IPC bridge', () => {
     expect(new TextDecoder().decode(invoke.mock.calls[0]![1] as Uint8Array)).toBe(rawCarriers.validOpaqueRawInput);
   });
   it('uses exact fixed commands, keys and explicit save attempt without creating a Direct save stage', async () => {
-    const invoke = vi.fn<StoryInvoke>(async () => ({})); const port = createIpcStoryPendingPort(invoke);
-    await port.begin(manifest); await port.queryUpload(token); await port.seal(token); await port.abortUpload(token);
-    await port.describe('battle'); await port.prepareSave(key, digest); await port.save(key, digest, token);
+    const invoke = vi.fn<StoryInvoke>(async (command) => command === STORY_PENDING_IPC.seal || command === STORY_PENDING_IPC.describe ? snapshot : {});
+    const port = createIpcStoryPendingPort(invoke);
+    await port.begin(manifest); await port.queryUpload(token);
+    expect(StoryPendingSnapshotSchema.parse(await port.seal(token))).toEqual(snapshot); await port.abortUpload(token);
+    expect(StoryPendingSnapshotSchema.parse(await port.describe('battle'))).toEqual(snapshot);
+    await port.prepareSave(key, digest); await port.save(key, digest, token);
     await port.receipt('session', 'chapter');
     expect(invoke.mock.calls).toEqual([
       [STORY_PENDING_IPC.begin, { manifest }], [STORY_PENDING_IPC.queryUpload, { token }],
@@ -58,6 +63,27 @@ describe('storage-only durable pending raw IPC bridge', () => {
     ]);
     expect(Object.keys(port)).toEqual(['begin', 'append', 'queryUpload', 'seal', 'abortUpload', 'describe', 'read', 'prepareSave', 'save', 'receipt']);
     expect(invoke.mock.calls.some(([command]) => [STORY_IPC.begin, STORY_IPC.append, STORY_IPC.end].includes(command as typeof STORY_IPC.begin))).toBe(false);
+  });
+  it.each([null, {
+    version: 1, attemptId: token, storyProtocolVersion: 'arena-story-v1', inputDigest: digest,
+    clientBodyHash: 'a'.repeat(64), funding: { mode: 'system', providerId: 'system', modelId: 'default' },
+    observedGeneration: { generationId: `arena_${'b'.repeat(64)}`, serverPayloadHash: 'c'.repeat(64) },
+  }])('keeps the v7 read-only create claim unchanged through seal and describe %#', async createClaim => {
+    const original = StoryPendingSnapshotSchema.parse({ ...snapshot, createClaim });
+    const invoke = vi.fn<StoryInvoke>(async () => original), port = createIpcStoryPendingPort(invoke);
+    expect(await port.seal(token)).toBe(original); expect(await port.describe('battle')).toBe(original);
+    expect(StoryPendingSnapshotSchema.parse(original).createClaim).toEqual(createClaim);
+    expect(invoke.mock.calls).toEqual([[STORY_PENDING_IPC.seal, { token }], [STORY_PENDING_IPC.describe, { product: 'battle' }]]);
+    expect(Object.keys(port)).not.toContain('createClaim');
+  });
+  it('does not synthesize missing v7 claim evidence or accept renderer-written claims in an upload', async () => {
+    const { createClaim: _createClaim, ...incomplete } = snapshot;
+    const invoke = vi.fn<StoryInvoke>(async () => incomplete), port = createIpcStoryPendingPort(invoke);
+    // The low-level port preserves unknown replies; the caller must check the canonical snapshot.
+    const value = await port.describe('battle'); expect(value).toBe(incomplete);
+    expect(StoryPendingSnapshotSchema.safeParse(value).success).toBe(false);
+    expect(() => port.begin({ ...manifest, createClaim: null } as StoryPendingManifest)).toThrow();
+    expect(invoke).toHaveBeenCalledExactlyOnceWith(STORY_PENDING_IPC.describe, { product: 'battle' });
   });
   it('sends identical raw bytes with fixed ASCII-only identity and canonical offset headers', async () => {
     const invoke = vi.fn<StoryInvoke>(async () => ({ token, kind: 'input', receivedBytes: 3 })); const port = createIpcStoryPendingPort(invoke);

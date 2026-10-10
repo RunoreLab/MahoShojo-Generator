@@ -3,7 +3,6 @@ import {
   buildCompletedBattleStoryRecords, chunkBattleStoryCommitJson, freezeBattleStoryCommit,
   projectHostedStoryPendingContent, type HostedStoryPendingContentInput,
 } from '../src/arena-story-commit';
-
 const serialize = (value: unknown) => Buffer.concat([...chunkBattleStoryCommitJson(value, 7)]).toString('utf8');
 const base = (): HostedStoryPendingContentInput => ({
   reasoning: '', roleState: 'not-requested', workingCombatants: [
@@ -26,6 +25,22 @@ const records = (input: HostedStoryPendingContentInput) => {
 };
 
 describe('Hosted story pending content projection', () => {
+  it.each([{ header: { narrativeHistoryReadCount: 0 }, telemetry: { narrativeHistoryReadCount: 1 } },
+    { header: { narrativeHistoryReadCount: 3 }, telemetry: { narrativeHistoryReadCount: 0 } }])('rejects conflicting read counts and preserves both originals %#', ({ header, telemetry }) => {
+    const input = { ...base(), header, telemetry }; const before = structuredClone(input);
+    expect(() => projectHostedStoryPendingContent(input)).toThrow('读取数不一致');
+    expect(input).toEqual(before);
+  });
+  it('takes readCount from either carrier and preserves raw model text and usage references', () => {
+    const usage = { promptTokens: null, completionTokensIncludesReasoning: false };
+    const telemetry = { aiModel: '  model\ud800\n', usage, narrativeHistoryReadCount: 0 };
+    const result = projectHostedStoryPendingContent({ ...base(), telemetry });
+    expect(result.cardSnapshot.aiModel).toBe(telemetry.aiModel);
+    expect(result.cardSnapshot.aiUsage).toBe(usage);
+    expect(result.cardSnapshot.narrativeHistoryReadCount).toBe(0);
+    expect(projectHostedStoryPendingContent({ ...base(), header: { narrativeHistoryReadCount: 7 } }).cardSnapshot.narrativeHistoryReadCount).toBe(7);
+    expect(projectHostedStoryPendingContent({ ...base(), header: { narrativeHistoryReadCount: 0 }, telemetry }).cardSnapshot.narrativeHistoryReadCount).toBe(0);
+  });
 
   it('retains exact reasoning, report extensions, guidance and debug text including lone surrogates', () => {
     const text = '  推理\r\n\n\t𐐀🪄\u0000\ud800|\udfff  ';

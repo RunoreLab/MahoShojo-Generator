@@ -1,4 +1,6 @@
 import { sha256 } from '@noble/hashes/sha2.js';
+import { DesktopArenaHostedStoryClientBodyIntentSchema, type DesktopArenaHostedStoryClientBodyIntent } from '@mahoshojo/contracts/desktop-arena-story-transport';
+import type { DesktopArenaHostedSuccessTelemetry } from '@mahoshojo/contracts/desktop-arena-hosted';
 import type { BattleStoryDeterministicDigest } from './arena-battle-story-session';
 
 /** Transport frame size only; the host supplies its separate whole-commit resource policy. */
@@ -111,6 +113,60 @@ export const digestBattleStoryCommitValue = (value: unknown, stringChunkSize = J
   for (const bytes of iterateBattleStoryCommitJsonUtf8(value, stringChunkSize)) hash.update(bytes);
   return hash.digest();
 };
+
+/**
+ * Narrow v1 creation-intent encoding, NOT JSON canonicalization or a server payload
+ * hash. Fields are: domain NUL, story protocol NUL, 32 digest bytes, funding u8
+ * (system=0/preset=1), provider/model (u32BE UTF-8 length + bytes), override mask
+ * (tokens=1/temperature=2/thinking=4), then u32BE tokens, f64BE temperature,
+ * thinking u8 (default=0/disabled=1/enabled=2), enabled effort u8
+ * (absent=0/minimal=1/low=2/medium=3/high=4/xhigh=5/max=6).
+ * The caller uses the existing trusted funding resolver; no catalog is copied here.
+ */
+export const encodeHostedStoryClientBodyIntent = (input: DesktopArenaHostedStoryClientBodyIntent): Uint8Array => {
+  const checked = DesktopArenaHostedStoryClientBodyIntentSchema.parse(input);
+  const funding = checked.funding ?? { mode: 'system' as const, providerId: 'system' as const, modelId: 'default' };
+  // A hash of unresolved/trimmed identity could diverge from the Native resolver.
+  if (funding.modelId !== funding.modelId.trim() || (input.funding && input.funding.modelId !== funding.modelId)) {
+    throw new Error('故事创建摘要需要已归一的模型身份');
+  }
+  const encoder = new TextEncoder();
+  const pieces: Uint8Array[] = [encoder.encode('desktop-arena-story-client-body-v1\0arena-story-v1\0')];
+  const u8 = (value: number): void => { pieces.push(Uint8Array.of(value)); };
+  const u32 = (value: number): void => {
+    const bytes = new Uint8Array(4); new DataView(bytes.buffer).setUint32(0, value, false); pieces.push(bytes);
+  };
+  const text = (value: string): void => {
+    const bytes = encoder.encode(value);
+    // Native UTF-8 identity cannot represent lone UTF-16 surrogates. Never silently
+    // replace them and collapse distinct model identities to U+FFFD.
+    if (new TextDecoder().decode(bytes) !== value) throw new Error('故事创建摘要的模型身份不是有效 UTF-8');
+    u32(bytes.byteLength); pieces.push(bytes);
+  };
+  pieces.push(Uint8Array.from(checked.inputDigest.slice(7).match(/../gu)!, (pair) => Number.parseInt(pair, 16)));
+  u8(funding.mode === 'system' ? 0 : 1); text(funding.providerId); text(funding.modelId);
+  const overrides = funding.generationOverrides;
+  const tokens = overrides?.maxOutputTokens; const temperature = overrides?.temperature; const thinking = overrides?.thinking;
+  u8((tokens === undefined ? 0 : 1) | (temperature === undefined ? 0 : 2) | (thinking === undefined ? 0 : 4));
+  if (tokens !== undefined) u32(tokens);
+  if (temperature !== undefined) {
+    const bytes = new Uint8Array(8); new DataView(bytes.buffer).setFloat64(0, temperature === 0 ? 0 : temperature, false); pieces.push(bytes);
+  }
+  if (thinking) {
+    u8(thinking.mode === 'default' ? 0 : thinking.mode === 'disabled' ? 1 : 2);
+    if (thinking.mode === 'enabled') u8(thinking.effort === undefined ? 0
+      : ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'].indexOf(thinking.effort) + 1);
+  }
+  const result = new Uint8Array(pieces.reduce((size, bytes) => size + bytes.byteLength, 0));
+  let offset = 0;
+  for (const bytes of pieces) { result.set(bytes, offset); offset += bytes.byteLength; }
+  return result;
+};
+
+/** Lowercase 64-hex digest, deliberately distinct from inputDigest's sha256: prefix. */
+export const digestHostedStoryClientBodyIntent = (input: DesktopArenaHostedStoryClientBodyIntent): string => (
+  digestHex(sha256(encodeHostedStoryClientBodyIntent(input))).slice(7)
+);
 
 export class BattleStoryCommitByteLimitError extends RangeError {
   readonly code = 'story-commit-too-large';
@@ -275,7 +331,7 @@ export const captureBattleStoryCommitExpected = (input: {
   };
 };
 
-/** Already-checked public content, expressed structurally to avoid a Desktop dependency. */
+/** Already-checked public content, with no application or platform runtime dependency. */
 export type HostedStoryPendingContentInput = {
   inputUserGuidance?: string;
   reasoning: string;
@@ -287,6 +343,7 @@ export type HostedStoryPendingContentInput = {
     reporterInfo?: object; userGuidance?: string; characterGuidances?: readonly unknown[];
     adjudicationResults?: readonly unknown[]; narrativeHistoryReadCount?: number; scenarioDisplayName?: string;
   };
+  telemetry?: DesktopArenaHostedSuccessTelemetry;
   workingCombatants: readonly object[];
   roleState: 'not-requested' | 'accepted' | 'old-roles';
   roleResponse?: {
@@ -321,7 +378,12 @@ export const projectHostedStoryPendingContent = (input: HostedStoryPendingConten
     updatedIndexes.add(index);
     nextWorkingCombatants[index] = { ...input.workingCombatants[index], data: update.data, isNative: update.isNative };
   }
-  const { header, meta } = input;
+  const { header, meta, telemetry } = input;
+  if (header?.narrativeHistoryReadCount !== undefined && telemetry?.narrativeHistoryReadCount !== undefined
+    && header.narrativeHistoryReadCount !== telemetry.narrativeHistoryReadCount) {
+    throw new Error('故事响应头与遥测的叙事历史读取数不一致，不能冻结本章；原件保持不变。');
+  }
+  const narrativeHistoryReadCount = telemetry?.narrativeHistoryReadCount ?? header?.narrativeHistoryReadCount;
   const userGuidance = header?.userGuidance ?? input.inputUserGuidance;
   const cardSnapshot = {
     aiReasoning: { status: 'done' as const, source: 'provider' as const, text: input.reasoning },
@@ -329,7 +391,9 @@ export const projectHostedStoryPendingContent = (input: HostedStoryPendingConten
     ...(userGuidance !== undefined ? { userGuidance } : {}),
     ...(header?.characterGuidances !== undefined ? { characterGuidances: header.characterGuidances } : {}),
     ...(header?.adjudicationResults !== undefined ? { adjudicationResults: header.adjudicationResults } : {}),
-    ...(header?.narrativeHistoryReadCount !== undefined ? { narrativeHistoryReadCount: header.narrativeHistoryReadCount } : {}),
+    ...(narrativeHistoryReadCount !== undefined ? { narrativeHistoryReadCount } : {}),
+    ...(telemetry?.aiModel !== undefined ? { aiModel: telemetry.aiModel } : {}),
+    ...(telemetry?.usage !== undefined ? { aiUsage: telemetry.usage } : {}),
     ...(header?.scenarioDisplayName !== undefined ? { scenarioDisplayName: header.scenarioDisplayName } : {}),
     ...(meta ? { streamUpdateMetaDebug: {
       source: 'sse' as const, parseOk: meta.data.parseOk,

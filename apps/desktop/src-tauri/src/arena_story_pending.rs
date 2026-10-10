@@ -8,6 +8,14 @@ const INPUT_BYTES: u64 = 12 * 1024 * 1024;
 const OUTPUT_BYTES: u64 = 4 * 1024 * 1024;
 const ROLE_BYTES: u64 = 16 * 1024 * 1024;
 
+#[path = "arena_story_pending_native.rs"]
+mod native;
+pub(crate) use native::{AdmissionGuard, CreatePermit};
+pub use native::{CreateClaim, FundingMode, NativeFunding};
+
+pub(crate) const MIGRATION_7: &str =
+    "ALTER TABLE arena_story_pending ADD COLUMN create_claim TEXT;";
+
 pub(crate) const MIGRATION_6: &str = r#"
 CREATE TABLE arena_story_pending (
  token TEXT PRIMARY KEY NOT NULL,
@@ -60,6 +68,7 @@ pub enum PendingKind {
     Meta,
     Header,
     RoleResponse,
+    Telemetry,
     Session,
     Seed,
     Chapter,
@@ -79,6 +88,7 @@ impl PendingKind {
             Self::Meta => "meta",
             Self::Header => "header",
             Self::RoleResponse => "roleResponse",
+            Self::Telemetry => "telemetry",
             Self::Session => "session",
             Self::Seed => "seed",
             Self::Chapter => "chapter",
@@ -172,6 +182,8 @@ pub struct PendingSnapshot {
     pub manifest: PendingManifest,
     pub save_attempt_id: Option<String>,
     pub restored: bool,
+    #[serde(deserialize_with = "required_nullable")]
+    pub create_claim: Option<CreateClaim>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -271,7 +283,7 @@ impl PendingManifest {
                 .as_deref()
                 .is_some_and(|s| !valid_digest(s))
             || self.parts.is_empty()
-            || self.parts.len() > 11
+            || self.parts.len() > 12
         {
             return Err(StoryError::Invalid);
         }
@@ -287,7 +299,7 @@ impl PendingManifest {
             let limit = match p.kind {
                 PendingKind::Input => INPUT_BYTES,
                 PendingKind::Markdown | PendingKind::Reasoning => OUTPUT_BYTES,
-                PendingKind::Meta => 6 * OUTPUT_BYTES + 65536,
+                PendingKind::Meta | PendingKind::Telemetry => 6 * OUTPUT_BYTES + 65536,
                 PendingKind::Header => 65536,
                 PendingKind::RoleResponse => ROLE_BYTES,
                 _ => CANDIDATE_COMMIT_BYTES,
@@ -346,7 +358,7 @@ impl PendingManifest {
         }
         Ok(total)
     }
-    fn key(&self) -> PendingKey {
+    pub(crate) fn key(&self) -> PendingKey {
         PendingKey {
             product: self.product,
             request_id: self.request_id.clone(),
@@ -360,13 +372,50 @@ struct Stored {
     active: bool,
     total: u64,
 }
+fn schema_version(connection: &Connection) -> Result<i64, StoryError> {
+    connection
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .map_err(|_| StoryError::Corrupt)
+}
+type StoredRow = (String, bool, u64, Option<String>, bool, Option<String>);
 fn load(connection: &Connection, token: &str) -> Result<Stored, StoryError> {
-    let row:Option<(String,bool,u64,Option<String>,bool)>=connection.query_row("SELECT CASE WHEN length(CAST(metadata AS BLOB))<=65536 THEN metadata ELSE NULL END,active,total_bytes,save_attempt,restored FROM arena_story_pending WHERE token=?1",[token],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).optional().map_err(|_|StoryError::Corrupt)?;
-    let (document, active, total, save_attempt_id, restored) = row.ok_or(StoryError::Stale)?;
+    // Historical v6 backups have this table but not create_claim. Never select
+    // a column absent from the version we are auditing.
+    let claim_column = if schema_version(connection)? >= 7 {
+        "create_claim"
+    } else {
+        "NULL"
+    };
+    let sql = format!("SELECT CASE WHEN length(CAST(metadata AS BLOB))+coalesce(length(CAST({claim_column} AS BLOB)),0)<=65536 THEN metadata ELSE NULL END,active,total_bytes,save_attempt,restored,{claim_column} FROM arena_story_pending WHERE token=?1");
+    let row: Option<StoredRow> = connection
+        .query_row(&sql, [token], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+            ))
+        })
+        .optional()
+        .map_err(|_| StoryError::Corrupt)?;
+    let (document, active, total, save_attempt_id, restored, claim_document) =
+        row.ok_or(StoryError::Stale)?;
     let manifest: PendingManifest =
         serde_json::from_str(&document).map_err(|_| StoryError::Corrupt)?;
     if manifest.validate()? != total {
         return Err(StoryError::Corrupt);
+    }
+    let create_claim: Option<CreateClaim> = claim_document
+        .as_deref()
+        .map(native::parse_claim)
+        .transpose()?;
+    if let Some(claim) = &create_claim {
+        if !active {
+            return Err(StoryError::Corrupt);
+        }
+        claim.validate(&manifest).map_err(|_| StoryError::Corrupt)?;
     }
     Ok(Stored {
         token: token.into(),
@@ -374,6 +423,7 @@ fn load(connection: &Connection, token: &str) -> Result<Stored, StoryError> {
             manifest,
             save_attempt_id,
             restored,
+            create_claim,
         },
         active,
         total,
@@ -515,10 +565,7 @@ fn hash_blob(
 impl StoryStore {
     pub fn pending_begin(&self, manifest: PendingManifest) -> Result<BeginOutcome, StoryError> {
         let total = manifest.validate()?;
-        let _permit = self
-            .gate
-            .enter_write()
-            .map_err(|_| StoryError::Maintenance)?;
+        let _admission = self.pending_admission(manifest.product)?;
         let mut stages = self.stages.lock().map_err(|_| StoryError::Io)?;
         stages.retain(|_, s| s.created_at.elapsed() < STAGE_LIFETIME);
         let mut connection = lock_connection(&self.connection).map_err(StoryError::from_store)?;
@@ -707,28 +754,62 @@ impl StoryStore {
         inputs.retain(|(id, _), _| id != token);
         Ok(())
     }
+    #[cfg(test)]
     pub fn pending_seal(&self, token: &str) -> Result<PendingSnapshot, StoryError> {
         self.pending_seal_with_hook(token, &mut |_| Ok(()))
     }
+    #[cfg(test)]
     fn pending_seal_with_hook(
         &self,
         token: &str,
         hook: &mut impl FnMut(&str) -> Result<(), StoryError>,
     ) -> Result<PendingSnapshot, StoryError> {
+        let product = self.pending_upload_product(token)?;
+        let guard = self.pending_admission(product)?;
+        self.pending_seal_admitted_with_hook(&guard, token, hook)
+    }
+    pub(crate) fn pending_seal_admitted(
+        &self,
+        guard: &AdmissionGuard<'_>,
+        token: &str,
+    ) -> Result<PendingSnapshot, StoryError> {
+        self.pending_seal_admitted_with_hook(guard, token, &mut |_| Ok(()))
+    }
+    fn pending_seal_admitted_with_hook(
+        &self,
+        guard: &AdmissionGuard<'_>,
+        token: &str,
+        hook: &mut impl FnMut(&str) -> Result<(), StoryError>,
+    ) -> Result<PendingSnapshot, StoryError> {
         ipc::token(Some(token))?;
-        let _permit = self
-            .gate
-            .enter_write()
-            .map_err(|_| StoryError::Maintenance)?;
-        // Same order as Direct begin/end; the reservation and P/T transition are atomic.
+        // Caller checked the sole Native Flight under this same admission guard,
+        // then released Flight before we lock stages / the connection.
         let _stages = self.stages.lock().map_err(|_| StoryError::Io)?;
         let mut connection = lock_connection(&self.connection).map_err(StoryError::from_store)?;
-        let row = load(&connection, token)?;
+        let mut row = load(&connection, token)?;
+        guard.check(self, row.snapshot.manifest.product)?;
         if row.active {
             return Ok(row.snapshot);
         }
-        validate_payload(&connection, &row)?;
         check_candidate(&connection, &row.snapshot.manifest)?;
+        let claim_document: Option<String> = connection
+            .query_row(
+                "SELECT create_claim FROM arena_story_pending WHERE product=?1 AND active=1",
+                [row.snapshot.manifest.product.sql()],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|_| StoryError::Io)?
+            .flatten();
+        // Preserve the Native bytes across revision replacement, and check the
+        // combined budget before deleting or changing either existing row.
+        row.snapshot.create_claim = claim_document
+            .as_deref()
+            .map(native::parse_claim)
+            .transpose()?;
+        native::metadata_budget(&connection, token, claim_document.as_deref())?;
+        native::claim_metadata_budget(&connection, token, row.snapshot.create_claim.as_ref())?;
+        validate_payload(&connection, &row)?;
         hook("validated")?;
         let tx = connection.transaction().map_err(|_| StoryError::Io)?;
         tx.execute(
@@ -738,8 +819,8 @@ impl StoryStore {
         .map_err(|_| StoryError::Io)?;
         hook("old-removed")?;
         tx.execute(
-            "UPDATE arena_story_pending SET active=1 WHERE token=?1",
-            [token],
+            "UPDATE arena_story_pending SET active=1,create_claim=?2 WHERE token=?1",
+            params![token, claim_document],
         )
         .map_err(|_| StoryError::Io)?;
         hook("before-seal-commit")?;
@@ -784,10 +865,7 @@ impl StoryStore {
         key: &PendingKey,
         wire_digest: &str,
     ) -> Result<SavePreparation, StoryError> {
-        let _permit = self
-            .gate
-            .enter_write()
-            .map_err(|_| StoryError::Maintenance)?;
+        let _admission = self.pending_admission(key.product)?;
         let mut attempts = self.pending_attempts.lock().map_err(|_| StoryError::Io)?;
         let connection = lock_connection(&self.connection).map_err(StoryError::from_store)?;
         let row = exact(&connection, key)?;
@@ -828,10 +906,7 @@ impl StoryStore {
         attempt_id: &str,
         hook: &mut impl FnMut(&str) -> Result<(), StoryError>,
     ) -> Result<StoryReceipt, StoryError> {
-        let _permit = self
-            .gate
-            .enter_write()
-            .map_err(|_| StoryError::Maintenance)?;
+        let _admission = self.pending_admission(key.product)?;
         let token = self
             .pending_attempts
             .lock()
@@ -1242,6 +1317,13 @@ fn validate_input(bytes: &[u8], m: &PendingManifest) -> Result<(), StoryError> {
     }
     Ok(())
 }
+fn telemetry_integer(raw: &RawValue) -> Result<f64, StoryError> {
+    let value: f64 = serde_json::from_str(raw.get()).map_err(|_| StoryError::Invalid)?;
+    if !value.is_finite() || value < 0.0 || value.fract() != 0.0 {
+        return Err(StoryError::Invalid);
+    }
+    Ok(value)
+}
 fn validate_carrier(
     bytes: &[u8],
     kind: PendingKind,
@@ -1294,7 +1376,53 @@ fn validate_carrier(
                 }
             }
             if let Some(v) = h.get("narrativeHistoryReadCount") {
-                integer(v)?;
+                telemetry_integer(v)?;
+            }
+        }
+        PendingKind::Telemetry => {
+            let telemetry = object(
+                raw,
+                &["version", "aiModel", "usage", "narrativeHistoryReadCount"],
+                &[],
+            )?;
+            if let Some(version) = telemetry.get("version") {
+                if telemetry_integer(version)? != 1.0 {
+                    return Err(StoryError::Invalid);
+                }
+            }
+            if let Some(model) = telemetry.get("aiModel") {
+                // Match the existing Hosted success telemetry, without the
+                // unrelated model-selection limit or a lossy String conversion.
+                string_units(model)?;
+            }
+            if let Some(usage) = telemetry.get("usage") {
+                let usage = object(
+                    usage,
+                    &[
+                        "promptTokens",
+                        "completionTokens",
+                        "reasoningTokens",
+                        "totalTokens",
+                        "cachedTokens",
+                        "textTokens",
+                        "completionTokensIncludesReasoning",
+                    ],
+                    &[],
+                )?;
+                for (name, value) in usage {
+                    if name == "completionTokensIncludesReasoning" {
+                        boolean(value)?;
+                    } else if value.get() != "null"
+                        && telemetry_integer(value)? > MAX_SAFE_INTEGER as f64
+                    {
+                        return Err(StoryError::Invalid);
+                    }
+                }
+            }
+            if let Some(count) = telemetry.get("narrativeHistoryReadCount") {
+                // The existing field has no safe-integer maximum; preserve its
+                // JS numeric domain rather than narrowing it to a u64.
+                telemetry_integer(count)?;
             }
         }
         PendingKind::Meta => {
@@ -1424,8 +1552,36 @@ fn validate_carrier(
 fn buffered(kind: PendingKind) -> bool {
     matches!(
         kind,
-        PendingKind::Input | PendingKind::Header | PendingKind::Meta | PendingKind::RoleResponse
+        PendingKind::Input
+            | PendingKind::Header
+            | PendingKind::Meta
+            | PendingKind::RoleResponse
+            | PendingKind::Telemetry
     )
+}
+// A Native claim is the original-generation authority. Historical v6 candidates
+// have no claim and retain their existing imported/local content semantics.
+fn validate_claim_generation(connection: &Connection, row: &Stored) -> Result<(), StoryError> {
+    let Some(claim) = &row.snapshot.create_claim else {
+        return Ok(());
+    };
+    let m = &row.snapshot.manifest;
+    if m.role_state != RoleState::Accepted && m.commit_manifest.is_none() {
+        return Ok(());
+    }
+    let observed = claim
+        .observed_generation
+        .as_ref()
+        .ok_or(StoryError::OriginalsUncovered)?;
+    for kind in [PendingKind::RoleResponse, PendingKind::Chapter] {
+        if m.parts.iter().any(|p| p.kind == kind) {
+            let raw = read_blob(connection, &row.token, kind)?;
+            if string(needed(parse_raw(&raw)?, "generationId")?)? != observed.generation_id {
+                return Err(StoryError::OriginalsUncovered);
+            }
+        }
+    }
+    Ok(())
 }
 fn validate_payload(connection: &Connection, row: &Stored) -> Result<(), StoryError> {
     let m = &row.snapshot.manifest;
@@ -1452,6 +1608,7 @@ fn validate_payload(connection: &Connection, row: &Stored) -> Result<(), StoryEr
     if count != m.parts.len() as u64 {
         return Err(StoryError::Corrupt);
     }
+    validate_claim_generation(connection, row)?;
     if let Some(commit) = &m.commit_manifest {
         validate_content_coverage(connection, row)?;
         let validated = validate_documents(commit, &mut |kind| {
@@ -1675,6 +1832,33 @@ fn members(raw: &RawValue) -> Result<Vec<&str>, StoryError> {
     result.push(inner[start..].trim());
     Ok(result)
 }
+fn raw_member(item: &str) -> Result<(Vec<u16>, &RawValue), StoryError> {
+    let mut quote = false;
+    let mut escape = false;
+    let mut colon = None;
+    for (index, byte) in item.bytes().enumerate() {
+        if quote {
+            if escape {
+                escape = false;
+            } else if byte == b'\\' {
+                escape = true;
+            } else if byte == b'"' {
+                quote = false;
+            }
+        } else if byte == b'"' {
+            quote = true;
+        } else if byte == b':' {
+            colon = Some(index);
+            break;
+        }
+    }
+    let index = colon.ok_or(StoryError::Invalid)?;
+    let key: &RawValue =
+        serde_json::from_str(item[..index].trim()).map_err(|_| StoryError::Invalid)?;
+    let value: &RawValue =
+        serde_json::from_str(item[index + 1..].trim()).map_err(|_| StoryError::Invalid)?;
+    Ok((string_units(key)?, value))
+}
 fn raw_object(
     raw: &RawValue,
 ) -> Result<std::collections::BTreeMap<Vec<u16>, &RawValue>, StoryError> {
@@ -1683,35 +1867,35 @@ fn raw_object(
     }
     let mut map = std::collections::BTreeMap::new();
     for item in members(raw)? {
-        let mut quote = false;
-        let mut escape = false;
-        let mut colon = None;
-        for (index, byte) in item.bytes().enumerate() {
-            if quote {
-                if escape {
-                    escape = false
-                } else if byte == b'\\' {
-                    escape = true
-                } else if byte == b'"' {
-                    quote = false
-                }
-            } else if byte == b'"' {
-                quote = true
-            } else if byte == b':' {
-                colon = Some(index);
-                break;
-            }
-        }
-        let index = colon.ok_or(StoryError::Invalid)?;
-        let key: &RawValue =
-            serde_json::from_str(item[..index].trim()).map_err(|_| StoryError::Invalid)?;
-        let value: &RawValue =
-            serde_json::from_str(item[index + 1..].trim()).map_err(|_| StoryError::Invalid)?;
-        if map.insert(string_units(key)?, value).is_some() {
+        let (key, value) = raw_member(item)?;
+        if map.insert(key, value).is_some() {
             return Err(StoryError::Invalid);
         }
     }
     Ok(map)
+}
+/// Project only the requested wrapper members using JSON.parse's decoded-key,
+/// last-value semantics. Unknown business extensions (including lone-surrogate
+/// keys and duplicate keys) are ignored; selected RawValue bytes are untouched.
+/// Closed authority objects continue using raw_object/object and reject duplicates.
+pub(crate) fn raw_projection_fields<'a>(
+    raw: &'a RawValue,
+    allowed: &[&str],
+) -> Result<std::collections::BTreeMap<String, &'a RawValue>, StoryError> {
+    if !raw.get().starts_with('{') {
+        return Err(StoryError::Invalid);
+    }
+    let mut result = std::collections::BTreeMap::new();
+    for item in members(raw)? {
+        let (key, value) = raw_member(item)?;
+        if let Some(name) = allowed
+            .iter()
+            .find(|name| key.iter().copied().eq(name.encode_utf16()))
+        {
+            result.insert((*name).to_owned(), value);
+        }
+    }
+    Ok(result)
 }
 fn raw_get<'a>(raw: &'a RawValue, key: &str) -> Result<Option<&'a RawValue>, StoryError> {
     Ok(raw_object(raw)?
@@ -1774,6 +1958,7 @@ fn parse_raw(document: &str) -> Result<&RawValue, StoryError> {
     serde_json::from_str(document).map_err(|_| StoryError::Invalid)
 }
 fn validate_content_coverage(connection: &Connection, row: &Stored) -> Result<(), StoryError> {
+    validate_claim_generation(connection, row)?;
     let m = &row.snapshot.manifest;
     let chapter_document = read_blob(connection, &row.token, PendingKind::Chapter)?;
     let chapter = parse_raw(&chapter_document)?;
@@ -1812,6 +1997,25 @@ fn validate_content_coverage(connection: &Connection, row: &Stored) -> Result<()
         for key in ["mode", "language", "storyLength"] {
             if let Some(expected) = raw_get(header, key)? {
                 covered(expected, needed(source, key)?)?;
+            }
+        }
+    }
+    if has(PendingKind::Telemetry) {
+        let text = read_blob(connection, &row.token, PendingKind::Telemetry)?;
+        let telemetry = parse_raw(&text)?;
+        for (field, output) in [
+            ("aiModel", "aiModel"),
+            ("usage", "aiUsage"),
+            ("narrativeHistoryReadCount", "narrativeHistoryReadCount"),
+        ] {
+            if let Some(expected) = raw_get(telemetry, field)? {
+                covered(expected, needed(snapshot, output)?)?;
+                if field == "narrativeHistoryReadCount" && has(PendingKind::Header) {
+                    let header = read_blob(connection, &row.token, PendingKind::Header)?;
+                    if let Some(header_count) = raw_get(parse_raw(&header)?, field)? {
+                        covered(header_count, expected)?;
+                    }
+                }
             }
         }
     }

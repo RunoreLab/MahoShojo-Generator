@@ -605,6 +605,21 @@ fn verify_sqlite(connection: &Connection) -> Result<i64, BackupError> {
             if exists { return Err(BackupError::Corrupt); }
         }
     }
+    // v7 extends the existing v6 table. Do not add another table-presence
+    // tuple above: that would incorrectly reject every historical v6 backup.
+    if version >= 6 {
+        let claim_column: Option<(String, bool)> = connection.query_row(
+            r#"SELECT type, "notnull" FROM pragma_table_info('arena_story_pending') WHERE name='create_claim'"#,
+            [], |r| Ok((r.get(0)?, r.get(1)?)),
+        ).optional().map_err(|_| BackupError::Corrupt)?;
+        if if version >= 7 {
+            claim_column != Some(("TEXT".into(), false))
+        } else {
+            claim_column.is_some()
+        } {
+            return Err(BackupError::Corrupt);
+        }
+    }
     let integrity = connection
         .query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
         .map_err(|_| BackupError::Corrupt)?;

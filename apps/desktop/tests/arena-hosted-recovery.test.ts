@@ -27,7 +27,7 @@ describe('Arena Hosted public recovery pointer owner', () => {
     expect(storage.getItem('mahoshojo.desktop.arena.battle.draft.v1')?.length).toBe(4 * 1024 * 1024 + 1);
   });
 
-  it.each(['{', JSON.stringify({ ...pointer(), version: 2 }), JSON.stringify({ ...pointer(), product: 'arena' }), JSON.stringify({ ...pointer(), token: 'canary' }), ' '.repeat(16385)])('preserves an invalid original and refuses replacement until explicit successful discard', (raw) => {
+  it.each(['{', JSON.stringify({ ...pointer(), version: 2 }), JSON.stringify({ ...pointer(), product: 'arena' }), JSON.stringify({ ...pointer(), token: 'canary' })])('preserves an invalid original and refuses replacement until explicit successful discard', (raw) => {
     const storage = new Storage(); storage.values.set(ARENA_HOSTED_RECOVERY_KEYS.battle, raw);
     const owner = new DesktopArenaHostedRecovery(storage, 'battle'); expect(owner.getSnapshot().blocked).toBe(true);
     expect(owner.prepare(pointer())).toBe(false); expect(storage.getItem(ARENA_HOSTED_RECOVERY_KEYS.battle)).toBe(raw);

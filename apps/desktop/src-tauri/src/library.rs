@@ -49,7 +49,7 @@ pub struct LocalLibrary {
         dead_code,
         reason = "internal story storage candidate has no command binding yet"
     )]
-    stories: crate::arena_story::StoryStore,
+    stories: Arc<crate::arena_story::StoryStore>,
     /// 保留一份自有引用，让 store 之外的维护操作（审计 / GC / 备份）能在同一临界区里
     /// 跑跨表查询，而不必重新拼装连接。D2.2b 起被 `connection()` 使用。
     #[allow(dead_code, reason = "D2.2b 审计需要跨表只读查询")]
@@ -96,7 +96,7 @@ impl LocalLibrary {
         .map_err(|_| crate::store::StoreError::Unavailable)?;
         Ok(Self {
             gate,
-            stories,
+            stories: Arc::new(stories),
             profiles: LocalStore::new(Arc::clone(&connection)),
             cards: LocalCardStore::new(Arc::clone(&connection)),
             packages: WebPackageStore::new(Arc::clone(&connection)),
@@ -130,6 +130,11 @@ impl LocalLibrary {
         dead_code,
         reason = "internal story storage candidate has no command binding yet"
     )]
+    /// The Arena transport and storage binder share the same admission locks and database.
+    pub(crate) fn shared_stories(&self) -> Arc<crate::arena_story::StoryStore> {
+        Arc::clone(&self.stories)
+    }
+
     pub fn stories(&self) -> &crate::arena_story::StoryStore {
         &self.stories
     }

@@ -244,7 +244,7 @@ async fn json_protocol_and_identity_failures_deliver_no_raw_fragments() {
 }
 #[test]
 fn json_secret_scanner_checks_unicode_escapes_and_preserves_lone_surrogates() {
-    let state = ArenaState::new().unwrap();
+    let state = ArenaState::isolated();
     let cloud = CloudState::new().unwrap();
     let secrets = Secrets::default();
     let flight = state

@@ -1,11 +1,13 @@
 import { z } from './zod';
-import { ArenaStoryCreateRequestSchema } from './arena-story';
+import { ARENA_STORY_PROTOCOL_VERSION, ArenaStoryCreateRequestSchema } from './arena-story';
 import { ARENA_RECONCILIATION_LIMITS, ArenaReconciliationIssueSchema, ArenaReconciliationSuccessSchema } from './arena-reconciliation';
 import {
   DESKTOP_ARENA_HOSTED_LIMITS, DesktopArenaHostedActorSchema,
   DesktopArenaHostedProductSchema, DesktopArenaHostedRequestIdSchema,
   DesktopArenaHostedHeaderMetaSchema, DesktopArenaHostedSseEventSchema,
+  DesktopArenaHostedSuccessTelemetrySchema, DesktopArenaHostedGenerationIdSchema,
 } from './desktop-arena-hosted';
+import { DesktopHostedGenerationOverridesSchema, DesktopHostedPresetConfigSchema, DesktopHostedSystemConfigSchema } from './desktop-cloud';
 import { JsonValueSchema } from './json-value';
 import { jsonUtf8ByteLength } from './wire-size';
 
@@ -128,6 +130,7 @@ export const STORY_PENDING_LIMITS = Object.freeze({
   inputBytes: DESKTOP_ARENA_HOSTED_LIMITS.requestBodyBytes,
   outputContentBytes: DESKTOP_ARENA_HOSTED_LIMITS.outputContentBytes,
   metaBytes: DESKTOP_ARENA_HOSTED_LIMITS.eventWireBytes,
+  telemetryBytes: DESKTOP_ARENA_HOSTED_LIMITS.eventWireBytes,
   headerBytes: DESKTOP_ARENA_HOSTED_LIMITS.headerDecodedBytes,
   roleResponseBytes: ARENA_RECONCILIATION_LIMITS.responseBodyBytes,
 });
@@ -157,6 +160,9 @@ export const StoryPendingMetaSchema = pendingJson.pipe(DesktopArenaHostedSseEven
   .transform((value) => value as PendingMetaEvent);
 export const StoryPendingRoleResponseSchema = pendingJson.pipe(ArenaReconciliationSuccessSchema)
   .refine((value) => jsonUtf8ByteLength(value) <= STORY_PENDING_LIMITS.roleResponseBytes, 'Pending role response exceeds its byte budget');
+export const StoryPendingTelemetrySchema = pendingJson.pipe(DesktopArenaHostedSuccessTelemetrySchema)
+  .refine((value) => jsonUtf8ByteLength(value) <= STORY_PENDING_LIMITS.telemetryBytes, 'Pending telemetry exceeds its byte budget');
+export type StoryPendingTelemetry = z.infer<typeof StoryPendingTelemetrySchema>;
 export type StoryPendingHeader = z.infer<typeof StoryPendingHeaderSchema>;
 export type StoryPendingMeta = z.infer<typeof StoryPendingMetaSchema>;
 export type StoryPendingRoleResponse = z.infer<typeof StoryPendingRoleResponseSchema>;
@@ -173,7 +179,7 @@ export const StoryPendingRoleSyncSchema = z.object({
 export type StoryPendingRoleSync = z.infer<typeof StoryPendingRoleSyncSchema>;
 
 export const StoryPendingPartKindSchema = z.enum([
-  'input', 'markdown', 'reasoning', 'meta', 'header', 'roleResponse',
+  'input', 'markdown', 'reasoning', 'meta', 'header', 'roleResponse', 'telemetry',
   'session', 'seed', 'chapter', 'checkpoint0', 'checkpoint1',
 ]);
 export type StoryPendingPartKind = z.infer<typeof StoryPendingPartKindSchema>;
@@ -206,6 +212,7 @@ export const StoryPendingManifestSchema = z.object({
   const limits: Partial<Record<StoryPendingPartKind, number>> = {
     input: STORY_PENDING_LIMITS.inputBytes, meta: STORY_PENDING_LIMITS.metaBytes,
     header: STORY_PENDING_LIMITS.headerBytes, roleResponse: STORY_PENDING_LIMITS.roleResponseBytes,
+    telemetry: STORY_PENDING_LIMITS.telemetryBytes,
   };
   if (value.parts.some((item) => item.byteLength > (limits[item.kind] ?? STORY_PENDING_LIMITS.slotBytes))
     || (part('markdown')?.byteLength ?? 0) + (part('reasoning')?.byteLength ?? 0) > STORY_PENDING_LIMITS.outputContentBytes
@@ -235,9 +242,37 @@ export const StoryPendingKeySchema = z.object({
   product: DesktopArenaHostedProductSchema, requestId: DesktopArenaHostedRequestIdSchema, pendingRevision: integer.min(1),
 }).strict();
 export type StoryPendingKey = z.infer<typeof StoryPendingKeySchema>;
+/** Non-secret resolver result, not a renderer authority to inject a provider. */
+export const StoryPendingFundingSnapshotSchema = z.discriminatedUnion('mode', [
+  z.object({
+    mode: z.literal('system'), providerId: z.literal('system'),
+    modelId: DesktopHostedSystemConfigSchema.shape.modelId.unwrap(),
+    generationOverrides: DesktopHostedGenerationOverridesSchema.optional(),
+  }).strict(),
+  z.object({
+    mode: z.literal('preset'), providerId: DesktopHostedPresetConfigSchema.shape.providerId,
+    modelId: DesktopHostedPresetConfigSchema.shape.modelId,
+    generationOverrides: DesktopHostedGenerationOverridesSchema.optional(),
+  }).strict().refine((value) => value.providerId !== 'system', 'System funding is not a preset'),
+]);
+export type StoryPendingFundingSnapshot = z.infer<typeof StoryPendingFundingSnapshotSchema>;
+/** Read-only Native evidence. Upload manifests deliberately have no createClaim field. */
+export const StoryPendingCreateClaimSnapshotSchema = z.object({
+  version: z.literal(1), attemptId: StoryBeginOutcomeSchema.shape.token,
+  storyProtocolVersion: z.literal(ARENA_STORY_PROTOCOL_VERSION), inputDigest: digest,
+  clientBodyHash: z.string().regex(/^[a-f0-9]{64}$/u),
+  funding: StoryPendingFundingSnapshotSchema.readonly(),
+  observedGeneration: z.object({
+    generationId: DesktopArenaHostedGenerationIdSchema,
+    serverPayloadHash: z.string().regex(/^[a-f0-9]{64}$/u).nullable(),
+  }).strict().readonly().nullable(),
+}).strict().readonly();
+export type StoryPendingCreateClaimSnapshot = z.infer<typeof StoryPendingCreateClaimSnapshotSchema>;
 export const StoryPendingSnapshotSchema = z.object({
   manifest: StoryPendingManifestSchema, saveAttemptId: StoryBeginOutcomeSchema.shape.token.nullable(), restored: z.boolean(),
-}).strict();
+  createClaim: StoryPendingCreateClaimSnapshotSchema.nullable(),
+}).strict().refine((value) => value.createClaim === null || value.createClaim.inputDigest === value.manifest.inputDigest,
+  'Create claim must match its original pending input');
 export type StoryPendingSnapshot = z.infer<typeof StoryPendingSnapshotSchema>;
 export const StoryPendingBeginOutcomeSchema = z.object({
   token: StoryBeginOutcomeSchema.shape.token, totalBytes: integer.min(1).max(STORY_PENDING_LIMITS.slotBytes),
@@ -246,7 +281,7 @@ export const StoryPendingAppendOutcomeSchema = z.object({
   token: StoryBeginOutcomeSchema.shape.token, kind: StoryPendingPartKindSchema,
   receivedBytes: integer.max(STORY_PENDING_LIMITS.slotBytes),
 }).strict();
-/** Input/header/meta/roleResponse bytes are validated before persistence. An
+/** Input/header/meta/roleResponse/telemetry bytes are validated before persistence. An
  * incomplete carrier may have an in-memory append acknowledgement but a durable query offset of zero. Consumers
  * must not infer safe append replay or automatic upload retry from that offset. */
 export const StoryPendingUploadSchema = z.object({
