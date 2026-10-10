@@ -164,7 +164,8 @@ describe('desktop router keeps the product path inside the hash', () => {
     expect(hrefs).toContain('#/encyclopedia');
     expect(hrefs).toContain('#/local-library');
     expect(hrefs).toContain('#/settings');
-    expect(hrefs).not.toContain('/battle');
+    expect(hrefs).toContain('#/battle');
+    expect(hrefs).not.toContain('#/arena');
     // 页脚站外链接经 onNavigateExternal 渲染为真实 <a href>（点击被拦截走
     // open_external_url），而不是不可点的占位。
     expect(hrefs.some((href) => href?.startsWith('https://'))).toBe(true);

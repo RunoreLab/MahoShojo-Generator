@@ -26,9 +26,12 @@ export interface DesktopAiProviderPanelProps {
   controlsSlot?: ReactNode;
   /** 设置与生成页使用相同供应商/模型/凭据控件。 */
   management?: boolean;
+  /** Optional page owner hook; the panel never installs a second native close guard. */
+  onDirtyChange?: (dirty: boolean) => void;
+  showConnectionTest?: boolean;
 }
 
-export const DesktopAiProviderPanel = ({ controlsSlot, management = false }: DesktopAiProviderPanelProps) => {
+export const DesktopAiProviderPanel = ({ controlsSlot, management = false, onDirtyChange, showConnectionTest = true }: DesktopAiProviderPanelProps) => {
   const { state, store } = useDesktopAiConfig();
   const router = useRouter();
   const [editing, setEditing] = useState<EditingState | null>(null);
@@ -44,6 +47,8 @@ export const DesktopAiProviderPanel = ({ controlsSlot, management = false }: Des
   const presetId = identity?.kind === 'preset' ? identity.providerId : null;
   const keyDraft = presetId ? store.getPresetKeyDraft(presetId) : '';
   const identityKey = JSON.stringify(identity);
+  const hasCredentialDraft = listDesktopPresetEntries(new Set()).some(({ preset }) => !!store.getPresetKeyDraft(preset.id));
+  useEffect(() => { onDirtyChange?.(editorDirty || hasCredentialDraft); return () => onDirtyChange?.(false); }, [editorDirty, hasCredentialDraft, onDirtyChange]);
   useEffect(() => { setCustomModel(false); setError(null); }, [identityKey, target.location]);
   useEffect(() => { if (presetId) void store.refreshPresetSecret(presetId); }, [presetId, store]);
 
@@ -142,7 +147,7 @@ export const DesktopAiProviderPanel = ({ controlsSlot, management = false }: Des
         else if (scope) store.setGenerationOverrides(scope, target.modelId, next);
       })} temperatureSupported={capabilities ? capabilities.temperature.support !== 'unsupported' : true} temperatureMax={capabilities?.temperature.max} maxOutputTokensMax={capabilities?.maxOutputTokens.max} thinkingSupport={capabilities?.thinking.support ?? 'unknown'} thinkingEfforts={capabilities?.thinking.efforts} canDisableThinking={capabilities ? capabilities.thinking.support === 'supported' && capabilities.thinking.canDisable !== false : true} />}
     >
-      {profile && target.mode && <ConnectionTestSection target={target} />}
+      {showConnectionTest && profile && target.mode && <ConnectionTestSection target={target} />}
     </AiProviderSelectorForm>
     {(error || state.modelInputError) && <p role="alert">{error ?? state.modelInputError}</p>}
     {target.unavailableReason && <p role="status">{target.unavailableReason}</p>}
