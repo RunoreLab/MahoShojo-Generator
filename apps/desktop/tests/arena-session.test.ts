@@ -6,6 +6,7 @@ import type { AiStreamEvent } from '@mahoshojo/ai-core/stream-events';
 import { MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES } from '@mahoshojo/contracts/desktop-ipc';
 import { localLibraryRecordBytes } from '@mahoshojo/local-library/archive-export';
 import { ARENA_DRAFT_KEY, DesktopArenaSession, createInitialArenaDraft, type ArenaDraft } from '../src/features/arena/session';
+import { addAdvancedAuxScenario, addAdvancedCombatants, addAdvancedLore, importAdvancedHistory, setAdvancedMainScenario } from '../src/features/arena/advanced-input';
 import { readSublimationHistorySource } from '../src/features/sublimation/history-source';
 
 const memory = () => {
@@ -179,4 +180,33 @@ describe('Desktop Arena independent session', () => {
       session.dispose();
     }
   });
+  it('advanced freezes manual and role/main/auxiliary events once without reintroducing deleted sources', async () => {
+    const repo = repository(), storage = memory(), random = vi.fn(() => 0);
+    const session = new DesktopArenaSession({ repository: repo.port, storage, product: 'arena', random, requestId: () => 'advanced-roll', now: () => '2026-10-10T00:00:00Z' }); session.setScope('A');
+    const event = (description: string) => ({ type: 'binary' as const, description, probability: 100 });
+    const base = makeDraft('scenario', 'stream'); let draft: ArenaDraft = { ...base, combatants: [], adjudicationEvents: [event('手动')], historyUpdatedAt: '2000-01-01T00:00:00Z' };
+    draft = addAdvancedCombatants(draft, base.combatants.map((item) => ({ ...item, data: { ...item.data, adjudicationEvents: [event(item.filename)] } })));
+    draft = setAdvancedMainScenario(draft, { title: '主', adjudicationEvents: [event('主')] }, 'main');
+    draft = addAdvancedAuxScenario(draft, { title: '辅', adjudicationEvents: [event('辅')] }, 'aux', 'aux');
+    draft = { ...draft, adjudicationEvents: draft.adjudicationEvents.filter((item) => (item as { description: string }).description !== '甲.json') };
+    draft = addAdvancedLore(draft, { source: 'upload', questionnaire: { id: 'lore', title: 'Lore', kind: 'magical-girl', questions: [], loreMarkdown: '参考设定' } }, () => 'lore');
+    session.updateDraft(draft); let release!: () => void; const wait = new Promise<void>((resolve) => { release = resolve; }); const options = native(valid(true), 'stop', wait);
+    const run = session.generate(options, draft, intent('stream')); await session.generate(options, draft, intent('stream'));
+    await vi.waitFor(() => expect(session.getSnapshot().rawText).not.toBe('')); expect(random).toHaveBeenCalledTimes(4);
+    expect(session.getSnapshot().generation?.adjudicationResults.map((item) => item.description)).toEqual(['手动', '乙.json', '主', '辅']);
+    release(); await run; expect(session.getSnapshot().phase).toBe('completed'); expect(session.getSnapshot().draft.historyUpdatedAt).toBe('2026-10-10T00:00:00Z');
+    await session.save('history'); await session.save('characters'); expect(random).toHaveBeenCalledTimes(4);
+    const history = [...repo.records.values()].find((record) => record.cardType === 'history')!; expect(history.provenance).toEqual({ kind: 'unsigned' });
+    expect([...repo.records.values()].find((record) => record.cardType === 'character')?.provenance).toEqual({ kind: 'unsigned', execution: 'direct-local' }); session.dispose();
+  });
+  it('advanced raw import can exceed draft persistence without truncation or source-library writes', async () => {
+    const repo = repository(), storage = memory(); const session = new DesktopArenaSession({ repository: repo.port, storage, product: 'arena' }); session.setScope('A');
+    session.updateDraft(createInitialArenaDraft()); const originalDraft = [...storage.values.values()][0];
+    const raw = JSON.stringify({ entries: [{ id: 'original-id', content: '正文' }], unknown: 'x'.repeat(4 * 1024 * 1024) });
+    await session.importInput(async () => (draft) => importAdvancedHistory(draft, raw, 'append', { name: 'raw.json', now: '2026-10-10T00:00:00Z', createId: () => 'raw' }));
+    expect(session.getSnapshot().draftSaved).toBe(false); expect(session.getSnapshot().draftError).toContain('4 MiB'); expect([...storage.values.values()][0]).toBe(originalDraft);
+    expect(JSON.parse(session.exportDocument()).draft.historyOriginals[0].text).toBe(raw); expect(repo.records.size).toBe(0);
+    expect(await session.save('history')).toBe(true); expect(repo.records.size).toBe(1); session.dispose();
+  });
+
 });
