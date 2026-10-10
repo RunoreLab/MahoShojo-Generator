@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 
 import type { LocalWebPackageRecordV1 } from '@mahoshojo/local-library/web-package-record';
@@ -56,34 +56,69 @@ export const WebPackageDiagnosticsPanel = () => {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const lifecycle = useRef({ mounted: false, epoch: 0, flight: null as symbol | null });
+
+  // 单一同步锁覆盖列表与打开；effect 世代也隔离 StrictMode 的清理/重启。
+  const startOperation = useCallback(() => {
+    const owner = lifecycle.current;
+    if (!owner.mounted || owner.flight !== null) return null;
+    const epoch = owner.epoch;
+    const token = Symbol('webpkg-diagnostics');
+    owner.flight = token;
+    const isCurrent = () => owner.mounted && owner.epoch === epoch && owner.flight === token;
+    return {
+      isCurrent,
+      finish: () => {
+        if (!isCurrent()) return false;
+        owner.flight = null;
+        return true;
+      },
+    };
+  }, []);
 
   const refresh = useCallback(async (): Promise<void> => {
+    const operation = startOperation();
+    if (!operation) return;
+    setLoading(true);
     try {
       const page = await packages.list({ includeDeleted: false, limit: PACKAGE_LIST_LIMIT });
+      if (!operation.isCurrent()) return;
       setRecords(page.items);
       setError(null);
     } catch (cause) {
-      setError(describeError(cause));
+      if (operation.isCurrent()) setError(describeError(cause));
     } finally {
-      setLoading(false);
+      if (operation.finish()) setLoading(false);
     }
-  }, [packages]);
+  }, [packages, startOperation]);
 
   useEffect(() => {
+    const owner = lifecycle.current;
+    owner.mounted = true;
+    owner.epoch += 1;
     void refresh();
+    return () => {
+      owner.mounted = false;
+      owner.epoch += 1;
+      owner.flight = null;
+    };
   }, [refresh]);
 
   const openInIsolatedWebview = useCallback(
     async (record: LocalWebPackageRecordV1): Promise<void> => {
+      const operation = startOperation();
+      if (!operation) return;
       setBusyId(record.id);
       setError(null);
       setNotice(null);
       try {
         const archive = await packages.readArchive(record.ref.digest);
+        if (!operation.isCurrent()) return;
         if (!archive) {
           throw new Error('本地库中存在记录但缺少包字节');
         }
         const base = await unpackWebPackageZip(archive);
+        if (!operation.isCurrent()) return;
         // 物化 id 是渲染层命名空间——native 的 `wpk-<N>` 由 begin 另行分配，两者刻意不混用。
         const snapshot = createWebPackageResourceSnapshot(`desktop-staging-${record.id}`, {
           base,
@@ -95,15 +130,17 @@ export const WebPackageDiagnosticsPanel = () => {
           tauriRawInvoke,
           snapshot,
           base.manifest.name,
+          operation.isCurrent,
         );
+        if (!operation.isCurrent()) return;
         setNotice(`已在受限 webview 打开（${opened.webviewLabel}）：${base.manifest.name}`);
       } catch (cause) {
-        setError(describeError(cause));
+        if (operation.isCurrent()) setError(describeError(cause));
       } finally {
-        setBusyId(null);
+        if (operation.finish()) setBusyId(null);
       }
     },
-    [packages],
+    [packages, startOperation],
   );
 
   return (
@@ -125,10 +162,7 @@ export const WebPackageDiagnosticsPanel = () => {
           type="button"
           className="rounded border border-(--app-border) px-3 py-2 text-sm"
           disabled={loading || busyId !== null}
-          onClick={() => {
-            setLoading(true);
-            void refresh();
-          }}
+          onClick={() => void refresh()}
         >
           刷新列表
         </button>
@@ -157,7 +191,7 @@ export const WebPackageDiagnosticsPanel = () => {
               <button
                 type="button"
                 className="mt-3 rounded border border-(--app-border) px-3 py-2 text-sm"
-                disabled={busyId !== null}
+                disabled={loading || busyId !== null}
                 onClick={() => void openInIsolatedWebview(record)}
               >
                 {busyId === record.id ? '正在暂存并打开…' : '在受限 webview 中打开'}
@@ -168,6 +202,7 @@ export const WebPackageDiagnosticsPanel = () => {
       )}
       <p className="mt-3 text-xs text-(--app-text-muted)">
         只按导入原样打开（不含生成覆盖层）；真实 webview 的隔离验收需在运行中的桌面应用里确认。
+        离开诊断页只停止尚未派发的步骤；已派发的打开仍可能建立窗口，请单独关闭。
       </p>
     </section>
   );

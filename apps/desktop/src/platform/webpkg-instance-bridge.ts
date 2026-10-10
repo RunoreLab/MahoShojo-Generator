@@ -115,13 +115,26 @@ export interface OpenedWebPackageInstance {
  * begin 必须在 append 之前完成——native 只按"先声明、后按声明验收"接收字节，不存在
  * "先送文件再补登记"的路径。open 只在所有文件回执通过后发起：声明表与已收表在 native 侧
  * 逐条对齐，桥层用回执复核它，而不是乐观地假设送达。
+ * 可选 isCurrent 在派发前及每次 await 后验证宿主 owner；过期抛本地 AbortError。
+ * 已派发的 open 不能撤销，晚回执只被丢弃；未 open 的 collecting 仍由原 TTL 清理。
  */
 export const openWebPackageInstanceInIsolatedWebview = async (
   invoke: StructuredInvokeFn,
   rawInvoke: RawInvokeFn,
   snapshot: WebPackageResourceSnapshot,
   title: string,
+  isCurrent: () => boolean = () => true,
 ): Promise<OpenedWebPackageInstance> => {
+  // 本地 owner 失效只停止尚未派发的步骤；不扩 Native 错误码，也不冒充撤销已发的 open。
+  let openDispatched = false;
+  const assertCurrent = (): void => {
+    if (!isCurrent()) {
+      throw new DOMException(openDispatched
+        ? '打开操作已过期；窗口可能已建立，请单独关闭。'
+        : '打开操作已过期，已停止后续步骤；未打开的暂存实例按原 TTL 回收。', 'AbortError');
+    }
+  };
+  assertCurrent();
   const declaredFiles = [...snapshot.files.entries()].map(([path, file]) => ({
     path,
     mediaType: file.mediaType,
@@ -135,11 +148,13 @@ export const openWebPackageInstanceInIsolatedWebview = async (
 
   let instanceId: DesktopWebPackageInstanceId;
   try {
-    const begun = DesktopBeginWebPackageInstanceResponseSchema.parse(
-      await invoke(BEGIN_WEB_PACKAGE_INSTANCE_COMMAND, { request }),
-    );
+    assertCurrent();
+    const response = await invoke(BEGIN_WEB_PACKAGE_INSTANCE_COMMAND, { request });
+    assertCurrent();
+    const begun = DesktopBeginWebPackageInstanceResponseSchema.parse(response);
     instanceId = DesktopWebPackageInstanceIdSchema.parse(begun.instanceId);
   } catch (cause) {
+    assertCurrent();
     throw cause instanceof DesktopWebPackageInstanceError ? cause : toWebpkgError(BEGIN_WEB_PACKAGE_INSTANCE_COMMAND, cause);
   }
 
@@ -159,16 +174,18 @@ export const openWebPackageInstanceInIsolatedWebview = async (
       const chunk = file.bytes.subarray(offset, end);
       let received;
       try {
-        received = DesktopAppendWebPackageResourceResponseSchema.parse(
-          await rawInvoke(APPEND_WEB_PACKAGE_RESOURCE_COMMAND, chunk, {
-            headers: {
-              [DESKTOP_WEBPKG_INSTANCE_ID_HEADER]: instanceId,
-              [DESKTOP_WEBPKG_RESOURCE_PATH_HEADER]: encodedPath,
-              [DESKTOP_WEBPKG_RESOURCE_OFFSET_HEADER]: String(offset),
-            },
-          }),
-        );
+        assertCurrent();
+        const response = await rawInvoke(APPEND_WEB_PACKAGE_RESOURCE_COMMAND, chunk, {
+          headers: {
+            [DESKTOP_WEBPKG_INSTANCE_ID_HEADER]: instanceId,
+            [DESKTOP_WEBPKG_RESOURCE_PATH_HEADER]: encodedPath,
+            [DESKTOP_WEBPKG_RESOURCE_OFFSET_HEADER]: String(offset),
+          },
+        });
+        assertCurrent();
+        received = DesktopAppendWebPackageResourceResponseSchema.parse(response);
       } catch (cause) {
+        assertCurrent();
         throw cause instanceof DesktopWebPackageInstanceError ? cause : toWebpkgError(APPEND_WEB_PACKAGE_RESOURCE_COMMAND, cause);
       }
       // 回执必须等于本文件已送达的累计字节数：native 按声明长度验收，桥按回执复核，
@@ -185,13 +202,15 @@ export const openWebPackageInstanceInIsolatedWebview = async (
   }
 
   try {
-    const opened = DesktopOpenWebPackageInstanceResponseSchema.parse(
-      await invoke(OPEN_WEB_PACKAGE_INSTANCE_COMMAND, {
-        request: DesktopOpenWebPackageInstanceRequestSchema.parse({ instanceId }),
-      }),
-    );
+    assertCurrent();
+    const openRequest = DesktopOpenWebPackageInstanceRequestSchema.parse({ instanceId });
+    openDispatched = true;
+    const response = await invoke(OPEN_WEB_PACKAGE_INSTANCE_COMMAND, { request: openRequest });
+    assertCurrent();
+    const opened = DesktopOpenWebPackageInstanceResponseSchema.parse(response);
     return { instanceId, webviewLabel: opened.label };
   } catch (cause) {
+    assertCurrent();
     throw cause instanceof DesktopWebPackageInstanceError ? cause : toWebpkgError(OPEN_WEB_PACKAGE_INSTANCE_COMMAND, cause);
   }
 };

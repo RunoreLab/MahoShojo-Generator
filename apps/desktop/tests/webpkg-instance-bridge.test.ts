@@ -280,3 +280,73 @@ describe('Web Package 受限 webview 桥接（D4b）', () => {
     expect(ipc.rawCalls).toHaveLength(0);
   });
 });
+
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+};
+
+describe('Web Package bridge owner lifecycle', () => {
+  const snapshot = () => makeSnapshot([
+    ['index.html', 'text/html', encode('<html></html>')],
+    ['data.bin', 'application/octet-stream', new Uint8Array(MAX_DESKTOP_WEBPKG_APPEND_CHUNK_BYTES + 3)],
+  ]);
+
+  it('does not begin for an already expired owner', async () => {
+    const ipc = makeIpc(okHandlers());
+    const outcome = await openWebPackageInstanceInIsolatedWebview(ipc.invoke, ipc.rawInvoke, snapshot(), 't', () => false).catch((error: unknown) => error);
+    expect(outcome).toMatchObject({ name: 'AbortError' });
+    expect(ipc.structuredCalls).toHaveLength(0);
+    expect(ipc.rawCalls).toHaveLength(0);
+  });
+
+  it('does not append or open after a late begin response', async () => {
+    const begin = deferred<{ instanceId: string }>();
+    let current = true;
+    const ok = okHandlers();
+    const ipc = makeIpc({ ...ok, structured: (command) => command === BEGIN_WEB_PACKAGE_INSTANCE_COMMAND ? begin.promise : ok.structured(command) });
+    const result = openWebPackageInstanceInIsolatedWebview(ipc.invoke, ipc.rawInvoke, snapshot(), 't', () => current).catch((error: unknown) => error);
+    expect(ipc.structuredCalls).toHaveLength(1);
+    current = false; begin.resolve({ instanceId: 'wpk-7' });
+    expect(await result).toMatchObject({ name: 'AbortError' });
+    expect(ipc.rawCalls).toHaveLength(0);
+    expect(ipc.structuredCalls.map(({ command }) => command)).toEqual([BEGIN_WEB_PACKAGE_INSTANCE_COMMAND]);
+  });
+
+  it('does not send the next chunk or open after owner expires during append', async () => {
+    const append = deferred<{ receivedByteLength: number }>();
+    let current = true;
+    const ok = okHandlers();
+    const ipc = makeIpc({ ...ok, raw: (command, bytes, headers) => headers['x-webpkg-path'] === 'data.bin' && headers['x-webpkg-offset'] === '0' ? append.promise : ok.raw(command, bytes, headers) });
+    const result = openWebPackageInstanceInIsolatedWebview(ipc.invoke, ipc.rawInvoke, snapshot(), 't', () => current).catch((error: unknown) => error);
+    await vi.waitFor(() => expect(ipc.rawCalls).toHaveLength(2));
+    current = false; append.resolve({ receivedByteLength: MAX_DESKTOP_WEBPKG_APPEND_CHUNK_BYTES });
+    expect(await result).toMatchObject({ name: 'AbortError' });
+    expect(ipc.rawCalls).toHaveLength(2);
+    expect(ipc.structuredCalls.map(({ command }) => command)).toEqual([BEGIN_WEB_PACKAGE_INSTANCE_COMMAND]);
+  });
+
+  it('discards a late open receipt without claiming that its window was revoked', async () => {
+    const open = deferred<{ label: string }>();
+    let current = true;
+    const ok = okHandlers();
+    const ipc = makeIpc({ ...ok, structured: (command) => command === OPEN_WEB_PACKAGE_INSTANCE_COMMAND ? open.promise : ok.structured(command) });
+    const result = openWebPackageInstanceInIsolatedWebview(ipc.invoke, ipc.rawInvoke, snapshot(), 't', () => current).catch((error: unknown) => error);
+    await vi.waitFor(() => expect(ipc.structuredCalls).toHaveLength(2));
+    current = false; open.resolve({ label: 'webpkg-wpk-7' });
+    expect(await result).toMatchObject({ name: 'AbortError', message: expect.stringContaining('窗口可能已建立') });
+    expect(ipc.structuredCalls.map(({ command }) => command)).toEqual([BEGIN_WEB_PACKAGE_INSTANCE_COMMAND, OPEN_WEB_PACKAGE_INSTANCE_COMMAND]);
+  });
+
+  it('does not surface stale native failure details after ownership changes', async () => {
+    const begin = deferred<unknown>();
+    let current = true;
+    const ipc = makeIpc({ structured: () => begin.promise });
+    const result = openWebPackageInstanceInIsolatedWebview(ipc.invoke, ipc.rawInvoke, snapshot(), 't', () => current).catch((error: unknown) => error);
+    current = false; begin.reject({ code: 'webpkg-window-unavailable', message: 'stale native failure' });
+    expect(await result).toMatchObject({ name: 'AbortError' });
+    expect(ipc.rawCalls).toHaveLength(0);
+  });
+});
