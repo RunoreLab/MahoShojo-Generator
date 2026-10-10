@@ -17,6 +17,8 @@ import { DESKTOP_AI_CONFIG_STORAGE_KEY } from '../src/features/ai-config/desktop
 import { getDesktopAiConfigStore, resetDesktopAiConfigStoreForTests } from '../src/features/ai-config/use-desktop-ai-config';
 import { arenaWebPackageFixture, wrappedArenaWebPackageFile } from './fixtures/arena-web-package';
 import { createDesktopRouter } from '../src/app/router';
+import { installStoryCrypto, StoryFixturePort, storyFixtureInvoke } from './helpers/story-fixture';
+installStoryCrypto();
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), listen: vi.fn(), download: vi.fn(), downloadBinary: vi.fn(), profile: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.invoke, isTauri: () => true, Channel: class { onmessage?: (value: unknown) => void; } }));
 vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ onCloseRequested: mocks.listen }) }));
@@ -24,6 +26,7 @@ vi.mock('../src/platform/download-text-file', () => ({ downloadTextFile: mocks.d
 vi.mock('../src/platform/provider-profile-bridge', () => ({ listProviderProfileIds: async () => ['loopback'], getProviderProfile: mocks.profile }));
 let root: Root, container: HTMLDivElement, server: Server, endpoint: string;
 let activeCloseHandles = 0;
+let storyPort: StoryFixturePort, storyIpc: ReturnType<typeof storyFixtureInvoke>;
 let markdownSuffix = '';
 let webTextOverride: string | null = null;
 let packageDocs: Map<string, LocalWebPackageRecordV1>, packageBytes: Map<string, Uint8Array>;
@@ -71,12 +74,14 @@ const calls = () => mocks.invoke.mock.calls.filter(([cmd]) => ['stream_direct_ai
 const scopeClose = () => { const args = mocks.listen.mock.calls.at(-1)!; const event = { preventDefault: vi.fn() }; args[0](event); return event; };
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-  vi.clearAllMocks(); localStorage.clear(); received = []; docs = new Map(); hold = false; failSave = false; eof = false; release = undefined; activeCloseHandles = 0; markdownSuffix = ''; webTextOverride = null; packageDocs = new Map(); packageBytes = new Map();
+  vi.clearAllMocks(); localStorage.clear(); storyPort = new StoryFixturePort(); storyIpc = storyFixtureInvoke(storyPort); received = []; docs = new Map(); hold = false; failSave = false; eof = false; release = undefined; activeCloseHandles = 0; markdownSuffix = ''; webTextOverride = null; packageDocs = new Map(); packageBytes = new Map();
   localStorage.setItem(DESKTOP_AI_CONFIG_STORAGE_KEY, JSON.stringify({ version: 2, selection: { executionPreference: 'client', clientConnectionId: 'loopback' }, hiddenPresetIds: [] }));
   resetDesktopAiConfigStoreForTests();
   mocks.profile.mockResolvedValue({ id: 'loopback', name: 'Loopback', adapter: 'openai-compatible', baseUrl: endpoint.replace('/chat/completions', ''), modelId: 'fixture-model' });
   mocks.listen.mockImplementation(async () => { activeCloseHandles += 1; return vi.fn(() => { activeCloseHandles -= 1; }); }); mocks.download.mockResolvedValue(undefined);
-  mocks.invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+  mocks.invoke.mockImplementation(async (command: string, raw?: Record<string, unknown> | Uint8Array, options?: { headers: Record<string, string> }) => {
+    if (command.includes('_arena_story_')) return storyIpc.invoke(command, raw, options);
+    const args = raw as Record<string, unknown> | undefined;
     if (command === 'list_local_cards') { const request = args!.request as { cardTypes: string[] }; return { documents: [...docs.values()].filter((card) => !request.cardTypes.length || request.cardTypes.includes(card.cardType)).map((card) => JSON.stringify(card)) }; }
     if (command === 'get_local_card') return docs.has(args!.id as string) ? JSON.stringify(docs.get(args!.id as string)) : null;
     if (command === 'save_local_card') { if (failSave) throw new Error('disk-failed'); const request = args!.request as { document: string; writeMode: string }; expect(request.writeMode).toBe('insert-if-absent'); const card = JSON.parse(request.document) as LocalCardRecordV1; const alreadyPresent = docs.has(card.id); if (!alreadyPresent) docs.set(card.id, card); return { id: card.id, alreadyPresent }; }
@@ -510,4 +515,52 @@ describe('Desktop Web source journey with execution closed', () => {
     expect(packageDocs.size).toBe(0); expect(mocks.invoke.mock.calls.some(([command]) => command === 'open_web_package_instance')).toBe(false);
   });
 
+});
+
+
+describe('Desktop two-route continuous story through actual default binder', () => {
+  it.each(['battle', 'arena'] as const)('%s starts, explicitly continues, reopens the same device story and exports the complete chain', async (product) => {
+    const value = draft('daily', 'non-stream');
+    window.localStorage.setItem(product === 'arena' ? ADVANCED_ARENA_DRAFT_KEY : ARENA_DRAFT_KEY, JSON.stringify({ version: 1, draft: value }));
+    window.location.hash = `#/${product}`; const router = await mount(); await click('恢复草稿');
+    await click('新建连续战报'); await vi.waitFor(() => expect(storyPort.heads()[0]?.chapterCount).toBe(1)); await settle();
+    expect(container.querySelector('[aria-label="连续战报会话"]')?.textContent).toContain('共 1 章');
+    expect(JSON.parse(received[0]!.arenaInputJson!).internalGuidance).toContain('首章');
+    expect(JSON.parse(localStorage.getItem(product === 'arena' ? ADVANCED_ARENA_DRAFT_KEY : ARENA_DRAFT_KEY)!).draft.combatants).toEqual(value.combatants);
+    await change('textarea[aria-label="下一章故事引导"]', '沿本故事继续');
+    await click('继续续写'); await vi.waitFor(() => expect(storyPort.heads()[0]?.chapterCount).toBe(2)); await settle();
+    expect(received).toHaveLength(2); expect(JSON.parse(received[1]!.arenaInputJson!).userGuidance).toBe('沿本故事继续');
+    expect(mocks.invoke.mock.calls.filter(([command]) => command === 'append_arena_story_part').every(([,body]) => body instanceof Uint8Array)).toBe(true);
+    await click('导出完整 Markdown'); await vi.waitFor(() => expect(container.textContent).toContain('完整故事已导出'));
+    expect(storyIpc.exported).toContain('章节数：2 章'); expect(storyIpc.exported.match(/^# 车站重逢$/gm)).toHaveLength(3);
+    vi.mocked(window.confirm).mockReturnValue(true);
+    await act(async () => router.navigate({ to: product === 'battle' ? '/arena' : '/battle' })); await settle();
+    await vi.waitFor(() => expect(container.querySelector('[data-story-read-status="loaded"]')).not.toBeNull());
+    expect(container.querySelector('[aria-label="连续战报会话"]')?.textContent).toContain('共 2 章'); expect(received).toHaveLength(2);
+    expect(activeCloseHandles).toBe(1);
+  });
+  it('shows query-only unknown saving in the actual route and never starts another model', async () => {
+    storyPort.loseEndReply = true; storyPort.hideReceipts = true;
+    saveDraft(draft('daily','stream')); await mount(); await click('恢复草稿'); await click('新建连续战报');
+    await vi.waitFor(() => expect(container.textContent).toContain('保存状态待确认')); await settle();
+    await click('查询原保存结果'); expect(received).toHaveLength(1); expect(storyPort.begin).toHaveBeenCalledTimes(1);
+    await click('导出未保存章节'); expect(mocks.download.mock.calls.at(-1)![1]).toContain(text);
+    storyPort.hideReceipts = false; await click('查询原保存结果'); await vi.waitFor(() => expect(container.textContent).toContain('完整章节已保存到本机故事'));
+    expect(received).toHaveLength(1); expect(storyPort.begin).toHaveBeenCalledTimes(1);
+  });
+  it('stops a real in-flight Direct chapter, preserves received prose and leaves the stored chain intact', async () => {
+    saveDraft(draft('daily','stream')); await mount(); await click('恢复草稿'); await click('新建连续战报');
+    await vi.waitFor(() => expect(storyPort.heads()[0]?.chapterCount).toBe(1)); await settle();hold = true;
+    await click('继续续写'); await vi.waitFor(() => expect(container.querySelector('[aria-label="本次章节结果"]')?.textContent).toContain(text));
+    await click('停止章节生成'); release?.(); await settle();
+    expect(storyPort.heads()[0]?.chapterCount).toBe(1); expect(storyPort.begin).toHaveBeenCalledTimes(1); expect(received).toHaveLength(2);
+    await click('导出完整原始输出'); expect(JSON.parse(mocks.download.mock.calls.at(-1)![1]).rawText).toContain(text);
+    expect(scopeClose().preventDefault).toHaveBeenCalled();
+  });
+  it('keeps Hosted single-shot usable while the same real story controls explicitly reject Hosted generation', async () => {
+    localStorage.setItem(DESKTOP_AI_CONFIG_STORAGE_KEY, JSON.stringify({ version: 2, selection: { executionPreference: 'server', clientConnectionId: 'loopback' }, hiddenPresetIds: [] }));
+    saveDraft(draft('daily','non-stream')); await mount(); await click('恢复草稿');
+    expect(button('生成战报').disabled).toBe(false);expect(button('新建连续战报').disabled).toBe(true);
+    expect(container.querySelector('[aria-label="连续战报会话"]')?.textContent).toContain('当前选择为服务器生成');expect(received).toHaveLength(0);
+  });
 });

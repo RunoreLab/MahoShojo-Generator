@@ -1,6 +1,7 @@
 import {
   assembleArenaGenerationPrompt,
   buildArenaGenerationInputSnapshot,
+  buildArenaStoryGenerationInputSnapshot,
   buildArenaStructuredReportSchema,
   createArenaStreamProjector,
   qualifyArenaWebPackageOutput,
@@ -24,6 +25,8 @@ import type { BattleReportRenderSnapshotV1 } from '@mahoshojo/contracts';
 import { buildWebPackagePromptProjection, buildWebPackagePromptFromProjection, createWebPackageOverlayFromBase, type ResolvedWebPackage } from '@mahoshojo/web-package';
 import { ProviderTargetSchema } from '@mahoshojo/contracts/provider-target';
 import type { AdjudicationResult } from '@mahoshojo/domain/arena-types';
+import type { BattleStoryArenaRequestInput } from '@mahoshojo/domain/arena-battle-story-request';
+import { countBattleStoryCommitJsonBytes } from '@mahoshojo/domain/arena-story-commit';
 import type { NarrativeHistoryAppendInput } from '@mahoshojo/domain/narrative-history-operations';
 import { describeDesktopPresetModelSupport } from '../ai-config/desktop-ai-config';
 import { createDesktopAiExecutionPort, type DesktopAiExecutionOptions } from '../../platform/desktop-ai-execution';
@@ -44,6 +47,8 @@ export interface ArenaDirectHostContext {
   reporterInfo: { name: string; publication: string };
   /** Already resolved by the host; this adapter never rolls dice or signs updates. */
   adjudicationResults: AdjudicationResult[];
+  /** Host-owned chapter semantics, never a string copied from the ordinary Arena draft. */
+  story?: BattleStoryArenaRequestInput;
   /** Local read-only source; resolved bytes are verified and frozen before dispatch. */
   resolveWebPackage?: (ref: WebPackageRef) => Promise<ResolvedWebPackage>;
 }
@@ -84,8 +89,14 @@ export const executeArenaDirect = async (
   // Snapshot before the first await. Mutating selection, model, roster or account
   // while a request is running cannot redirect its result into a new scope.
   const resolveWebPackage = context.resolveWebPackage;
-  const frozen = clone({ input, intent, context: { ...context, resolveWebPackage: undefined } });
-  const { intent: task, context: host } = frozen;
+  // Do not duplicate input + seed + checkpoint in a giant clone. Project only the
+  // actual business graph, budget it, then freeze that graph once below.
+  const story = context.story;
+  const frozen = clone({ intent, context: {
+    scopeKey: context.scopeKey, reporterInfo: context.reporterInfo,
+  } });
+  const { intent: task } = frozen;
+  const host = { ...frozen.context, adjudicationResults: context.adjudicationResults };
   const target = options.providerTarget === undefined ? undefined : ProviderTargetSchema.parse(options.providerTarget);
   const executionOptions = { ...options, providerTarget: target };
   let rawText = '';
@@ -99,11 +110,25 @@ export const executeArenaDirect = async (
   if (signal.aborted) return cancelled();
   if (!['direct-local', 'direct-remote'].includes(task.mode)
     || !['stream', 'non-stream'].includes(task.generationMode)
-    || !['markdown', 'web'].includes(frozen.input.reportFormat)
-    || frozen.input.arenaFreeRankingEnabled
+    || !story && (!['markdown', 'web'].includes(input.reportFormat) || input.arenaFreeRankingEnabled)
+    || story && (!['start', 'continue'].includes(story.action) || task.generationMode !== 'stream')
     || !host.scopeKey.trim()
-    || host.adjudicationResults.length > ARENA_CANONICAL_RESOURCE_LIMITS.maxAdjudicationEvents) {
+    || !Array.isArray(host.adjudicationResults) || host.adjudicationResults.length > ARENA_CANONICAL_RESOURCE_LIMITS.maxAdjudicationEvents) {
     return failed('invalid-request', '本片仅支持非排位单人 Arena 的 Markdown 或 Web 输出。');
+  }
+  let payload: (ReturnType<typeof buildArenaGenerationInputSnapshot> | ReturnType<typeof buildArenaStoryGenerationInputSnapshot>) & { adjudicationResults: AdjudicationResult[] };
+  try {
+    const projected = {
+      ...(story ? buildArenaStoryGenerationInputSnapshot(story) : buildArenaGenerationInputSnapshot(input)),
+      adjudicationResults: host.adjudicationResults,
+    };
+    // Counts the exact JSON UTF-8 bytes without materializing a large serialized
+    // checkpoint. Internal story guidance shares the same 12 MiB business budget.
+    countBattleStoryCommitJsonBytes(projected, ARENA_CANONICAL_RESOURCE_LIMITS.requestBodyBytes);
+    payload = clone(projected);
+    host.adjudicationResults = payload.adjudicationResults;
+  } catch {
+    return failed('invalid-request', 'Arena 输入或连续故事上下文未通过资源校验。');
   }
   if (target?.kind === 'system') return failed('unsupported-model', '系统默认配置需要服务器执行。');
   if (target?.kind === 'preset') {
@@ -113,18 +138,18 @@ export const executeArenaDirect = async (
     }
   }
   const streaming = task.generationMode === 'stream';
-  const web = frozen.input.reportFormat === 'web';
+  const web = payload.reportFormat === 'web';
   let packageBase: ResolvedWebPackage | undefined;
   let packageContext: Parameters<typeof assembleArenaGenerationPrompt>[0]['packageContext'];
-  if (web && frozen.input.webPackageRef) {
+  if (web && payload.webPackageRef) {
     try {
       if (!resolveWebPackage) throw new Error('missing package source');
-      const ref = WebPackageRefSchema.parse(frozen.input.webPackageRef);
+      const ref = WebPackageRefSchema.parse(payload.webPackageRef);
       packageBase = await resolveWebPackage(ref);
       if (signal.aborted) return cancelled();
       if (packageBase.ref.id !== ref.id || packageBase.ref.version !== ref.version || packageBase.ref.digest !== ref.digest) throw new Error('package mismatch');
       const projection = buildWebPackagePromptProjection(packageBase);
-      if (frozen.input.webPackagePromptProjection && JSON.stringify(frozen.input.webPackagePromptProjection) !== JSON.stringify(projection)) throw new Error('projection mismatch');
+      if (payload.webPackagePromptProjection && JSON.stringify(payload.webPackagePromptProjection) !== JSON.stringify(projection)) throw new Error('projection mismatch');
       packageContext = { ref, projection, prompt: buildWebPackagePromptFromProjection(projection) };
     } catch {
       if (signal.aborted) return cancelled();
@@ -132,11 +157,16 @@ export const executeArenaDirect = async (
     }
   }
   if (signal.aborted) return cancelled();
-  const payload = { ...buildArenaGenerationInputSnapshot(frozen.input), adjudicationResults: host.adjudicationResults,
-    ...(packageContext ? { webPackagePromptProjection: packageContext.projection } : {}) };
+  if (packageContext && payload.reportFormat === 'web') payload = { ...payload, webPackagePromptProjection: packageContext.projection };
   // The original business JSON is resource evidence. Formatted messages may expand;
   // native does not certify equivalence or apply a false 12 MiB whole-IPC cap.
-  const arenaInputJson = JSON.stringify(payload);
+  let arenaInputJson: string;
+  try {
+    countBattleStoryCommitJsonBytes(payload, ARENA_CANONICAL_RESOURCE_LIMITS.requestBodyBytes);
+    arenaInputJson = JSON.stringify(payload);
+  } catch {
+    return failed('invalid-request', 'Arena 输入未通过资源校验。');
+  }
   if (!validateArenaAiInputJson(arenaInputJson)) return failed('invalid-request', 'Arena 输入未通过资源校验。');
   const reportOptions = {
     enableImpacts: payload.writeArenaHistory || payload.writeCurrentState,
@@ -145,7 +175,7 @@ export const executeArenaDirect = async (
   };
   const schema = buildArenaStructuredReportSchema(reportOptions);
   const prompt = assembleArenaGenerationPrompt({
-    payload: { ...payload, userGuidance: streaming ? payload.userGuidance.trim() : payload.userGuidance.trim().slice(0, 200) },
+    payload: { ...payload, userGuidance: streaming ? (payload.userGuidance ?? '').trim() : (payload.userGuidance ?? '').trim().slice(0, 200) },
     outputContract: web ? packageContext ? 'web-package-target' : 'web-document' : streaming ? 'stream-markdown' : 'structured-report',
     ...(packageContext ? { packageContext } : {}),
     reporterInfo: host.reporterInfo,
@@ -265,14 +295,14 @@ export const executeArenaDirect = async (
   // Metadata repair is local but asynchronous. Cancellation still wins before
   // handing back any completion/history candidate.
   if (signal.aborted) return cancelled();
-  report.mode = frozen.input.battleMode;
+  report.mode = payload.mode;
   report.adjudicationResults = host.adjudicationResults;
   report.reportFormat = web ? 'web' : 'markdown';
   report.aiModel = terminal.resolvedModelId ?? task.modelId;
-  if (frozen.input.battleMode === 'scenario' && frozen.input.scenarioDisplayName) report.scenario = frozen.input.scenarioDisplayName;
+  if (payload.mode === 'scenario' && payload.scenarioTitle) report.scenario = payload.scenarioTitle;
   return {
     ...common(), status: 'completed', markdown, report, impacts, metaStatus, ...(renderSnapshot ? { renderSnapshot } : {}),
-    ...(frozen.input.settings.writeNarrativeHistory ? { historyCandidate: {
+    ...(payload.writeNarrativeHistory ? { historyCandidate: {
       scopeKey: host.scopeKey, requestId: request.requestId, generationId: request.requestId, title: report.headline || (web ? 'Web 战报' : ''), content: markdown,
     } } : {}),
   };

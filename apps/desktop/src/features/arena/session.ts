@@ -6,7 +6,8 @@ import type { DesktopArenaHostedAnyRecoveryPointer as DesktopArenaHostedRecovery
 import { parseBattleReportRenderSnapshotV1, type BattleReportRenderSnapshotV1 } from '@mahoshojo/contracts';
 import { WebPackageRefSchema, WebPackagePromptProjectionSchema } from '@mahoshojo/contracts/web-package';
 import { buildArenaGenerationInputSnapshot, type ArenaBattleReport } from '@mahoshojo/ai-core/arena-generation';
-import { ARENA_CANONICAL_CAPABILITIES, evaluateArenaBasicGenerationReadiness } from '@mahoshojo/contracts/arena-capabilities';
+import { ARENA_CANONICAL_CAPABILITIES, ARENA_CANONICAL_RESOURCE_LIMITS, evaluateArenaBasicGenerationReadiness } from '@mahoshojo/contracts/arena-capabilities';
+import { countBattleStoryCommitJsonBytes } from '@mahoshojo/domain/arena-story-commit';
 import { validateArenaAiInputJson } from '@mahoshojo/contracts/ai-execution';
 import { MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES } from '@mahoshojo/contracts/desktop-ipc';
 import { SafeJsonValueSchema } from '@mahoshojo/contracts/json-value';
@@ -109,7 +110,9 @@ export const arenaReadinessMessage = (draft: ArenaDraft, product: DesktopArenaPr
   const issue = evaluateArenaBasicGenerationReadiness({ battleMode: draft.battleMode, combatantCount: draft.combatants.length, hasScenario: !!draft.scenario.content })[0];
   if (issue?.code === 'GENERATION_SCENARIO_REQUIRED') return '请先选择主情景。';
   if (issue) return `当前模式至少需要 ${ARENA_CANONICAL_CAPABILITIES.minCombatantsByMode[draft.battleMode]} 位角色。`;
-  if (!validateArenaAiInputJson(JSON.stringify(buildArenaGenerationInputSnapshot(buildDesktopArenaInput(draft, product))))) return '输入超过 Arena 资源上限或格式不受支持；请调整输入，内容不会被截断。';
+  const payload = buildArenaGenerationInputSnapshot(buildDesktopArenaInput(draft, product));
+  try { countBattleStoryCommitJsonBytes(payload, ARENA_CANONICAL_RESOURCE_LIMITS.requestBodyBytes); } catch { return '输入超过 Arena 资源上限或格式不受支持；请调整输入，内容不会被截断。'; }
+  if (!validateArenaAiInputJson(JSON.stringify(payload))) return '输入超过 Arena 资源上限或格式不受支持；请调整输入，内容不会被截断。';
   return null;
 };
 

@@ -3,7 +3,9 @@ import * as arenaCore from '@mahoshojo/ai-core/arena-generation';
 import { appendNarrativeHistoryEntry } from '@mahoshojo/domain/narrative-history-operations';
 import type { AiExecutionRequest } from '@mahoshojo/contracts/ai-execution';
 import type { AiStreamEvent } from '@mahoshojo/ai-core/stream-events';
-import { assembleArenaGenerationPrompt, buildArenaGenerationInputSnapshot, type ArenaGenerationInputSnapshot } from '@mahoshojo/ai-core/arena-generation';
+import { assembleArenaGenerationPrompt, buildArenaGenerationInputSnapshot, buildArenaStoryGenerationInputSnapshot, type ArenaGenerationInputSnapshot } from '@mahoshojo/ai-core/arena-generation';
+import { buildBattleStoryArenaRequest, type BattleStoryArenaRequestInput } from '@mahoshojo/domain/arena-battle-story-request';
+import { ARENA_CANONICAL_RESOURCE_LIMITS } from '@mahoshojo/contracts/arena-capabilities';
 import { executeArenaDirect, type ArenaDirectHostContext, type ArenaDirectIntent } from '../src/features/arena/direct';
 
 const input = (mode: ArenaGenerationInputSnapshot['battleMode'] = 'classic'): ArenaGenerationInputSnapshot => ({
@@ -195,4 +197,87 @@ it('does not fall back to an old complete update when the latest loose update is
   const result = await executeArenaDirect(native.options, input(), task(), host(), new AbortController().signal);
   expect(result.status).toBe('invalid-output'); expect(result.rawText).toBe(raw);
   expect(result.markdown).toBe('正文'); expect(result).not.toHaveProperty('historyCandidate');
+});
+
+const story = (): BattleStoryArenaRequestInput => {
+  const value = input('daily');
+  const combatants = buildArenaGenerationInputSnapshot(value).combatants;
+  return { action: 'continue', sourceChapterId: 'chapter-12', chapterIndex: 13,
+    seed: { combatants, mode: 'daily', language: 'zh-CN', storyLength: 'long',
+      settings: { ...value.settings, readArenaHistoryLimit: 9, writeNarrativeHistory: false } },
+    chapterContext: { workingCombatants: combatants, sessionSummary: '此前已达成约定',
+      recentWindow: [{ chapterId: 'chapter-11', chapterIndex: 11, title: '前章', text: '保留投影全文', mode: 'full', truncated: true },
+        { chapterId: 'chapter-12', chapterIndex: 12, title: '上章', text: '上一章已完成', mode: 'full', truncated: false }] },
+    userGuidance: '本轮继续守约' };
+};
+
+describe('controlled Direct story request seam', () => {
+  it('consumes the same Hosted business constructor with projected native context, exactly one transport', async () => {
+    const request = story(); const context = { ...host(), story: request }; const native = harness();
+    const value = { ...input('scenario'), internalGuidance: 'UNTRUSTED_DRAFT_GUIDANCE' };
+    const result = await executeArenaDirect(native.options, value, task(), context, new AbortController().signal);
+    const payload = JSON.parse(native.request!.arenaInputJson!);
+    expect(payload).toEqual(JSON.parse(JSON.stringify({ ...buildBattleStoryArenaRequest(request), reportFormat: 'markdown', arenaFreeRankingEnabled: false,
+      isDowngrade: false, adjudicationResults: [] })));
+    const expected = assembleArenaGenerationPrompt({ payload, outputContract: 'stream-markdown', reporterInfo: context.reporterInfo, adjudicationResults: [] });
+    expect(native.request!.messages.at(-1)!.content).toBe(expected.prompt);
+    expect(payload.internalGuidance).toContain('续写第 13 章');
+    expect(payload.internalGuidance).toContain('[本章内容已按上下文预算截断]');
+    expect(payload.internalGuidance).not.toContain(request.userGuidance);
+    expect(native.request!.messages.at(-1)!.content).not.toContain('UNTRUSTED_DRAFT_GUIDANCE');
+    expect(native.invoke).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ status: 'completed', report: { mode: 'daily' } });
+    expect(result).not.toHaveProperty('historyCandidate');
+  });
+  it('ordinary drafts cannot inject internal guidance and chapter requests cannot select another output mode', async () => {
+    const native = harness();
+    await executeArenaDirect(native.options, { ...input(), internalGuidance: 'INJECTED', story: story() } as ArenaGenerationInputSnapshot,
+      task(), host(), new AbortController().signal);
+    expect(JSON.parse(native.request!.arenaInputJson!)).not.toHaveProperty('internalGuidance');
+    for (const [intent, request] of [[task('non-stream'), story()], [task(), { ...story(), action: 'rewrite' }]] as const) {
+      const rejected = harness();
+      expect((await executeArenaDirect(rejected.options, input(), intent, { ...host(), story: request }, new AbortController().signal)).status).toBe('failed');
+      expect(rejected.invoke).not.toHaveBeenCalled();
+    }
+  });
+  it('freezes story semantics before dispatch without consuming the other page draft', async () => {
+    const request = story();
+    const native = harness(streamText, events => {
+      request.chapterContext.workingCombatants[0] = { data: { name: 'MUTATED' } };
+      request.chapterContext.recentWindow![0]!.text = 'MUTATED'; request.seed.mode = 'classic'; request.userGuidance = 'MUTATED';
+      return events;
+    });
+    const unrelated = { ...input(), toJSON() { throw new Error('ordinary draft must not be cloned for a story'); } };
+    const outcome = await executeArenaDirect(native.options, unrelated, task(), { ...host(), story: request }, new AbortController().signal);
+    expect(outcome.status).toBe('completed'); expect(native.request!.arenaInputJson).not.toContain('MUTATED');
+    expect(native.request!.arenaInputJson).toContain('保留投影全文');
+  });
+  it('includes controlled internal guidance in the exact 12 MiB/+1 business byte gate', async () => {
+    const request = story(); request.userGuidance = '';
+    const context = { ...host(), story: request };
+    const baseline = JSON.stringify({ ...buildArenaStoryGenerationInputSnapshot(request), adjudicationResults: [] });
+    const padding = ARENA_CANONICAL_RESOURCE_LIMITS.requestBodyBytes - new TextEncoder().encode(baseline).byteLength;
+    request.userGuidance = 'x'.repeat(padding);
+    const boundary = harness();
+    expect((await executeArenaDirect(boundary.options, input(), task(), context, new AbortController().signal)).status).toBe('completed');
+    expect(new TextEncoder().encode(boundary.request!.arenaInputJson).byteLength).toBe(ARENA_CANONICAL_RESOURCE_LIMITS.requestBodyBytes);
+    expect(boundary.invoke).toHaveBeenCalledTimes(1);
+    request.userGuidance += 'x';
+    const rejected = harness();
+    const stringify = JSON.stringify;
+    const guard = vi.spyOn(JSON, 'stringify').mockImplementation((value, ...args) => {
+      if (value && typeof value === 'object' && 'combatants' in value) throw new Error('large business object serialized before resource preflight');
+      return stringify(value, ...args);
+    });
+    try {
+      const outcome = await executeArenaDirect(rejected.options, input(), task(), context, new AbortController().signal);
+      expect(outcome).toMatchObject({ status: 'failed', code: 'invalid-request' });
+      expect(rejected.invoke).not.toHaveBeenCalled();
+      expect(guard.mock.calls.some(([value]) => value && typeof value === 'object' && 'combatants' in value)).toBe(false);
+    } finally { guard.mockRestore(); }
+    const tooLargeContext = story(); tooLargeContext.chapterContext.sessionSummary = '\u0000'.repeat(ARENA_CANONICAL_RESOURCE_LIMITS.requestBodyBytes / 6);
+    const summaryRejected = harness();
+    expect((await executeArenaDirect(summaryRejected.options, input(), task(), { ...host(), story: tooLargeContext }, new AbortController().signal)).status).toBe('failed');
+    expect(summaryRejected.invoke).not.toHaveBeenCalled();
+  });
 });
