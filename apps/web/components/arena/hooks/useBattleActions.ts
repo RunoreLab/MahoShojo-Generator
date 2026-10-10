@@ -2,7 +2,7 @@
 
 import { useCallback } from 'react';
 
-import { buildAdjudicationSourceKey, markAdjudicationEventsWithSource } from '@/lib/arena/adjudication-events';
+import { buildAdjudicationSourceKey, prepareAdjudicationEventImport } from '@/lib/arena/adjudication-events';
 import { buildArenaMaterialState } from '@/lib/arena/materials';
 import {
   canAddArenaReferenceItems,
@@ -28,7 +28,6 @@ import {
 import {
   getCombatantDisplayName,
   inferCombatantType,
-  isLegacyAdjudicatorFormat,
 } from '../utils/characterValidator';
 import { parseCombatantsFromText } from '../utils/fileParser';
 import { resolveArenaDataCardTemplate } from '../utils/data-card-template';
@@ -129,15 +128,13 @@ export const useBattleActions = () => {
 
   const appendAdjudicationEvents = useCallback(
     (events: unknown, label: string, sourceKey?: string | null) => {
-      if (!Array.isArray(events) || events.length === 0) return;
-      if (isLegacyAdjudicatorFormat(events as any[])) {
+      const prepared = prepareAdjudicationEventImport(events, label, sourceKey);
+      if (prepared.status === 'legacy') {
         setError(`⚠️ 文件 "${label}" 包含旧版随机事件，已被忽略。`);
         return;
       }
-      const effectiveSourceKey = sourceKey ?? buildAdjudicationSourceKey({ sourceLabel: label });
-      const marked = markAdjudicationEventsWithSource(events, effectiveSourceKey);
-      if (marked.length === 0) return;
-      appendAdjudicationEventsToStore(marked, effectiveSourceKey);
+      if (prepared.status !== 'ready') return;
+      appendAdjudicationEventsToStore(prepared.events, prepared.sourceKey);
     },
     [appendAdjudicationEventsToStore, setError]
   );

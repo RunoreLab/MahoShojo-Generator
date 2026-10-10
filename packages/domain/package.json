@@ -248,7 +248,9 @@
     "./wantu-card/schema": "./src/wantu-card/schema.ts",
     "./wantu-card/types": "./src/wantu-card/types.ts",
     "./wantu-card/wantu-data-card": "./src/wantu-card/wantu-data-card.ts",
-    "./arena-adjudication": "./src/arena-adjudication.ts"
+    "./arena-adjudication": "./src/arena-adjudication.ts",
+    "./arena-questionnaire-request": "./src/arena-questionnaire-request.ts",
+    "./arena-adjudication-events": "./src/arena-adjudication-events.ts"
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",
