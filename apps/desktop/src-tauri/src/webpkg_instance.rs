@@ -9,7 +9,7 @@
 //!    "请求方 label 去掉前缀后等于 URL 里的 instance id"时才服务——foreign instance、
 //!    main-ui、任何别的 webview 一律 404。这让同一 `maho-webpkg` origin 下的多个包窗口
 //!    也拿不到彼此的字节。
-//! 3. **失败一律 404。** 非法路径、未知 instance、未 Open 的 instance、未声明的文件——对外
+//! 3. **失败一律 404。** 非规范 scheme/authority、非法路径、未知 instance、未 Open 的 instance、未声明的文件——对外
 //!    只有一种结果。不区分"不存在"与"不许看"，否则状态差异本身就是一份可探测的侧信道。
 //! 4. **字节只活在内存里。** staging 不落盘：包字节归 blob store，临时镜像归本注册表；
 //!    窗口 Destroyed 时 instance 连同字节一并释放。本模块**不产生任何文件路径**。
@@ -202,6 +202,8 @@ fn is_allowed_navigation_origin(url: &url::Url) -> bool {
 /// 路径——即声明为 `text/html` 的资源。foreign instance、外链、about:/data:/
 /// javascript: 与一切非 HTML 目标一律拒；非 HTML 资源作为 subresource 由 resolver
 /// 正常服务，不受本判定影响。
+/// 此处只约束宿主实际交给导航回调的 URL。浏览器原地求值的 `javascript:` 不一定
+/// 触发该回调，不能把本白名单当作脚本禁用策略；其 Document/CSP 继承另行实机验证。
 ///
 /// 为什么必须判资源类型而不只看 URL：CSP `sandbox` 是**当次响应**的 policy，不粘在
 /// browsing context 上——受限 HTML（`sandbox allow-scripts` → opaque origin）一旦
@@ -920,6 +922,12 @@ fn build_webpkg_window(
 
 /// `maho-webpkg` 协议响应。返回类型与 `register_uri_scheme_protocol` 的 `T: Into<Cow>` 匹配。
 ///
+/// Wry 0.57.0 在 Windows 上先把 `http://maho-webpkg.<authority>/…` 还原成
+/// `maho-webpkg://<authority>/…`，Tauri 2.12.0 原样传入本 handler。因此只接受
+/// 规范 scheme + **完整** authority `localhost`，不把浏览器映射 URL 加进白名单，
+/// 也不用只取 host 或 URL 规范化的办法吞掉 userinfo、显式端口或尾点。
+/// 上游通配匹配会把非 localhost 后缀也送到这里；它不代表来源已经授权。
+///
 /// 读完整 `Request` 而不是只读 URI：`Range` 头决定返回 200 全量还是 206 区间
 /// （镜像 Tauri 官方 streaming 示例的 Range → 206 → 单帧截断语义）。所有授权类失败
 /// 统一 404 + 同一组安全响应头，Range 不可满足单独走 416——它只对已通过钉定校验的
@@ -929,6 +937,15 @@ pub fn resolve_webpkg_request(
     webview_label: &str,
     request: &http::Request<Vec<u8>>,
 ) -> http::Response<std::borrow::Cow<'static, [u8]>> {
+    if request.uri().scheme_str() != Some(URI_SCHEME)
+        || request
+            .uri()
+            .authority()
+            .map(|authority| authority.as_str())
+            != Some(RESOURCE_HOST)
+    {
+        return not_found_response();
+    }
     let uri_path = request.uri().path();
     let range_header = request
         .headers()
@@ -1032,11 +1049,13 @@ mod tests {
         registry.begin(entry, "示例包", files, Instant::now())
     }
 
-    /// resolver 测试的 Request 构造：`uri()` 只有 path 段参与判定，host 任意取
-    /// scheme 的正则形态即可。
+    /// resolver 测试默认构造 Wry 已还原的规范 URI。
     fn request(path: &str, range: Option<&str>) -> http::Request<Vec<u8>> {
-        let mut builder =
-            http::Request::builder().uri(format!("{URI_SCHEME}://{RESOURCE_HOST}{path}"));
+        request_uri(&format!("{URI_SCHEME}://{RESOURCE_HOST}{path}"), range)
+    }
+
+    fn request_uri(uri: &str, range: Option<&str>) -> http::Request<Vec<u8>> {
+        let mut builder = http::Request::builder().uri(uri);
         if let Some(range) = range {
             builder = builder.header(http::header::RANGE, range);
         }
@@ -1709,6 +1728,93 @@ mod tests {
             js.headers().get("content-type").unwrap(),
             "application/javascript; charset=utf-8"
         );
+    }
+
+    #[test]
+    fn resolver_仅服务规范_native_scheme_和完整_authority() {
+        let registry = WebPackageInstances::default();
+        let begun = begin(
+            &registry,
+            "index.html",
+            vec![declared("index.html", "text/html", 5)],
+        )
+        .expect("begin");
+        registry
+            .append(
+                &begun.instance_id,
+                "index.html",
+                0,
+                b"hello",
+                Instant::now(),
+            )
+            .expect("append");
+        promote_to_open(&registry, &begun.instance_id, OpenPhase::Serving);
+        let label = label_for_instance(&begun.instance_id);
+        let path = format!("{INSTANCE_URL_PREFIX}{}/index.html", begun.instance_id);
+
+        // Query 不改变资源身份；正规的完整 URI 仍经原 label↔instance/path/Range 边界。
+        let canonical = format!("{URI_SCHEME}://{RESOURCE_HOST}{path}?revision=1");
+        let full = resolve_webpkg_request(&registry, &label, &request_uri(&canonical, None));
+        assert_eq!(full.status(), http::StatusCode::OK);
+        assert_eq!(full.body().as_ref(), b"hello");
+        let ranged = resolve_webpkg_request(
+            &registry,
+            &label,
+            &request_uri(&canonical, Some("bytes=1-2")),
+        );
+        assert_eq!(ranged.status(), http::StatusCode::PARTIAL_CONTENT);
+        assert_eq!(ranged.body().as_ref(), b"el");
+
+        // 以下都是 handler 的 http::Uri 输入，不是声称浏览器会逐字保留原始 URL。
+        // Windows 正规 http://maho-webpkg.localhost 已由 Wry 还原；evil.example、
+        // localhost.evil.example 等后缀也会被还原，却绝不能因此获得资源。
+        let mut rejected: Vec<String> = [
+            "maho-webpkg://evil.example",
+            "maho-webpkg://localhost.evil.example",
+            "maho-webpkg://localhost.localhost",
+            "maho-webpkg://localhost.",
+            "maho-webpkg://LOCALHOST",
+            "maho-webpkg://localhost:80",
+            "maho-webpkg://localhost:443",
+            "maho-webpkg://localhost:12345",
+            "maho-webpkg://localhost:",
+            "maho-webpkg://user@localhost",
+            "maho-webpkg://user:password@localhost",
+            "maho-webpkg://localhost@evil.example",
+            "maho-webpkg://127.0.0.1",
+            "maho-webpkg://[::1]",
+            "maho-webpkg://maho-webpkg.localhost",
+            "http://maho-webpkg.localhost",
+            "https://maho-webpkg.localhost",
+            "http://localhost",
+            "https://localhost",
+            "ipc://localhost",
+            "file://localhost",
+        ]
+        .iter()
+        .map(|origin| format!("{origin}{path}"))
+        .collect();
+        rejected.extend([path, "localhost".to_string(), "*".to_string()]);
+        let missing = not_found_response();
+        for uri in rejected {
+            // 即便 Range 不可满足，也必须先拒绝 origin，不能泄漏文件长度或存在性。
+            for range in [None, Some("bytes=0-1"), Some("bytes=999-")] {
+                let response = resolve_webpkg_request(&registry, &label, &request_uri(&uri, range));
+                assert_eq!(response.status(), missing.status(), "{uri} {range:?}");
+                assert_eq!(response.headers(), missing.headers(), "{uri} {range:?}");
+                assert_eq!(response.body(), missing.body(), "{uri} {range:?}");
+            }
+        }
+        for forbidden_label in ["main-ui", "webpkg-wpk-999"] {
+            let response = resolve_webpkg_request(
+                &registry,
+                forbidden_label,
+                &request_uri(&canonical, Some("bytes=999-")),
+            );
+            assert_eq!(response.status(), missing.status());
+            assert_eq!(response.headers(), missing.headers());
+            assert_eq!(response.body(), missing.body());
+        }
     }
 
     #[test]
