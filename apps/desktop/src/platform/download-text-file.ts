@@ -9,7 +9,15 @@
  * 开始读取 blob，同步 revoke 会让部分 WebView2 版本拿到空文件。
  */
 export const downloadTextFile = (fileName: string, text: string, mimeType = 'application/json'): void => {
-  const blob = new Blob([text], { type: mimeType });
+  downloadBlobFile(fileName, new Blob([text], { type: mimeType }));
+};
+
+/** Main UI only: preserves the same browser/OS download boundary, with no arbitrary-path IPC. */
+export const downloadBinaryFile = (fileName: string, bytes: Uint8Array, mimeType: string): void => {
+  downloadBlobFile(fileName, new Blob([new Uint8Array(bytes).buffer], { type: mimeType }));
+};
+
+const downloadBlobFile = (fileName: string, blob: Blob): void => {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
