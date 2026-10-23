@@ -15,6 +15,7 @@ import { generationActionClassNames } from '../generation-actions';
 import type { HomeAssetSource } from '../home/feature-catalog';
 import { BaseModal } from '../modal';
 import { ProductFooter } from '../shell';
+import { ScenarioResultContent } from '../scenario';
 import { SHOWROOM_MAGICAL_GIRL } from './fixtures';
 import { SHOWROOM_SECTIONS, type ShowroomSectionId } from './sections';
 
@@ -246,6 +247,13 @@ function ResultSurfacesSection() {
   const [width, setWidth] = useState<BattleReportCardWidthSettingsValue>({ battleReportCardWidthMode: 'manual', battleReportCardWidthPx: 760 });
   return (
     <div className="flex flex-col gap-3">
+      <div className={PANEL_CLASS} aria-label="情景 Markdown 预览样板">
+        <ScenarioResultContent data={{
+          description: '## 场景概览\n\n**钟楼**中的一次调查。\n\n- 寻找线索\n- 观察星空',
+          elements: { events: '# 简报\\n\\n---\\n\\n## 任务\\n记录星轨。' },
+          extension: { preserved: true },
+        }} />
+      </div>
       <p className="text-sm text-(--app-text-muted)">
         以下为共享 <code>MagicalGirlCard</code> 真实组件（fixture 数据 + <code>MAGICAL_GIRL_CARD_GRADIENT</code>）：
       </p>

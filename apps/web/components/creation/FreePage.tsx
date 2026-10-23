@@ -20,6 +20,7 @@ import { TokenIndicator } from '@/components/shared/TokenIndicator';
 import { JsonSizeIndicator } from '@/components/shared/JsonSizeIndicator';
 import { StreamStopButton } from '@/components/shared/StreamStopButton';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
+import { ScenarioMarkdownPreview } from '@mahoshojo/ui-web/scenario';
 import MagicalGirlCard from '@/components/MagicalGirlCard';
 import { MAGICAL_GIRL_CARD_GRADIENT } from '@mahoshojo/ui-web/character-card';
 import CanshouCard from '@/components/CanshouCard';
@@ -563,7 +564,7 @@ export function FreePage() {
               <h2 className="text-2xl font-bold text-center mb-4">{title}</h2>
               <div className="rounded-lg bg-gray-50 p-4 border border-gray-200">
                 {streamingMarkdown ? (
-                  <MarkdownBlock content={streamingMarkdown} variant="light" mode="article" />
+                  <ScenarioMarkdownPreview key={JSON.stringify(streamedGeneralCard)} content={streamingMarkdown} renderMarkdown={(content) => <MarkdownBlock content={content} variant="light" mode="article" />} />
                 ) : submitting ? (
                   <div className="text-sm text-gray-500 text-center">正在启动流式生成…</div>
                 ) : (
@@ -738,7 +739,7 @@ export function FreePage() {
           {nonStreamReasoningNode}
           <FreeResultPanel title={resultData.title || '通用情景卡'}>
             <div className="rounded-lg bg-gray-50 p-4 border border-gray-200">
-              <MarkdownBlock content={resultData.content || ''} variant="light" mode="article" />
+              <ScenarioMarkdownPreview key={JSON.stringify(resultData)} content={resultData.content || ''} renderMarkdown={(content) => <MarkdownBlock content={content} variant="light" mode="article" />} />
             </div>
           </FreeResultPanel>
           <div className="card !max-w-none">

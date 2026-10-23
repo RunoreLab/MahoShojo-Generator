@@ -35,7 +35,12 @@ const GeneralScenarioCard: React.FC<GeneralScenarioCardProps> = ({
       if (saveButton) saveButton.style.display = 'none';
       if (logoPlaceholder) logoPlaceholder.style.display = 'flex';
 
-      const result = await snapdom(cardRef.current, { scale: 1, useProxy: getSnapdomProxyUrl() });
+      const result = await snapdom(cardRef.current, {
+        scale: 1,
+        useProxy: getSnapdomProxyUrl(),
+        exclude: ['[data-scenario-preview-controls]'],
+        excludeMode: 'remove',
+      });
 
       if (saveButton) saveButton.style.display = 'block';
       if (logoPlaceholder) logoPlaceholder.style.display = 'none';

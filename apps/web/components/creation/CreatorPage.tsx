@@ -5,6 +5,7 @@ import { captureCharacterCardExportGuard } from '@/lib/character-card-export';
 import { GeneratedByUserBadge } from '@/components/shared/GeneratedByUserBadge';
 
 import { ResultJsonCopyButton } from '@mahoshojo/ui-web/details-controls';
+import { ScenarioMarkdownPreview } from '@mahoshojo/ui-web/scenario';
 
 import { buildCreatorInputEstimateText } from '@mahoshojo/domain/creator/input-estimate';
 
@@ -2738,7 +2739,7 @@ export const CreatorPage: React.FC = () => {
                       </h2>
                       <div className="rounded-lg bg-gray-50 p-4 border border-gray-200">
                         {streamingMarkdown ? (
-                          <MarkdownBlock content={streamingMarkdown} variant="light" mode="article" />
+                          <ScenarioMarkdownPreview key={JSON.stringify(streamedScenarioCardForDisplay)} content={streamingMarkdown} renderMarkdown={(content) => <MarkdownBlock content={content} variant="light" mode="article" />} />
                         ) : submitting ? (
                           <div className="text-sm text-gray-500 text-center">正在启动流式生成…</div>
                         ) : (

@@ -87,6 +87,7 @@ import {
 } from '@mahoshojo/ui-web/questionnaire';
 import { GeneralCharacterCard, type GeneralCharacterCardData } from '@mahoshojo/ui-web/character-card';
 import { MarkdownBlock } from '@mahoshojo/ui-web/markdown';
+import { ScenarioMarkdownPreview } from '@mahoshojo/ui-web/scenario';
 import {
   BuildRulePanel,
   BuildRulePicker,
@@ -1214,7 +1215,7 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
         <div className="rounded-2xl border border-(--app-border) bg-(--app-surface) p-4">
           <h3 className="text-lg font-semibold">{typeof resolvedResultPayload.title === 'string' ? resolvedResultPayload.title : '未命名情景'}</h3>
           <div className="mt-3">
-            <MarkdownBlock content={typeof resolvedResultPayload.content === 'string' ? resolvedResultPayload.content : ''} />
+            <ScenarioMarkdownPreview key={JSON.stringify(resolvedResultPayload)} content={typeof resolvedResultPayload.content === 'string' ? resolvedResultPayload.content : ''} renderMarkdown={(content) => <MarkdownBlock content={content} />} />
           </div>
         </div>
       )}

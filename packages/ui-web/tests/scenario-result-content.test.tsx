@@ -18,7 +18,7 @@ it('reads familiar fields while preserving extensions and exact JSON in a collap
   const before = JSON.stringify(data);
   render(data);
   const preview = container.querySelector('[aria-label="情景内容预览"]')!;
-  expect(preview.textContent).toContain('  星轨\n记录  ');
+  expect(preview.textContent).toContain('星轨\n记录');
   expect(preview.textContent).toContain('守夜人：记录星轨');
   expect(preview.textContent).toContain('发现线索');
   expect(preview.textContent).not.toContain('not-verification');

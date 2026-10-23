@@ -1,4 +1,5 @@
 import type { ReactNode, RefObject } from 'react';
+import { ScenarioMarkdownPreview } from '../scenario/ScenarioMarkdownPreview';
 import { Download, Heart, Info, Star, X } from 'lucide-react';
 import type { CardLibraryDetailsCard } from '../card-library/host';
 import Badge from '../card-library/Badge';
@@ -98,7 +99,7 @@ export function BasicCardDetailsModal({ isOpen, onClose, card, source, renderMar
           <p className="text-xs text-gray-500">来源：{describeCardDetailsSource(source)}</p>
         </section>
         {metadata}
-        <section className="space-y-2"><h3 className="font-medium text-gray-700">{card.type === 'history' ? '内容' : '详细设定'}</h3><div className="rounded-lg bg-gray-50 p-4"><CardDetailsBody data={card.data} renderMarkdown={renderMarkdown} /></div></section>
+        <section className="space-y-2"><h3 className="font-medium text-gray-700">{card.type === 'history' ? '内容' : '详细设定'}</h3><div className="rounded-lg bg-gray-50 p-4"><CardDetailsBody key={card.type === 'scenario' ? JSON.stringify([card.id, card.data]) : undefined} data={card.data} renderMarkdown={card.type === 'scenario' ? (content) => <ScenarioMarkdownPreview content={content} renderMarkdown={renderMarkdown} /> : renderMarkdown} /></div></section>
       </div>
       <div className="flex shrink-0 flex-wrap items-center justify-end gap-3 border-t bg-gray-50 p-6">{footer}<button type="button" onClick={onClose} className="rounded-lg bg-gray-200 px-4 py-2 text-gray-700 hover:bg-gray-300">关闭</button></div>
     </div>

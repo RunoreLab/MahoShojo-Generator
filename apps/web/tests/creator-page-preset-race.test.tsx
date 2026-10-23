@@ -200,7 +200,7 @@ describe('Web CreatorPage 高级语言与预设加载', () => {
     const request = vi.fn((input: unknown) => {
       const url = String(input);
       if (url.includes('/api/creator/generate')) return Promise.resolve(structured
-        ? jsonResponse(generated) : new Response('# 旧结果\n\n原始正文', { headers: { 'Content-Type': 'text/plain' } }));
+        ? jsonResponse(generated) : new Response(kind === 'general-scenario' ? '# 简报\\n\\n---\\n\\n## 任务\\n记录星轨。' : '# 旧结果\n\n原始正文', { headers: { 'Content-Type': 'text/plain' } }));
       if (url === '/questionnaires/presets/mg-default.json') return Promise.resolve(jsonResponse({ ...DEFAULT_QUESTIONNAIRE, nativeAllowed: false }));
       return fetchMock(input);
     });
@@ -208,6 +208,12 @@ describe('Web CreatorPage 高级语言与预设加载', () => {
     await mountPage(); await startQuestionnaire();
     await clickButton(templateLabel);
     await clickButton('还没想好', 400); await clickButton('还没想好', 400);
+    if (kind === 'general-scenario') {
+      await clickButton('按换行预览');
+      expect([...container.querySelectorAll('h3')].some((heading) => heading.textContent === '任务')).toBe(true);
+      await clickButton('恢复原文预览');
+      expect([...container.querySelectorAll('h3')].some((heading) => heading.textContent === '任务')).toBe(false);
+    }
     const checkResultControls = () => {
       expect(container.querySelector('[aria-label="继续创作"] a[href="/battle"]')?.textContent).toContain(
         kind === 'general-scenario' ? '把这个情景投入故事' : kind === 'canshou' ? '让它大闹一场' : '让她大闹一场');

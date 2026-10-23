@@ -1,6 +1,6 @@
 import type { ReactNode, Ref } from 'react';
 
-import { MarkdownBlock } from '../markdown/MarkdownBlock';
+import { ScenarioMarkdownPreview } from './ScenarioMarkdownPreview';
 
 export interface GeneralScenarioCardProps {
   readonly scenario: {
@@ -49,9 +49,7 @@ export function GeneralScenarioCard({
         <div className="result-item">
           <div className="result-label">情景设定</div>
           <div className="result-value text-sm">
-            {renderMarkdown ? renderMarkdown(displayContent) : (
-              <MarkdownBlock content={displayContent} variant="dark" mode="article" />
-            )}
+            <ScenarioMarkdownPreview key={JSON.stringify(scenario)} content={displayContent} variant="dark" renderMarkdown={renderMarkdown} />
             {isStreaming && (
               <span className="inline-block w-2 h-4 bg-white/70 animate-pulse align-middle ml-1" />
             )}

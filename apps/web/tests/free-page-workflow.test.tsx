@@ -365,3 +365,18 @@ it.each(['magical-girl', 'canshou'] as const)('keeps a pending %s result copy th
     }
   }
 });
+
+it('renders the general-scenario result with reversible escaped-newline preview and keeps copy/save payloads original', async () => {
+  const card = { templateId: '通用情景', title: '合成情景', content: '# 简报\\n\\n---\\n\\n## 任务\\n记录星轨。', signature: 'keep', extension: { kept: true } };
+  localStorage.setItem(KEY, JSON.stringify({ ...draft, schemaId: 'general-scenario' }));
+  mocks.dispatch.mockResolvedValueOnce(Response.json(card));
+  await mount(); await act(async () => byText('开始生成').click());
+  expect(byText('按换行预览').getAttribute('aria-pressed')).toBe('false');
+  await act(async () => byText('按换行预览').click());
+  expect([...container.querySelectorAll('h3')].some((heading) => heading.textContent === '任务')).toBe(true);
+  expect(JSON.parse(byText('保存到云端').dataset.cardJson!)).toEqual(card);
+  await act(async () => byText('复制到剪贴板').click());
+  expect(mocks.copy).toHaveBeenLastCalledWith(JSON.stringify(card, null, 2));
+  await act(async () => byText('恢复原文预览').click());
+  expect([...container.querySelectorAll('h3')].some((heading) => heading.textContent === '任务')).toBe(false);
+});

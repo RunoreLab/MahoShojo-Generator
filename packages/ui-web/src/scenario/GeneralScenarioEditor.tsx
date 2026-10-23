@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { ScenarioJsonDetails } from './ScenarioResultContent';
 import { ScenarioResultSurface } from './ScenarioResultSurface';
+import { ScenarioMarkdownPreview } from './ScenarioMarkdownPreview';
 
 /** Web 通用情景 Markdown 工作区，宿主保留转换、签名及存储策略。 */
 export function GeneralScenarioEditor({ draft, onCreate, onConvert, canConvert, onChange, disabled, reasoning, actions, sizeIndicator, feedback }: {
@@ -30,6 +31,10 @@ export function GeneralScenarioEditor({ draft, onCreate, onConvert, canConvert, 
           </div>
           {reasoning}
         </div>
+        <details open className="rounded-lg border border-(--app-border) p-4">
+          <summary className="cursor-pointer text-sm font-medium">Markdown 预览</summary>
+          <ScenarioMarkdownPreview key={JSON.stringify(draft)} content={typeof draft.content === 'string' ? draft.content : ''} />
+        </details>
         <ScenarioJsonDetails data={draft} />
         <div className="flex flex-col md:flex-row justify-center gap-2 mt-2">{actions}</div>
         {sizeIndicator}

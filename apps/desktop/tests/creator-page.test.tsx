@@ -166,11 +166,17 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
   it.each(['magical-girl', 'canshou', 'general', 'general-scenario'] as const)('keeps %s result controls tied to the retained result after changing the input template', async (cardKind) => {
     const result = cardKind === 'magical-girl' ? card
       : cardKind === 'canshou' ? { name: '旧残兽', appearance: '烟雾', coreConcept: '', coreEmotion: '', evolutionStage: '', materialAndSkin: '', featuresAndAppendages: '', attackMethod: '', specialAbility: '', origin: '', birthEnvironment: '', researcherNotes: '' }
-        : cardKind === 'general-scenario' ? { templateId: '通用情景', title: '旧情景', content: '# 情景正文' }
+        : cardKind === 'general-scenario' ? { templateId: '通用情景', title: '旧情景', content: '# 简报\\n\\n---\\n\\n## 任务\\n记录星轨。' }
           : { templateId: '通用角色', name: '旧角色', content: '# 角色正文' };
     mocks.execute.mockResolvedValue(completed('direct-local', { card: result, cardKind }));
     window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft()));
     const router = await mount(); await click('生成数据卡');
+    if (cardKind === 'general-scenario') {
+      await click('按换行预览');
+      expect([...container.querySelectorAll('h4')].some((heading) => heading.textContent === '任务')).toBe(true);
+      await click('恢复原文预览');
+      expect([...container.querySelectorAll('h4')].some((heading) => heading.textContent === '任务')).toBe(false);
+    }
     const checkResultControls = () => {
       const structured = cardKind === 'magical-girl' || cardKind === 'canshou';
       expect(container.textContent!.includes('设定长图保存方式')).toBe(structured);

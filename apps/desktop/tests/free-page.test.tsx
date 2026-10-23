@@ -500,3 +500,16 @@ it.each(['missing', 'rejected'] as const)('restored full result copy handles %s 
   expect(container.textContent).toContain('✅ 数据卡 JSON 已复制到剪贴板');
   expect(fallback).toHaveBeenCalledTimes(2); expect(mocks.execute).not.toHaveBeenCalled(); expect(mocks.save).not.toHaveBeenCalled();
 });
+
+it('previews general-scenario escaped newlines without modifying downloaded JSON', async () => {
+  const card = { templateId: '通用情景', title: '合成情景', content: '# 简报\\n\\n---\\n\\n## 任务\\n记录星轨。', extension: { kept: true } };
+  mocks.execute.mockResolvedValue({ status: 'completed', mode: 'direct-local', card, cardKind: 'general-scenario', rawText: JSON.stringify(card) });
+  window.localStorage.setItem(FREE_DRAFT_KEY, JSON.stringify({ ...storedDraft('情景'), schemaId: 'general-scenario' }));
+  await mount(); await click('生成数据卡');
+  await click('按换行预览');
+  expect([...container.querySelectorAll('h3')].some((heading) => heading.textContent === '任务')).toBe(true);
+  await click('💾 下载设定文件');
+  expect(mocks.download.mock.calls[0]?.[1]).toBe(JSON.stringify(card, null, 2));
+  await click('恢复原文预览');
+  expect([...container.querySelectorAll('h3')].some((heading) => heading.textContent === '任务')).toBe(false);
+});

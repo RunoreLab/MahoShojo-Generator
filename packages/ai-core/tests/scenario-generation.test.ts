@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod/v3';
+import { parseStructuredJsonWithSchema } from '@mahoshojo/ai-core/structured-json';
 
 import {
   SCENARIO_GENERATION_SCHEMA,
@@ -117,5 +118,33 @@ describe('scenario shared generation', () => {
     });
     expect(invalidOptions).not.toContain('invalidFields');
     expect(invalidOptions).not.toContain('invalidTitle');
+  });
+});
+
+describe('scenario Markdown JSON boundary', () => {
+  const scenario = (description: string) => ({
+    title: '天文台', scenario_type: '调查', description,
+    elements: { scene: {}, events: '观察', atmosphere: '安静', development: [] },
+  });
+
+  it.each([
+    '# 简报\n\n## 任务\n观察',
+    '# 简报\r\n\r\n## 任务\r\n观察',
+    '# 简报\\n\\n## 任务\\n观察',
+    '路径 `C:\\notes\\new`；JSON `{"line":"a\\nb"}`',
+  ])('decodes the JSON transport once and preserves the actual field value', (description) => {
+    const wire = JSON.stringify(scenario(description));
+    const parsed = parseStructuredJsonWithSchema(wire, SCENARIO_GENERATION_SCHEMA);
+    expect(parsed.data.description).toBe(description);
+    expect(parsed.telemetry.usedJsonRepair).toBe(false);
+    expect(JSON.parse(JSON.stringify(parsed.data)).description).toBe(description);
+  });
+
+  it('repairs invalid JSON containing a real unescaped line break without adding literal escapes to the field', () => {
+    const description = '# 简报\n\n## 任务\n观察';
+    const wire = JSON.stringify(scenario(description)).replace(/\\n/g, '\n');
+    const parsed = parseStructuredJsonWithSchema(wire, SCENARIO_GENERATION_SCHEMA);
+    expect(parsed.telemetry.usedJsonRepair).toBe(true);
+    expect(parsed.data.description).toBe(description);
   });
 });

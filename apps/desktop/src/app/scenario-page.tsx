@@ -17,7 +17,6 @@ import {
   useResultAutoScroll,
 } from '@mahoshojo/ui-web/details-controls';
 import { convertDataCard, createBlankDataCard } from '@mahoshojo/domain/sublimation';
-import { MarkdownBlock } from '@mahoshojo/ui-web/markdown';
 import { useEscapeLayer } from '@mahoshojo/ui-web/modal';
 import {
   ScenarioPageLayout,
@@ -27,6 +26,7 @@ import {
   GeneralScenarioEditor,
   ScenarioResultSurface,
   ScenarioResultContent,
+  ScenarioMarkdownPreview,
   ScenarioResultActions,
   ScenarioTitleField,
   ScenarioQuestionFields,
@@ -369,7 +369,7 @@ function ScenarioForm({ session }: { session: ScenarioSession }) {
                   {cardKind === 'general-scenario' && (
                     <>
                       <h2 className="text-2xl font-bold text-center mb-4">{typeof card.title === 'string' && card.title ? card.title : '通用情景卡'}</h2>
-                      <MarkdownBlock content={typeof card.content === 'string' ? card.content : ''} variant="light" mode="article" />
+                      <ScenarioMarkdownPreview key={JSON.stringify(card)} content={typeof card.content === 'string' ? card.content : ''} />
                     </>
                   )}
                   {cardKind === 'scenario' && (

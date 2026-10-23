@@ -120,3 +120,27 @@ describe('stream/read-text-and-reasoning-stream', () => {
     expect(result.reasoning?.reasoningTokens).toBe(0);
   });
 });
+
+// Scenario Markdown must be decoded once at the SSE boundary, never globally unescaped.
+test.each([
+  '# 简报\n\n## 任务\n- 观察',
+  '# 简报\r\n\r\n## 任务\r\n- 观察',
+  '# 简报\\n\\n---\\n\\n## 任务\\n观察',
+  '# 示例\n\n`C:\\notes\\new`\n\n```json\n{"line":"a\\nb"}\n```',
+])('preserves scenario Markdown and literal backslashes across fragmented SSE transport', async (markdown) => {
+  const split = Math.floor(markdown.length / 2);
+  const wire = encodeSse('markdown', { chunk: markdown.slice(0, split) })
+    + encodeSse('markdown', { chunk: markdown.slice(split) })
+    + encodeSse('done', { ok: true });
+  const bytes = new TextEncoder().encode(wire);
+  const response = new Response(new ReadableStream({
+    start(controller) {
+      for (let i = 0; i < bytes.length; i += 7) controller.enqueue(bytes.slice(i, i + 7));
+      controller.close();
+    },
+  }), { headers: { 'Content-Type': 'text/event-stream' } });
+  const onText = vi.fn();
+  const result = await readTextAndReasoningStreamFromResponse(response, { onText });
+  expect(result.text).toBe(markdown);
+  expect(onText).toHaveBeenLastCalledWith(markdown);
+});

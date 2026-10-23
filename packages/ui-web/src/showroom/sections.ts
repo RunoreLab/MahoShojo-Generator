@@ -56,7 +56,7 @@ export const SHOWROOM_SECTIONS: readonly ShowroomSectionMeta[] = [
   {
     id: 'result-surfaces',
     title: '卡片与结果面',
-    summary: '真实角色结果卡与导出账号标注、完整结果 JSON 复制、角色更新折叠保留状态、竞技场安全源码、战报卡片自动/手动宽度与禁用态、品牌/模型用量、故事读取错误、红蓝错误文字与完整/简化版操作反馈。',
+    summary: '情景安全 Markdown 与可撤回换行预览、真实角色结果卡与导出账号标注、完整结果 JSON 复制、角色更新折叠保留状态、竞技场安全源码、战报卡片自动/手动宽度与禁用态、品牌/模型用量、故事读取错误、红蓝错误文字与完整/简化版操作反馈。',
   },
   {
     id: 'footer',

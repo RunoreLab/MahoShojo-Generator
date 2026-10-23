@@ -49,7 +49,7 @@ import {
   toPromptAttachments,
   useFreeAttachments,
 } from '@mahoshojo/ui-web/free';
-import { MarkdownBlock } from '@mahoshojo/ui-web/markdown';
+import { ScenarioMarkdownPreview } from '@mahoshojo/ui-web/scenario';
 import { useEscapeLayer } from '@mahoshojo/ui-web/modal';
 import { BackHomeLink, ProductFooter } from '@mahoshojo/ui-web/shell';
 import type { HomeAssetSource } from '@mahoshojo/ui-web/home';
@@ -362,7 +362,7 @@ function FreeForm({ session }: { session: FreeSession }) {
                 {cardKind === 'general-scenario' && (
                   <FreeResultPanel title={typeof card.title === 'string' && card.title ? card.title : '通用情景卡'}>
                     <div className="rounded-lg bg-gray-50 p-4 border border-gray-200">
-                      <MarkdownBlock content={typeof card.content === 'string' ? card.content : ''} variant="light" mode="article" />
+                      <ScenarioMarkdownPreview key={JSON.stringify(card)} content={typeof card.content === 'string' ? card.content : ''} />
                     </div>
                   </FreeResultPanel>
                 )}
