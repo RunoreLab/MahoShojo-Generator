@@ -119,3 +119,29 @@ describe('Desktop Tea user-message fork wire', () => {
     }
   });
 });
+
+describe('Desktop Tea reviewed dual-target merge wire', () => {
+  const source = { sessionId: 'child', instance: 'a'.repeat(32), expectedRevision: 2 };
+  const parent = { sessionId: 'parent', instance: 'b'.repeat(32), expectedRevision: 5 };
+  const merge = () => ({ version: 1, request: { action: 'merge', operationId: 'merge-1', source, parent, anchorMessageId: 'anchor', editedMessageId: 'edited' } });
+  it('accepts both exact targets and the original-operation receipt query', () => {
+    expect(TeaWriteRequestSchema.parse(merge())).toEqual(merge());
+    expect(TeaReadRequestSchema.parse({ version: 1, request: { action: 'receipt', write: merge() } }).request.action).toBe('receipt');
+    expect(TeaReadRequestSchema.parse({ version: 1, request: { action: 'merge-preview', source } }).request.action).toBe('merge-preview');
+  });
+  it('rejects same parent/source, injected replacement content, missing anchors and ambiguous target extensions', () => {
+    for (const patch of [{ parent: source }, { messages: [] }, { session: session() }, { summary: 'client override' }, { editedMessageId: '' },
+      { anchorMessageId: undefined }, { source: { ...source, expectedRevision: 0 } }, { parent: { ...parent, path: '/arbitrary' } }, { source: { ...source, instance: 'old' } }]) {
+      expect(TeaWriteRequestSchema.safeParse({ ...merge(), request: { ...merge().request, ...patch } }).success).toBe(false);
+    }
+    expect(TeaReadRequestSchema.safeParse({ version: 1, request: { action: 'merge-preview', source, parent } }).success).toBe(false);
+  });
+  it('bounds titles, text previews and affected counts without accepting full message bodies', () => {
+    const result = { action: 'merge-preview', source, parent, sourceTitle: '分支', parentTitle: '父会话', anchorPreview: '原文', editedPreview: '修改',
+      anchorMessageId: 'anchor', editedMessageId: 'edited', replacedMessageCount: 1, copiedMessageCount: 1 };
+    expect(TeaReadResponseSchema.safeParse({ version: 1, result }).success).toBe(true);
+    for (const patch of [{ sourceTitle: 'x'.repeat(193) }, { editedPreview: '\ud800' }, { copiedMessageCount: 0 }, { replacedMessageCount: 10_001 }, { messages: [] }]) {
+      expect(TeaReadResponseSchema.safeParse({ version: 1, result: { ...result, ...patch } }).success).toBe(false);
+    }
+  });
+});

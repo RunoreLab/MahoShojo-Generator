@@ -75,3 +75,19 @@ it('discloses the current model call and Token cost without modifying the draft'
   expect(generate).toHaveBeenCalledOnce(); expect(edit).not.toHaveBeenCalled();
   expect(container.querySelector('textarea')?.value).toBe('尚未发送的草稿');
 });
+
+it('keeps superseded actions readable but never invokes their callback, while active actions remain selectable', async () => {
+  const choose = vi.fn();
+  for (const meta of [{ superseded: true }, { superseded: true, rawOutput, choicesValid: true, completion: 'completed' }]) {
+    await render(<MagicTeaPartyChatMessage message={{ ...message, meta }} session={session} preferences={preferences} isGenerating={false} onSelectChoice={choose} />);
+    expect(container.textContent).toContain('喝茶');
+    expect(container.textContent).toContain('该条消息已被更新替换');
+    expect(choiceButtons()).toHaveLength(0);
+    const historicalAction = [...container.querySelectorAll('div')].find(node => node.textContent === '喝茶')!;
+  expect(historicalAction).toBeTruthy(); await act(async () => historicalAction.click());
+  }
+  expect(choose).not.toHaveBeenCalled();
+  await render(<MagicTeaPartyChatMessage message={{ ...message, meta: { superseded: false, rawOutput } }} session={session} preferences={preferences} isGenerating={false} onSelectChoice={choose} />);
+  await act(async () => choiceButtons()[0].click());
+  expect(choose).toHaveBeenCalledExactlyOnceWith('喝茶');
+});

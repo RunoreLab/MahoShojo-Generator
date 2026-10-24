@@ -1246,3 +1246,6 @@ fn fork_uses_web_unicode_trim_and_player_identity() {
     assert_eq!(m["speakerId"], "player");
     assert_eq!(m["meta"]["speakerName"], "玩家");
 }
+
+#[path = "magic_tea_party_merge_tests.rs"]
+mod merge_tests;

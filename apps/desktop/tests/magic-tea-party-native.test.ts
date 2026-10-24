@@ -125,3 +125,31 @@ describe('Tea fork result relationship', () => {
     await expect(createIpcTeaNativePort(invoke).mutate(request)).rejects.toMatchObject({ writeEvidence: 'unknown' });
   });
 });
+
+describe('Tea merge exact dual-target correlation', () => {
+  const source = { sessionId: 'child', instance: 'a'.repeat(32), expectedRevision: 2 };
+  const parent = { sessionId: 'parent', instance: 'b'.repeat(32), expectedRevision: 5 };
+  const request: TeaWriteRequest = { version: 1, request: { action: 'merge', operationId: 'merge-1', source, parent, anchorMessageId: 'anchor', editedMessageId: 'edited' } };
+  const result = { action: 'merge', operationId: 'merge-1', sessionId: 'parent', instance: parent.instance, revision: 6,
+    source: { sessionId: 'child', instance: source.instance, revision: 2 } };
+  it('accepts exact dual identities in direct and historical receipt responses', async () => {
+    const invoke = vi.fn().mockResolvedValueOnce({ version: 1, result }).mockResolvedValueOnce({ version: 1,
+      result: { action: 'receipt', receipt: { operationId: 'merge-1', digest: '0'.repeat(64), result } } });
+    const port = createIpcTeaNativePort(invoke);
+    expect((await port.mutate(request)).result).toEqual(result);
+    expect((await port.read({ version: 1, request: { action: 'receipt', write: request } })).result.action).toBe('receipt');
+  });
+  it.each([{ sessionId: 'child' }, { instance: source.instance }, { revision: 5 }, { operationId: 'other' },
+    { source: { ...result.source, sessionId: 'other' } }, { source: { ...result.source, instance: parent.instance } }, { source: { ...result.source, revision: 3 } }])('rejects mismatched merge evidence %j', async patch => {
+    const changed = { ...result, ...patch };
+    await expect(createIpcTeaNativePort(vi.fn().mockResolvedValue({ version: 1, result: changed })).mutate(request)).rejects.toMatchObject({ writeEvidence: 'unknown' });
+    await expect(createIpcTeaNativePort(vi.fn().mockResolvedValue({ version: 1, result: { action: 'receipt', receipt: {
+      operationId: 'merge-1', digest: '0'.repeat(64), result: changed,
+    } } })).read({ version: 1, request: { action: 'receipt', write: request } })).rejects.toMatchObject({ code: 'tea-invalid' });
+  });
+  it.each([{ sessionId: 'other' }, { instance: parent.instance }, { expectedRevision: 3 }])('rejects a preview for another source snapshot %j', async patch => {
+    const result = { action: 'merge-preview', source: { ...source, ...patch }, parent, sourceTitle: '分支', parentTitle: '父会话',
+      anchorMessageId: 'anchor', editedMessageId: 'edited', anchorPreview: '原文', editedPreview: '修改', replacedMessageCount: 1, copiedMessageCount: 1 };
+    await expect(createIpcTeaNativePort(vi.fn().mockResolvedValue({ version: 1, result })).read({ version: 1, request: { action: 'merge-preview', source } })).rejects.toMatchObject({ code: 'tea-invalid', writeEvidence: 'not-written' });
+  });
+});

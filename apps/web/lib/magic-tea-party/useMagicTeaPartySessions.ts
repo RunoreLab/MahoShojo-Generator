@@ -1255,7 +1255,7 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
       }
 
       const now = Date.now();
-      const superseded = parentMessages.slice(parentForkIndex).map((message) => ({
+      const superseded = parentMessages.slice(parentForkIndex).filter((message) => message.meta?.superseded !== true).map((message) => ({
         ...message,
         meta: {
           ...(message.meta ?? {}),
@@ -1312,6 +1312,8 @@ export function useMagicTeaPartySessions(options: UseMagicTeaPartySessionsOption
         summary,
         summarySections,
         summaryMeta,
+        lastChoices: undefined,
+        autoSummaryState: undefined,
         updatedAt: now,
       };
 

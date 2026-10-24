@@ -27,6 +27,9 @@ export type TeaNativePort = {
 
 const matchesMutation = (request: TeaWriteRequest['request'], result: TeaWriteResponse['result']): boolean => {
   if (request.action !== result.action) return false;
+  if (request.action === 'merge' && result.action === 'merge') return result.operationId === request.operationId
+    && result.sessionId === request.parent.sessionId && result.instance === request.parent.instance && result.revision === request.parent.expectedRevision + 1
+    && result.source.sessionId === request.source.sessionId && result.source.instance === request.source.instance && result.source.revision === request.source.expectedRevision;
   if (request.action === 'fork' && result.action === 'fork') return result.operationId === request.operationId
     && result.sessionId === request.targetSessionId && result.instance !== request.instance && result.revision === 1;
   if (request.action === 'import' && result.action === 'import') return result.operationId === request.operationId
@@ -60,6 +63,9 @@ export const createIpcTeaNativePort = (invoke: TeaStorageInvoke = tauriInvoke): 
     if (!parsed.success || parsed.data.result.action !== checked.data.request.action) throw new TeaStorageError('tea-invalid', 'not-written');
     const request = checked.data.request; const result = parsed.data.result;
     if ('expectedCatalogRevision' in request && 'catalogRevision' in result && request.expectedCatalogRevision !== null && result.catalogRevision !== request.expectedCatalogRevision) throw new TeaStorageError('tea-invalid', 'not-written');
+    if (request.action === 'merge-preview' && result.action === 'merge-preview'
+      && (result.source.sessionId !== request.source.sessionId || result.source.instance !== request.source.instance
+        || result.source.expectedRevision !== request.source.expectedRevision || result.parent.sessionId === result.source.sessionId)) throw new TeaStorageError('tea-invalid', 'not-written');
     if (request.action === 'list' && result.action === 'list' && (result.rows.length > request.limit || (request.cursor && result.catalogRevision !== request.cursor.catalogRevision))) throw new TeaStorageError('tea-invalid', 'not-written');
     if (request.action === 'session' && result.action === 'session' && result.record && result.record.session.id !== request.sessionId) throw new TeaStorageError('tea-invalid', 'not-written');
     if (request.action === 'messages' && result.action === 'messages' && (result.sessionId !== request.sessionId || result.instance !== request.instance || result.revision !== request.expectedRevision || result.rows.length > request.limit || result.rows.some((row, index) => row.message.sessionId !== request.sessionId || row.ordinal <= (index ? result.rows[index - 1]!.ordinal : request.cursor?.ordinal ?? 0)))) throw new TeaStorageError('tea-invalid', 'not-written');

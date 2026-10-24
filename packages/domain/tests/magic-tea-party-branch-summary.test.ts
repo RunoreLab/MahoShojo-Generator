@@ -71,3 +71,12 @@ describe('shared Native/Web branch summary golden cases', () => {
     expect(JSON.parse(JSON.stringify(result))).toEqual(expected);
   });
 });
+
+
+describe('shared Native/Web merge summary golden cases', () => {
+  it.each(fixture.cases)('$name', ({ session: summary, replaceFromIndex, expectedMerge }) => {
+    const result = resolveMagicTeaPartyBranchSummary({ session: Object.assign(session(), { summary: undefined, summarySections: undefined, summaryMeta: undefined }, summary) as MagicTeaPartySession,
+      messages: fixture.messageIds.map(id => ({ id, sessionId: 'session', role: 'user', content: id, createdAt: 1 })), replaceFromIndex });
+    expect(JSON.parse(JSON.stringify(result))).toEqual(expectedMerge);
+  });
+});

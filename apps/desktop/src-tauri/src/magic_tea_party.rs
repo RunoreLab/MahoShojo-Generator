@@ -133,7 +133,12 @@ pub enum ReadOperation {
         limit: usize,
     },
     #[serde(rename_all = "camelCase")]
-    Receipt { write: WriteRequest },
+    Receipt {
+        write: WriteRequest,
+    },
+    MergePreview {
+        source: SessionTarget,
+    },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -200,6 +205,14 @@ pub enum WriteOperation {
         anchor_message_id: String,
         edited_content: String,
         target_session_id: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    Merge {
+        operation_id: String,
+        source: SessionTarget,
+        parent: SessionTarget,
+        anchor_message_id: String,
+        edited_message_id: String,
     },
     #[serde(rename_all = "camelCase")]
     BeginGeneration {
@@ -587,6 +600,31 @@ fn validate_write(operation: &WriteOperation) -> Result<(), TeaError> {
                 return Err(TeaError::TooLarge);
             }
         }
+        WriteOperation::Merge {
+            operation_id,
+            source,
+            parent,
+            anchor_message_id,
+            edited_message_id,
+        } => {
+            validate_target_fields(
+                &source.session_id,
+                &source.instance,
+                source.expected_revision,
+            )?;
+            validate_target_fields(
+                &parent.session_id,
+                &parent.instance,
+                parent.expected_revision,
+            )?;
+            if source.session_id == parent.session_id
+                || !id(operation_id)
+                || !id(anchor_message_id)
+                || !id(edited_message_id)
+            {
+                return Err(TeaError::Invalid);
+            }
+        }
         WriteOperation::BeginGeneration {
             session_id,
             instance,
@@ -683,6 +721,26 @@ fn validate_result(value: &Value) -> Result<(), TeaError> {
             validate_saved(value)?;
             checked_id(value, "operationId")?;
         }
+        "merge" => {
+            if !exact_keys(
+                value,
+                &[
+                    "action",
+                    "sessionId",
+                    "instance",
+                    "revision",
+                    "operationId",
+                    "source",
+                ],
+            ) || !exact_keys(&value["source"], &["sessionId", "instance", "revision"])
+                || value["source"]["sessionId"] == value["sessionId"]
+            {
+                return Err(TeaError::Corrupt);
+            }
+            validate_saved(value)?;
+            validate_saved(&value["source"])?;
+            checked_id(value, "operationId")?;
+        }
         "begin-generation" | "finish-generation" => {
             if !exact_keys(
                 value,
@@ -761,6 +819,15 @@ fn fork_summary(
     ordinal: i64,
     ids: &HashMap<String, String>,
 ) -> Result<(), TeaError> {
+    branch_summary(c, document, sid, ordinal, Some(ids))
+}
+fn branch_summary(
+    c: &Connection,
+    document: &mut Value,
+    sid: &str,
+    ordinal: i64,
+    ids: Option<&HashMap<String, String>>,
+) -> Result<(), TeaError> {
     let mut clear = false;
     if let Some(to) = document["summaryMeta"]["toMessageId"].as_str() {
         let at: Option<i64> = c
@@ -780,7 +847,7 @@ fn fork_summary(
             if let Some(new_id) = meta
                 .get(field)
                 .and_then(Value::as_str)
-                .and_then(|id| ids.get(id))
+                .and_then(|id| ids.and_then(|ids| ids.get(id)))
             {
                 meta.insert(field.into(), json!(new_id));
             }
@@ -790,9 +857,18 @@ fn fork_summary(
                 match coverage.get_mut(field).and_then(Value::as_array_mut) {
                     Some(values) => {
                         for value in values {
-                            match value.as_str().and_then(|id| ids.get(id)) {
-                                Some(new_id) => *value = json!(new_id),
-                                None => clear = true,
+                            if let Some(ids) = ids {
+                                match value.as_str().and_then(|id| ids.get(id)) {
+                                    Some(new_id) => *value = json!(new_id),
+                                    None => clear = true,
+                                }
+                            } else if let Some(id) = value.as_str() {
+                                let retained: bool = c.query_row("SELECT EXISTS(SELECT 1 FROM magic_tea_message WHERE session_id=?1 AND id=?2 AND ordinal<?3)", params![sid, id, ordinal], |r| r.get(0))?;
+                                if !retained {
+                                    clear = true;
+                                }
+                            } else {
+                                clear = true;
                             }
                         }
                     }
@@ -829,7 +905,13 @@ fn next(value: i64) -> Result<i64, TeaError> {
         .filter(|v| valid_revision(*v))
         .ok_or(TeaError::TooLarge)
 }
+#[cfg(test)]
+thread_local! { static FAIL_NEXT_NONCE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
 fn nonce() -> Result<String, TeaError> {
+    #[cfg(test)]
+    if FAIL_NEXT_NONCE.with(|fail| fail.replace(false)) {
+        return Err(TeaError::Io);
+    }
     let mut bytes = [0u8; 16];
     getrandom::fill(&mut bytes).map_err(|_| TeaError::Io)?;
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
@@ -960,6 +1042,227 @@ fn insert_message(
     c.execute("INSERT INTO magic_tea_message(id,session_id,ordinal,document,document_bytes,document_digest) VALUES(?1,?2,?3,?4,?5,?6)",params![checked_id(document,"id")?,session_id,ordinal,text,text.len() as i64,digest(&text)])?;
     Ok(())
 }
+fn target_value(row: &SessionRow) -> Value {
+    json!({"sessionId":row.id,"instance":row.instance,"expectedRevision":row.revision})
+}
+struct MergeAnchors {
+    anchor: Value,
+    edited: Value,
+    parent_ordinal: i64,
+    source_ordinal: i64,
+}
+fn merge_anchors(
+    c: &Connection,
+    source: &SessionRow,
+    parent: &SessionRow,
+    anchor_id: &str,
+    edited_id: Option<&str>,
+) -> Result<MergeAnchors, TeaError> {
+    if source.id == parent.id
+        || source.document["forkedFrom"]["sessionId"].as_str() != Some(&parent.id)
+        || source.document["forkedFrom"]["messageId"].as_str() != Some(anchor_id)
+    {
+        return Err(TeaError::Invalid);
+    }
+    if source.active_begin.is_some() || parent.active_begin.is_some() {
+        return Err(TeaError::Busy);
+    }
+    let anchor: Option<(i64, String, i64, String)> = c.query_row(
+        "SELECT ordinal,document,document_bytes,document_digest FROM magic_tea_message WHERE session_id=?1 AND id=?2",
+        params![parent.id, anchor_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
+    let (parent_ordinal, text, bytes, hash) = anchor.ok_or(TeaError::Missing)?;
+    let anchor = read_document(text, bytes, hash)?;
+    validate_message(&anchor, &parent.id)?;
+    if anchor["role"] != "user" {
+        return Err(TeaError::Invalid);
+    }
+    let count: i64 = c.query_row(
+        "SELECT COUNT(*) FROM magic_tea_message WHERE session_id=?1 AND json_extract(document,'$.role')='user' AND json_extract(document,'$.revisionOf')=?2",
+        params![source.id, anchor_id], |r| r.get(0))?;
+    if count != 1 {
+        return Err(TeaError::Invalid);
+    }
+    let (source_ordinal, text, bytes, hash): (i64, String, i64, String) = c.query_row(
+        "SELECT ordinal,document,document_bytes,document_digest FROM magic_tea_message WHERE session_id=?1 AND json_extract(document,'$.role')='user' AND json_extract(document,'$.revisionOf')=?2",
+        params![source.id, anchor_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
+    let edited = read_document(text, bytes, hash)?;
+    validate_message(&edited, &source.id)?;
+    if edited_id.is_some_and(|id| edited["id"].as_str() != Some(id)) {
+        return Err(TeaError::Stale);
+    }
+    if anchor["meta"]["superseded"] == true || edited["meta"]["superseded"] == true {
+        return Err(TeaError::Stale);
+    }
+    Ok(MergeAnchors {
+        anchor,
+        edited,
+        parent_ordinal,
+        source_ordinal,
+    })
+}
+// SQL admission bounds allocations before materializing complete tails. Actual mutated
+// documents are checked again after markers and fresh identifiers have been added.
+fn merge_admission(
+    c: &Connection,
+    source: &SessionRow,
+    parent: &SessionRow,
+    anchors: &MergeAnchors,
+) -> Result<(i64, i64, i64), TeaError> {
+    let tail = |sid: &str, ordinal| -> Result<(i64, i64), TeaError> {
+        Ok(c.query_row("SELECT COUNT(*),COALESCE(SUM(document_bytes),0) FROM magic_tea_message WHERE session_id=?1 AND ordinal>=?2",
+            params![sid, ordinal], |r| Ok((r.get(0)?,r.get(1)?)))?)
+    };
+    let (copied, source_bytes) = tail(&source.id, anchors.source_ordinal)?;
+    let (replaced, parent_bytes) = tail(&parent.id, anchors.parent_ordinal)?;
+    if copied + replaced > 10_000 || source_bytes + parent_bytes > WRITE_BYTES as i64 {
+        return Err(TeaError::TooLarge);
+    }
+    let ordinal: i64 = c.query_row(
+        "SELECT COALESCE(MAX(ordinal),0) FROM magic_tea_message WHERE session_id=?1",
+        [&parent.id],
+        |r| r.get(0),
+    )?;
+    if ordinal
+        .checked_add(copied)
+        .is_none_or(|last| last > MAX_SAFE)
+    {
+        return Err(TeaError::TooLarge);
+    }
+    Ok((ordinal, copied, replaced))
+}
+fn merge(
+    c: &Connection,
+    operation_id: &str,
+    source_target: &SessionTarget,
+    parent_target: &SessionTarget,
+    anchor_id: &str,
+    edited_id: &str,
+) -> Result<Value, TeaError> {
+    let source = target(
+        c,
+        &source_target.session_id,
+        &source_target.instance,
+        source_target.expected_revision,
+    )?;
+    let mut parent = target(
+        c,
+        &parent_target.session_id,
+        &parent_target.instance,
+        parent_target.expected_revision,
+    )?;
+    // This check intentionally runs under BEGIN IMMEDIATE, never trusting a preview.
+    let anchors = merge_anchors(c, &source, &parent, anchor_id, Some(edited_id))?;
+    let (last_ordinal, _, _) = merge_admission(c, &source, &parent, &anchors)?;
+    let now = i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| TeaError::Io)?
+            .as_millis(),
+    )
+    .map_err(|_| TeaError::TooLarge)?;
+    let mut document = parent.document.clone();
+    branch_summary(c, &mut document, &parent.id, anchors.parent_ordinal, None)?;
+    let object = document.as_object_mut().ok_or(TeaError::Corrupt)?;
+    object.remove("lastChoices");
+    object.remove("autoSummaryState");
+    document["updatedAt"] = json!(now.max(integer(&parent.document, "updatedAt")?));
+    let mut bytes = validate_session(&document)?.len();
+    let mut changed = Vec::new();
+    let mut copied = Vec::new();
+    let mut ids = HashMap::new();
+    let mut query = c.prepare("SELECT document,document_bytes,document_digest FROM magic_tea_message WHERE session_id=?1 AND ordinal>=?2 ORDER BY ordinal,id")?;
+    {
+        let mut rows = query.query(params![parent.id, anchors.parent_ordinal])?;
+        while let Some(row) = rows.next()? {
+            let mut message = read_document(row.get(0)?, row.get(1)?, row.get(2)?)?;
+            validate_message(&message, &parent.id)?;
+            if message["status"] == "streaming" {
+                return Err(TeaError::Corrupt);
+            }
+            // Retain attribution on already superseded history, including nested merges.
+            if message["meta"]["superseded"] == true {
+                continue;
+            }
+            if message.get("meta").is_none() {
+                message["meta"] = json!({});
+            }
+            message["meta"]["superseded"] = json!(true);
+            message["meta"]["supersededAt"] = json!(now);
+            message["meta"]["supersededBy"] = json!("merge");
+            message["meta"]["supersededBySessionId"] = json!(source.id);
+            let text = validate_message(&message, &parent.id)?;
+            bytes = bytes.checked_add(text.len()).ok_or(TeaError::TooLarge)?;
+            if bytes > WRITE_BYTES {
+                return Err(TeaError::TooLarge);
+            }
+            changed.push((checked_id(&message, "id")?.to_owned(), text));
+        }
+    }
+    {
+        let mut rows = query.query(params![source.id, anchors.source_ordinal])?;
+        while let Some(row) = rows.next()? {
+            let mut message = read_document(row.get(0)?, row.get(1)?, row.get(2)?)?;
+            validate_message(&message, &source.id)?;
+            if message["status"] == "streaming" {
+                return Err(TeaError::Corrupt);
+            }
+            let new_id = nonce()?;
+            ids.insert(checked_id(&message, "id")?.to_owned(), new_id.clone());
+            message["id"] = json!(new_id);
+            message["sessionId"] = json!(parent.id);
+            copied.push(message);
+        }
+    }
+    for message in &mut copied {
+        for field in ["sourceMessageId", "revisionOf"] {
+            if let Some(old_id) = message.get(field).and_then(Value::as_str) {
+                if let Some(new_id) = ids.get(old_id) {
+                    message[field] = json!(new_id);
+                } else {
+                    let exists: bool = c.query_row("SELECT EXISTS(SELECT 1 FROM magic_tea_message WHERE session_id=?1 AND id=?2)", params![parent.id, old_id], |r| r.get(0))?;
+                    if !exists {
+                        message
+                            .as_object_mut()
+                            .ok_or(TeaError::Corrupt)?
+                            .remove(field);
+                    }
+                }
+            }
+        }
+        bytes = bytes
+            .checked_add(validate_message(message, &parent.id)?.len())
+            .ok_or(TeaError::TooLarge)?;
+        if bytes > WRITE_BYTES {
+            return Err(TeaError::TooLarge);
+        }
+    }
+    // Include the JSON envelope overhead and aggregate node/depth limits, not just
+    // original stored byte counts. Everything above remains read-only on rejection.
+    let changed_values = changed
+        .iter()
+        .map(|(_, text)| serde_json::from_str::<Value>(text).map_err(|_| TeaError::Corrupt))
+        .collect::<Result<Vec<_>, _>>()?;
+    json_boundary(
+        &json!({"session":&document,"replaced":changed_values,"copied":&copied}),
+        WRITE_BYTES,
+        ENVELOPE_NODES,
+    )?;
+    for (id, text) in changed {
+        c.execute("UPDATE magic_tea_message SET document=?1,document_bytes=?2,document_digest=?3 WHERE session_id=?4 AND id=?5", params![text,text.len() as i64,digest(&text),parent.id,id])?;
+    }
+    for (index, message) in copied.iter().enumerate() {
+        insert_message(c, &parent.id, last_ordinal + index as i64 + 1, message)?;
+    }
+    update_session(c, &mut parent, &document)?;
+    let mut result = saved(&parent, "merge");
+    result["operationId"] = json!(operation_id);
+    result["source"] =
+        json!({"sessionId":source.id,"instance":source.instance,"revision":source.revision});
+    // The outer transaction persists the receipt with these changes. Receipts have
+    // no foreign key/GC: this permanent marker must outlive both source and parent.
+    Ok(result)
+}
+
 fn load_receipt(c: &Connection, operation_id: &str) -> Result<Option<Value>, TeaError> {
     let row = c
         .query_row(
@@ -1052,13 +1355,44 @@ impl TeaStore {
     }
     fn read_locked(&self, c: &Connection, operation: ReadOperation) -> Result<Value, TeaError> {
         match operation {
+            ReadOperation::MergePreview { source } => {
+                let source = target(
+                    c,
+                    &source.session_id,
+                    &source.instance,
+                    source.expected_revision,
+                )?;
+                let parent_id = source.document["forkedFrom"]["sessionId"]
+                    .as_str()
+                    .ok_or(TeaError::Invalid)?;
+                let anchor_id = source.document["forkedFrom"]["messageId"]
+                    .as_str()
+                    .ok_or(TeaError::Invalid)?;
+                if !id(parent_id) || !id(anchor_id) || parent_id == source.id {
+                    return Err(TeaError::Invalid);
+                }
+                let parent = load_session(c, parent_id)?.ok_or(TeaError::Missing)?;
+                let anchors = merge_anchors(c, &source, &parent, anchor_id, None)?;
+                let (_, copied, replaced) = merge_admission(c, &source, &parent, &anchors)?;
+                response(
+                    json!({"action":"merge-preview", "source":target_value(&source), "parent":target_value(&parent),
+                    "anchorMessageId":anchor_id, "editedMessageId":anchors.edited["id"],
+                    "sourceTitle":preview(source.document["title"].as_str().unwrap_or("")),
+                    "parentTitle":preview(parent.document["title"].as_str().unwrap_or("")),
+                    "anchorPreview":preview(anchors.anchor["content"].as_str().unwrap_or("")),
+                    "editedPreview":preview(anchors.edited["content"].as_str().unwrap_or("")),
+                    "replacedMessageCount":replaced, "copiedMessageCount":copied}),
+                    DIRECTORY_BYTES,
+                )
+            }
             ReadOperation::Receipt { write } => {
                 if write.version != 1 {
                     return Err(TeaError::Invalid);
                 }
                 validate_write(&write.request)?;
                 let operation_id = match &write.request {
-                    WriteOperation::Fork { operation_id, .. }
+                    WriteOperation::Merge { operation_id, .. }
+                    | WriteOperation::Fork { operation_id, .. }
                     | WriteOperation::Import { operation_id, .. }
                     | WriteOperation::SetPin { operation_id, .. }
                     | WriteOperation::DeleteSelected { operation_id, .. }
@@ -1242,7 +1576,8 @@ impl TeaStore {
         hash: &str,
     ) -> Result<Value, TeaError> {
         let receipt_id = match &operation {
-            WriteOperation::Fork { operation_id, .. }
+            WriteOperation::Merge { operation_id, .. }
+            | WriteOperation::Fork { operation_id, .. }
             | WriteOperation::Import { operation_id, .. }
             | WriteOperation::SetPin { operation_id, .. }
             | WriteOperation::DeleteSelected { operation_id, .. }
@@ -1544,6 +1879,20 @@ impl TeaStore {
                 result["operationId"] = json!(operation_id);
                 result
             }
+            WriteOperation::Merge {
+                operation_id,
+                source,
+                parent,
+                anchor_message_id,
+                edited_message_id,
+            } => merge(
+                c,
+                &operation_id,
+                &source,
+                &parent,
+                &anchor_message_id,
+                &edited_message_id,
+            )?,
             WriteOperation::BeginGeneration {
                 session_id,
                 instance,
@@ -1811,6 +2160,7 @@ pub(crate) fn verify_schema(c: &Connection, version: i64) -> Result<(), StoreErr
                     Some(
                         "import"
                             | "fork"
+                            | "merge"
                             | "begin-generation"
                             | "finish-generation"
                             | "set-pin"

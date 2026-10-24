@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ChangeEvent } from 'react';
 import { Link } from '@tanstack/react-router';
 import { invoke } from '@tauri-apps/api/core';
-import { ChevronRight, ChevronUp, Download, RefreshCw, Save, Search, Trash2, X } from 'lucide-react';
+import { ChevronRight, ChevronUp, Download, GitMerge, RefreshCw, Save, Search, Trash2, X } from 'lucide-react';
 import { Button, CardLibraryModal, type CardLibrarySelectionContext } from '@mahoshojo/ui-web/card-library';
 import { MarkdownBlock } from '@mahoshojo/ui-web/markdown';
 import {
@@ -55,7 +55,7 @@ export default function MagicTeaPartyPage() {
     settings: { ...state.record.session.settings, ...(state.nameDraft === null ? {} : { userDisplayName: state.nameDraft }) } }) : null;
   const editingRole = session?.roles.find(role => role.id === editingRoleId) ?? null;
   const editDisabled = !guard.ready || state.busy || state.pending !== 'none' || importBusy || preparingView;
-  const disabled = editDisabled || state.editingMessageId !== null;
+  const disabled = editDisabled || state.editingMessageId !== null || state.mergePreview !== null;
   const run = (work: () => Promise<unknown>) => { void work().catch(error => owner.report(error)); };
   const renderScope = `${state.incarnation}:${state.record?.session.id ?? ''}`;
   const currentScope = () => `${owner.getSnapshot().incarnation}:${owner.getSnapshot().record?.session.id ?? ''}`;
@@ -185,8 +185,29 @@ export default function MagicTeaPartyPage() {
       onLockTitle={() => run(() => owner.update({ titleMeta: { source: 'manual' } }))} onCreateSession={() => { if (!providerDirty && !roleDirty.current && !pasteDirty.current) run(() => owner.create()); }} />}
     beforeChat={<>
       {session?.forkedFrom ? <p className="break-all text-xs text-(--app-text-muted)">
-        分支来源{session.branchLabel ? `（${session.branchLabel}）` : ''}：会话 {session.forkedFrom.sessionId} · 消息 {session.forkedFrom.messageId}。原会话保持独立，不会合并。
+        分支来源{session.branchLabel ? `（${session.branchLabel}）` : ''}：会话 {session.forkedFrom.sessionId} · 消息 {session.forkedFrom.messageId}。原会话与分支保持独立；可先审阅，再明确确认合并到原会话。
       </p> : null}
+      {session?.forkedFrom ? <Button size="sm" disabled={disabled} onClick={() => {
+        if (disabled || preparing.current || currentScope() !== renderScope) return;
+        if (providerDirty || roleDirty.current || roleSaving.current || pasteDirty.current) { owner.report(new Error('请先保存或取消连接、角色和粘贴导入草稿，再审阅合并')); return; }
+        run(owner.prepareMerge);
+      }}><GitMerge className="size-4 shrink-0" aria-hidden="true" />审阅合并到原会话</Button> : null}
+      {state.mergePreview ? <section aria-label="审阅分支合并" className="space-y-3 rounded-xl border border-(--app-border-strong) bg-(--app-surface) p-4 text-sm">
+        <h2 className="font-semibold">合并到原会话前请核对</h2>
+        <p className="break-all">来源分支：{state.mergePreview.sourceTitle}（{state.mergePreview.source.sessionId}）</p>
+        <p className="break-all">目标原会话：{state.mergePreview.parentTitle}（{state.mergePreview.parent.sessionId}）</p>
+        <p className="whitespace-pre-wrap break-all">原锚点：{state.mergePreview.anchorPreview}</p>
+        <p className="whitespace-pre-wrap break-all">分支改写：{state.mergePreview.editedPreview}</p>
+        <p>将从原锚点起替换 {state.mergePreview.replacedMessageCount} 条历史消息，并复制分支尾部 {state.mergePreview.copiedMessageCount} 条消息。旧历史仍保留并标为已替换，来源分支不变。受影响的摘要、旧行动选项和自动摘要进度会失效，不会调用模型。</p>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="primary" size="sm" disabled={editDisabled} onClick={() => {
+            if (editDisabled || preparing.current || currentScope() !== renderScope || !state.mergePreview) return;
+            if (providerDirty || roleDirty.current || roleSaving.current || pasteDirty.current) { owner.report(new Error('请先保存或取消连接、角色和粘贴导入草稿，再确认合并')); return; }
+            const preview = state.mergePreview; run(() => owner.confirmMerge(preview));
+          }}><GitMerge className="size-4 shrink-0" aria-hidden="true" />确认合并到原会话</Button>
+          <Button size="sm" disabled={state.busy || state.pending !== 'none'} onClick={owner.cancelMerge}><X className="size-4 shrink-0" aria-hidden="true" />取消合并</Button>
+        </div>
+      </section> : null}
       {roleHasDraft && !editingRole ? <p role="status" className="text-sm text-(--app-text-muted)">有未保存的角色修改，重新打开对应角色可继续编辑。</p> : null}
       <section hidden={!editingRole && !roleHasDraft} className="rounded-xl border border-(--app-border-strong) bg-(--app-surface) p-4 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2"><h2 ref={roleHeading} tabIndex={-1} className="text-sm font-semibold text-(--app-text)">会话角色编辑</h2>
