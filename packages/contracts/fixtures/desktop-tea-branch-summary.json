@@ -60,6 +60,29 @@
             "omittedMessageCount": 1
           }
         }
+      },
+      "expectedMerge": {
+        "summary": "已有摘要",
+        "summarySections": {
+          "recap": "摘要段落"
+        },
+        "summaryMeta": {
+          "updatedAt": 1,
+          "fromMessageId": "a",
+          "toMessageId": "c",
+          "coverage": {
+            "version": 1,
+            "sourceMessageCount": 3,
+            "selectedMessageIds": [
+              "b",
+              "c"
+            ],
+            "clippedMessageIds": [
+              "c"
+            ],
+            "omittedMessageCount": 1
+          }
+        }
       }
     },
     {
@@ -88,7 +111,8 @@
         }
       },
       "replaceFromIndex": 2,
-      "expected": {}
+      "expected": {},
+      "expectedMerge": {}
     },
     {
       "name": "tail-coverage",
@@ -116,7 +140,8 @@
         }
       },
       "replaceFromIndex": 3,
-      "expected": {}
+      "expected": {},
+      "expectedMerge": {}
     },
     {
       "name": "missing-coverage",
@@ -144,7 +169,8 @@
         }
       },
       "replaceFromIndex": 3,
-      "expected": {}
+      "expected": {},
+      "expectedMerge": {}
     },
     {
       "name": "legacy-unknown",
@@ -170,6 +196,17 @@
           "fromMessageId": "missing-from",
           "toMessageId": "missing-to"
         }
+      },
+      "expectedMerge": {
+        "summary": "已有摘要",
+        "summarySections": {
+          "recap": "摘要段落"
+        },
+        "summaryMeta": {
+          "updatedAt": 1,
+          "fromMessageId": "missing-from",
+          "toMessageId": "missing-to"
+        }
       }
     },
     {
@@ -179,6 +216,9 @@
       },
       "replaceFromIndex": 0,
       "expected": {
+        "summary": "旧摘要"
+      },
+      "expectedMerge": {
         "summary": "旧摘要"
       }
     }

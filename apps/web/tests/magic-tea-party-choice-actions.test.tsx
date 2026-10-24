@@ -392,3 +392,19 @@ describe('Web selected-action entry', () => {
     expect(chat.isGenerating).toBe(false);
   });
 });
+
+it('renders superseded Web actions as history only without dispatching selection or a model request', async () => {
+  const prior: MagicTeaPartyMessage = { id: 'old-choice', sessionId: session.id, role: 'assistant', content: '旧行动', createdAt: 2, status: 'done',
+    choices, segments: [{ type: 'choices', items: choices }], meta: { superseded: true, rawOutput: rawChoices, choicesValid: true } };
+  await render(session, [...history(session.id), prior]);
+  expect(container.textContent).toContain('该条消息已被更新替换');
+  expect(container.textContent).toContain('喝茶');
+  expect([...container.querySelectorAll('button')].filter(button => button.title === '选择该行动')).toHaveLength(0);
+  const historicalAction = [...container.querySelectorAll('div')].find(node => node.textContent === '喝茶')!;
+  expect(historicalAction).toBeTruthy(); await act(async () => historicalAction.click());
+  expect(mocks.selectChoice).not.toHaveBeenCalled(); expect(mocks.dispatch).not.toHaveBeenCalled();
+  await render(session, [{ ...prior, meta: { ...prior.meta, superseded: false } }]);
+  const choice = [...container.querySelectorAll('button')].find(button => button.title === '选择该行动')!;
+  await act(async () => choice.click());
+  expect(mocks.selectChoice).toHaveBeenCalledExactlyOnceWith('喝茶');
+});

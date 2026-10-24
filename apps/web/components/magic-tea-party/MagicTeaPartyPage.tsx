@@ -621,7 +621,7 @@ export function MagicTeaPartyPage() {
     };
     const fallbackChoices = [...messages]
       .reverse()
-      .find((message) => Array.isArray(message.choices) && message.choices.length > 0)?.choices;
+      .find((message) => message.meta?.superseded !== true && Array.isArray(message.choices) && message.choices.length > 0)?.choices;
     const lastChoices = activeSession.lastChoices ?? fallbackChoices;
 
     setUpdateError(null);

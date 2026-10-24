@@ -42,7 +42,7 @@ const harness = (session = baseSession()) => {
         if (drop === 'fork') { drop = null; throw new Error('synthetic reply loss after commit'); }
         return { version: 1, result };
       }
-      if (write.action === 'import' || write.action === 'set-pin' || write.action === 'delete-selected') throw new Error('organization is covered by the real Native journey, not this single-record fixture');
+      if (write.action === 'merge' || write.action === 'import' || write.action === 'set-pin' || write.action === 'delete-selected') throw new Error('organization is covered by the real Native journey, not this single-record fixture');
       const sessionId = write.action === 'create' ? write.session.id : write.sessionId;
       const instance = write.action === 'create' ? 'b'.repeat(32) : write.instance;
       const revision = write.action === 'create' ? 1 : write.expectedRevision + (write.action === 'delete' ? 0 : 1);

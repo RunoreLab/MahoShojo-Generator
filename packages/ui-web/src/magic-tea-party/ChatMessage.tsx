@@ -378,7 +378,8 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
   const notices = message.meta?.notices;
   const hasErrorNotice = Array.isArray(notices)
     && notices.some((notice: unknown) => notice && typeof notice === 'object' && 'level' in notice && notice.level === 'error');
-  const canSelectChoices = Boolean(props.onSelectChoice)
+  const isSuperseded = isMessageSuperseded(message);
+  const canSelectChoices = !isSuperseded && Boolean(props.onSelectChoice)
     && (message.status === undefined || message.status === 'done') && !message.error
     && (completion === undefined || completion === 'completed' || completion === 'provider')
     && message.meta?.choicesValid !== false && !hasErrorNotice
@@ -391,7 +392,6 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
   const messageReasoning = message.role === 'assistant' ? getMessageAiReasoning(message) : null;
   const reasoningStatus = messageReasoning?.status ?? (message.status === 'streaming' ? 'thinking' : 'idle');
   const speakerClass = `px-1 text-xs font-semibold ${isUser ? 'text-right text-pink-700' : 'text-gray-600'}`;
-  const isSuperseded = isMessageSuperseded(message);
   const canEdit = Boolean(props.onStartEdit && props.onEditDraftChange && props.onCancelEdit && props.onConfirmEdit);
   const isEditing = canEdit && message.role === 'user' && props.editingMessageId === message.id;
   const editingDraft = typeof props.editingDraft === 'string' ? props.editingDraft : message.content;

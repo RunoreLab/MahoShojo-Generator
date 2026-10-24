@@ -13,7 +13,8 @@ import { editedTeaSummary, prepareTeaSummaryRequest, prepareTeaAutoSummaryReques
 type DirectoryCursor = Extract<TeaReadResponse['result'], { action: 'list' }>['nextCursor'];
 type MessageCursor = Extract<TeaReadResponse['result'], { action: 'messages' }>['nextCursor'];
 export type TeaCleanupSelection = { directory: TeaHead[]; incarnation: number; targets: ReadonlyArray<Readonly<{ sessionId: string; instance: string; expectedRevision: number }>>; titles: readonly string[] };
-type Pending = { write: TeaWriteRequest; unknown: boolean; purpose: 'ordinary' | 'begin' | 'finish' | 'import' | 'fork' };
+export type TeaMergePreview = Extract<TeaReadResponse['result'], { action: 'merge-preview' }>;
+type Pending = { write: TeaWriteRequest; unknown: boolean; purpose: 'ordinary' | 'begin' | 'finish' | 'import' | 'fork' | 'merge' };
 type Generation = { owner: number; controller: AbortController; dispatched: boolean; request: AiExecutionRequest;
   kind: 'chat' | 'choices' | 'summary'; summaryMeta?: TeaSummaryPreparation['summaryMeta']; outputFormat: 'jsonl' | 'markdown';
   automatic: boolean; autoFollowupAllowed: boolean; target: ResolvedDesktopAiTarget; droppedRatio: number; current: () => boolean;
@@ -23,12 +24,13 @@ export type DesktopTeaIntent = { kind: 'reply' | 'selected-choice'; text: string
 export type DesktopTeaState = {
   incarnation: number; directory: TeaHead[]; directoryCursor: DirectoryCursor; catalogRevision: number | null;
   record: TeaRecord | null; messages: TeaMessageDocument[]; messageCursor: MessageCursor;
+  mergePreview: TeaMergePreview | null;
   editingMessageId: string | null; editingDraft: string;
   input: string; titleDraft: string | null; nameDraft: string | null; summaryDraft: string | null; busy: boolean; generating: boolean; generationKind: Generation['kind'] | null; isAutoSummarizing: boolean; pending: 'none' | 'save' | 'unknown';
   error: string | null; notice: string | null; rawUnsaved: string | null;
 };
 const initial = (): DesktopTeaState => ({ incarnation: 0, directory: [], directoryCursor: null, catalogRevision: null,
-  record: null, messages: [], messageCursor: null, editingMessageId: null, editingDraft: '', input: '', titleDraft: null, nameDraft: null, summaryDraft: null, busy: false, generating: false, generationKind: null, isAutoSummarizing: false, pending: 'none', error: null, notice: null, rawUnsaved: null });
+  record: null, messages: [], messageCursor: null, mergePreview: null, editingMessageId: null, editingDraft: '', input: '', titleDraft: null, nameDraft: null, summaryDraft: null, busy: false, generating: false, generationKind: null, isAutoSummarizing: false, pending: 'none', error: null, notice: null, rawUnsaved: null });
 const canonical = (value: unknown): string => {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
   if (value && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`).join(',')}}`;
@@ -40,6 +42,7 @@ const cloneWrite = (write: TeaWriteRequest): TeaWriteRequest => TeaWriteRequestS
 export class DesktopTeaSession {
   private state = initial(); private readonly listeners = new Set<() => void>();
   private live = true; private incarnation = 0; private pending: Pending | null = null; private generation: Generation | null = null;
+  private mergePreparation: object | null = null;
   private preparation: { cancelled: boolean; automatic: boolean } | null = null; private consecutiveDroppedTurns = 0;
   constructor(private readonly port: TeaNativePort, private readonly id: () => string = () => crypto.randomUUID(), private readonly now: () => number = Date.now) {}
   activate = () => { if (!this.live) { this.live = true; this.pending = null; this.generation = null; this.state = { ...initial(), incarnation: ++this.incarnation }; } };
@@ -47,7 +50,7 @@ export class DesktopTeaSession {
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener); };
   private publish(patch: Partial<DesktopTeaState>) { if (!this.live) return; this.state = { ...this.state, ...patch }; for (const listener of this.listeners) listener(); }
   private current(owner: number) { return this.live && owner === this.incarnation; }
-  isBusy = () => this.state.editingMessageId !== null || this.state.busy || this.state.titleDraft !== null || this.state.nameDraft !== null || this.state.summaryDraft !== null || this.state.pending !== 'none' || Boolean(this.pending) || this.state.input !== (this.state.record?.session.draft ?? '');
+  isBusy = () => this.state.mergePreview !== null || this.state.editingMessageId !== null || this.state.busy || this.state.titleDraft !== null || this.state.nameDraft !== null || this.state.summaryDraft !== null || this.state.pending !== 'none' || Boolean(this.pending) || this.state.input !== (this.state.record?.session.draft ?? '');
   setInput = (input: string) => { if (this.allowed()) this.publish({ input }); };
   stageTitle = (value: string) => { if (this.allowed() && this.state.record) this.publish({ titleDraft: value === this.state.record.session.title ? null : value }); };
   stageName = (value: string) => { if (this.allowed() && this.state.record) this.publish({ nameDraft: value === this.state.record.session.settings.userDisplayName ? null : value }); };
@@ -61,7 +64,7 @@ export class DesktopTeaSession {
   };
   report = (error: unknown) => this.publish({ error: error instanceof Error ? error.message : '茶会操作未完成，请保留输入后重试' });
   dispose = () => { this.live = false; this.incarnation += 1; this.generation?.controller.abort(); this.generation?.release(); this.listeners.clear(); };
-  private allowed(editing = false) { return this.live && !this.state.busy && !this.pending && this.state.pending === 'none' && (editing || this.state.editingMessageId === null); }
+  private allowed(editing = false) { return this.live && !this.state.busy && !this.pending && this.state.pending === 'none' && this.state.mergePreview === null && (editing || this.state.editingMessageId === null); }
   startMessageEdit = (messageId: string) => {
     if (!this.allowed()) return;
     if (this.isBusy()) { this.report(new Error('请先保存会话草稿，再编辑消息创建分支')); return; }
@@ -87,7 +90,46 @@ export class DesktopTeaSession {
       instance, expectedRevision: revision, anchorMessageId: message.id, editedContent: this.state.editingDraft,
       targetSessionId: this.id() } }, 'fork');
   };
-  private nextOwner() { this.incarnation += 1; this.consecutiveDroppedTurns = 0; this.publish({ incarnation: this.incarnation }); return this.incarnation; }
+  prepareMerge = async (): Promise<boolean> => {
+    if (!this.allowed() || !this.state.record) return false;
+    if (this.isBusy()) { this.report(new Error('请先保存或取消会话草稿，再审阅分支合并')); return false; }
+    const record = this.state.record; const owner = this.incarnation; const token = {};
+    this.mergePreparation = token; this.publish({ busy: true, error: null, notice: null });
+    try {
+      const response = await this.port.read({ version: 1, request: { action: 'merge-preview', source: {
+        sessionId: record.session.id, instance: record.instance, expectedRevision: record.revision,
+      } } });
+      if (!this.current(owner) || this.mergePreparation !== token || this.state.record !== record) return false;
+      if (response.result.action !== 'merge-preview') throw new Error('分支合并预览不匹配');
+      // Freeze the reviewed snapshot: a caller cannot replace identities between review and confirmation.
+      const preview: TeaMergePreview = Object.freeze({ ...response.result,
+        source: Object.freeze({ ...response.result.source }), parent: Object.freeze({ ...response.result.parent }) });
+      this.publish({ mergePreview: preview }); return true;
+    } catch (error) {
+      if (this.current(owner) && this.mergePreparation === token) this.report(error instanceof TeaStorageError && error.code === 'tea-stale'
+        ? new Error('该分支锚点已被替换或会话已变化，无法合并；请重新审阅，必要时重新建立分支') : error);
+      return false;
+    } finally {
+      if (this.current(owner) && this.mergePreparation === token) { this.mergePreparation = null; this.publish({ busy: false }); }
+    }
+  };
+  cancelMerge = () => {
+    if (!this.live || this.pending) return;
+    const preparing = this.mergePreparation !== null; this.mergePreparation = null;
+    this.publish({ mergePreview: null, ...(preparing ? { busy: false } : {}) });
+  };
+  confirmMerge = async (preview: TeaMergePreview): Promise<boolean> => {
+    const record = this.state.record;
+    if (!this.live || this.state.busy || this.pending || this.state.pending !== 'none' || !record || this.state.mergePreview !== preview) return false;
+    if (record.session.id !== preview.source.sessionId || record.instance !== preview.source.instance || record.revision !== preview.source.expectedRevision
+      || this.state.editingMessageId !== null || this.state.input !== (record.session.draft ?? '')
+      || this.state.titleDraft !== null || this.state.nameDraft !== null || this.state.summaryDraft !== null) {
+      this.publish({ mergePreview: null, error: '会话或草稿已变化，请先保存或取消草稿，再重新审阅合并' }); return false;
+    }
+    return this.write({ version: 1, request: { action: 'merge', operationId: this.id(), source: { ...preview.source }, parent: { ...preview.parent },
+      anchorMessageId: preview.anchorMessageId, editedMessageId: preview.editedMessageId } }, 'merge');
+  };
+  private nextOwner() { this.mergePreparation = null; this.incarnation += 1; this.consecutiveDroppedTurns = 0; this.publish({ incarnation: this.incarnation, mergePreview: null }); return this.incarnation; }
   private cancelAutomaticIntent() { if (this.preparation?.automatic || this.generation?.automatic) this.stop(); }
   refreshDirectory = async (next = false): Promise<void> => {
     if (!this.allowed()) return;
@@ -102,11 +144,12 @@ export class DesktopTeaSession {
     if (response.result.action !== 'list') throw new Error('茶会目录回执不匹配');
     this.publish({ directory: response.result.rows, directoryCursor: response.result.nextCursor, catalogRevision: response.result.catalogRevision });
   }
-  private async loadRecord(id: string, owner: number, input?: string) {
+  private async loadRecord(id: string, owner: number, input?: string, expectedInstance?: string) {
     const response = await this.port.read({ version: 1, request: { action: 'session', sessionId: id, expectedCatalogRevision: null } });
     if (!this.current(owner)) return;
     if (response.result.action !== 'session') throw new Error('茶会会话回执不匹配');
     const record = response.result.record;
+    if (record && expectedInstance && record.instance !== expectedInstance) throw new Error('原父会话已被替换，请刷新目录后重新选择');
     this.publish({ record, input: input ?? record?.session.draft ?? '', titleDraft: null, nameDraft: null, summaryDraft: null, messages: [], messageCursor: null });
     if (record) {
       let last: TeaMessageDocument[] = [];
@@ -222,7 +265,7 @@ export class DesktopTeaSession {
     let write: TeaWriteRequest;
     try { write = cloneWrite(input); } catch { this.report(new Error('内容超过桌面文本存储边界，原输入和未保存结果已保留，可导出后处理')); return false; }
     const pending = { write, purpose, unknown: false }; this.pending = pending;
-    this.publish({ busy: true, pending: 'save', error: null });
+    this.publish({ busy: true, pending: 'save', error: null, ...(purpose === 'merge' ? { mergePreview: null } : {}) });
     try {
       const response = await this.port.mutate(write);
       if (!this.current(owner) || this.pending !== pending) return false;
@@ -237,8 +280,11 @@ export class DesktopTeaSession {
         }
         pending.unknown = !(error instanceof TeaStorageError) || error.writeEvidence === 'unknown';
         const prefix = this.generation?.automatic ? '剧情已保存；自动摘要' : '本次';
+        const staleMerge = purpose === 'merge' && error instanceof TeaStorageError && ['tea-stale', 'tea-missing', 'tea-busy', 'tea-invalid'].includes(error.code);
         this.publish({ busy: false, generating: false, pending: pending.unknown ? 'unknown' : 'save',
-          error: pending.unknown ? `${prefix}保存结果未知，请核对原操作；不会重新调用模型` : `${prefix}保存未完成，请重试原保存或导出保留内容` });
+          error: pending.unknown ? `${prefix}保存结果未知，请核对原操作；不会重新调用模型` : staleMerge
+            ? '父会话或分支已变化、正在生成或锚点已被替换；请放弃此未提交的合并，再重新审阅，必要时重新建立分支'
+            : `${prefix}保存未完成，请重试原保存或导出保留内容` });
       }
       if (this.current(owner) && this.pending !== pending) { this.publish({ busy: false, error: '保存已确认，但重新读取失败，请刷新会话' }); return true; }
       return false;
@@ -248,6 +294,7 @@ export class DesktopTeaSession {
     const manualSummaryDraft = this.generation?.automatic ? this.state.summaryDraft : null;
     this.pending = null;
     this.publish({ pending: 'none', busy: true, error: null });
+    if (result.action === 'merge') { this.consecutiveDroppedTurns = 0; this.publish({ mergePreview: null, notice: '分支合并已保存；父会话旧历史和源分支均保留，不会自动生成' }); }
     if (result.action === 'fork') this.publish({ editingMessageId: null, editingDraft: '', notice: '已打开新分支，原会话保持不变；可手动续写' });
     if (result.action === 'begin-generation') {
       const generation = this.generation;
@@ -272,7 +319,7 @@ export class DesktopTeaSession {
     else if (result.action === 'delete-selected') this.publish({ notice: `已删除所选 ${result.sessions.length} 个会话；当前编辑保持不变` });
     else if (result.action === 'delete') this.publish({ record: null, messages: [], messageCursor: null, input: '', notice: '会话已删除' });
     else if ('sessionId' in result) {
-      try { await this.loadRecord(result.sessionId, owner); }
+      try { await this.loadRecord(result.sessionId, owner, undefined, result.action === 'merge' ? result.instance : undefined); }
       finally { if (this.current(owner) && manualSummaryDraft !== null && result.action === 'finish-generation') this.publish({ summaryDraft: manualSummaryDraft }); }
     }
     else if (result.action === 'import') {
@@ -288,7 +335,7 @@ export class DesktopTeaSession {
     const owner = this.incarnation; this.publish({ busy: true, error: null });
     try {
       const write = pending.write.request;
-      if (write.action === 'fork' || write.action === 'import' || write.action === 'begin-generation' || write.action === 'finish-generation' || write.action === 'set-pin' || write.action === 'delete-selected') {
+      if (write.action === 'merge' || write.action === 'fork' || write.action === 'import' || write.action === 'begin-generation' || write.action === 'finish-generation' || write.action === 'set-pin' || write.action === 'delete-selected') {
         const response = await this.port.read({ version: 1, request: { action: 'receipt', write: pending.write } });
         if (!this.current(owner) || this.pending !== pending) return;
         if (response.result.action !== 'receipt') throw new Error('保存回执不匹配');
@@ -312,7 +359,10 @@ export class DesktopTeaSession {
           pending.unknown = false; this.publish({ pending: 'save', notice: '原写入尚未生效，可重试原操作' });
         } else throw new Error('会话已发生其他修改，不能盲目重放。请导出未保存内容，再明确放弃并重新读取');
       }
-    } catch (error) { if (this.current(owner)) this.report(error); }
+    } catch (error) { if (this.current(owner)) {
+      if (this.pending !== pending) this.publish({ error: '保存已确认，但重新读取失败，请刷新会话' });
+      else this.report(error);
+    } }
     finally { if (this.current(owner)) this.publish({ busy: false }); }
   };
   retryPending = async () => {
@@ -322,6 +372,9 @@ export class DesktopTeaSession {
   abandonPending = async () => {
     if (this.state.busy || !this.live) return;
     if (this.pending?.unknown) { this.report(new Error('保存结果仍未知，请先核对原回执；不能把未知当作未提交而放弃')); return; }
+    if (this.pending?.write.request.action === 'merge') {
+      this.pending = null; this.publish({ pending: 'none', mergePreview: null, error: null, notice: '已放弃未提交的合并；源分支和草稿保持不变，请重新审阅后再合并' }); return;
+    }
     if (this.pending?.write.request.action === 'fork') {
       this.pending = null;
       this.publish({ pending: 'none', error: null, notice: '已放弃未提交的分支保存；原会话和消息编辑草稿保持不变' });

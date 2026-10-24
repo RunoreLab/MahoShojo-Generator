@@ -23,6 +23,7 @@ let mountedRouter: ReturnType<typeof createDesktopRouter> | undefined;
 const originalPushState = window.history.pushState;
 const originalReplaceState = window.history.replaceState;
 let instance = 'a'.repeat(32);
+let forkParent: { session: TeaSessionDocument; instance: string; revision: number; messages: TeaMessageDocument[] } | null = null;
 const button = (text: string) => { const node = [...container.querySelectorAll('button')].find(item => item.textContent?.trim() === text); expect(node, text).toBeTruthy(); return node!; };
 const click = (text: string) => act(async () => button(text).click());
 const openSession = (title: string) => act(async () => { const node = [...container.querySelectorAll('button')].find(item => item.querySelector('.line-clamp-1')?.textContent === title); expect(node).toBeTruthy(); node!.click(); });
@@ -42,7 +43,7 @@ beforeEach(() => {
   vi.stubGlobal('crypto', webcrypto); native.listen.mockResolvedValue(vi.fn());
   document = null; revision = 1; messages = []; streams = 0; instance = 'a'.repeat(32);
   streamOutput = '{"type":"narration","text":"共源茶会正文😀"}\n';
-  streamReasoning = '';
+  streamReasoning = ''; forkParent = null;
   localStorage.setItem(DESKTOP_AI_CONFIG_STORAGE_KEY, JSON.stringify({ version: 5, selection: { executionPreference: 'client', clientTarget: { kind: 'custom', profileId: profile.id }, serverTarget: { kind: 'system' }, systemModelId: 'default' }, hiddenPresetIds: [], modelsByProfileId: {}, presetsByProviderId: {} }));
   native.invoke.mockImplementation(withFixtureStreamReceipt(async (command: string, args: Record<string, unknown> = {}) => {
     if (command === 'list_provider_profile_ids') return [profile.id];
@@ -53,6 +54,14 @@ beforeEach(() => {
     if (command === 'list_local_cards' || command === 'list_web_packages') return { documents: [] };
     if (command === 'read_magic_tea_party') {
       const request = TeaReadRequestSchema.parse(args.request).request;
+      if (request.action === 'merge-preview') {
+        if (!forkParent || !document?.forkedFrom) throw new Error('missing parent');
+        const anchor = forkParent.messages.findIndex(message => message.id === document!.forkedFrom!.messageId);
+        const edited = messages.findIndex(message => message.revisionOf === document!.forkedFrom!.messageId);
+        return { version: 1, result: { action: 'merge-preview', source: request.source, parent: { sessionId: forkParent.session.id, instance: forkParent.instance, expectedRevision: forkParent.revision },
+          anchorMessageId: forkParent.messages[anchor]!.id, editedMessageId: messages[edited]!.id, sourceTitle: document.title, parentTitle: forkParent.session.title,
+          anchorPreview: forkParent.messages[anchor]!.content, editedPreview: messages[edited]!.content, replacedMessageCount: forkParent.messages.length - anchor, copiedMessageCount: messages.length - edited } };
+      }
       if (request.action === 'list') return { version: 1, result: { action: 'list', catalogRevision: revision, rows: document ? [{ id: document.id, instance, revision, title: document.title, titleTruncated: false, pinnedAt: 0, pinnedOrder: 0, createdAt: document.createdAt, updatedAt: document.updatedAt, messageCount: messages.length, roleNames: document.roles.map(role => role.name), roleCount: document.roles.length, scenarioTitle: null }] : [], nextCursor: null } };
       if (request.action === 'session') return { version: 1, result: { action: 'session', catalogRevision: revision, record: document ? { session: document, instance, revision } : null } };
       if (request.action === 'messages') return { version: 1, result: { action: 'messages', catalogRevision: revision, sessionId: document!.id, instance, revision, rows: messages.map((message, index) => ({ ordinal: index + 1, message })), nextCursor: null } };
@@ -61,10 +70,21 @@ beforeEach(() => {
     if (command === 'mutate_magic_tea_party') {
       const request = TeaWriteRequestSchema.parse(args.request).request;
       if (request.action === 'fork') {
+        forkParent = { session: structuredClone(document!), instance, revision, messages: structuredClone(messages) };
         document = { ...document!, id: request.targetSessionId, branchLabel: '改写分支', forkedFrom: { sessionId: request.sessionId, messageId: request.anchorMessageId, createdAt: 10 } }; revision = 1; instance = 'b'.repeat(32);
         const anchor = messages.findIndex(message => message.id === request.anchorMessageId);
-        messages = messages.slice(0, anchor + 1).map((message, index) => ({ ...message, sessionId: request.targetSessionId, ...(index === anchor ? { content: request.editedContent } : {}) }));
+        messages = messages.slice(0, anchor + 1).map((message, index) => ({ ...message, sessionId: request.targetSessionId, ...(index === anchor ? { id: `edited-${message.id}`, content: request.editedContent, revisionOf: message.id } : {}) }));
         return { version: 1, result: { action: 'fork', operationId: request.operationId, sessionId: request.targetSessionId, instance, revision } };
+      }
+      if (request.action === 'merge') {
+        if (!forkParent || request.parent.expectedRevision !== forkParent.revision) throw { code: 'tea-stale', message: 'Local tea storage did not complete; retain the input or unsaved result', writeEvidence: 'not-written' };
+        const source = { sessionId: document!.id, instance, revision };
+        const anchor = forkParent.messages.findIndex(message => message.id === request.anchorMessageId);
+        const edited = messages.findIndex(message => message.id === request.editedMessageId);
+        messages = [...forkParent.messages.map((message, index) => index < anchor ? message : { ...message, meta: { ...message.meta, superseded: true } }),
+          ...messages.slice(edited).map(message => ({ ...message, id: `merged-${message.id}`, sessionId: forkParent!.session.id }))];
+        document = structuredClone(forkParent.session); instance = forkParent.instance; revision = forkParent.revision + 1;
+        return { version: 1, result: { action: 'merge', operationId: request.operationId, sessionId: document.id, instance, revision, source } };
       }
       if (request.action === 'import' || request.action === 'set-pin' || request.action === 'delete-selected') throw new Error('not used by page fixture');
       revision = request.action === 'create' ? 1 : request.expectedRevision + (request.action === 'delete' ? 0 : 1);
@@ -744,8 +764,8 @@ it('uses the shared user editor for cancel, empty and single-write fork; continu
   expect(container.querySelector('textarea[placeholder="编辑后将创建新会话分支"]')).toBeNull(); expect(streams).toBe(generated);
   expect(container.textContent).toContain('可手动续写');
   expect(container.textContent).toContain(`分支来源（改写分支）：会话 ${original!.id}`);
-  expect(container.textContent).toContain('原会话保持独立，不会合并');
-  expect([...container.querySelectorAll('button')].some(node => node.textContent?.includes('合并'))).toBe(false);
+  expect(container.textContent).toContain('原会话与分支保持独立');
+  expect(button('审阅合并到原会话').disabled).toBe(false);
 });
 
 it('refuses inline fork editing while composer or pasted card drafts are unsaved', async () => {
@@ -787,4 +807,98 @@ it('preserves a provider connection draft and does not fork or save it implicitl
   expect(container.querySelector('textarea[placeholder="编辑后将创建新会话分支"]')).toBeNull(); expect(name.value).toBe('未保存连接');
   expect(native.invoke.mock.calls.filter(([command]) => command === 'mutate_magic_tea_party')).toHaveLength(before);
   expect(native.invoke.mock.calls.some(([command]) => command === 'save_provider_profile')).toBe(false);
+});
+
+const createMergeBranch = async () => {
+  await mount(); await click('新建会话'); await change('textarea[placeholder^="输入你的行动"]', '父剧情锚点'); await click('发送');
+  await click('编辑并分支'); await change('textarea[placeholder="编辑后将创建新会话分支"]', '分支改写剧情'); await click('创建分支');
+};
+const teaWrites = () => native.invoke.mock.calls.filter(([command]) => command === 'mutate_magic_tea_party');
+
+it('previews both merge targets, cancels without writes and confirms once without generating', async () => {
+  await createMergeBranch();
+  const branch = document!.id; const before = teaWrites().length; const generated = streams;
+  await click('审阅合并到原会话');
+  const preview = container.querySelector('section[aria-label="审阅分支合并"]')!;
+  expect(preview.textContent).toContain(branch); expect(preview.textContent).toContain(forkParent!.session.id);
+  for (const text of ['父剧情锚点', '分支改写剧情', '替换 2 条', '复制分支尾部 1 条', '旧历史仍保留', '来源分支不变', '不会调用模型']) expect(preview.textContent).toContain(text);
+  expect(button('保存会话草稿').disabled).toBe(true);
+  await click('取消合并');
+  expect(container.querySelector('section[aria-label="审阅分支合并"]')).toBeNull(); expect(teaWrites()).toHaveLength(before);
+  await click('审阅合并到原会话');
+  await act(async () => { button('确认合并到原会话').click(); button('确认合并到原会话').click(); });
+  expect(teaWrites()).toHaveLength(before + 1); expect(streams).toBe(generated);
+  const request = TeaWriteRequestSchema.parse(teaWrites().at(-1)![1]!.request).request;
+  expect(request).toMatchObject({ action: 'merge', source: { sessionId: branch }, parent: { sessionId: forkParent!.session.id } });
+  expect(document!.id).toBe(forkParent!.session.id);
+  expect(container.querySelector('section[aria-label="审阅分支合并"]')).toBeNull();
+});
+
+it('preserves pasted and composer drafts rather than implicitly saving them for merge', async () => {
+  await createMergeBranch(); const before = teaWrites().length;
+  await change('textarea[placeholder^="粘贴角色"]', '未导入的角色草稿');
+  await click('审阅合并到原会话');
+  expect(container.querySelector('section[aria-label="审阅分支合并"]')).toBeNull();
+  expect(container.querySelector<HTMLTextAreaElement>('textarea[placeholder^="粘贴角色"]')!.value).toBe('未导入的角色草稿');
+  await change('textarea[placeholder^="粘贴角色"]', '');
+  await change('textarea[placeholder^="输入你的行动"]', '尚未保存的行动'); await click('审阅合并到原会话');
+  expect(container.querySelector('section[aria-label="审阅分支合并"]')).toBeNull();
+  expect(container.querySelector<HTMLTextAreaElement>('textarea[placeholder^="输入你的行动"]')!.value).toBe('尚未保存的行动');
+  expect(teaWrites()).toHaveLength(before);
+});
+
+it('keeps superseded Desktop choice messages visible but non-actionable and active choices still work', async () => {
+  await mount(); await click('新建会话');
+  const choices = [{ id: 'old', text: '被替换的旧行动' }];
+  messages = [{ id: 'old-choice', sessionId: document!.id, role: 'assistant', content: '旧行动', createdAt: 1, status: 'done',
+    choices, segments: [{ type: 'choices', items: choices }], meta: { superseded: true, choicesValid: true } }];
+  await click('首批消息');
+  expect(container.textContent).toContain('被替换的旧行动'); expect(container.textContent).toContain('该条消息已被更新替换');
+  expect([...container.querySelectorAll('button')].some(node => node.textContent === '被替换的旧行动')).toBe(false);
+  const before = teaWrites().length;
+  const historicalAction = [...container.querySelectorAll('div')].find(node => node.textContent === '被替换的旧行动')!;
+  expect(historicalAction).toBeTruthy(); await act(async () => historicalAction.click());
+  expect(teaWrites()).toHaveLength(before); expect(streams).toBe(0);
+  messages = [{ ...messages[0]!, meta: { choicesValid: true } }]; await click('首批消息');
+  await click('被替换的旧行动'); expect(streams).toBe(1);
+});
+
+it('preserves a role form draft and blocks merge without an implicit role save', async () => {
+  await createMergeBranch();
+  await change('textarea[placeholder^="粘贴角色"]', JSON.stringify({ templateId: '通用角色', name: '原角色', content: '设定' })); await click('导入');
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label^="编辑角色："]')!.click());
+  await change('input[aria-label="角色名称"]', '合并前未保存角色');
+  const before = teaWrites().length;
+  await click('审阅合并到原会话');
+  expect(container.querySelector('section[aria-label="审阅分支合并"]')).toBeNull();
+  expect(container.querySelector<HTMLInputElement>('input[aria-label="角色名称"]')!.value).toBe('合并前未保存角色');
+  expect(document!.roles[0]!.name).toBe('原角色'); expect(teaWrites()).toHaveLength(before);
+});
+
+it('preserves a provider draft and blocks merge without an implicit connection save', async () => {
+  await createMergeBranch(); await click('更新凭据');
+  const heading = [...container.querySelectorAll('h3')].find(node => node.textContent?.trim() === '编辑连接')!;
+  const name = heading.parentElement!.querySelector('input')!;
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(name, '合并前未保存连接'); name.dispatchEvent(new Event('input', { bubbles: true })); });
+  const before = teaWrites().length;
+  await click('审阅合并到原会话');
+  expect(container.querySelector('section[aria-label="审阅分支合并"]')).toBeNull(); expect(name.value).toBe('合并前未保存连接');
+  expect(teaWrites()).toHaveLength(before); expect(native.invoke.mock.calls.some(([command]) => command === 'save_provider_profile')).toBe(false);
+});
+
+it('keeps a changed parent out of the merge and requires a fresh review instead of silently refreshing CAS', async () => {
+  await createMergeBranch(); const sourceId = document!.id; const originalMessages = structuredClone(messages);
+  await click('审阅合并到原会话'); const reviewedRevision = forkParent!.revision; forkParent!.revision += 1;
+  await click('确认合并到原会话');
+  expect(document!.id).toBe(sourceId); expect(messages).toEqual(originalMessages);
+  expect(container.textContent).toContain('重新审阅');
+  const failed = TeaWriteRequestSchema.parse(teaWrites().at(-1)![1]!.request).request;
+  expect(failed).toMatchObject({ action: 'merge', parent: { expectedRevision: reviewedRevision } });
+  expect(container.querySelector('section[aria-label="审阅分支合并"]')).toBeNull();
+  vi.spyOn(window, 'confirm').mockReturnValue(true); await click('明确放弃易失结果');
+  await click('审阅合并到原会话'); await click('确认合并到原会话');
+  expect(document!.id).toBe(forkParent!.session.id);
+  const fresh = TeaWriteRequestSchema.parse(teaWrites().at(-1)![1]!.request).request;
+  expect(fresh).toMatchObject({ action: 'merge', parent: { expectedRevision: reviewedRevision + 1 } });
+  expect(fresh.action === 'merge' && failed.action === 'merge' && fresh.operationId !== failed.operationId).toBe(true);
 });
