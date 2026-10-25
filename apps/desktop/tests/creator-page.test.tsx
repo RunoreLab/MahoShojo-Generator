@@ -396,7 +396,7 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     await settle();
     expect(answer().getAttribute('aria-label')).toBe(questionnaire.questions[1].question);
     await act(async () => setNativeValue(answer(), '第二题回答'));
-    await click('上一题');
+    await click('返回上题');
     expect(answer().getAttribute('aria-label')).toBe(questionnaire.questions[0].question);
     expect(answer().value).toBe('善良');
     await click('下一题');
@@ -408,11 +408,87 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     expect(mocks.save).not.toHaveBeenCalled();
   });
 
-  it('preserves the current question through conditional flow changes and keeps required/final gates without generating', async () => {
+  it('Creator action parity: options advance through the updated conditional flow and final action submits the new answer once', async () => {
+    const custom = { ...questionnaire, id: 'actions', questions: [
+      { id: 'choice', question: '选择分支', allowCustom: false, options: ['跳过', '展开'],
+        jump: { when: { questionId: 'choice', operator: 'equals', value: '跳过' }, to: { questionId: 'last' } } },
+      { id: 'branch', question: '被跳过的题' },
+      { id: 'last', question: '最后选择', allowCustom: false, options: ['最终新答案'] },
+    ] };
+    window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft({
+      answers: {}, questionnaireSelections: [{ ...selection, selectionId: 'preset:actions', questionnaire: custom }],
+    })));
+    await mount();
+    if (button('开始回答问卷')) await click('开始回答问卷');
+    expect(mocks.execute).not.toHaveBeenCalled();
+    await click('跳过');
+    expect(container.querySelector('h3.text-xl')?.textContent).toBe('最后选择');
+    expect(mocks.execute).not.toHaveBeenCalled();
+    let finish: ((outcome: CreatorGenerationOutcome) => void) | undefined;
+    mocks.execute.mockImplementation(() => new Promise<CreatorGenerationOutcome>(resolve => { finish = resolve; }));
+    const finalOption = button('最终新答案');
+    await act(async () => { finalOption.click(); finalOption.click(); });
+    await settle();
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.execute.mock.calls[0]![1].answers).toEqual([
+      expect.objectContaining({ questionId: 'choice', answer: '跳过' }),
+      expect.objectContaining({ questionId: 'last', answer: '最终新答案' }),
+    ]);
+    await act(async () => finish!(completed('direct-local')));
+  });
+
+  it('Creator action parity: suggestions only fill, final text submit uses the latest answer and retains overwrite confirmation', async () => {
+    const custom = { ...questionnaire, id: 'one', questions: [
+      { id: 'last', question: '最后文本', required: true, suggestions: ['仅填入灵感'] },
+    ] };
+    window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft({
+      answers: {}, questionnaireSelections: [{ ...selection, selectionId: 'preset:one', questionnaire: custom }],
+    })));
+    await mount();
+    if (button('开始回答问卷')) await click('开始回答问卷');
+    expect(button('提交').disabled).toBe(true);
+    await click('仅填入灵感');
+    expect(mocks.execute).not.toHaveBeenCalled();
+    const answer = container.querySelector<HTMLTextAreaElement>('.ui-web-questionnaire-answer-input')!;
+    await act(async () => { setNativeValue(answer, '同一事件批次的新答案'); button('提交').click(); });
+    await settle();
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.execute.mock.calls[0]![1].answers[0].answer).toBe('同一事件批次的新答案');
+    await click('还没想好');
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('dialog[open]')?.textContent).toContain('当前结果尚未保存');
+    await click('确定重新生成');
+    expect(mocks.execute).toHaveBeenCalledTimes(2);
+    expect(mocks.execute.mock.calls[1]![1].answers[0].answer).toBe('还没想好');
+  });
+
+  it.each(['recommended', 'referenced', 'quick'] as const)('Creator action parity: %s choices advance, while a jump-to-end submits only the new visible answers', async (kind) => {
+    const custom = { ...questionnaire, id: 'jump-end', questions: [
+      { id: 'choice', question: '结束分支', maxLength: 1,
+        ...(kind === 'referenced' ? { optionsFrom: 'hidden', allowCustom: false } : { options: ['结束'] }),
+        jump: { when: { questionId: 'choice', operator: 'notEmpty' }, toEnd: true } },
+      { id: 'hidden', question: '跳过旧题', options: ['结束'] },
+    ] };
+    window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft({
+      answers: { 'preset:jump-end::hidden': '旧回答' },
+      questionnaireSelections: [{ ...selection, selectionId: 'preset:jump-end', questionnaire: custom }],
+    })));
+    await mount();
+    expect(mocks.execute).not.toHaveBeenCalled();
+    await click(kind === 'quick' ? '还没想好' : '结束');
+    expect(mocks.execute).toHaveBeenCalledTimes(1);
+    expect(mocks.execute.mock.calls[0]![1].answers).toEqual([
+      expect.objectContaining({ questionId: 'choice', answer: kind === 'quick' ? '还没想好' : '结束' }),
+    ]);
+    expect(mocks.execute.mock.calls[0]![1].hosted.allowNativeSignature).toBe(false);
+    expect(container.textContent).toContain('共 1 题，已进入结果阶段');
+  });
+
+  it('preserves the current question through conditional text edits and keeps required gates without generating', async () => {
     const custom = {
       ...questionnaire, id: 'conditional', questions: [
         { id: 'conditional-first', question: '条件前置题', displayIf: { questionId: 'choice', operator: 'equals', value: '展开' } },
-        { id: 'choice', question: '必答选择题', required: true, allowCustom: false, options: ['展开', '隐藏'] },
+        { id: 'choice', question: '必答选择题', required: true, allowCustom: true, options: ['展开', '隐藏'] },
         { id: 'last', question: '独立生成前末题' },
       ],
     };
@@ -425,7 +501,8 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     expect(question()).toBe('必答选择题');
     expect(button('下一题').disabled).toBe(true);
     await click('下一题');
-    await click('展开');
+    await act(async () => setNativeValue(container.querySelector<HTMLTextAreaElement>('.ui-web-questionnaire-answer-input')!, '展开'));
+    await settle();
     expect(question()).toBe('必答选择题');
     expect(button('下一题').disabled).toBe(false);
     expect(container.textContent).toContain('问题 2 / 3');
@@ -433,8 +510,10 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     await act(async () => { next.click(); next.click(); });
     await settle();
     expect(question()).toBe('独立生成前末题');
-    expect(button('下一题').disabled).toBe(true);
-    await click('上一题'); await click('隐藏');
+    expect(button('跳过并提交').disabled).toBe(false);
+    await click('返回上题');
+    await act(async () => setNativeValue(container.querySelector<HTMLTextAreaElement>('.ui-web-questionnaire-answer-input')!, '隐藏'));
+    await settle();
     expect(question()).toBe('必答选择题');
     expect(container.textContent).toContain('问题 1 / 2');
     await click('下一题');
@@ -630,15 +709,16 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     expect(container.textContent).toContain('百合');
   });
 
-  it('restores uncertain hosted work without replay and retains explicit repeat-cost confirmation', async () => {
+  it.each(['explicit', 'final'] as const)('restores uncertain hosted work without replay and retains %s repeat-cost confirmation', async (entry) => {
     window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft({
+      questionnaireSelections: [{ ...selection, questionnaire: { ...questionnaire, questions: [questionnaire.questions[0]] } }],
       output: { mode: 'hosted-json', card: null, cardKind: 'magical-girl', rawText: '上次中断的正文', phase: 'uncertain' },
     })));
     await mount();
     expect(container.textContent).toContain('上次生成的服务器执行结果未能确认');
     expect(container.querySelector('pre')?.textContent).toBe('上次中断的正文');
     expect(mocks.execute).not.toHaveBeenCalled();
-    await click('重新生成');
+    await click(entry === 'final' ? '提交' : '重新生成');
     expect(container.querySelector('dialog[open]')?.textContent).toContain('可能产生重复调用与费用');
     await click('取消');
     expect(mocks.execute).not.toHaveBeenCalled();

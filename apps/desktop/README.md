@@ -481,6 +481,12 @@ desktop_config_open_directory()
   都不会放进 iframe；该能力属于 D4 的独立零 capability webview。
 - 审计、GC 与 Web 包归档读取已有 `async fn` + `spawn_blocking`；这不代表所有 I/O 或 renderer 工作都不会阻塞。`zipSync` 仍是同步组装，真实响应性尚未验收；D2.4a 备份已通过 async command + spawn_blocking 执行，维护锁的等待也在 blocking worker 内；实际 WebView 响应性仍需真机验收。
 
+## Creator 问卷动作维护
+
+Creator 的选项和快捷答案按 Web 语义前进；灵感提示仅填入。末题真实用户动作复用正常生成入口，保留 Provider 准备、覆盖确认、single-flight 与 uncertain 警告；草稿恢复、条件流对账和重渲染不得派发生成。实现遵循[页面交互共源 ADR](../../docs/decisions/2026-10-09_072800_现有页面交互共源与草稿恢复修订.md)。
+
+点选写入与提交可能处于同一 React 批次，因此必须从 session 的同步答案重建条件流，并以同一快照收集提交答案、题数和原生资格，不能读取上一帧闭包。导航同时更新题目 key 锚点与 index；按钮/选项提示复用 `getQuestionnaireQuestionPresentation`。改动这些接缝时运行 `tests/creator-page.test.tsx` 与 `tests/creator-session.test.ts`。
+
 ## 问卷草稿与保存范围
 
 默认问卷与花名数据以根 `content/` 为权威来源。草稿由单个 DetailsSession 持有，通过 WebView localStorage 保存版本化回答、输出语言、结果和已接收部分正文；上限为序列化后 4 Mi 字符，不存 Provider 凭据、不恢复上游请求。旧草稿需明确恢复或清除；读写失败显式报告，在途生成/保存和未持久化内容阻止路由离开、刷新及原生关闭。

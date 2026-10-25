@@ -83,6 +83,7 @@ import {
   APP_SELECTION_THEME,
   DETAILS_QUESTIONNAIRE_THEME,
   QuestionnaireQuestionPanel,
+  getQuestionnaireQuestionPresentation,
   QuestionnaireSelectionPanel,
 } from '@mahoshojo/ui-web/questionnaire';
 import { GeneralCharacterCard, type GeneralCharacterCardData } from '@mahoshojo/ui-web/character-card';
@@ -588,7 +589,7 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
   const showTextInput = question?.allowCustom !== false || !questionHasOptions;
   const updateAnswer = (value: string) => {
     if (!flowItem) return;
-    updateDraft({ answers: { ...answersByKey, [flowItem.key]: value } });
+    updateDraft({ answers: { ...session.getSnapshot().draft.answers, [flowItem.key]: value } });
   };
   // `nativeAllowed` 是签名资格而非可用性：非原生问卷照常生成，只是不获官方签名。
   const isNativeSignatureEligible = isQuestionnaireSelectionNativeAllowed(effectiveSelections);
@@ -830,13 +831,18 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
     && !(target.location === 'client' && !target.providerTarget);
 
   const generate = (discardUnsavedResult = false) => {
-    if (cloudSavingRef.current || !canGenerateNow) return;
+    if (cloudSavingRef.current || !canGenerateNow || session.isBusy() || aiStore.getSnapshot().generationActive) return;
     if (!discardUnsavedResult) {
       if (session.hasUnsavedResult()) { setConfirmRegenerate('unsaved'); return; }
       if (state.phase === 'uncertain') { setConfirmRegenerate('uncertain'); return; }
     }
     try {
-      const answers = collectQuestionnaireFlowAnswerItems(flow, answersByKey);
+      // 用户点选可能与提交处于同一 React 批次；会话是答案的同步 owner，
+      // 不能用上一帧的 flow/answers 判断末题、隐藏题或签名资格。
+      const submittedAnswers = session.getSnapshot().draft.answers;
+      const submittedFlow = buildQuestionnaireFlow(flowItems, submittedAnswers).flow;
+      const submittedOverLimit = hasOverLimitQuestionnaireAnswers(submittedFlow, submittedAnswers);
+      const answers = collectQuestionnaireFlowAnswerItems(submittedFlow, submittedAnswers);
       if (answers.length === 0 && buildRuleRuntimeResults.length === 0 && !freeformBrief.trim()) {
         setActionError('请至少填写一题，或补充自由说明，或提供规则车卡后再生成。');
         return;
@@ -864,9 +870,9 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
         template,
         templateLabel,
         primaryRuleLabel,
-        questionCount: flow.length,
-        nativeAllowed: isQuestionnaireGenerationNativeSignatureAllowed(effectiveSelections, hasOverLimitAnswer),
-        overLimitCount: flow.filter((item) => isAnswerOverLimit(answersByKey[item.key] ?? '', item.question.maxLength)).length,
+        questionCount: submittedFlow.length,
+        nativeAllowed: isQuestionnaireGenerationNativeSignatureAllowed(effectiveSelections, submittedOverLimit),
+        overLimitCount: submittedFlow.filter((item) => isAnswerOverLimit(submittedAnswers[item.key] ?? '', item.question.maxLength)).length,
         streamFallbackLabel: template === 'general-scenario'
           ? freeformBrief.trim() || answers[0]?.answer || ''
           : answers[0]?.answer || freeformBrief.trim(),
@@ -893,7 +899,7 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
             selections: [...effectiveSelections],
             allowNativeSignature: isQuestionnaireGenerationNativeSignatureAllowed(
               effectiveSelections,
-              hasOverLimitAnswer,
+              submittedOverLimit,
             ),
           },
         },
@@ -903,6 +909,32 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
       }).catch((cause: unknown) => setActionError(cause instanceof Error ? cause.message : 'AI 配置准备失败'));
     } catch (error) { setActionError(error instanceof Error ? error.message : '创作请求无法生成。'); }
   };
+
+  const advanceQuestion = (option?: string) => {
+    if (!flowItem || busy || cloudSavingRef.current || session.isBusy()
+      || aiStore.getSnapshot().generationActive || session.getSnapshot().pendingRestore) return;
+    const nextAnswers = { ...session.getSnapshot().draft.answers };
+    if (option !== undefined) nextAnswers[flowItem.key] = option;
+    if (question?.required === true && !nextAnswers[flowItem.key]?.trim()) {
+      setActionError('本题为必答，请填写后再继续。');
+      return;
+    }
+    if (option !== undefined) updateDraft({ answers: nextAnswers });
+    const nextFlow = buildQuestionnaireFlow(flowItems, nextAnswers);
+    const nextIndex = (nextFlow.indexByKey.get(flowItem.key) ?? -1) + 1;
+    const nextItem = nextFlow.flow[nextIndex];
+    setActionError(null);
+    if (nextItem) {
+      currentQuestionKeyRef.current = nextItem.key;
+      setQuestionIndex(nextIndex);
+    } else {
+      // 仅真实用户完成末题走正常提交；恢复/条件对账 effect 不派发生成。
+      generate();
+    }
+  };
+  const questionPresentation = getQuestionnaireQuestionPresentation({
+    variant: 'details', question, answer, index: currentIndex, total: flow.length, busy,
+  });
 
   useEffect(() => {
     const dialog = regenerateDialog.current;
@@ -1151,13 +1183,12 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
         helperText={question.helperText}
         isRequired={question.required === true}
         skipText="本题可跳过，不作答将不会记录"
-        quickOptions={question.allowCustom !== false ? ['还没想好', '不想回答'] : []}
-        onQuickOption={updateAnswer}
+        quickOptions={questionPresentation.quickOptions}
+        quickOptionDisabled={busy}
+        onQuickOption={advanceQuestion}
         options={question.options}
-        optionsHintText={question.allowCustom !== false
-          ? '推荐选项（点击填写，也可继续补充文本）'
-          : '推荐选项（本题仅可从选项中选择）'}
-        onOptionSelect={updateAnswer}
+        optionsHintText={questionPresentation.optionsHintText}
+        onOptionSelect={advanceQuestion}
         suggestions={showTextInput ? question.suggestions : undefined}
         onSuggestionSelect={updateAnswer}
         showTextInput={showTextInput}
@@ -1169,19 +1200,13 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
         limitLabel={`建议不超过 ${getAnswerLimitInfo(question.maxLength).limit ?? 500} 字，不限制生成`}
         isOverLimit={isAnswerOverLimit(answer, question.maxLength)}
         overLimitText="回答超过建议长度，仍可生成但不具备原生性。"
-        prevLabel="上一题"
-        nextButtonContent="下一题"
+        prevLabel={questionPresentation.prevLabel}
+        nextButtonContent={questionPresentation.nextButtonLabel}
         onPrev={() => navigateToQuestion(currentIndex - 1)}
-        onNext={() => {
-          if (question.required === true && !answer.trim()) {
-            setActionError('本题为必答，请填写后再继续。');
-            return;
-          }
-          setActionError(null);
-          navigateToQuestion(currentIndex + 1);
-        }}
-        disablePrev={currentIndex === 0}
-        disableNext={currentIndex >= flow.length - 1 || (question.required === true && !answer.trim())}
+        onNext={() => advanceQuestion()}
+        disablePrev={busy || currentIndex === 0}
+        disableNext={busy || (question.required === true && !answer.trim())
+          || (currentIndex === flow.length - 1 && !canGenerateNow)}
       />}
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <button className={generationSubmitClassName} disabled={!canGenerateNow} onClick={() => generate()}>
