@@ -672,11 +672,12 @@ export const applyArenaRatingsUpdateIfBothMatch = async (
   eventId?: string,
 ): Promise<'applied' | 'already-applied' | 'conflict' | 'identity-conflict' | 'event-skipped'> => {
   const [aEntity, bEntity] = entities.map(normalizeEntity) as [ArenaRatingsEntity, ArenaRatingsEntity];
-  const buildEntityCase = (column: SQL | AnyColumn, aValue: unknown, bValue: unknown): SQL =>
+  // The UPDATE's WHERE restricts rows to this exact pair. Repeating B's identity
+  // in every CASE pushes strict settlement beyond D1's 100-binding limit.
+  const buildEntityCase = (aValue: unknown, bValue: unknown): SQL =>
     sql`CASE
       WHEN ${arenaRatings.entityType} = ${aEntity.entityType} AND ${arenaRatings.entityId} = ${aEntity.entityId} THEN ${aValue}
-      WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${bValue}
-      ELSE ${column}
+      ELSE ${bValue}
     END`;
   const buildTierRankSql = (value: SQL | AnyColumn): SQL<number> =>
     sql`CASE ${value}
@@ -820,32 +821,26 @@ export const applyArenaRatingsUpdateIfBothMatch = async (
       queue === 'strict' && aSeasonNext && bSeasonNext
         ? {
             seasonPeakRating: buildEntityCase(
-              arenaRatings.seasonPeakRating,
               aSeasonNext.seasonPeakRating,
               bSeasonNext.seasonPeakRating,
             ),
             seasonPeakGames: buildEntityCase(
-              arenaRatings.seasonPeakGames,
               aSeasonNext.seasonPeakGames,
               bSeasonNext.seasonPeakGames,
             ),
             seasonPeakAt: buildEntityCase(
-              arenaRatings.seasonPeakAt,
               aSeasonNext.seasonPeakAt,
               bSeasonNext.seasonPeakAt,
             ),
             seasonLowRating: buildEntityCase(
-              arenaRatings.seasonLowRating,
               aSeasonNext.seasonLowRating,
               bSeasonNext.seasonLowRating,
             ),
             seasonLowGames: buildEntityCase(
-              arenaRatings.seasonLowGames,
               aSeasonNext.seasonLowGames,
               bSeasonNext.seasonLowGames,
             ),
             seasonLowAt: buildEntityCase(
-              arenaRatings.seasonLowAt,
               aSeasonNext.seasonLowAt,
               bSeasonNext.seasonLowAt,
             ),
@@ -854,66 +849,22 @@ export const applyArenaRatingsUpdateIfBothMatch = async (
 
     const setPayload = includeDelta
       ? {
-          rating: sql`CASE
-            WHEN ${arenaRatings.entityType} = ${aEntity.entityType} AND ${arenaRatings.entityId} = ${aEntity.entityId} THEN ${computed.aAfter.rating}
-            WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${computed.bAfter.rating}
-            ELSE ${arenaRatings.rating}
-          END`,
-          games: sql`CASE
-            WHEN ${arenaRatings.entityType} = ${aEntity.entityType} AND ${arenaRatings.entityId} = ${aEntity.entityId} THEN ${computed.aAfter.games}
-            WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${computed.bAfter.games}
-            ELSE ${arenaRatings.games}
-          END`,
-          wins: sql`CASE
-            WHEN ${arenaRatings.entityType} = ${aEntity.entityType} AND ${arenaRatings.entityId} = ${aEntity.entityId} THEN ${computed.aAfter.wins}
-            WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${computed.bAfter.wins}
-            ELSE ${arenaRatings.wins}
-          END`,
-          losses: sql`CASE
-            WHEN ${arenaRatings.entityType} = ${aEntity.entityType} AND ${arenaRatings.entityId} = ${aEntity.entityId} THEN ${computed.aAfter.losses}
-            WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${computed.bAfter.losses}
-            ELSE ${arenaRatings.losses}
-          END`,
-          draws: sql`CASE
-            WHEN ${arenaRatings.entityType} = ${aEntity.entityType} AND ${arenaRatings.entityId} = ${aEntity.entityId} THEN ${computed.aAfter.draws}
-            WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${computed.bAfter.draws}
-            ELSE ${arenaRatings.draws}
-          END`,
-          lastDelta: sql`CASE
-            WHEN ${arenaRatings.entityType} = ${aEntity.entityType} AND ${arenaRatings.entityId} = ${aEntity.entityId} THEN ${computed.deltaA}
-            WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${computed.deltaB}
-            ELSE ${arenaRatings.lastDelta}
-          END`,
+          rating: buildEntityCase(computed.aAfter.rating, computed.bAfter.rating),
+          games: buildEntityCase(computed.aAfter.games, computed.bAfter.games),
+          wins: buildEntityCase(computed.aAfter.wins, computed.bAfter.wins),
+          losses: buildEntityCase(computed.aAfter.losses, computed.bAfter.losses),
+          draws: buildEntityCase(computed.aAfter.draws, computed.bAfter.draws),
+          lastDelta: buildEntityCase(computed.deltaA, computed.deltaB),
           ...seasonPayload,
           lastAppliedAt: appliedAtIso,
           updatedAt: appliedAtIso,
         }
       : {
-          rating: sql`CASE
-            WHEN ${arenaRatings.entityType} = ${aEntity.entityType} AND ${arenaRatings.entityId} = ${aEntity.entityId} THEN ${computed.aAfter.rating}
-            WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${computed.bAfter.rating}
-            ELSE ${arenaRatings.rating}
-          END`,
-          games: sql`CASE
-            WHEN ${arenaRatings.entityType} = ${aEntity.entityType} AND ${arenaRatings.entityId} = ${aEntity.entityId} THEN ${computed.aAfter.games}
-            WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${computed.bAfter.games}
-            ELSE ${arenaRatings.games}
-          END`,
-          wins: sql`CASE
-            WHEN ${arenaRatings.entityType} = ${aEntity.entityType} AND ${arenaRatings.entityId} = ${aEntity.entityId} THEN ${computed.aAfter.wins}
-            WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${computed.bAfter.wins}
-            ELSE ${arenaRatings.wins}
-          END`,
-          losses: sql`CASE
-            WHEN ${arenaRatings.entityType} = ${aEntity.entityType} AND ${arenaRatings.entityId} = ${aEntity.entityId} THEN ${computed.aAfter.losses}
-            WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${computed.bAfter.losses}
-            ELSE ${arenaRatings.losses}
-          END`,
-          draws: sql`CASE
-            WHEN ${arenaRatings.entityType} = ${aEntity.entityType} AND ${arenaRatings.entityId} = ${aEntity.entityId} THEN ${computed.aAfter.draws}
-            WHEN ${arenaRatings.entityType} = ${bEntity.entityType} AND ${arenaRatings.entityId} = ${bEntity.entityId} THEN ${computed.bAfter.draws}
-            ELSE ${arenaRatings.draws}
-          END`,
+          rating: buildEntityCase(computed.aAfter.rating, computed.bAfter.rating),
+          games: buildEntityCase(computed.aAfter.games, computed.bAfter.games),
+          wins: buildEntityCase(computed.aAfter.wins, computed.bAfter.wins),
+          losses: buildEntityCase(computed.aAfter.losses, computed.bAfter.losses),
+          draws: buildEntityCase(computed.aAfter.draws, computed.bAfter.draws),
           ...seasonPayload,
           updatedAt: appliedAtIso,
         };
