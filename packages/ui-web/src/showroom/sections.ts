@@ -41,7 +41,7 @@ export const SHOWROOM_SECTIONS: readonly ShowroomSectionMeta[] = [
   {
     id: 'controls',
     title: '操作控件',
-    summary: '生成操作三档（primary/secondary/destructive）与禁用态。',
+    summary: '生成操作三档（primary/secondary/destructive）与禁用态；问卷生产导航的上一题/下一题、必答、提交中及蓝色主题。',
   },
   {
     id: 'forms',

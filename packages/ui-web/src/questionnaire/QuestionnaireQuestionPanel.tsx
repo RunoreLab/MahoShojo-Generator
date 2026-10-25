@@ -149,8 +149,6 @@ export function QuestionnaireQuestionPanel({
   onNext,
   disablePrev,
   disableNext,
-  prevButtonClass,
-  nextButtonClass,
 }: QuestionnaireQuestionPanelProps) {
   const safeQuestion = questionText?.trim() ? questionText : '未加载题目';
   const quickOptionList = (quickOptions ?? []).filter(Boolean);
@@ -275,8 +273,6 @@ export function QuestionnaireQuestionPanel({
         onNext={onNext}
         disablePrev={disablePrev}
         disableNext={disableNext}
-        prevButtonClass={prevButtonClass}
-        nextButtonClass={nextButtonClass}
       />
     </>
   );

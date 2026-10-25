@@ -8,25 +8,20 @@ export interface QuestionnaireNavigationActionsProps {
   onNext: () => void;
   disablePrev?: boolean;
   disableNext?: boolean;
-  /** 旧 Creator 入口兼容；Details/Canshou 使用共享默认样式。 */
-  prevButtonClass?: string;
-  nextButtonClass?: string;
 }
 
 export function QuestionnaireNavigationActions({
   prevLabel, nextButtonContent, onPrev, onNext, disablePrev, disableNext,
-  prevButtonClass, nextButtonClass,
 }: QuestionnaireNavigationActionsProps) {
-  const hasLegacyClasses = Boolean(prevButtonClass || nextButtonClass);
   return (
-    <div className={hasLegacyClasses ? 'mt-4 flex flex-col sm:flex-row gap-2' : 'ui-web-questionnaire-navigation'} role="group" aria-label="问卷翻页操作">
+    <div className="ui-web-questionnaire-navigation" role="group" aria-label="问卷翻页操作">
       <button type="button"
-        className={prevButtonClass ?? 'ui-web-questionnaire-step-button ui-web-questionnaire-step-button--previous'}
+        className="ui-web-questionnaire-step-button ui-web-questionnaire-step-button--previous"
         onClick={onPrev} disabled={disablePrev}>
         {prevLabel}
       </button>
       <button type="button"
-        className={nextButtonClass ?? 'ui-web-questionnaire-step-button'}
+        className="ui-web-questionnaire-step-button"
         onClick={onNext} disabled={disableNext}>
         {nextButtonContent}
       </button>

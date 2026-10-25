@@ -377,6 +377,73 @@ describe('Desktop /creator workbench (native adapter mock)', () => {
     expect(mocks.execute).not.toHaveBeenCalled();
   });
 
+  it.each(['next', 'number', 'select', 'review'] as const)('keeps explicit %s navigation on its destination instead of restoring the old question key', async (entry) => {
+    window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft()));
+    await mount();
+    const answer = () => container.querySelector<HTMLTextAreaElement>('.ui-web-questionnaire-answer-input')!;
+    expect(answer().value).toBe('善良');
+    if (entry === 'next') await click('下一题');
+    if (entry === 'number') await click('2');
+    if (entry === 'select') {
+      const select = container.querySelector<HTMLSelectElement>('#question-navigator-select')!;
+      await act(async () => { select.value = select.options[1]!.value; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    }
+    if (entry === 'review') {
+      await clickText('答案概览');
+      const edit = [...container.querySelectorAll('button')].filter(item => item.textContent === '编辑此题')[1]!;
+      await act(async () => edit.click());
+    }
+    await settle();
+    expect(answer().getAttribute('aria-label')).toBe(questionnaire.questions[1].question);
+    await act(async () => setNativeValue(answer(), '第二题回答'));
+    await click('上一题');
+    expect(answer().getAttribute('aria-label')).toBe(questionnaire.questions[0].question);
+    expect(answer().value).toBe('善良');
+    await click('下一题');
+    expect(answer().value).toBe('第二题回答');
+    const stored = JSON.parse(window.localStorage.getItem(CREATOR_DRAFT_KEY)!);
+    expect(stored.answers[`${selection.selectionId}::${questionnaire.questions[0].id}`]).toBe('善良');
+    expect(stored.answers[`${selection.selectionId}::${questionnaire.questions[1].id}`]).toBe('第二题回答');
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it('preserves the current question through conditional flow changes and keeps required/final gates without generating', async () => {
+    const custom = {
+      ...questionnaire, id: 'conditional', questions: [
+        { id: 'conditional-first', question: '条件前置题', displayIf: { questionId: 'choice', operator: 'equals', value: '展开' } },
+        { id: 'choice', question: '必答选择题', required: true, allowCustom: false, options: ['展开', '隐藏'] },
+        { id: 'last', question: '独立生成前末题' },
+      ],
+    };
+    window.localStorage.setItem(CREATOR_DRAFT_KEY, JSON.stringify(draft({
+      answers: {}, questionnaireSelections: [{ ...selection, selectionId: 'preset:conditional', questionnaire: custom }],
+    })));
+    await mount();
+    if (button('开始回答问卷')) await click('开始回答问卷');
+    const question = () => container.querySelector('h3.text-xl')?.textContent;
+    expect(question()).toBe('必答选择题');
+    expect(button('下一题').disabled).toBe(true);
+    await click('下一题');
+    await click('展开');
+    expect(question()).toBe('必答选择题');
+    expect(button('下一题').disabled).toBe(false);
+    expect(container.textContent).toContain('问题 2 / 3');
+    const next = button('下一题');
+    await act(async () => { next.click(); next.click(); });
+    await settle();
+    expect(question()).toBe('独立生成前末题');
+    expect(button('下一题').disabled).toBe(true);
+    await click('上一题'); await click('隐藏');
+    expect(question()).toBe('必答选择题');
+    expect(container.textContent).toContain('问题 1 / 2');
+    await click('下一题');
+    expect(question()).toBe('独立生成前末题');
+    expect(JSON.parse(window.localStorage.getItem(CREATOR_DRAFT_KEY)!).answers['preset:conditional::choice']).toBe('隐藏');
+    expect(mocks.execute).not.toHaveBeenCalled();
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
   it('injects the default preset on a fresh mount, then walks intro → questionnaire → direct generate → save', async () => {
     await mount();
     // 进页面即注入默认选择并落盘（残余草稿语义：非空选择集但无用户内容）。

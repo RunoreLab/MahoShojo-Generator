@@ -20,6 +20,7 @@ import { ImageGenerationFeedback, ImageGenerationResultView } from '../image-gen
 import type { HomeAssetSource } from '../home/feature-catalog';
 import { BaseModal } from '../modal';
 import { ProductFooter } from '../shell';
+import { QuestionnaireNavigationActions } from '../questionnaire';
 import { ScenarioResultContent } from '../scenario';
 import { SHOWROOM_MAGICAL_GIRL } from './fixtures';
 import { LocalImagesSample } from './LocalImagesSample';
@@ -208,8 +209,32 @@ function ScalesSection() {
   );
 }
 
+function QuestionnaireNavigationSample() {
+  const [index, setIndex] = useState(0);
+  const [answer, setAnswer] = useState('');
+  const [busy, setBusy] = useState(false);
+  return <section className={`${PANEL_CLASS} min-w-0`} aria-label="问卷翻页操作样板">
+    <h3 className="text-sm font-semibold">问卷导航：三类问卷、双端共用生产组件</h3>
+    <p role="status" className="mt-2 text-sm text-(--app-text-muted)">问题 {index + 1} / 2；第二题必答。样板不会生成或保存内容。</p>
+    <label className="input-group mt-3">
+      <span className="input-label">第二题答案</span>
+      <input aria-label="第二题答案" className="input-field" value={answer} onChange={event => setAnswer(event.target.value)} disabled={busy} />
+    </label>
+    <label className="flex items-center gap-2 text-sm">
+      <input aria-label="模拟操作中" type="checkbox" checked={busy} onChange={event => setBusy(event.target.checked)} />模拟操作中
+    </label>
+    <QuestionnaireNavigationActions prevLabel="上一题" nextButtonContent={busy ? '提交中...' : index === 0 ? '下一题' : '提交'}
+      disablePrev={busy || index === 0} disableNext={busy || (index === 1 && !answer.trim())}
+      onPrev={() => setIndex(0)} onNext={() => setIndex(index === 0 ? 1 : 0)} />
+    <div className="blue-theme">
+      <QuestionnaireNavigationActions prevLabel="返回上题" nextButtonContent="跳过并提交"
+        disablePrev disableNext onPrev={() => {}} onNext={() => {}} />
+    </div>
+  </section>;
+}
+
 function ControlsSection() {
-  return (
+  return <div className="flex flex-col gap-4">
     <div className={`${PANEL_CLASS} flex flex-wrap items-center gap-3`}>
       <button type="button" className={generationActionClassNames.primary}>主操作</button>
       <button type="button" className={generationActionClassNames.secondary}>次要操作</button>
@@ -217,7 +242,8 @@ function ControlsSection() {
       <button type="button" className={generationActionClassNames.primary} disabled>禁用主操作</button>
       <button type="button" className={generationActionClassNames.secondary} disabled>禁用次要操作</button>
     </div>
-  );
+    <QuestionnaireNavigationSample />
+  </div>;
 }
 
 function FormsSection() {

@@ -8,6 +8,8 @@ test.each([
   '../apps/web/components/creation/CanshouPage.tsx',
   '../apps/desktop/src/app/details-page.tsx',
   '../apps/desktop/src/app/canshou-page.tsx',
+  '../apps/web/components/creation/CreatorPage.tsx',
+  '../apps/desktop/src/app/creator-page.tsx',
 ])('%s consumes the shared navigation without host style overrides', (path) => {
   const source = read(path);
   expect(source).toContain('QuestionnaireQuestionPanel');

@@ -199,3 +199,25 @@ it('copies the complete fixture through the production result button only after 
     expect(sample.querySelector('[role=status]')?.textContent).toBe('完整结果 JSON 已复制到剪贴板');
   } finally { vi.unstubAllGlobals(); }
 });
+
+it('renders the production questionnaire navigation with required and busy states', () => {
+  act(() => root.render(<ShowroomView />));
+  const sample = container.querySelector('[aria-label="问卷翻页操作样板"]')!;
+  const actions = sample.querySelector('.ui-web-questionnaire-navigation')!;
+  const [prev, next] = [...actions.querySelectorAll('button')];
+  expect(prev.disabled).toBe(true);
+  expect(next.disabled).toBe(false);
+  act(() => next.click());
+  expect(sample.querySelector('[role="status"]')?.textContent).toContain('问题 2 / 2');
+  expect(next.disabled).toBe(true);
+  const input = sample.querySelector<HTMLInputElement>('input:not([type="checkbox"])')!;
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '示例回答');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  expect(next.disabled).toBe(false);
+  act(() => sample.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
+  expect(prev.disabled).toBe(true); expect(next.disabled).toBe(true);
+  expect(next.textContent).toBe('提交中...');
+  expect(sample.querySelectorAll('.blue-theme .ui-web-questionnaire-step-button:disabled')).toHaveLength(2);
+});

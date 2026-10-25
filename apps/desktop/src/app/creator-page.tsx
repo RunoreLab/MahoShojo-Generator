@@ -439,6 +439,7 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
           selections: [...selections],
           replacementSelection: replacement,
         }));
+        currentQuestionKeyRef.current = null;
         setQuestionIndex(0);
       })
       .catch(() => {
@@ -463,6 +464,7 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
     const next = reconcileQuestionnaireSelectionsForSingleMode(selections);
     if (!next) return;
     updateSelections([...next]);
+    currentQuestionKeyRef.current = null;
     setQuestionIndex(0);
   }, [allowMultiple, selections, updateSelections]);
 
@@ -571,6 +573,14 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
   useEffect(() => () => revokeBlobUrl(savedImageUrl), [savedImageUrl]);
 
   const currentIndex = Math.min(questionIndex, Math.max(0, flow.length - 1));
+  // 显式翻页必须同时移动锚点；否则流程对账 effect 会按旧 key 把页码拉回。
+  // 与 Web Creator 的上一题/题号跳转同口径，条件流变更仍按稳定 key 保留当前题。
+  const navigateToQuestion = (index: number) => {
+    const item = flow[index];
+    if (!item) return;
+    currentQuestionKeyRef.current = item.key;
+    setQuestionIndex(index);
+  };
   const flowItem = flow[currentIndex];
   const question = flowItem?.question;
   const answer = flowItem ? answersByKey[flowItem.key] ?? '' : '';
@@ -1086,7 +1096,7 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
         theme="app"
         items={flow.map((item) => ({ id: item.key, label: item.question.question }))}
         currentIndex={currentIndex}
-        onNavigate={setQuestionIndex}
+        onNavigate={navigateToQuestion}
         isAnswered={(index) => Boolean(answersByKey[flow[index]!.key]?.trim())}
       />}
       {!blockedDraft && flow.length > 0 && <BulkAnswerTools
@@ -1116,7 +1126,7 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
           questionnaireTitle: item.questionnaireTitle,
           answer: answersByKey[item.key] ?? '',
         }))}
-        onEdit={setQuestionIndex}
+        onEdit={navigateToQuestion}
       />}
       <QuestionnaireAnswerExportPanel
         variant="app"
@@ -1161,19 +1171,17 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
         overLimitText="回答超过建议长度，仍可生成但不具备原生性。"
         prevLabel="上一题"
         nextButtonContent="下一题"
-        onPrev={() => setQuestionIndex((index) => Math.max(0, index - 1))}
+        onPrev={() => navigateToQuestion(currentIndex - 1)}
         onNext={() => {
           if (question.required === true && !answer.trim()) {
             setActionError('本题为必答，请填写后再继续。');
             return;
           }
           setActionError(null);
-          setQuestionIndex((index) => Math.min(flow.length - 1, index + 1));
+          navigateToQuestion(currentIndex + 1);
         }}
         disablePrev={currentIndex === 0}
-        disableNext={currentIndex >= flow.length - 1}
-        prevButtonClass={actionClass}
-        nextButtonClass={actionClass}
+        disableNext={currentIndex >= flow.length - 1 || (question.required === true && !answer.trim())}
       />}
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <button className={generationSubmitClassName} disabled={!canGenerateNow} onClick={() => generate()}>
@@ -1336,6 +1344,7 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
                 if (session.getSnapshot().draftError) return;
                 previousTargetsRef.current = null;
                 previousSignatureRef.current = null;
+                currentQuestionKeyRef.current = null;
                 setConfirmClear(false); setQuestionIndex(0); setShowIntroduction(true); setSelectionReady(false); setProvisionalDefault(null);
               }}>确认清除</button>
               <button className={actionClass} onClick={() => setConfirmClear(false)}>保留草稿</button>
