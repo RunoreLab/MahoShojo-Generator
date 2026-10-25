@@ -717,7 +717,7 @@ export const applyArenaRatingsUpdateIfBothMatch = async (
         ),
       );
 
-  const readEventDisposition = async (): Promise<'pending' | 'applied' | 'event-skipped'> => {
+  const readEventDisposition = async (requireUnambiguousAfterState = false): Promise<'pending' | 'applied' | 'event-skipped'> => {
     if (identityGuards === undefined) return 'pending';
     if (!eventId) throw new Error('ARENA_RATING_EVENT_SETTLEMENT_RETRY');
     const events = await db.select({ status: arenaRatingEvents.status, queue: arenaRatingEvents.queue,
@@ -741,6 +741,27 @@ export const applyArenaRatingsUpdateIfBothMatch = async (
       || event.bAfterRating !== computed.bAfter.rating || event.bAfterGames !== computed.bAfter.games
       || event.aDelta !== computed.deltaA || event.bDelta !== computed.deltaB) {
       throw new Error('ARENA_RATING_EVENT_SETTLEMENT_RETRY');
+    }
+    if (requireUnambiguousAfterState) {
+      // Several failed settlements can share the same before/after snapshots.
+      // Numeric equality cannot attribute a write when another event can own it.
+      const matchesSide = (reversed: boolean) => and(
+        eq(arenaRatingEvents.aEntityType, reversed ? bEntity.entityType : aEntity.entityType),
+        eq(arenaRatingEvents.aEntityId, reversed ? bEntity.entityId : aEntity.entityId),
+        eq(arenaRatingEvents.aAfterRating, reversed ? computed.bAfter.rating : computed.aAfter.rating),
+        eq(arenaRatingEvents.aAfterGames, reversed ? computed.bAfter.games : computed.aAfter.games),
+        eq(arenaRatingEvents.bEntityType, reversed ? aEntity.entityType : bEntity.entityType),
+        eq(arenaRatingEvents.bEntityId, reversed ? aEntity.entityId : bEntity.entityId),
+        eq(arenaRatingEvents.bAfterRating, reversed ? computed.aAfter.rating : computed.bAfter.rating),
+        eq(arenaRatingEvents.bAfterGames, reversed ? computed.aAfter.games : computed.bAfter.games),
+      );
+      const competing = await db.select({ id: arenaRatingEvents.id }).from(arenaRatingEvents).where(and(
+        sql`${arenaRatingEvents.id} <> ${eventId}`,
+        eq(arenaRatingEvents.queue, queue),
+        inArray(arenaRatingEvents.status, ['pending', 'applied']),
+        or(matchesSide(false), matchesSide(true)),
+      )).limit(1);
+      if (competing.length) throw new Error('ARENA_RATING_EVENT_SETTLEMENT_RETRY');
     }
     return 'pending';
   };
@@ -804,7 +825,7 @@ export const applyArenaRatingsUpdateIfBothMatch = async (
       bRating === computed.bAfter.rating &&
       bGames === computed.bAfter.games
     ) {
-      const disposition = await readEventDisposition();
+      const disposition = await readEventDisposition(true);
       return disposition === 'event-skipped' ? 'event-skipped' : 'already-applied';
     }
 
@@ -937,7 +958,7 @@ export const applyArenaRatingsUpdateIfBothMatch = async (
       bAfterRating === computed.bAfter.rating &&
       bAfterGames === computed.bAfter.games
     ) {
-      const disposition = await readEventDisposition();
+      const disposition = await readEventDisposition(true);
       return disposition === 'event-skipped' ? 'event-skipped' : 'already-applied';
     }
 

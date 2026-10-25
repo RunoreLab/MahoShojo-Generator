@@ -19,7 +19,7 @@ const computed = { aBefore: initial, bBefore: initial,
 const entities = [{ entityType: 'data_card' as const, entityId: 'a' }, { entityType: 'data_card' as const, entityId: 'b' }] as const;
 
 describe('rating source guards execute atomically in SQLite', () => {
-  it.each(['none', 'mixed-entity-types', 'legacy-no-delta', 'body-same-timestamp', 'version', 'private', 'unapproved', 'deleted', 'reconcile-before', 'reconcile-after', 'free-owner', 'free-owner-changed', 'skip-first', 'apply-first', 'skipped-after', 'applied-conflict', 'skipped-conflict', 'computed-mismatch-after'] as const)('both or neither rating updates: %s', async (change) => {
+  it.each(['none', 'mixed-entity-types', 'legacy-no-delta', 'body-same-timestamp', 'version', 'private', 'unapproved', 'deleted', 'reconcile-before', 'reconcile-after', 'shared-after-applied', 'shared-after-pending', 'shared-after-reversed', 'unrelated-after', 'free-owner', 'free-owner-changed', 'skip-first', 'apply-first', 'skipped-after', 'applied-conflict', 'skipped-conflict', 'computed-mismatch-after'] as const)('both or neither rating updates: %s', async (change) => {
     const sqlite = new DatabaseSync(':memory:');
     try {
       sqlite.exec(`
@@ -51,7 +51,13 @@ INSERT INTO arena_ratings(entity_type,entity_id,queue,rating,games,wins,losses,d
       }
       if (change === 'computed-mismatch-after') sqlite.exec("UPDATE arena_rating_events SET a_delta=999");
       if (change === 'skipped-after') sqlite.exec("UPDATE arena_rating_events SET status='skipped'");
-      if (change === 'reconcile-after' || change === 'skipped-after' || change === 'computed-mismatch-after') sqlite.exec("UPDATE arena_ratings SET rating=CASE entity_id WHEN 'a' THEN 1020 ELSE 980 END, games=1, wins=CASE entity_id WHEN 'a' THEN 1 ELSE 0 END, losses=CASE entity_id WHEN 'b' THEN 1 ELSE 0 END");
+      if (change === 'reconcile-after' || change === 'skipped-after' || change === 'computed-mismatch-after' || change.startsWith('shared-after-') || change === 'unrelated-after') sqlite.exec("UPDATE arena_ratings SET rating=CASE entity_id WHEN 'a' THEN 1020 ELSE 980 END, games=1, wins=CASE entity_id WHEN 'a' THEN 1 ELSE 0 END, losses=CASE entity_id WHEN 'b' THEN 1 ELSE 0 END");
+      if (change.startsWith('shared-after-') || change === 'unrelated-after') {
+        sqlite.exec("INSERT INTO arena_rating_events SELECT 'peer',queue,'applied',NULL,'earlier',a_entity_type,a_entity_id,b_entity_type,b_entity_id,a_before_rating,a_before_games,a_after_rating,a_after_games,b_before_rating,b_before_games,b_after_rating,b_after_games,a_delta,b_delta FROM arena_rating_events WHERE id='event'");
+        if (change === 'shared-after-pending') sqlite.exec("UPDATE arena_rating_events SET status='pending',applied_at=NULL WHERE id='peer'");
+        if (change === 'shared-after-reversed') sqlite.exec("UPDATE arena_rating_events SET a_entity_id='b',b_entity_id='a',a_after_rating=980,b_after_rating=1020,a_delta=-20,b_delta=20 WHERE id='peer'");
+        if (change === 'unrelated-after') sqlite.exec("UPDATE arena_rating_events SET b_entity_id='unrelated' WHERE id='peer'");
+      }
       sqlite.exec("INSERT INTO arena_ratings(entity_type,entity_id,queue,rating,games,wins,losses,draws) VALUES('data_card','outside','strict',1600,9,5,3,1),('data_card','a','other',1700,10,6,3,1)");
       const guards = sqlite.prepare(`SELECT id, data, updated_at AS updatedAt FROM data_cards ${change === 'mixed-entity-types' ? "WHERE id='a'" : ''} ORDER BY id`).all()
         .map((row) => ({ id: row.id as string, data: row.data as string, updatedAt: row.updatedAt as string, authorizedUserId: 42 }));
@@ -79,7 +85,7 @@ INSERT INTO arena_ratings(entity_type,entity_id,queue,rating,games,wins,losses,d
       if (change === 'skip-first') {
         expect(await markArenaRatingEventStatus(typedDb, 'event', 'skipped', { skipReason: 'entity-reference-unavailable' })).toBe(true);
       }
-      if (change === 'computed-mismatch-after') {
+      if (change === 'computed-mismatch-after' || change.startsWith('shared-after-')) {
         await expect(applyArenaRatingsUpdateIfBothMatch(typedDb, queue, [...entities], computed, 'now', null, 'event'))
           .rejects.toThrow('ARENA_RATING_EVENT_SETTLEMENT_RETRY');
         expect(updates).toHaveLength(0);
@@ -90,11 +96,11 @@ INSERT INTO arena_ratings(entity_type,entity_id,queue,rating,games,wins,losses,d
         db as unknown as Parameters<typeof applyArenaRatingsUpdateIfBothMatch>[0], queue, pair, computed, 'now', change.startsWith('reconcile-') ? null : guards, 'event',
       );
       const newlyApplied = ['none', 'mixed-entity-types', 'legacy-no-delta', 'free-owner', 'apply-first'].includes(change);
-      expect(result).toBe(change === 'skip-first' || change === 'skipped-after' || change === 'skipped-conflict' ? 'event-skipped' : newlyApplied ? 'applied' : change === 'reconcile-after' || change === 'applied-conflict' ? 'already-applied' : 'identity-conflict');
-      expect(updates).toHaveLength(change === 'reconcile-after' || change === 'skipped-after' || change.endsWith('-conflict') ? 0 : change === 'legacy-no-delta' ? 2 : 1);
+      expect(result).toBe(change === 'skip-first' || change === 'skipped-after' || change === 'skipped-conflict' ? 'event-skipped' : newlyApplied ? 'applied' : change === 'reconcile-after' || change === 'unrelated-after' || change === 'applied-conflict' ? 'already-applied' : 'identity-conflict');
+      expect(updates).toHaveLength(change === 'reconcile-after' || change === 'unrelated-after' || change === 'skipped-after' || change.endsWith('-conflict') ? 0 : change === 'legacy-no-delta' ? 2 : 1);
       if (updates.length && !change.startsWith('reconcile-')) expect((updates[0].match(/EXISTS/g) ?? []).length).toBe(1 + guards.length);
       const rows = sqlite.prepare("SELECT * FROM arena_ratings WHERE queue=? AND entity_id<>'outside' ORDER BY entity_id,entity_type").all(queue);
-      expect(rows.map((row) => [row.rating, row.games, row.wins, row.losses, row.draws])).toEqual(change.endsWith('-conflict') ? [[1500, 5, 0, 0, 0], [1500, 5, 0, 0, 0]] : newlyApplied || change === 'reconcile-after' || change === 'skipped-after' ? [[1020, 1, 1, 0, 0], [980, 1, 0, 1, 0]] : [[1000, 0, 0, 0, 0], [1000, 0, 0, 0, 0]]);
+      expect(rows.map((row) => [row.rating, row.games, row.wins, row.losses, row.draws])).toEqual(change.endsWith('-conflict') ? [[1500, 5, 0, 0, 0], [1500, 5, 0, 0, 0]] : newlyApplied || change === 'reconcile-after' || change === 'unrelated-after' || change === 'skipped-after' ? [[1020, 1, 1, 0, 0], [980, 1, 0, 1, 0]] : [[1000, 0, 0, 0, 0], [1000, 0, 0, 0, 0]]);
       expect(sqlite.prepare("SELECT rating,games FROM arena_ratings WHERE entity_id='outside' OR queue='other' ORDER BY queue").all())
         .toEqual([{ rating: 1700, games: 10 }, { rating: 1600, games: 9 }]);
       if (newlyApplied) {
