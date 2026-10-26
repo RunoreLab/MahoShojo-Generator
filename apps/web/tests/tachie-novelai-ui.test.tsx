@@ -99,6 +99,34 @@ it('同 owner 编辑提示词后恢复原任务，保留原请求与首次提交
   expect(editedResult).not.toHaveBeenCalled(); expect(editedImage).not.toHaveBeenCalled();
 });
 
+it.each([
+  ['928x1664', '928x1664'], [' 928x1664 ', '1328x1328'], [928, '1328x1328'],
+])('ModelScope 恢复尺寸严格匹配，生成期间尺寸禁用：%j', async (modelscopeSize, expectedSize) => {
+  localStorage.setItem('tachie_credentials', JSON.stringify({
+    source: 'modelscope', modelscopeToken: 'old-token', modelscopeSize, modelscopeModel: ' custom/saved ',
+  }));
+  const fetchMock = vi.fn().mockImplementation((_url, init) => new Promise((_resolve, reject) => {
+    init.signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+  }));
+  vi.stubGlobal('fetch', fetchMock);
+  await act(async () => root.render(<TachieGenerator prompt="角色外观" />));
+  const size = container.querySelector<HTMLSelectElement>('#modelscopeSize')!;
+  expect(size.value).toBe(expectedSize);
+  expect([...size.options].map(option => option.text)).toEqual([
+    '16:9 竖屏（928×1664）', '16:9 横屏（1664×928）', '正方形（1328×1328）',
+    '4:3 竖屏（1104×1472）', '4:3 横屏（1472×1104）',
+  ]);
+  expect(size.disabled).toBe(false);
+  await act(async () => button('使用 ModelScope').click());
+  expect(size.disabled).toBe(true);
+  expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({
+    modelscopeModel: 'custom/saved', modelscopeSize: expectedSize,
+  });
+  await act(async () => button('停止等待').click());
+  expect(size.disabled).toBe(false);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
 it('默认简单模式；自定义参数仅在开启时生效，切回简单模式恢复默认请求', async () => {
   const defaultNegative = 'lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page';
   const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({

@@ -30,6 +30,46 @@ describe('Web image adapter and shared lifecycle', () => {
     expect(clientCalls).toHaveLength(2);
     expect(clientCalls.map(([, init]) => init?.method)).toEqual(['POST', 'POST']);
     expect(JSON.parse(clientCalls[1][1]!.body as string)).toEqual({ source: 'modelscope', modelscopeToken: 'user-token', generateUuid: 'job-1' });
+    const upstreamCreate = fetchMock.mock.calls.find(([url]) => url.endsWith('/images/generations'))!;
+    expect(JSON.parse(upstreamCreate[1]!.body as string)).toEqual({
+      model: 'Stonego/XiabanmostyleV3', prompt: '角色外观', size: '1328x1328',
+    });
+  });
+
+  it.each([
+    ...['928x1664', '1664x928', '1328x1328', '1104x1472', '1472x1104']
+      .flatMap(size => [[size, size], [` \t${size}\n `, size]]),
+    ...[undefined, null, 1328, true, {}, ['928x1664'], '', '1024x1024', '928X1664', '928×1664']
+      .map(size => [size, '1328x1328']),
+  ])('真实 handler 保留尺寸的 HTTP trim 与 fallback：%j', async (modelscopeSize, expectedSize) => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ task_id: 'size-job' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const response = await generateHandler(new Request('https://example.test/api/tachie/generate', {
+      method: 'POST', body: JSON.stringify({ source: 'modelscope', prompt: '角色外观', modelscopeToken: 'token', modelscopeSize }),
+    }));
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      model: 'Stonego/XiabanmostyleV3', prompt: '角色外观', size: expectedSize,
+    });
+  });
+
+  it.each([
+    [undefined, 'Stonego/XiabanmostyleV3'], [null, 'Stonego/XiabanmostyleV3'],
+    [42, 'Stonego/XiabanmostyleV3'], [[], 'Stonego/XiabanmostyleV3'],
+    ['', 'Stonego/XiabanmostyleV3'], [' \t\n ', 'Stonego/XiabanmostyleV3'],
+    [' \tcustom/model\n ', 'custom/model'],
+  ])('真实 handler 保留模型的 HTTP trim 与默认值：%j', async (modelscopeModel, expectedModel) => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ task_id: 'model-job' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const response = await generateHandler(new Request('https://example.test/api/tachie/generate', {
+      method: 'POST', body: JSON.stringify({ source: 'modelscope', prompt: '角色外观', modelscopeToken: 'token', modelscopeModel }),
+    }));
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      model: expectedModel, prompt: '角色外观', size: '1328x1328',
+    });
   });
 
   it('LibLib 保留工作流参数、seed=0，查询异常保留 ID，恢复只查询', async () => {

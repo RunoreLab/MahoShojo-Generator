@@ -1,27 +1,20 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import {
+  DEFAULT_MODELSCOPE_MODEL,
+  DEFAULT_MODELSCOPE_SIZE,
+  MODELSCOPE_SIZE_OPTIONS,
+  isModelScopePresetSize,
+  type ModelScopePresetSize,
+} from '@mahoshojo/ai-core/modelscope';
 import { generateTachieWithProgress, type TachieGenerationRequest, type TachieGenerationResult, type TachieSource } from "@/lib/tachie/manager";
 import { ImageGenerationFeedback, ImageGenerationResultView } from '@mahoshojo/ui-web/image-generation';
 import { normalizeModelScopeToken } from "@/lib/tachie/modelscope/error";
 import { DEFAULT_NOVELAI_SETTINGS, normalizeNovelAIToken } from '@/lib/tachie/novelai';
 import { NovelAISettingsFields } from '@/components/tachie/NovelAISettings';
 
-const MODELSCOPE_SIZE_OPTIONS = [
-  { value: "928x1664", label: "16:9 竖屏（928×1664）" },
-  { value: "1664x928", label: "16:9 横屏（1664×928）" },
-  { value: "1328x1328", label: "正方形（1328×1328）" },
-  { value: "1104x1472", label: "4:3 竖屏（1104×1472）" },
-  { value: "1472x1104", label: "4:3 横屏（1472×1104）" },
-] as const;
-
-type ModelScopePresetSize = (typeof MODELSCOPE_SIZE_OPTIONS)[number]["value"];
-
-const DEFAULT_MODELSCOPE_SIZE: ModelScopePresetSize = "1328x1328";
 const NOVELAI_TOKEN_KEY = 'tachie_novelai_token';
-
-const isModelScopePresetSize = (value: unknown): value is ModelScopePresetSize =>
-  typeof value === "string" && MODELSCOPE_SIZE_OPTIONS.some((option) => option.value === value);
 
 interface TachieGeneratorProps {
   prompt: string;
@@ -59,7 +52,7 @@ export default function TachieGenerator({
   const [accessKey, setAccessKey] = useState("");
   const [secretKey, setSecretKey] = useState("");
   const [modelscopeToken, setModelscopeToken] = useState("");
-  const [modelscopeModel, setModelscopeModel] = useState("Stonego/XiabanmostyleV3");
+  const [modelscopeModel, setModelscopeModel] = useState(DEFAULT_MODELSCOPE_MODEL);
   const [modelscopeSize, setModelscopeSize] = useState<ModelScopePresetSize>(DEFAULT_MODELSCOPE_SIZE);
   const [novelaiToken, setNovelaiToken] = useState('');
   const [novelaiStorageError, setNovelaiStorageError] = useState('');
@@ -131,7 +124,7 @@ export default function TachieGenerator({
             setModelscopeModel(
               typeof parsed.modelscopeModel === 'string' && parsed.modelscopeModel.trim()
                 ? parsed.modelscopeModel
-                : 'Stonego/XiabanmostyleV3'
+                : DEFAULT_MODELSCOPE_MODEL
             );
             setModelscopeSize(isModelScopePresetSize(parsed.modelscopeSize) ? parsed.modelscopeSize : DEFAULT_MODELSCOPE_SIZE);
           } catch (error) {
@@ -152,7 +145,7 @@ export default function TachieGenerator({
           accessKey: accessKey.trim(),
           secretKey: secretKey.trim(),
           modelscopeToken: normalizedModelScopeToken,
-          modelscopeModel: modelscopeModel.trim() || 'Stonego/XiabanmostyleV3',
+          modelscopeModel: modelscopeModel.trim() || DEFAULT_MODELSCOPE_MODEL,
           modelscopeSize,
         }));
         localStorage.setItem(REMEMBER_KEY, 'true');
@@ -173,7 +166,7 @@ export default function TachieGenerator({
       setAccessKey('');
       setSecretKey('');
       setModelscopeToken('');
-      setModelscopeModel('Stonego/XiabanmostyleV3');
+      setModelscopeModel(DEFAULT_MODELSCOPE_MODEL);
       setModelscopeSize(DEFAULT_MODELSCOPE_SIZE);
     }
   };

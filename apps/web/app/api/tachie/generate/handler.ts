@@ -1,3 +1,4 @@
+import { DEFAULT_MODELSCOPE_MODEL, DEFAULT_MODELSCOPE_SIZE, isModelScopePresetSize } from '@mahoshojo/ai-core/modelscope';
 import { enforceTextSafety } from "@/lib/content-safety/server";
 import { getLogger } from "@/lib/logger";
 import { getSignedUrl } from "@/lib/tachie/liblib/utils";
@@ -57,14 +58,6 @@ async function handler(req: Request) {
     return null;
   };
 
-  const MODELSCOPE_SIZE_WHITELIST = new Set([
-    "928x1664",
-    "1664x928",
-    "1328x1328",
-    "1104x1472",
-    "1472x1104",
-  ]);
-
   try {
     const payloadRaw = await req.json().catch(() => null);
     const payload = payloadRaw && typeof payloadRaw === "object"
@@ -78,9 +71,9 @@ async function handler(req: Request) {
       const prompt = typeof payload.prompt === "string" ? payload.prompt.trim() : "";
       const modelscopeToken = normalizeModelScopeToken(payload.modelscopeToken);
       const modelscopeModelRaw = typeof payload.modelscopeModel === "string" ? payload.modelscopeModel.trim() : "";
-      const modelscopeModel = modelscopeModelRaw || "Stonego/XiabanmostyleV3";
+      const modelscopeModel = modelscopeModelRaw || DEFAULT_MODELSCOPE_MODEL;
       const modelscopeSizeRaw = typeof payload.modelscopeSize === "string" ? payload.modelscopeSize.trim() : "";
-      const modelscopeSize = MODELSCOPE_SIZE_WHITELIST.has(modelscopeSizeRaw) ? modelscopeSizeRaw : "1328x1328";
+      const modelscopeSize = isModelScopePresetSize(modelscopeSizeRaw) ? modelscopeSizeRaw : DEFAULT_MODELSCOPE_SIZE;
 
       if (!prompt) {
         return new Response(

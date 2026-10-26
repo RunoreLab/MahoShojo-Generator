@@ -176,6 +176,25 @@ describe('server-safe shared entrypoints stay free of React hooks', () => {
     expect(files.some(file => file.endsWith('image-generation/NovelAISettingsFields.tsx'))).toBe(true);
     expect(SERVER_SAFE_ENTRYPOINTS).not.toHaveProperty('./image-generation');
   });
+  it('keeps ModelScope parameter rules on one host-free client/server export', async () => {
+    const aiCoreRoot = path.resolve(PACKAGE_ROOT, '../ai-core');
+    const manifest = JSON.parse(readFileSync(path.join(aiCoreRoot, 'package.json'), 'utf8'));
+    expect(manifest.exports['./modelscope']).toEqual({
+      types: './src/modelscope.ts', import: './src/modelscope.ts', default: './src/modelscope.ts',
+    });
+    for (const platform of ['browser', 'node'] as const) {
+      const bundled = await build({
+        stdin: { contents: 'export * from "@mahoshojo/ai-core/modelscope";',
+          resolveDir: path.resolve(PACKAGE_ROOT, '../../apps/web'), loader: 'ts' },
+        bundle: true, platform, format: 'esm', write: false, metafile: true, logLevel: 'silent',
+      });
+      expect(Object.keys(bundled.metafile!.inputs).filter(file => file !== '<stdin>').map(file => path.resolve(file)))
+        .toEqual([path.join(aiCoreRoot, 'src/modelscope.ts')]);
+      expect(findHookCalls(bundled.outputFiles[0].text)).toEqual([]);
+      expect(bundled.outputFiles[0].text).not.toMatch(/\b(?:window|document|localStorage|sessionStorage|indexedDB|fetch|WebSocket|process)\b/u);
+      expect(Object.values(bundled.metafile!.outputs).flatMap(output => output.imports)).toEqual([]);
+    }
+  });
   it('keeps NovelAI settings and Prompt rules on a host-free ai-core export', async () => {
     const aiCoreRoot = path.resolve(PACKAGE_ROOT, '../ai-core');
     const manifest = JSON.parse(readFileSync(path.join(aiCoreRoot, 'package.json'), 'utf8'));

@@ -2,6 +2,13 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import {
+  DEFAULT_MODELSCOPE_MODEL,
+  DEFAULT_MODELSCOPE_SIZE,
+  MODELSCOPE_SIZE_OPTIONS,
+  isModelScopePresetSize,
+  type ModelScopePresetSize,
+} from '@mahoshojo/ai-core/modelscope';
 import { CardForgeThemeEditor, CardForgePageView, CardForgeWorkspace, CardForgeSourceFields } from '@mahoshojo/ui-web/card-forge';
 import { ImageGenerationFeedback } from '@mahoshojo/ui-web/image-generation';
 import { generateTachieWithProgress, type TachieGenerationRequest, type TachieGenerationResult } from '@/lib/tachie/manager';
@@ -99,25 +106,8 @@ const SAMPLE_CARD_JSON = JSON.stringify(
   2,
 );
 
-const MODELSCOPE_SIZE_OPTIONS = [
-  { value: '928x1664', label: '16:9 竖屏（928×1664）' },
-  { value: '1664x928', label: '16:9 横屏（1664×928）' },
-  { value: '1328x1328', label: '正方形（1328×1328）' },
-  { value: '1104x1472', label: '4:3 竖屏（1104×1472）' },
-  { value: '1472x1104', label: '4:3 横屏（1472×1104）' },
-] as const;
-
-type ModelScopePresetSize = (typeof MODELSCOPE_SIZE_OPTIONS)[number]['value'];
-
-const DEFAULT_MODELSCOPE_SIZE: ModelScopePresetSize = '1328x1328';
-
-const isModelScopePresetSize = (value: unknown): value is ModelScopePresetSize =>
-  typeof value === 'string' && MODELSCOPE_SIZE_OPTIONS.some((option) => option.value === value);
-
 const TACHIE_CREDENTIALS_KEY = 'card-forge-tachie-credentials';
 const TACHIE_REMEMBER_KEY = 'card-forge-tachie-remember';
-
-const DEFAULT_MODELSCOPE_MODEL = 'Stonego/XiabanmostyleV3';
 
 interface TachieCredentials {
   modelscopeToken: string;
