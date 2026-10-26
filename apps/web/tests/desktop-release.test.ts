@@ -13,7 +13,10 @@ const completeRelease = () => ({
   })),
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 describe('manual GitHub release publication', () => {
   test('opens downloads only for the complete published stable release', () => {
@@ -63,5 +66,31 @@ describe('manual GitHub release publication', () => {
     const response = await GET();
     expect(response.status).toBe(503);
     expect(response.headers.get('Cache-Control')).toBe('no-store');
+  });
+
+  test('retries a transient GitHub server error once and keeps the unpublished tag preparing', async () => {
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response('upstream unavailable', { status: 502 }))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }));
+    vi.stubGlobal('fetch', fetch);
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(await getDesktopRelease()).toEqual({ status: 'preparing' });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  test('logs safe GitHub rate-limit diagnostics without retrying a 403', async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(null, {
+      status: 403,
+      headers: { 'x-github-request-id': 'SAFE-REQUEST-ID', 'x-ratelimit-remaining': '0' },
+    }));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal('fetch', fetch);
+
+    expect(await getDesktopRelease()).toEqual({ status: 'unavailable' });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith('[desktop-release] GitHub release lookup failed', {
+      reason: 'http_error', status: 403, requestId: 'SAFE-REQUEST-ID', rateLimitRemaining: '0', retryAfter: undefined,
+    });
   });
 });
