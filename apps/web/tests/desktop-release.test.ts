@@ -62,7 +62,7 @@ describe('manual GitHub release publication', () => {
     expect(cacheRequest).toBeInstanceOf(Request);
     expect(cacheRequest.headers.get('cookie')).toBeNull();
     expect(cacheRequest.headers.get('authorization')).toBeNull();
-    expect(cacheOptions).toEqual({ key: 'https://mahoshojo.invalid/_edge-cache/desktop-release/0.1.0', ttlSeconds: 300 });
+    expect(cacheOptions).toEqual({ key: 'https://mahoshojo.colanns.me/_edge-cache/desktop-release/0.1.0', ttlSeconds: 300, awaitCacheWrite: true });
   });
 
   test('an unpublished release means no update, without an installer link', async () => {
@@ -71,15 +71,33 @@ describe('manual GitHub release publication', () => {
     expect((await GET()).status).toBe(204);
   });
 
-  test.each(['network', 'rate-limit', 'invalid-json'])('failure remains retryable: %s', async (fault) => {
+  test.each([
+    { fault: 'network', expected: { status: 'unavailable', failure: 'network' } },
+    { fault: 'rate-limit', expected: { status: 'unavailable', failure: 'rate-limited', upstreamStatus: 403, retryAfterSeconds: 5 } },
+    { fault: 'invalid-json', expected: { status: 'unavailable', failure: 'invalid-json', upstreamStatus: 200 } },
+    { fault: 'timeout', expected: { status: 'unavailable', failure: 'timeout' } },
+  ])('failure remains retryable: $fault', async ({ fault, expected }) => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => {
-      if (fault === 'network') throw new TypeError('offline');
-      return fault === 'rate-limit' ? new Response(null, { status: 403 }) : new Response('invalid JSON');
+      if (fault === 'network') throw new TypeError('secret network message');
+      if (fault === 'timeout') throw Object.assign(new Error('secret timeout message'), { name: 'TimeoutError' });
+      if (fault === 'rate-limit') return new Response('secret upstream body', {
+        status: 403,
+        headers: { 'x-ratelimit-remaining': '0', 'retry-after': '5', 'x-private-secret': 'never expose' },
+      });
+      return new Response('secret invalid JSON body');
     }));
-    expect(await getDesktopRelease()).toEqual({ status: 'unavailable' });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(await getDesktopRelease()).toEqual(expected);
     const response = await GET();
     expect(response.status).toBe(503);
     expect(response.headers.get('Cache-Control')).toBe('no-store');
+    expect(await response.text()).toBe('');
+    if (fault === 'rate-limit') {
+      expect(response.headers.get('X-Desktop-Release-Failure')).toBe('rate-limited');
+      expect(response.headers.get('X-Desktop-Release-Upstream-Status')).toBe('403');
+      expect(response.headers.get('Retry-After')).toBe('5');
+    }
+    expect(JSON.stringify([...response.headers])).not.toMatch(/secret|offline/i);
   });
 
   test('retries a transient GitHub server error once and keeps the unpublished tag preparing', async () => {
@@ -93,7 +111,7 @@ describe('manual GitHub release publication', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
-  test('logs safe GitHub rate-limit diagnostics without retrying a 403', async () => {
+  test('logs only bounded GitHub rate-limit diagnostics without retrying a 403', async () => {
     const fetch = vi.fn().mockResolvedValue(new Response(null, {
       status: 403,
       headers: { 'x-github-request-id': 'SAFE-REQUEST-ID', 'x-ratelimit-remaining': '0' },
@@ -101,10 +119,20 @@ describe('manual GitHub release publication', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.stubGlobal('fetch', fetch);
 
-    expect(await getDesktopRelease()).toEqual({ status: 'unavailable' });
+    expect(await getDesktopRelease()).toEqual({ status: 'unavailable', failure: 'rate-limited', upstreamStatus: 403 });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith('[desktop-release] GitHub release lookup failed', {
-      reason: 'http_error', status: 403, requestId: 'SAFE-REQUEST-ID', rateLimitRemaining: '0', retryAfter: undefined,
+      failure: 'rate-limited', upstreamStatus: 403,
     });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('SAFE-REQUEST-ID');
+  });
+
+  test('does not expose secret upstream errors in safe failure diagnostics', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('secret URL https://private.invalid/token')));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const result = await getDesktopRelease();
+    expect(result).toEqual({ status: 'unavailable', failure: 'network' });
+    expect(JSON.stringify(result)).not.toMatch(/secret|private\.invalid|token/);
+    expect(JSON.stringify(warn.mock.calls)).not.toMatch(/secret|private\.invalid|token/);
   });
 });

@@ -65,7 +65,7 @@ const matchCacheWithTimeout = async (cache: Cache, cacheReq: Request): Promise<R
 
 export async function withEdgeCache(
   req: Request,
-  options: { key: string; ttlSeconds: number },
+  options: { key: string; ttlSeconds: number; awaitCacheWrite?: boolean },
   handler: () => Promise<Response>,
 ): Promise<Response> {
   const ttlSeconds = Math.max(0, Math.floor(options.ttlSeconds));
@@ -90,13 +90,14 @@ export async function withEdgeCache(
   const res = await handler();
   if (res.status !== 200) return res;
 
+  const pendingWrites: Promise<unknown>[] = [];
   try {
     const contentLength = res.headers.get('Content-Length');
     const contentLengthNum = contentLength ? Number(contentLength) : NaN;
     const shouldAttemptMemoryCache = !Number.isFinite(contentLengthNum) || contentLengthNum <= MAX_MEMORY_CACHE_BODY_CHARS;
 
     if (shouldAttemptMemoryCache) {
-      void res.clone().text().then((bodyText) => {
+      const memoryWrite = res.clone().text().then((bodyText) => {
         if (bodyText.length > MAX_MEMORY_CACHE_BODY_CHARS) return;
         memoryCache.set(key, {
           status: res.status,
@@ -106,16 +107,20 @@ export async function withEdgeCache(
         });
         pruneMemoryCache(Date.now());
       }).catch(() => {});
+      if (options.awaitCacheWrite) pendingWrites.push(memoryWrite);
     }
   } catch {
   }
 
   if (cache && cacheReq) {
     try {
-      void cache.put(cacheReq, res.clone()).catch(() => {});
+      const cacheWrite = cache.put(cacheReq, res.clone()).catch(() => {});
+      if (options.awaitCacheWrite) pendingWrites.push(cacheWrite);
     } catch {
     }
   }
+
+  if (options.awaitCacheWrite && pendingWrites.length > 0) await Promise.all(pendingWrites);
 
   return res;
 }

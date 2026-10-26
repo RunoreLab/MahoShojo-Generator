@@ -112,4 +112,38 @@ describe('withEdgeCache relative URL support', () => {
     expect(response).not.toBe('timeout');
     expect(response).toBe(hangingResponse);
   });
+
+  test('awaitCacheWrite 等待 Cache API 与内存缓存写入后返回，写入失败仍返回响应', async () => {
+    let releaseText!: (text: string) => void;
+    let releasePut!: () => void;
+    let textFinished = false;
+    let putFinished = false;
+    const textPromise = new Promise<string>((resolve) => { releaseText = resolve; });
+    const putPromise = new Promise<void>((resolve) => { releasePut = resolve; });
+    const response = {
+      status: 200,
+      headers: new Headers(),
+      clone: () => ({ text: () => textPromise }),
+    } as unknown as Response;
+    (globalThis as { caches?: unknown }).caches = {
+      default: {
+        match: async () => null,
+        put: () => putPromise.then(() => { putFinished = true; throw new Error('write failed'); }),
+      },
+    };
+    const req = { method: 'GET', url: '/api/tags?case=await-writes' } as Request;
+    const resultPromise = withEdgeCache(req, { key: req.url, ttlSeconds: 300, awaitCacheWrite: true }, async () => response)
+      .then((result) => { textFinished = true; return result; });
+
+    await Promise.resolve();
+    expect(textFinished).toBe(false);
+    expect(putFinished).toBe(false);
+    releaseText('cached body');
+    await Promise.resolve();
+    expect(textFinished).toBe(false);
+    releasePut();
+
+    expect(await resultPromise).toBe(response);
+    expect(putFinished).toBe(true);
+  });
 });

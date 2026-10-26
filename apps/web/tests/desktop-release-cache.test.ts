@@ -47,7 +47,7 @@ describe('desktop release runtime cache', () => {
 
   test.each([
     { initialStatus: 404, expected: 'preparing' },
-    { initialStatus: 403, expected: 'unavailable' },
+    { initialStatus: 403, expected: 'unavailable', failure: 'upstream-http-error' },
   ])('$expected results do not populate the published cache', async ({ initialStatus, expected }) => {
     const fetch = vi.fn()
       .mockResolvedValueOnce(new Response(null, { status: initialStatus }))
@@ -56,7 +56,7 @@ describe('desktop release runtime cache', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const getDesktopRelease = await loadGetDesktopRelease();
 
-    expect(await getDesktopRelease()).toEqual({ status: expected });
+    expect(await getDesktopRelease()).toMatchObject({ status: expected, ...(expected === 'unavailable' ? { failure: 'upstream-http-error' } : {}) });
     expect(await getDesktopRelease()).toMatchObject({ status: 'published', version: DESKTOP_RELEASE.version });
     expect(fetch).toHaveBeenCalledTimes(2);
   });
@@ -124,7 +124,7 @@ describe('desktop release runtime cache', () => {
     const getDesktopRelease = await loadGetDesktopRelease();
 
     const result = await getDesktopRelease();
-    expect(result).toEqual({ status: 'unavailable' });
+    expect(result).toEqual({ status: 'unavailable', failure: 'invalid-cache' });
     expect(JSON.stringify(result)).not.toContain('attacker.invalid');
     expect(JSON.stringify(warn.mock.calls)).not.toContain('attacker.invalid');
     expect(fetch).not.toHaveBeenCalled();

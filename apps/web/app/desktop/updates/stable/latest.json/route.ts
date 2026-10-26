@@ -11,8 +11,18 @@ export async function GET() {
     return new Response(null, { status: 307, headers: { Location: release.manifestUrl, 'Cache-Control': 'public, max-age=300' } });
   }
   // Tauri 将 204 解释为没有新版本；网络故障保留为可重试失败。
+  const headers = new Headers({ 'Cache-Control': 'no-store' });
+  if (release.status === 'unavailable') {
+    if (release.failure) headers.set('X-Desktop-Release-Failure', release.failure);
+    if (release.upstreamStatus !== undefined && release.upstreamStatus >= 100 && release.upstreamStatus <= 599) {
+      headers.set('X-Desktop-Release-Upstream-Status', String(release.upstreamStatus));
+    }
+    if (release.retryAfterSeconds !== undefined && release.retryAfterSeconds >= 1 && release.retryAfterSeconds <= 3600) {
+      headers.set('Retry-After', String(release.retryAfterSeconds));
+    }
+  }
   return new Response(null, {
     status: release.status === 'preparing' ? 204 : 503,
-    headers: { 'Cache-Control': 'no-store' },
+    headers,
   });
 }
