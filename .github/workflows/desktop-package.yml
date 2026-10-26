@@ -49,7 +49,13 @@ jobs:
         run: pnpm run check:desktop-version
 
       - name: Build desktop app and NSIS bundle
-        run: pnpm build:desktop
+        shell: pwsh
+        run: |
+          # 内部测试不申请发布密钥；仅覆盖产物签名开关，不修改客户端的公钥与更新端点。
+          $internalConfig = Join-Path $env:RUNNER_TEMP 'desktop-internal-bundle.json'
+          '{"bundle":{"createUpdaterArtifacts":false}}' | Set-Content -LiteralPath $internalConfig -Encoding utf8NoBOM
+          pnpm --filter @mahoshojo/desktop exec tauri build --config "$internalConfig"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Generate SHA-256 checksums
         shell: pwsh

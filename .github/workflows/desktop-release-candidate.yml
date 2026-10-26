@@ -1,9 +1,8 @@
 name: Desktop Release Candidate
 
 # D5.2-D：只准备可验收的签名候选产物，绝不创建 tag/Release 或切换在线更新清单。
-# 启用前须由维护者配置 desktop-release environment 的 reviewer/branch protection，
-# 再在该 environment 设置 DESKTOP_RELEASE_ENABLED=true 和 Tauri signing secrets。
-# Environment 名称本身不等于已配置保护规则。当前 updater 未配置时 source gate 会拒绝运行。
+# desktop-release environment 只负责隔离 Tauri signing secrets；由维护者手动发起构建。
+# 使用现有 Repository CI 与 Windows Rust 检查，不另建 enable 开关或重复前检 job。
 on:
   workflow_dispatch:
     inputs:
@@ -24,36 +23,8 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: desktop-release-candidate
-  cancel-in-progress: false
-
 jobs:
-  preflight:
-    name: Check candidate source before expensive verification
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout exact candidate source
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22.23.4
-
-      - name: Validate candidate source without credentials
-        env:
-          RELEASE_VERSION: ${{ inputs.version }}
-          RELEASE_CHANNEL: ${{ inputs.channel }}
-          RELEASE_COMMIT: ${{ github.sha }}
-        run: node scripts/prepare-desktop-release.mjs --check-source --version "$RELEASE_VERSION" --channel "$RELEASE_CHANNEL" --commit "$RELEASE_COMMIT"
-
   verify:
-    needs: preflight
     uses: ./.github/workflows/ci.yml
 
   candidate:
@@ -72,15 +43,6 @@ jobs:
       RELEASE_NOTES_FILE: ${{ inputs.notes_file }}
       RELEASE_COMMIT: ${{ github.sha }}
     steps:
-      - name: Require explicitly enabled release environment
-        shell: pwsh
-        env:
-          RELEASE_ENABLED: ${{ vars.DESKTOP_RELEASE_ENABLED }}
-        run: |
-          if ($env:RELEASE_ENABLED -cne 'true') {
-            throw 'Configure desktop-release environment protections and enable DESKTOP_RELEASE_ENABLED first.'
-          }
-
       - name: Checkout exact candidate source
         uses: actions/checkout@v6
         with:
@@ -156,13 +118,17 @@ jobs:
         with:
           subject-path: .tmp/desktop-release-candidate/*
 
+      - name: Include attestation beside candidate files
+        shell: pwsh
+        env:
+          ATTESTATION_BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
+        run: Copy-Item -LiteralPath "$env:ATTESTATION_BUNDLE_PATH" -Destination .tmp/desktop-release-candidate/provenance.jsonl
+
       - name: Upload candidate for installation acceptance
         uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ inputs.version }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            .tmp/desktop-release-candidate/*
-            ${{ steps.attest.outputs.bundle-path }}
+          path: .tmp/desktop-release-candidate/*
           if-no-files-found: error
           retention-days: 30
 
