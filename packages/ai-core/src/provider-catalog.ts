@@ -360,7 +360,7 @@ const XIAOMI_MIMO_MODELS: readonly AIModelOption[] = [
 export const SYSTEM_PROVIDER_OPTION: AIProviderOption = Object.freeze({
     id: 'system',
     name: '使用系统默认配置',
-    description: '依照服务器轮询策略自动选择供应商与模型。',
+    description: '依照服务器策略按优先级选择供应商与模型。',
     docsUrl: '',
     baseUrl: '',
     type: 'openai',
@@ -368,78 +368,78 @@ export const SYSTEM_PROVIDER_OPTION: AIProviderOption = Object.freeze({
         {
             value: 'default',
             label: '默认策略',
-            description: '常规场景保持原有调用顺序，默认倾向使用 GLM 5.3 Flash；排位优先使用轻量模型。'
+            description: '常规场景保持原有调用顺序，默认倾向使用 MiniMax M3；排位和降级场景使用各自专用策略。'
         },
-        // {
-        //     value: 'big-pickle',
-        //     label: '实验性/推广模型',
-        //     description: '可能会随时更换的、处于实验或推广期的模型，或许能带来一些新奇的体验，但不建议发送敏感或私密数据。'
-        // },
-        // {
-        //     value: 'deepseek-v4-flash-0731',
-        //     label: 'DeepSeek V4 Flash',
-        //     description: 'DeepSeek V4 Flash 正式版，Agent 能力大幅增强，百万级上下文，兼顾质量与成本。'
-        // },
-        // {
-        //     value: 'deepseek-v4-pro',
-        //     label: 'DeepSeek V4 Pro',
-        //     description: 'DeepSeek V4 完全体，适合复杂分析、长文本写作与高质量生成。'
-        // },
+        {
+            value: 'minimax-m3',
+            label: 'MiniMax M3',
+            description: '【推荐】常规默认首选，适合创意写作、角色扮演与多轮聊天。由 Kouri AI 热情赞助。'
+        },
+        {
+            value: 'minimax-m2.7',
+            label: 'MiniMax M2.7',
+            description: 'MiniMax 系列备选，适合尝试不同的剧情与人物表达。由 Kouri AI 热情赞助。'
+        },
+        {
+            value: 'mimo-v2.6-pro',
+            label: 'MiMo V2.6 Pro',
+            description: '适合主动剧情、多角色互动与创意生成；复杂提示可能增加思考耗时。由 Kouri AI 热情赞助。'
+        },
+        {
+            value: 'deepseek-v4.1-flash-1017',
+            label: 'DeepSeek V4.1 Flash 1017',
+            description: '固定 1017 版本，兼顾生成成本、剧情推进与多轮交互。由 Kouri AI 热情赞助。'
+        },
         {
             value: 'glm-5.3-flash',
             label: 'GLM 5.3 Flash',
             description: '【推荐】牛来模型，智谱的最先进小模型。由 Kouri AI 热情赞助。'
         },
         {
-            value: 'deepseek-v4-flash-0731',
-            label: 'DeepSeek V4 Flash 0731',
-            description: '蓝色大肥鱼正式版，Agent 能力大幅增强，百万级上下文，兼顾质量与成本。由 Kouri AI 热情赞助。'
+            value: 'deepseek-v4-pro',
+            label: 'DeepSeek V4 Pro',
+            description: '适合复杂设定、长文本写作与多轮推理。由 Kouri AI 热情赞助。'
         },
-        // {
-        //     value: 'glm-5.2',
-        //     label: 'GLM-5.2',
-        //     description: '智谱开源旗舰模型，支持 1M 无损上下文，编程能力领先，适合复杂长程任务。'
-        // },
+        {
+            value: 'kimi-k2.6',
+            label: 'Kimi K2.6',
+            description: '适合中文创作、角色设定与多轮指令跟随。由 Kouri AI 热情赞助。'
+        },
+        {
+            value: 'glm-5.3',
+            label: 'GLM 5.3',
+            description: '适合复杂角色、世界设定与高质量长文生成。由 Kouri AI 热情赞助。'
+        },
+        {
+            value: 'qwen3.8-flash',
+            label: 'Qwen 3.8 Flash',
+            description: '低成本聊天与轻量生成备选。由 Kouri AI 热情赞助。'
+        },
         {
             value: 'glm-5.1',
             label: 'GLM-5.1',
             description: '智谱开源旗舰模型，适合复杂指令、多轮对话与高质量创作。由 Kouri AI 热情赞助。'
         },
         {
-            value: 'gemini-3.8-flash',
-            label: 'Gemini 3.8 Flash',
-            description: 'Google 的新模型，Benchmark 分数超级高，但代价是 Tokens 消耗也高。'
+            value: 'deepseek-v4-flash-0731',
+            label: 'DeepSeek V4 Flash 0731',
+            description: '蓝色大肥鱼正式版，适合偏好既有文风的剧情生成，百万级上下文，兼顾质量与成本。由 Kouri AI 热情赞助。'
+        },
+        {
+            value: 'minimax-m3.1-flash',
+            label: 'MiniMax M3.1 Flash',
+            description: '较低优先级备选，适合尝试不同的生成风格。由 Kouri AI 热情赞助。'
         },
         {
             value: 'gemini-3.7-flash',
             label: 'Gemini 3.7 Flash',
             description: 'Google 的新模型，据用户评测说很喜欢一惊一乍，还挺中二的。'
         },
-        // {
-        //     value: 'glm-5.2',
-        //     label: 'GLM-5.2',
-        //     description: '智谱开源旗舰模型，支持 1M 无损上下文，编程能力领先，适合复杂长程任务。'
-        // },
         {
             value: 'gemini-3.5-flash-lite',
             label: 'Gemini 3.5 Flash Lite',
             description: 'Google 高速轻量模型，适合预算敏感与高并发生成场景。'
         },
-        // {
-        //     value: 'gemma-4-31b-it',
-        //     label: 'Gemma 4 31B IT',
-        //     description: 'Gemma 4 指令模型（31B），适合作为高优先级的 Gemma 备用选择。'
-        // },
-        // {
-        //     value: 'gemma-4-26b-a4b-it',
-        //     label: 'Gemma 4 26B A4B IT',
-        //     description: 'Gemma 4 指令模型（26B A4B），建议先作为可选备用通道使用。'
-        // },
-        // {
-        //     value: 'gemma-3-27b-it',
-        //     label: 'Gemma 3 27B IT',
-        //     description: '更便宜但也更弱的 Gemma 3 指令模型（27B），建议仅作为流式输出的备用选择。'
-        // }
     ]
 });
 

@@ -5,10 +5,18 @@
     "type": "openai",
     "models": [
       "default",
+      "minimax-m3",
+      "minimax-m2.7",
+      "mimo-v2.6-pro",
+      "deepseek-v4.1-flash-1017",
       "glm-5.3-flash",
-      "deepseek-v4-flash-0731",
+      "deepseek-v4-pro",
+      "kimi-k2.6",
+      "glm-5.3",
+      "qwen3.8-flash",
       "glm-5.1",
-      "gemini-3.8-flash",
+      "deepseek-v4-flash-0731",
+      "minimax-m3.1-flash",
       "gemini-3.7-flash",
       "gemini-3.5-flash-lite"
     ]
