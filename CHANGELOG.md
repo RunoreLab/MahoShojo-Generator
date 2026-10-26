@@ -12,6 +12,19 @@
 
 - 退休 `/pvp` 卡牌对决及其房间、聊天、表情包、个人战绩和管理端专属操作，移除对应导航与百科。`/battle`、`/arena`、Arena 多人和历史战报访问继续保留；不随代码升级删除历史数据。
 
+## [Desktop 0.1.0] - 2026-10-27
+
+首个 Windows x64 桌面正式版，使用独立的 Desktop 版本序列；Web 版本保持 `0.10.0`。
+
+- 提供创作、竞技场、本地数据卡/图片/Web 包与已支持的在线账号功能，具体范围见[桌面客户端指南](https://mahoshojo.colanns.me/encyclopedia/desktop-client)。
+- 设置中可手动检查官方更新，下载、取消与安装前保护由原生侧执行，并验证更新包签名和版本。
+- 随包提供离线第三方许可，改善小屏窗口启动适配。
+- 官网开放统一下载与安装说明，GitHub Release 同时提供安装包、更新签名、校验和、更新清单和构建证明。
+- Beta 用户先备份后手动覆盖安装；旧库首次启动可执行图片库 schema 12 迁移，不能直接用旧 Beta 回退读取。网页本地库与桌面本地库不会自动同步。
+- 首发支持 Windows 11 x64；Windows 发行者代码签名暂缓，Windows 10 22H2 和缺失 WebView2 的实机环境仍需独立验证。
+
+[Desktop 0.1.0 Release](https://github.com/RunoreLab/MahoShojo-Generator/releases/tag/desktop-v0.1.0)
+
 ## [0.10.0] - 2026-09-30
 
 > Web 战报 × Web 包 × 本地库：战报从「一篇文章」变成「一段体验」

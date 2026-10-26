@@ -1,9 +1,9 @@
 # 文档导航
 
-2026-10-26 Desktop 正式版准备：[候选与发布 runbook](./runbooks/2026-10-26_220000_Desktop正式版候选与发布.md)
-记录 Beta 后发行收口、Windows 代码签名暂缓、下载入口审查与最终制品验收；
-[公告草案](./references/2026-10-26_220000_Desktop正式版公告草案.md)尚未推送给用户。
-供手动候选构建使用的 [0.1.0 发布说明](./references/2026-10-26_224500_Desktop010发布说明.md)已就绪。
+2026-10-27 Desktop 0.1.0 已[正式发布](https://github.com/RunoreLab/MahoShojo-Generator/releases/tag/desktop-v0.1.0)：
+[发行 runbook 与验收记录](./runbooks/2026-10-26_220000_Desktop正式版候选与发布.md)记录最终 GitHub 签名制品、构建证明、Windows 11 安装交接、本地库迁移与生产部署；
+[0.1.0 发布说明](./references/2026-10-26_224500_Desktop010发布说明.md)随 Release 分发，
+[原公告稿](./references/2026-10-26_220000_Desktop正式版公告草案.md)保留起草背景。
 
 2026-10-25 排位结算故障：[严格排位结算参数超限修复](./reports/2026-10-25_154300_严格排位结算参数超限修复.md)
 记录 D1 参数上限复现与双边原子评分语句压缩；[生产发布与历史恢复](./reports/2026-10-25_161500_排位生产发布与历史结算恢复.md)

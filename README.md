@@ -8,6 +8,7 @@
   <!-- markdownlint-disable-next-line MD036 -->
   <div>✨ 基于 AI 结构化生成的生成器 ✨</div>
   <a href="https://mahoshojo.colanns.me">在线试玩</a> |
+  <a href="https://mahoshojo.colanns.me/download">桌面版下载</a> |
   <a href="https://github.com/RunoreLab/MahoShojo-Generator/discussions">交流反馈</a> |
   <a href="https://pd.qq.com/s/brisxifbl">加入腾讯频道</a>
 </div>
@@ -20,7 +21,7 @@
 
 📖 查看完整的版本更新历史，请参阅 [CHANGELOG.md](./CHANGELOG.md)
 
-> 当前版本：`v0.10.0`
+> 当前版本：Web `v0.10.0`；Desktop `v0.1.0`（Windows x64）。桌面版与网页本地数据独立，安装与升级请阅读[下载指南](https://mahoshojo.colanns.me/download)。
 
 ## ✨ 核心功能
 
