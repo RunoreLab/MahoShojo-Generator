@@ -1,0 +1,177 @@
+name: Desktop Release Candidate
+
+# D5.2-D：只准备可验收的签名候选产物，绝不创建 tag/Release 或切换在线更新清单。
+# 启用前须由维护者配置 desktop-release environment 的 reviewer/branch protection，
+# 再在该 environment 设置 DESKTOP_RELEASE_ENABLED=true 和 Tauri signing secrets。
+# Environment 名称本身不等于已配置保护规则。当前 updater 未配置时 source gate 会拒绝运行。
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 与当前提交 apps/desktop/package.json 完全一致的 x.y.z 或 x.y.z-rc.N
+        required: true
+        type: string
+      channel:
+        description: 候选通道（必须与版本、公钥配置中的 endpoint 一致）
+        required: true
+        type: choice
+        options: [rc, stable]
+      notes_file:
+        description: 当前提交中已跟踪的 Release Notes 文件路径
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-candidate
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Check candidate source before expensive verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact candidate source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.23.4
+
+      - name: Validate candidate source without credentials
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_CHANNEL: ${{ inputs.channel }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: node scripts/prepare-desktop-release.mjs --check-source --version "$RELEASE_VERSION" --channel "$RELEASE_CHANNEL" --commit "$RELEASE_COMMIT"
+
+  verify:
+    needs: preflight
+    uses: ./.github/workflows/ci.yml
+
+  candidate:
+    name: Prepare signed Windows x64 candidate
+    needs: verify
+    runs-on: windows-latest
+    timeout-minutes: 90
+    environment: desktop-release
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_CHANNEL: ${{ inputs.channel }}
+      RELEASE_NOTES_FILE: ${{ inputs.notes_file }}
+      RELEASE_COMMIT: ${{ github.sha }}
+    steps:
+      - name: Require explicitly enabled release environment
+        shell: pwsh
+        env:
+          RELEASE_ENABLED: ${{ vars.DESKTOP_RELEASE_ENABLED }}
+        run: |
+          if ($env:RELEASE_ENABLED -cne 'true') {
+            throw 'Configure desktop-release environment protections and enable DESKTOP_RELEASE_ENABLED first.'
+          }
+
+      - name: Checkout exact candidate source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.28.6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.23.4
+          cache: pnpm
+
+      - name: Validate version, source and updater channel
+        shell: pwsh
+        run: |
+          node scripts/prepare-desktop-release.mjs --check-source --version "$env:RELEASE_VERSION" --channel "$env:RELEASE_CHANNEL" --commit "$env:RELEASE_COMMIT"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify desktop frontend and offline content
+        shell: pwsh
+        env:
+          DESKTOP_OFFLINE_CONTENT_REQUIRE_DIST: '1'
+        run: |
+          pnpm --filter @mahoshojo/desktop run build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm exec vitest run --config vitest.config.ts tests/desktop-offline-content.test.ts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify Rust
+        shell: pwsh
+        run: |
+          cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --all -- --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo clippy --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build updater-signed NSIS candidate
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) { throw 'Missing protected updater signing key.' }
+          pnpm --filter @mahoshojo/desktop exec tauri build --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Stage immutable candidate files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path .tmp | Out-Null
+          node scripts/prepare-desktop-release.mjs --version "$env:RELEASE_VERSION" --channel "$env:RELEASE_CHANNEL" --commit "$env:RELEASE_COMMIT" --bundle-dir apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis --output-dir .tmp/desktop-release-candidate --notes-file "$env:RELEASE_NOTES_FILE"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Attest exact candidate assets
+        id: attest
+        uses: actions/attest@v4
+        with:
+          subject-path: .tmp/desktop-release-candidate/*
+
+      - name: Upload candidate for installation acceptance
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ inputs.version }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .tmp/desktop-release-candidate/*
+            ${{ steps.attest.outputs.bundle-path }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Record acceptance handoff
+        shell: pwsh
+        run: |
+          @'
+          Candidate only: no Git tag, GitHub Release or hosted latest.json was published.
+          Download this artifact, verify its SHA256SUMS.txt and GitHub attestation, then test this exact installer.
+          Staging checked the signature envelope only; real Updater signature, corruption and upgrade tests remain required.
+          Publishing must promote these same bytes without rebuilding after acceptance.
+          '@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Encoding utf8

@@ -1,0 +1,69 @@
+name: 桌面客户端问题
+description: 报告 Windows 桌面版的安装、升级或使用问题
+title: '[Desktop] '
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请勿提交 API Key、登录令牌、完整配置文件、私人作品库或未脱敏日志。
+        安装来源与使用指南：https://mahoshojo.colanns.me/download
+  - type: input
+    id: version
+    attributes:
+      label: 客户端版本
+      description: 从设置页或安装包文件名获取，注明是正式版、RC 还是 Beta。
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Windows 与显示环境
+      description: Windows 版本与系统 build、x64/ARM、屏幕分辨率及缩放比例；已知时附 WebView2 版本。
+      placeholder: Windows 11 24H2 / x64 / 1920×1080 / 125%
+    validations:
+      required: true
+  - type: input
+    id: installer
+    attributes:
+      label: 安装来源与升级路径
+      description: 官方 Release 链接、安装包文件名、SHA256（若已校验）；若是升级，注明从哪个版本覆盖安装。
+  - type: dropdown
+    id: area
+    attributes:
+      label: 问题类型
+      options:
+        - 安装或启动
+        - 更新或升级后数据
+        - 本地库、导入导出或备份
+        - 登录或在线服务
+        - AI 生成
+        - 窗口、显示或输入
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: 复现步骤、预期与实际结果
+      description: 尽量提供最少步骤；说明是否每次出现、是否联网，AI 问题注明 Direct/Hosted 和模型名，勿提供密钥。
+      value: |
+        复现步骤：
+        1.
+
+        预期结果：
+
+        实际结果：
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 脱敏错误信息或截图
+      description: 仅提供与问题有关的公开信息；涉及数据丢失时先保留现场与备份，不要删除应用数据后再报告。
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 隐私确认
+      options:
+        - label: 我已确认报告不含 API Key、登录令牌或私人作品内容。
+          required: true
