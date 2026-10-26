@@ -17,8 +17,9 @@
         "title": "MahoShojo Generator",
         "width": 1180,
         "height": 800,
-        "minWidth": 960,
-        "minHeight": 640,
+        "minWidth": 800,
+        "minHeight": 450,
+        "preventOverflow": true,
         "resizable": true,
         "center": true,
         "backgroundColor": "#0b1220"
