@@ -91,7 +91,12 @@
     "./magic-tea-party": "./src/magic-tea-party/index.ts",
     "./repair-pipeline": "./src/repair-pipeline.ts",
     "./name-generation": "./src/name-generation.ts",
-    "./tavern-generation": "./src/tavern-generation.ts"
+    "./tavern-generation": "./src/tavern-generation.ts",
+    "./novelai": {
+      "types": "./src/novelai.ts",
+      "import": "./src/novelai.ts",
+      "default": "./src/novelai.ts"
+    }
   },
   "scripts": {
     "test": "vitest run --config vitest.config.ts",

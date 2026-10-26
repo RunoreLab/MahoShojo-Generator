@@ -391,3 +391,30 @@ it('补充要求改变时取消在途优化，过期结果不可应用', async (
   expect(button('应用到提示词')).toBeUndefined();
   expect(button('调用文本模型优化').disabled).toBe(false);
 });
+
+it('优化中收起插槽会取消请求并释放 busy，迟到结果不复活且重开不自动重试', async () => {
+  const provider = NOVELAI_TEXT_PROVIDERS.find((item) => item.type === 'openai')!;
+  localStorage.setItem('arena.customProvider.selected', provider.id);
+  localStorage.setItem(`arena.customProvider.apiKey.${provider.id}`, 'text-secret');
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { headers: { 'Content-Type': 'application/json' } })));
+  let finish!: (text: string) => void;
+  const rewrite = vi.spyOn(promptRewriter, 'rewriteNovelAIPrompt').mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+  await act(async () => root.render(<TachieGenerator prompt="原始描述" />));
+  await act(async () => button('NovelAI').click());
+  await setInput('NovelAI Persistent API Token', 'image-input');
+  await setInput('提示词', '手工描述');
+  await act(async () => button('LLM 优化提示词').click());
+  await act(async () => button('调用文本模型优化').click());
+  expect(button('使用 NovelAI').disabled).toBe(true);
+  const signal = rewrite.mock.calls[0][3];
+  await act(async () => button('收起 LLM 优化提示词').click());
+  expect(signal.aborted).toBe(true);
+  expect(button('使用 NovelAI').disabled).toBe(false);
+  await act(async () => finish('obsolete output'));
+  await act(async () => button('LLM 优化提示词').click());
+  expect(button('应用到提示词')).toBeUndefined();
+  expect(container.textContent).not.toContain('obsolete output');
+  expect(container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('手工描述');
+  expect(button('使用 NovelAI').disabled).toBe(false);
+  expect(rewrite).toHaveBeenCalledTimes(1);
+});

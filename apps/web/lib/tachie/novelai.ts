@@ -1,33 +1,9 @@
 import { z } from 'zod';
+import { NOVELAI_MODELS, parseNovelAISettings, type NovelAISettings } from '@mahoshojo/ai-core/novelai';
 
-export const NOVELAI_MODELS = [
-  'nai-diffusion-4-5-curated',
-  'nai-diffusion-5-curated',
-] as const;
+export { DEFAULT_NOVELAI_SETTINGS, NOVELAI_MODELS, NOVELAI_SIZES, type NovelAISettings } from '@mahoshojo/ai-core/novelai';
 
-export const NOVELAI_SIZES = ['832x1216', '1216x832', '1024x1024'] as const;
-
-export const DEFAULT_NOVELAI_SETTINGS = {
-  baseUrl: '',
-  model: NOVELAI_MODELS[0] as string,
-  size: NOVELAI_SIZES[0] as string,
-  steps: 28,
-  scale: 7,
-  seed: '',
-  negativePrompt: 'lowres, artistic error, film grain, scan artifacts, worst quality, bad quality, jpeg artifacts, very displeasing, chromatic aberration, dithering, halftone, screentone, multiple views, logo, too many watermarks, negative space, blank page',
-};
-
-export type NovelAISettings = typeof DEFAULT_NOVELAI_SETTINGS;
 export const normalizeNovelAIToken = (value: string) => value.trim().replace(/^Bearer\s+/i, '').trim();
-
-const settingsSchema = z.object({
-  model: z.enum(NOVELAI_MODELS),
-  size: z.enum(NOVELAI_SIZES),
-  steps: z.number().int().min(1).max(50),
-  scale: z.number().min(0).max(10),
-  seed: z.string().trim().refine((value) => value === '' || (/^\d+$/.test(value) && Number(value) <= 0xffffffff)),
-  negativePrompt: z.string().max(20_000),
-});
 
 export function resolveNovelAIEndpoint(baseUrl: string): string {
   try {
@@ -61,9 +37,7 @@ export function createNovelAIImageGenerator(
   if (!prompt.trim() || prompt.length > 20_000) throw new Error('请填写提示词，且不超过 20,000 字符');
   if (!NOVELAI_MODELS.some((model) => model === settings.model)) throw new Error('NovelAI 仅支持 V4.5 Curated 和 V5 Curated');
   const endpoint = resolveNovelAIEndpoint(settings.baseUrl);
-  const parsed = settingsSchema.safeParse(settings);
-  if (!parsed.success) throw new Error('请检查 NovelAI 参数：步数 1–50，强度 0–10，种子留空或填写 0–4294967295 的整数');
-  const options = parsed.data;
+  const options = parseNovelAISettings(settings);
   const [width, height] = options.size.split('x').map(Number);
   const seed = options.seed === '' ? crypto.getRandomValues(new Uint32Array(1))[0] : Number(options.seed);
   const input = prompt.trim();

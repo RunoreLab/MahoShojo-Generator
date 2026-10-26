@@ -89,3 +89,5 @@ export function ImageGenerationResultView({ imageUrl, seed, download }: ImageGen
     </div>
   );
 }
+
+export { NovelAISettingsFields, type NovelAISettingsFieldsProps } from './NovelAISettingsFields';

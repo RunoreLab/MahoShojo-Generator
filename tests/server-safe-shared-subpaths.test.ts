@@ -173,7 +173,23 @@ describe('server-safe shared entrypoints stay free of React hooks', () => {
       bundle: true, platform: 'browser', format: 'esm', write: false, metafile: true, logLevel: 'silent' });
     const files = Object.keys(bundled.metafile!.inputs);
     expect(files.some(file => file.includes('/apps/') || file.includes('/hosted-runtime/'))).toBe(false);
-    expect(SERVER_SAFE_ENTRYPOINTS).not.toContain('image-generation/index.tsx');
+    expect(files.some(file => file.endsWith('image-generation/NovelAISettingsFields.tsx'))).toBe(true);
+    expect(SERVER_SAFE_ENTRYPOINTS).not.toHaveProperty('./image-generation');
+  });
+  it('keeps NovelAI settings and Prompt rules on a host-free ai-core export', async () => {
+    const aiCoreRoot = path.resolve(PACKAGE_ROOT, '../ai-core');
+    const manifest = JSON.parse(readFileSync(path.join(aiCoreRoot, 'package.json'), 'utf8'));
+    expect(manifest.exports['./novelai']).toEqual({
+      types: './src/novelai.ts', import: './src/novelai.ts', default: './src/novelai.ts',
+    });
+    const bundled = await build({ entryPoints: [path.join(aiCoreRoot, manifest.exports['./novelai'].import)],
+      bundle: true, platform: 'browser', format: 'esm', write: false, metafile: true, logLevel: 'silent' });
+    const files = Object.keys(bundled.metafile!.inputs).map(file => file.replaceAll('\\', '/'));
+    expect(files.some(file => file.endsWith('packages/ai-core/src/novelai-prompt.ts'))).toBe(true);
+    expect(files.every(file => /(?:packages\/ai-core\/src\/novelai(?:-prompt)?\.ts|node_modules\/zod\/)/u.test(file))).toBe(true);
+    expect(findHookCalls(bundled.outputFiles[0].text)).toEqual([]);
+    expect(bundled.outputFiles[0].text).not.toMatch(/\b(?:localStorage|sessionStorage|indexedDB|fetch|WebSocket)\b/u);
+    expect(Object.values(bundled.metafile!.outputs).flatMap(output => output.imports)).toEqual([]);
   });
   it('keeps Tavern cloud projection pure and its controlled UI on the client barrel', async () => {
     const domainRoot = path.resolve(PACKAGE_ROOT, '../domain');

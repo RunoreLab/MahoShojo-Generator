@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { DEFAULT_NOVELAI_SETTINGS } from '@mahoshojo/ai-core/novelai';
 import { Download, ExternalLink, RefreshCw, RotateCw, X } from 'lucide-react';
 
 import { CHARACTER_CARD_EXPORTER_LABEL, MAGICAL_GIRL_CARD_GRADIENT, MagicalGirlCard } from '../character-card';
@@ -16,7 +17,7 @@ import { AdvancedArenaPageView } from '../arena/AdvancedArenaPageView';
 import { BattleLitePageView } from '../arena/BattleLitePageView';
 import { GenerationModeSwitcher, type GenerationMode } from '../details-controls/GenerationModeSwitcher';
 import { generationActionClassNames } from '../generation-actions';
-import { ImageGenerationFeedback, ImageGenerationResultView } from '../image-generation';
+import { ImageGenerationFeedback, ImageGenerationResultView, NovelAISettingsFields } from '../image-generation';
 import type { HomeAssetSource } from '../home/feature-catalog';
 import { BaseModal } from '../modal';
 import { ProductFooter } from '../shell';
@@ -272,6 +273,7 @@ function FormsSection() {
         <GenerationModeSwitcher label="宿主生成说明" value={generationMode} onChange={setGenerationMode}
           helper="连接中断时只找回同一次生成的内容；停止任务需要服务器确认。" />
       </div>
+      <NovelAISettingsSample />
       <div className="flex flex-col gap-2 border-t border-(--app-border) pt-4">
         <h3 className="text-sm font-medium text-(--app-text-muted)">battle-lite 共享类</h3>
         <p className="battle-lite-strong-text">.battle-lite-strong-text —— 主文本</p>
@@ -284,6 +286,24 @@ function FormsSection() {
       </div>
     </div>
   );
+}
+
+function NovelAISettingsSample() {
+  const [settings, setSettings] = useState({ ...DEFAULT_NOVELAI_SETTINGS });
+  const [token, setToken] = useState('');
+  const [prompt, setPrompt] = useState('1girl, blue hair');
+  const [customMode, setCustomMode] = useState(false);
+  const [disabled, setDisabled] = useState(false);
+  return <section className="space-y-3" aria-label="NovelAI 受控设置样板">
+    <label className="flex items-center gap-2 text-sm text-(--app-text-muted)">
+      <input type="checkbox" aria-label="禁用 NovelAI 设置样板" checked={disabled} onChange={(event) => setDisabled(event.target.checked)} />
+      禁用 NovelAI 设置样板
+    </label>
+    <NovelAISettingsFields token={token} onTokenChange={setToken} prompt={prompt} onPromptChange={setPrompt}
+      onUseRecommendedPrompt={() => setPrompt('1girl, blue hair')} settings={settings} onChange={setSettings}
+      customMode={customMode} onCustomModeChange={setCustomMode} disabled={disabled}
+      promptOptimizer={<p className="text-sm text-(--app-text-muted)">优化器由宿主装配；此样板不读取配置、不发送请求。</p>} />
+  </section>;
 }
 
 function OverlaySection({ onOpen }: { onOpen: () => void }) {

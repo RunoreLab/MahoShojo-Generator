@@ -221,3 +221,18 @@ it('renders the production questionnaire navigation with required and busy state
   expect(next.textContent).toBe('提交中...');
   expect(sample.querySelectorAll('.blue-theme .ui-web-questionnaire-step-button:disabled')).toHaveLength(2);
 });
+
+it('renders the production NovelAI controlled fields with custom values and disabled state', () => {
+  act(() => root.render(<ShowroomView />));
+  const sample = container.querySelector('[aria-label="NovelAI 受控设置样板"]')!;
+  const fieldset = sample.querySelector('fieldset')!;
+  expect(sample.textContent).toContain('简单模式');
+  expect(fieldset.querySelector('input[type=number]')).toBeNull();
+  act(() => fieldset.querySelector<HTMLInputElement>('input[type=checkbox]')!.click());
+  expect(fieldset.querySelector('input[type=number]')).not.toBeNull();
+  const toggle = [...fieldset.querySelectorAll('button')].find(node => node.textContent?.includes('LLM 优化提示词'))!;
+  act(() => toggle.click());
+  expect(fieldset.textContent).toContain('此样板不读取配置、不发送请求');
+  act(() => sample.querySelector<HTMLInputElement>('input[type=checkbox]')!.click());
+  expect(fieldset.disabled).toBe(true);
+});
