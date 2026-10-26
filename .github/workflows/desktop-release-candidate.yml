@@ -14,7 +14,7 @@ on:
         description: 候选通道（必须与版本、公钥配置中的 endpoint 一致）
         required: true
         type: choice
-        options: [rc, stable]
+        options: [stable, rc]
       notes_file:
         description: 当前提交中已跟踪的 Release Notes 文件路径
         required: true

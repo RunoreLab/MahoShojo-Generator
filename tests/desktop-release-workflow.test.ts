@@ -44,6 +44,7 @@ describe('desktop candidate workflow privilege and promotion boundary', () => {
   test('internal packaging stays usable without the updater private key', () => {
     const internalText = readFileSync(new URL('../.github/workflows/desktop-package.yml', import.meta.url), 'utf8');
     const internal = parse(internalText);
+    expect(Object.keys(internal.on)).toEqual(['workflow_dispatch']);
     const build = internal.jobs['package-nsis'].steps.find((step: { name: string }) => step.name === 'Build desktop app and NSIS bundle');
     expect(build.run).toContain('{"bundle":{"createUpdaterArtifacts":false}}');
     expect(build.run).toContain('tauri build --config "$internalConfig"');
