@@ -69,7 +69,7 @@ export function HomePage() {
         <aside
           data-testid="desktop-download-promotion"
           aria-label="桌面客户端下载"
-          className="mx-auto mb-5 flex max-w-2xl flex-col gap-2 rounded-xl border border-pink-200 bg-pink-50/80 p-4 text-sm dark:bg-pink-950/20 sm:flex-row sm:items-center sm:justify-between"
+          className="mx-auto mb-5 flex max-w-2xl flex-col gap-2 rounded-xl border border-(--app-border-strong) bg-(--app-surface-80) p-4 text-sm sm:flex-row sm:items-center sm:justify-between"
         >
           <div>
             <p className="font-semibold text-(--app-text)">
@@ -80,7 +80,7 @@ export function HomePage() {
           <Link
             prefetch={false}
             href="/download"
-            className="shrink-0 font-semibold text-pink-700 underline underline-offset-4 hover:text-pink-800"
+            className="shrink-0 font-semibold text-(--app-text) underline underline-offset-4"
           >
             {desktopPublished ? '下载 Windows 版' : '了解桌面版与发布进度'}
           </Link>

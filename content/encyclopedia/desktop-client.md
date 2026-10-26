@@ -20,7 +20,7 @@
 1. 访问 [桌面端下载页](https://mahoshojo.colanns.me/download)，确认当前显示“已开放下载”。
 2. 通过页面上的链接获取官方 Windows x64 安装包及 SHA256 校验文件。
 3. 安装前先确认来源。Windows PowerShell 可以运行 `Get-FileHash "安装包完整路径" -Algorithm SHA256`，将输出的 SHA256 与官方清单比较。
-4. 按安装向导完成安装，并在首次启动时根据提示安装或更新 Microsoft Edge WebView2 运行时。
+4. 按安装向导完成安装；若缺少 Microsoft Edge WebView2 运行时，安装程序需要联网下载它，因此不是完全离线安装包。
 5. 如需使用在线账户功能，在客户端的登录入口完成系统浏览器授权。
 
 目前的正式版首发计划面向 **Windows x64**。macOS、Linux 或 ARM 原生安装包不在本轮承诺范围内；网页版依然可以继续使用。

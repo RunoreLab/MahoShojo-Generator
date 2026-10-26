@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
-import { DESKTOP_RELEASE, getPublishedDesktopRelease } from './desktop-release';
+import { DESKTOP_RELEASE, getPublishedDesktopRelease } from '../lib/desktop-release';
 
 describe('desktop release publication gate', () => {
   test('does not show a download link before the official release is published', () => {

@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { Download } from 'lucide-react';
 
 import { DESKTOP_RELEASE, getPublishedDesktopRelease } from '@/lib/desktop-release';
 
@@ -14,8 +15,8 @@ export default function DesktopDownloadPage() {
   return (
     <main className="magic-background-white min-h-screen px-4 py-8 sm:py-12">
       <div className="mx-auto max-w-4xl">
-        <section className="card rounded-2xl border border-pink-200 p-6 sm:p-10">
-          <span className="inline-flex rounded-full bg-pink-100 px-3 py-1 text-xs font-medium text-pink-800">
+        <section className="card rounded-2xl border border-(--app-border-strong) p-6 sm:p-10">
+          <span className="inline-flex rounded-full border border-(--app-border-strong) bg-(--app-surface) px-3 py-1 text-xs font-medium text-(--app-text)">
             Windows 64 位 · 桌面客户端
           </span>
           <h1 className="mt-4 text-3xl font-bold text-(--app-text) sm:text-4xl">
@@ -26,18 +27,19 @@ export default function DesktopDownloadPage() {
             但本地数据保存在各自的设备存储中，并不会因为登录同一账号就自动同步。
           </p>
 
-          <div className="mt-6 rounded-xl border border-pink-200 bg-pink-50/80 p-5 dark:bg-pink-950/20">
+          <div className="mt-6 rounded-xl border border-(--app-border-strong) bg-(--app-surface-80) p-5">
             {published ? (
               <>
                 <p className="font-semibold text-(--app-text)">桌面版 v{published.version} 已开放下载</p>
                 <a
                   href={published.installerUrl}
-                  className="mt-3 inline-flex items-center justify-center rounded-lg bg-pink-600 px-5 py-3 font-semibold text-white transition-colors hover:bg-pink-700"
+                  className="mt-3 inline-flex items-center justify-center gap-2 rounded-lg border border-(--app-text) bg-(--app-surface) px-5 py-3 font-semibold text-(--app-text) underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-4"
                 >
+                  <Download size={18} aria-hidden="true" />
                   下载 Windows 安装包（x64）
                 </a>
                 <p className="mt-3 text-sm text-(--app-text-muted)">
-                  <a className="underline underline-offset-2 hover:text-pink-700" href={published.sha256Url}>
+                  <a className="text-(--app-text) underline underline-offset-2" href={published.sha256Url}>
                     查看 SHA256 校验文件
                   </a>
                   {' · '}建议从本站进入官方 GitHub Release 下载并核对校验值。
@@ -58,7 +60,7 @@ export default function DesktopDownloadPage() {
             <div className="rounded-xl border border-(--app-border) p-4">
               <h2 className="font-semibold text-(--app-text)">首次安装</h2>
               <p className="mt-2 text-sm leading-relaxed text-(--app-text-muted)">
-                首发计划提供 Windows x64 安装程序。部分设备首次启动可能需要安装 Microsoft WebView2 运行时；
+                首发计划提供 Windows x64 安装程序。缺少 Microsoft WebView2 运行时的设备，安装时需要联网下载；
                 在线账号、公开库以及云端 AI 服务仍需要网络。
               </p>
             </div>
@@ -71,18 +73,18 @@ export default function DesktopDownloadPage() {
             </div>
           </div>
 
-          <div className="mt-5 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm leading-relaxed text-amber-950 dark:bg-amber-950/20 dark:text-amber-100">
+          <div className="mt-5 rounded-lg border border-(--app-border-strong) bg-(--app-surface-80) p-4 text-sm leading-relaxed text-(--app-text)">
             <strong>关于 Windows 安装警告：</strong>首版暂不对安装程序进行 Windows 发行者代码签名，
             系统可能提示“未知发布者”或显示 SmartScreen 信誉警告。这与应用内更新所需的包签名是两回事。
             请仅通过官方入口获取安装包并校验 SHA256；不确定来源时不要安装，也不需要关闭系统安全防护。
           </div>
 
           <div className="mt-7 flex flex-wrap items-center gap-4 text-sm">
-            <Link className="font-medium text-pink-700 underline underline-offset-4 hover:text-pink-800" href="/encyclopedia/desktop-client">
+            <Link className="font-medium text-(--app-text) underline underline-offset-4" href="/encyclopedia/desktop-client">
               阅读桌面版安装与数据指南
             </Link>
             <a
-              className="font-medium text-pink-700 underline underline-offset-4 hover:text-pink-800"
+              className="font-medium text-(--app-text) underline underline-offset-4"
               href="https://github.com/RunoreLab/MahoShojo-Generator"
               target="_blank"
               rel="noopener noreferrer"

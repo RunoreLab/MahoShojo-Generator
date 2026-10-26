@@ -451,7 +451,15 @@ export function ShowroomView({ assetSource = { baseUrl: '/' } }: ShowroomViewPro
       case 'forms': return <FormsSection />;
       case 'overlay': return <OverlaySection onOpen={() => setModalOpen(true)} />;
       case 'result-surfaces': return <ResultSurfacesSection />;
-      case 'footer': return <ProductFooter assetSource={assetSource} />;
+      case 'footer': return (
+        <div className="grid gap-6">
+          <ProductFooter assetSource={assetSource} />
+          <ProductFooter
+            assetSource={assetSource}
+            platformLinks={<a href="/download" className="footer-link">桌面端下载</a>}
+          />
+        </div>
+      );
     }
   };
 

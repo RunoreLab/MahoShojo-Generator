@@ -61,6 +61,6 @@ export const SHOWROOM_SECTIONS: readonly ShowroomSectionMeta[] = [
   {
     id: 'footer',
     title: '页脚',
-    summary: 'ProductFooter 共源页脚：站内/站外导航、品牌资源与主题联动。',
+    summary: 'ProductFooter 共源页脚：站内/站外导航、品牌资源与主题联动，以及 Web 专属下载链接插槽。',
   },
 ];
