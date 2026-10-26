@@ -23,6 +23,14 @@ target 会在 production config check 中 fail closed。Gateway URL 与 runtime 
 - `/health/live` 和 `/health/ready` 分离进程存活与依赖就绪状态；
 - 每 60 秒以单行 JSON 日志导出 Node 进程、event-loop 和 HTTP 容量基线。
 
+另有只读基础设施端点 `GET|HEAD /api/desktop/releases/stable`，向官网提供固定 Desktop stable 版本的已验证公开投影。
+它不进入 `sharedRouteIds`，由 `createHonoApp` 显式注册，仍受既有 `/api/*` Redis 限速；不会读取或转发来访者的 Cookie、Authorization 或 Query，
+也不接收可变仓库、版本或上游 URL。它只查询固定 GitHub repo/tag，并要求 Release 非 draft/pre-release，安装包、签名、SHA 清单与 `latest.json`
+四项资产齐全且下载 URL 与契约一致后，才返回只含 status/version/三个 URL 的 JSON。单 Node 进程缓存该最小 validated projection 300 秒并合并
+并发 miss；未发布/资产未齐为 `204` 空体 `no-store`，超时、网络、上游 HTTP/限流或 JSON 错误为 `503` 空体 `no-store`，失败只通过 DESK-084
+限定的低基数诊断 header 表达。未发布或失败结果另有 120 秒单目标查询冷却；上游限流给出合法 `Retry-After` 且超过 120 秒时，按该值冷却，最多 3600 秒。
+冷却结果不会作为发布成功缓存或授权依据，成功缓存过期后失败也不会回退到旧版本。上游响应无论是否声明 `Content-Length`，读取均受 1 MiB 上限约束；fetch 与 body read 共用 5 秒总超时。
+
 Phase 2.5C 建立的 10 条 shared-service route 包括 `generate-magical-girl`，G25B-1 收口的
 `generate-game-card`、Free generate/stream、Scenario generate/stream，以及 G25B-2 收口的 Creator、残兽
 generate/stream。Hono 从 `apps/api/src/adapters/*` 加载这些 adapter，不再动态导入对应 Next route；Next wrapper
@@ -104,8 +112,9 @@ client × 20 次权威 transition；输出仅为本地容量事实，`serviceLev
 
 Hono 执行范围只包括 machine-readable 清单中明确保留的 API；具体清单以
 `config/hono-api-routes.json` 为准。已退出的 capability 与 `/api/tachie/generate` 继续由 Next.js Route Handler 承载。
-其余 API 也继续由 Next.js Route Handler 承载。Hono 对未列入白名单的 API 返回 `404`，新增迁移路由时
-必须先修改白名单、重新生成路由清单并补充测试。
+其余 API 也继续由 Next.js Route Handler 承载。Hono 对未列入白名单的 API 返回 `404`；这里的白名单指生成类 shared-route registry，
+另有显式注册于基础设施层的 `/api/health/*` 与 `/api/desktop/releases/stable`，不加入该 registry。
+新增 shared route 仍必须先修改白名单、重新生成路由清单并补充测试；新增基础设施例外则必须在 `createHonoApp` 显式注册并增加端到端 app 测试。
 
 ## 限速
 

@@ -40,6 +40,11 @@
       "import": "./src/desktop-ipc.ts",
       "default": "./src/desktop-ipc.ts"
     },
+    "./desktop-release": {
+      "types": "./src/desktop-release.ts",
+      "import": "./src/desktop-release.ts",
+      "default": "./src/desktop-release.ts"
+    },
     "./desktop-cloud": {
       "types": "./src/desktop-cloud.ts",
       "import": "./src/desktop-cloud.ts",

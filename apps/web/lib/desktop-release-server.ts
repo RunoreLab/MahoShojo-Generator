@@ -1,9 +1,13 @@
 import 'server-only';
 
-import { DESKTOP_RELEASE, parsePublishedDesktopRelease, type PublishedDesktopRelease } from './desktop-release';
+import {
+  DESKTOP_RELEASE,
+  parseDesktopReleaseProjection,
+  type DesktopReleaseFailure,
+  type PublishedDesktopRelease,
+} from '@mahoshojo/contracts/desktop-release';
 import { withEdgeCache } from './edge-cache';
 
-export type DesktopReleaseFailure = 'network' | 'timeout' | 'upstream-http-error' | 'rate-limited' | 'invalid-json' | 'invalid-cache';
 type DesktopReleaseUnavailable = {
   status: 'unavailable';
   failure?: DesktopReleaseFailure;
@@ -14,6 +18,7 @@ export type DesktopReleaseStatus = PublishedDesktopRelease | { status: 'preparin
 
 const RELEASE_CACHE_URL = `https://mahoshojo.colanns.me/_edge-cache/desktop-release/${encodeURIComponent(DESKTOP_RELEASE.version)}`;
 const RELEASE_CACHE_TTL_SECONDS = 300;
+const RELEASE_SERVICE_URL = 'https://homura.colanns.me/api/desktop/releases/stable';
 const RELEASE_FAILURES = new Set<DesktopReleaseFailure>([
   'network', 'timeout', 'upstream-http-error', 'rate-limited', 'invalid-json', 'invalid-cache',
 ]);
@@ -25,7 +30,7 @@ function boundedRetryAfter(value: string | null): number | undefined {
 }
 
 function logUpstreamFailure(failure: DesktopReleaseFailure, upstreamStatus?: number, retryAfterSeconds?: number) {
-  console.warn('[desktop-release] GitHub release lookup failed', {
+  console.warn('[desktop-release] Release service lookup failed', {
     failure,
     ...(upstreamStatus !== undefined ? { upstreamStatus } : {}),
     ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
@@ -55,7 +60,9 @@ function unavailableFromResponse(response: Response): DesktopReleaseUnavailable 
   const rawStatus = response.headers.get('X-Desktop-Release-Upstream-Status');
   const parsedStatus = rawStatus && /^\d{3}$/.test(rawStatus) ? Number(rawStatus) : undefined;
   const upstreamStatus = parsedStatus !== undefined && parsedStatus >= 100 && parsedStatus <= 599 ? parsedStatus : undefined;
-  const retryAfterSeconds = boundedRetryAfter(response.headers.get('Retry-After'));
+  const retryAfterSeconds = failure === 'rate-limited'
+    ? boundedRetryAfter(response.headers.get('Retry-After'))
+    : undefined;
   return {
     status: 'unavailable',
     ...(failure ? { failure } : {}),
@@ -64,18 +71,17 @@ function unavailableFromResponse(response: Response): DesktopReleaseUnavailable 
   };
 }
 
-/** 无凭据公开查询；短缓存避免每次页面访问都消耗 GitHub API 配额。 */
+/** 固定服务端点公开查询；Web edge cache 仅缓存已验证的固定版本投影。 */
 export async function getDesktopRelease(): Promise<DesktopReleaseStatus> {
   const cacheResponse = await withEdgeCache(
     new Request(RELEASE_CACHE_URL),
     { key: RELEASE_CACHE_URL, ttlSeconds: RELEASE_CACHE_TTL_SECONDS, awaitCacheWrite: true },
     async () => {
-      const url = `https://api.github.com/repos/${DESKTOP_RELEASE.repository}/releases/tags/desktop-v${DESKTOP_RELEASE.version}`;
       for (let attempt = 0; attempt < 2; attempt += 1) {
         let response: Response;
         try {
-          response = await fetch(url, {
-            headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'MahoShojo-Desktop-Downloads' },
+          response = await fetch(RELEASE_SERVICE_URL, {
+            headers: { Accept: 'application/json' },
             cache: 'no-store',
             signal: AbortSignal.timeout(5000),
           });
@@ -88,28 +94,37 @@ export async function getDesktopRelease(): Promise<DesktopReleaseStatus> {
         }
 
         if (response.status === 404) {
+          logUpstreamFailure('upstream-http-error', response.status);
+          return unavailableResponse('upstream-http-error', response.status);
+        }
+        if (response.status === 204) {
           return new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } });
         }
-        if (!response.ok) {
-          const rateLimited = response.status === 429
-            || (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0');
-          const failure: DesktopReleaseFailure = rateLimited ? 'rate-limited' : 'upstream-http-error';
-          const retryAfterSeconds = rateLimited ? boundedRetryAfter(response.headers.get('retry-after')) : undefined;
-          logUpstreamFailure(failure, response.status, retryAfterSeconds);
-          if (attempt === 0 && response.status >= 500) continue;
-          return unavailableResponse(failure, response.status, retryAfterSeconds);
+        if (response.status !== 200) {
+          const diagnostic = unavailableFromResponse(response);
+          const failure: DesktopReleaseFailure = diagnostic.failure ?? 'upstream-http-error';
+          const retryAfterSeconds = failure === 'rate-limited' ? diagnostic.retryAfterSeconds : undefined;
+          const upstreamStatus = diagnostic.upstreamStatus ?? response.status;
+          logUpstreamFailure(failure, upstreamStatus, retryAfterSeconds);
+          if (attempt === 0 && response.status >= 500 && failure !== 'rate-limited') continue;
+          return unavailableResponse(failure, upstreamStatus, retryAfterSeconds);
         }
 
+        let rawProjection: unknown;
         try {
-          const published = parsePublishedDesktopRelease(await response.json());
-          if (!published) return new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } });
-          return Response.json(published, {
-            headers: { 'Cache-Control': `public, max-age=${RELEASE_CACHE_TTL_SECONDS}` },
-          });
+          rawProjection = await response.json();
         } catch {
           logUpstreamFailure('invalid-json', response.status);
           return unavailableResponse('invalid-json', response.status);
         }
+        const published = parseDesktopReleaseProjection(rawProjection);
+        if (!published) {
+          logUpstreamFailure('invalid-cache', response.status);
+          return unavailableResponse('invalid-cache', response.status);
+        }
+        return Response.json(published, {
+          headers: { 'Cache-Control': `public, max-age=${RELEASE_CACHE_TTL_SECONDS}` },
+        });
       }
 
       return unavailableResponse('network');
@@ -119,21 +134,15 @@ export async function getDesktopRelease(): Promise<DesktopReleaseStatus> {
   if (cacheResponse.status === 204) return { status: 'preparing' };
   if (cacheResponse.status !== 200) return unavailableFromResponse(cacheResponse);
 
+  let cachedProjection: unknown;
   try {
-    const cached = await cacheResponse.json() as PublishedDesktopRelease;
-    const installer = `MahoShojo-Generator_${DESKTOP_RELEASE.version}_x64-setup.exe`;
-    const base = `https://github.com/${DESKTOP_RELEASE.repository}/releases/download/desktop-v${DESKTOP_RELEASE.version}`;
-    if (cached.status === 'published'
-      && cached.version === DESKTOP_RELEASE.version
-      && cached.installerUrl === `${base}/${installer}`
-      && cached.sha256Url === `${base}/SHA256SUMS.txt`
-      && cached.manifestUrl === `${base}/latest.json`) {
-      return cached;
-    }
+    cachedProjection = await cacheResponse.json();
   } catch {
-    // 缓存数据损坏时保持关闭状态；等该条目过期或被淘汰后才会重新验证 GitHub。
+    cachedProjection = null;
   }
-
+  const cached = parseDesktopReleaseProjection(cachedProjection);
+  if (cached) return cached;
+  // 损坏的共享缓存保持关闭状态；等条目过期或被淘汰后才重新查询固定服务端点。
   logUpstreamFailure('invalid-cache');
   return { status: 'unavailable', failure: 'invalid-cache' };
 }

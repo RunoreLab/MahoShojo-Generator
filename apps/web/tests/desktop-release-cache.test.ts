@@ -6,15 +6,11 @@ const baseUrl = `https://github.com/${DESKTOP_RELEASE.repository}/releases/downl
 const installer = `MahoShojo-Generator_${DESKTOP_RELEASE.version}_x64-setup.exe`;
 
 const completeRelease = () => ({
-  tag_name: `desktop-v${DESKTOP_RELEASE.version}`,
-  draft: false,
-  prerelease: false,
-  assets: [installer, `${installer}.sig`, 'SHA256SUMS.txt', 'latest.json'].map((name) => ({
-    name,
-    state: 'uploaded',
-    size: 100,
-    browser_download_url: `${baseUrl}/${name}`,
-  })),
+  status: 'published',
+  version: DESKTOP_RELEASE.version,
+  installerUrl: `${baseUrl}/${installer}`,
+  sha256Url: `${baseUrl}/SHA256SUMS.txt`,
+  manifestUrl: `${baseUrl}/latest.json`,
 });
 
 const loadGetDesktopRelease = async () => (await import('../lib/desktop-release-server')).getDesktopRelease;
@@ -46,17 +42,20 @@ describe('desktop release runtime cache', () => {
   });
 
   test.each([
-    { initialStatus: 404, expected: 'preparing' },
-    { initialStatus: 403, expected: 'unavailable', failure: 'upstream-http-error' },
-  ])('$expected results do not populate the published cache', async ({ initialStatus, expected }) => {
+    { initialStatus: 204, expected: 'preparing' },
+    { initialStatus: 503, expected: 'unavailable', failure: 'rate-limited' },
+  ])('$expected results do not populate the published cache', async ({ initialStatus, expected, failure }) => {
     const fetch = vi.fn()
-      .mockResolvedValueOnce(new Response(null, { status: initialStatus }))
+      .mockResolvedValueOnce(new Response(null, {
+        status: initialStatus,
+        ...(failure ? { headers: { 'X-Desktop-Release-Failure': failure, 'X-Desktop-Release-Upstream-Status': '403' } } : {}),
+      }))
       .mockResolvedValueOnce(Response.json(completeRelease()));
     vi.stubGlobal('fetch', fetch);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const getDesktopRelease = await loadGetDesktopRelease();
 
-    expect(await getDesktopRelease()).toMatchObject({ status: expected, ...(expected === 'unavailable' ? { failure: 'upstream-http-error' } : {}) });
+    expect(await getDesktopRelease()).toMatchObject({ status: expected, ...(failure ? { failure } : {}) });
     expect(await getDesktopRelease()).toMatchObject({ status: 'published', version: DESKTOP_RELEASE.version });
     expect(fetch).toHaveBeenCalledTimes(2);
   });
@@ -66,7 +65,7 @@ describe('desktop release runtime cache', () => {
     vi.spyOn(Date, 'now').mockImplementation(() => now);
     const fetch = vi.fn()
       .mockResolvedValueOnce(Response.json(completeRelease()))
-      .mockResolvedValueOnce(new Response(null, { status: 404 }));
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetch);
     const getDesktopRelease = await loadGetDesktopRelease();
 

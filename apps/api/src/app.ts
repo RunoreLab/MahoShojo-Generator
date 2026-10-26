@@ -9,6 +9,11 @@ import {
 } from '@mahoshojo/hosted-api/hosted-dr';
 import type { HonoServerConfig } from '#/config';
 import {
+  createDesktopReleaseService,
+  registerDesktopReleaseRoute,
+  type DesktopReleaseDependencies,
+} from '#/desktop-release';
+import {
   registerArenaRoomHttpRoutes,
   type ArenaRoomHttpDependencies,
 } from '#/arena-room/room-http';
@@ -42,7 +47,11 @@ export const createHonoApp = (
   config: HonoServerConfig,
   redis: RedisService,
   telemetry: RuntimeTelemetryService = noopRuntimeTelemetry,
-  services: { readonly arenaRoom?: ArenaRoomHttpDependencies; readonly adminArenaObservation?: AdminArenaObservationService } = {},
+  services: {
+    readonly arenaRoom?: ArenaRoomHttpDependencies;
+    readonly adminArenaObservation?: AdminArenaObservationService;
+    readonly desktopRelease?: DesktopReleaseDependencies;
+  } = {},
 ) => {
   if (config.arenaMultiplayerEnabled && !services.arenaRoom) {
     throw new Error('Arena Room HTTP dependencies are required when multiplayer is enabled');
@@ -78,6 +87,7 @@ export const createHonoApp = (
   }));
 
   registerHealthRoutes(app, config, redis, telemetry);
+  registerDesktopReleaseRoute(app, createDesktopReleaseService(services.desktopRelease));
   if (config.arenaMultiplayerEnabled && services.arenaRoom) {
     registerArenaRoomHttpRoutes(app, services.arenaRoom, {
       isAllowedOrigin: (origin) => isExactAllowedOrigin(

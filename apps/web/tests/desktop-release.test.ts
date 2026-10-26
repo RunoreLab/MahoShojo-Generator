@@ -16,6 +16,10 @@ const completeRelease = () => ({
     name, state: 'uploaded', size: 100, browser_download_url: `${baseUrl}/${name}`,
   })),
 });
+const publishedProjection = () => ({
+  status: 'published', version: DESKTOP_RELEASE.version,
+  installerUrl: `${baseUrl}/${installer}`, sha256Url: `${baseUrl}/SHA256SUMS.txt`, manifestUrl: `${baseUrl}/latest.json`,
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -51,13 +55,15 @@ describe('manual GitHub release publication', () => {
     expect(parsePublishedDesktopRelease(release)).toBeNull();
   });
 
-  test('a published release directs updater to the same versioned manifest', async () => {
-    const fetch = vi.fn().mockResolvedValue(Response.json(completeRelease()));
+  test('a published release from the fixed service directs updater to its versioned manifest', async () => {
+    const fetch = vi.fn().mockResolvedValue(Response.json(publishedProjection()));
     vi.stubGlobal('fetch', fetch);
     const response = await GET();
     expect(response.status).toBe(307);
     expect(response.headers.get('Location')).toBe(`${baseUrl}/latest.json`);
-    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/releases/tags/desktop-v0.1.0'), expect.objectContaining({ cache: 'no-store' }));
+    expect(fetch).toHaveBeenCalledWith('https://homura.colanns.me/api/desktop/releases/stable', expect.objectContaining({
+      cache: 'no-store', headers: { Accept: 'application/json' },
+    }));
     const [cacheRequest, cacheOptions] = withEdgeCacheMock.mock.calls[0] ?? [];
     expect(cacheRequest).toBeInstanceOf(Request);
     expect(cacheRequest.headers.get('cookie')).toBeNull();
@@ -66,7 +72,7 @@ describe('manual GitHub release publication', () => {
   });
 
   test('an unpublished release means no update, without an installer link', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(null, { status: 404 })));
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => new Response(null, { status: 204 })));
     expect(await getDesktopRelease()).toEqual({ status: 'preparing' });
     expect((await GET()).status).toBe(204);
   });
@@ -80,9 +86,14 @@ describe('manual GitHub release publication', () => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => {
       if (fault === 'network') throw new TypeError('secret network message');
       if (fault === 'timeout') throw Object.assign(new Error('secret timeout message'), { name: 'TimeoutError' });
-      if (fault === 'rate-limit') return new Response('secret upstream body', {
-        status: 403,
-        headers: { 'x-ratelimit-remaining': '0', 'retry-after': '5', 'x-private-secret': 'never expose' },
+      if (fault === 'rate-limit') return new Response(null, {
+        status: 503,
+        headers: {
+          'X-Desktop-Release-Failure': 'rate-limited',
+          'X-Desktop-Release-Upstream-Status': '403',
+          'Retry-After': '5',
+          'x-private-secret': 'never expose',
+        },
       });
       return new Response('secret invalid JSON body');
     }));
@@ -100,10 +111,10 @@ describe('manual GitHub release publication', () => {
     expect(JSON.stringify([...response.headers])).not.toMatch(/secret|offline/i);
   });
 
-  test('retries a transient GitHub server error once and keeps the unpublished tag preparing', async () => {
+  test('retries a transient release service server error once and preserves preparing state', async () => {
     const fetch = vi.fn()
       .mockResolvedValueOnce(new Response('upstream unavailable', { status: 502 }))
-      .mockResolvedValueOnce(new Response(null, { status: 404 }));
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetch);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -111,20 +122,23 @@ describe('manual GitHub release publication', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
-  test('logs only bounded GitHub rate-limit diagnostics without retrying a 403', async () => {
+  test('logs bounded release service rate-limit diagnostics without retrying 503', async () => {
     const fetch = vi.fn().mockResolvedValue(new Response(null, {
-      status: 403,
-      headers: { 'x-github-request-id': 'SAFE-REQUEST-ID', 'x-ratelimit-remaining': '0' },
+      status: 503,
+      headers: {
+        'X-Desktop-Release-Failure': 'rate-limited',
+        'X-Desktop-Release-Upstream-Status': '403',
+      },
     }));
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.stubGlobal('fetch', fetch);
 
     expect(await getDesktopRelease()).toEqual({ status: 'unavailable', failure: 'rate-limited', upstreamStatus: 403 });
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(warn).toHaveBeenCalledWith('[desktop-release] GitHub release lookup failed', {
+    expect(warn).toHaveBeenCalledWith('[desktop-release] Release service lookup failed', {
       failure: 'rate-limited', upstreamStatus: 403,
     });
-    expect(JSON.stringify(warn.mock.calls)).not.toContain('SAFE-REQUEST-ID');
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('x-private-secret');
   });
 
   test('does not expose secret upstream errors in safe failure diagnostics', async () => {
