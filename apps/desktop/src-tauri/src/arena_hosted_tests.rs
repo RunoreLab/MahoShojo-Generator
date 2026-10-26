@@ -19,6 +19,22 @@ fn fixture() -> Value {
     ))
     .unwrap()
 }
+
+#[test]
+fn updater_idle_gate_blocks_pending_hosted_request_until_terminal() {
+    let state = ArenaState::isolated();
+    let cloud = CloudState::new().unwrap();
+    let secrets = Secrets::default();
+    assert!(state.while_idle(|| ()).is_ok());
+    let flight = state
+        .prepare(&create(false, false), &cloud, &secrets)
+        .unwrap();
+    assert!(state
+        .while_idle(|| panic!("must not install with an unresolved Hosted request"))
+        .is_err());
+    flight.lock().unwrap().terminal = true;
+    assert!(state.while_idle(|| ()).is_ok());
+}
 #[derive(Default)]
 struct Secrets {
     values: Mutex<HashMap<String, String>>,

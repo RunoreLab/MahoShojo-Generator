@@ -411,6 +411,16 @@ pub struct RequestRegistry {
 }
 
 impl RequestRegistry {
+    /// Hold the registration lock only while starting the installer. New Direct jobs
+    /// cannot slip between the idle check and the process exit.
+    pub(crate) fn while_idle<T>(&self, action: impl FnOnce() -> T) -> Result<T, ()> {
+        let guard = self.entries.try_lock().map_err(|_| ())?;
+        if !guard.is_empty() {
+            return Err(());
+        }
+        Ok(action())
+    }
+
     pub fn register(&self, request_id: &str) -> Result<CancellationToken, DirectAiError> {
         let mut guard = self.entries.lock().map_err(|_| {
             DirectAiError::new(DirectAiErrorCode::Failed, "request registry poisoned")

@@ -132,6 +132,13 @@ impl LocalLibrary {
         self.gate.enter_maintenance(label)
     }
 
+    pub fn try_enter_maintenance(
+        &self,
+        label: &'static str,
+    ) -> Result<MaintenancePermit, MaintenanceRejection> {
+        self.gate.try_enter_maintenance(label)
+    }
+
     // ---- 访问者 -----------------------------------------------------------
 
     #[allow(

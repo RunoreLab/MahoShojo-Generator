@@ -25,6 +25,9 @@ fn main() {
     tauri_build::try_build(
         attributes.app_manifest(tauri_build::AppManifest::new().commands(&[
             "desktop_runtime_info",
+            "check_desktop_update",
+            "install_desktop_update",
+            "cancel_desktop_update",
             "set_provider_secret",
             "has_provider_secret",
             "delete_provider_secret",

@@ -1,6 +1,6 @@
 {
   "name": "@mahoshojo/desktop",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -14,7 +14,9 @@
     "dev:tauri": "tauri dev",
     "build:tauri": "tauri build",
     "check:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml",
-    "generate:content": "node ../../scripts/generate-encyclopedia-content.mjs --target desktop"
+    "generate:content": "node ../../scripts/generate-encyclopedia-content.mjs --target desktop && pnpm run generate:notices",
+    "generate:notices": "node ../../scripts/generate-desktop-notices.mjs",
+    "generate:notices:rust": "node ../../scripts/generate-desktop-notices.mjs --rust"
   },
   "dependencies": {
     "@mahoshojo/ai-core": "workspace:*",

@@ -24,6 +24,8 @@ import { EscapeMenuSettingsCard } from '../features/config/EscapeMenuSettingsCar
 import { OnlineSettingsSection } from '../features/config/OnlineSettingsSection';
 import { PublicCacheSettingsCard } from '../features/public-cache/PublicCacheSettingsCard';
 import { WebPackageDiagnosticsPanel } from '../features/webpkg/WebPackageDiagnosticsPanel';
+import { DesktopUpdateCard } from '../features/updater/DesktopUpdateCard';
+import { ThirdPartyNoticesCard } from '../features/updater/ThirdPartyNoticesCard';
 import { loadDesktopRuntimeInfo, type DesktopRuntimeInfo } from '../platform';
 import { navigateByProductHref, resolveInternalHrefForHashHistory } from './hash-history-fragment';
 
@@ -206,6 +208,8 @@ export const DesktopSettings = () => {
             <>
               <WebPackageDiagnosticsPanel />
               <RuntimeInfoPanel />
+              <DesktopUpdateCard />
+              <ThirdPartyNoticesCard />
             </>
           ),
         },

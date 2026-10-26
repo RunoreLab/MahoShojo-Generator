@@ -179,3 +179,7 @@ current_state.md
 
 /apps/web/public/mahou-title.svg
 /apps/desktop/public/mahou-title.svg
+
+# Generated dependency notices bundled by the Desktop build
+/apps/desktop/public/THIRD_PARTY_NOTICES.txt
+/apps/desktop/public/RUST_THIRD_PARTY_NOTICES.txt

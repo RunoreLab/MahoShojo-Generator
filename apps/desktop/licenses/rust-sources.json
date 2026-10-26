@@ -1,0 +1,30 @@
+{
+  "alloc-stdlib@0.3.0": {
+    "files": ["alloc-stdlib-LICENSE.txt"],
+    "source": "https://raw.githubusercontent.com/dropbox/rust-alloc-no-stdlib/0a81fd6928ea3b33c8cd484aa4575d50ffb98012/LICENSE"
+  },
+  "defmt-parser@1.0.0": {
+    "files": ["defmt-parser-MIT.txt", "defmt-parser-Apache.txt"],
+    "source": "https://github.com/knurling-rs/defmt/tree/4a8cdb44891ed57b8ff5a023b6bec7137c48708f"
+  },
+  "selectors@0.38.0": {
+    "files": ["MPL-2.0-LICENSE.txt"],
+    "source": "https://www.mozilla.org/media/MPL/2.0/index.815ca599c9df.txt"
+  },
+  "tauri-plugin@2.7.2": {
+    "files": ["tauri-plugin-LICENSE-MIT.txt"],
+    "source": "https://raw.githubusercontent.com/tauri-apps/tauri/59b63ab500da9859f12d8888c3298bc29bba0b92/LICENSE-MIT"
+  },
+  "webview2-com@0.39.1": {
+    "files": ["webview2-com-LICENSE.txt"],
+    "source": "https://raw.githubusercontent.com/wravery/webview2-rs/edc2caf886175ccaebe86078c9cfe1ae2a187328/LICENSE"
+  },
+  "webview2-com-sys@0.39.1": {
+    "files": ["webview2-com-LICENSE.txt"],
+    "source": "https://raw.githubusercontent.com/wravery/webview2-rs/edc2caf886175ccaebe86078c9cfe1ae2a187328/LICENSE"
+  },
+  "webview2-com-macros@0.8.1": {
+    "files": ["webview2-com-macros-LICENSE.txt"],
+    "source": "https://raw.githubusercontent.com/wravery/webview2-rs/dffa41a8a46d3f5565eefbff2de57d38d399f158/LICENSE"
+  }
+}

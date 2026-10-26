@@ -1,0 +1,22 @@
+{
+  "@ai-sdk/provider-utils": {
+    "files": ["ai-sdk-LICENSE.txt", "Apache-2.0-LICENSE.txt"],
+    "source": "https://raw.githubusercontent.com/vercel/ai/main/LICENSE"
+  },
+  "drizzle-orm": {
+    "files": ["drizzle-orm-LICENSE.txt"],
+    "source": "https://raw.githubusercontent.com/drizzle-team/drizzle-orm/main/LICENSE"
+  },
+  "remark-math": {
+    "files": ["remark-math-LICENSE.txt"],
+    "source": "https://raw.githubusercontent.com/remarkjs/remark-math/main/license"
+  },
+  "rehype-katex": {
+    "files": ["remark-math-LICENSE.txt"],
+    "source": "https://raw.githubusercontent.com/remarkjs/remark-math/main/license"
+  },
+  "@cfworker/json-schema": {
+    "files": ["cfworker-LICENSE.txt"],
+    "source": "https://raw.githubusercontent.com/cfworker/cfworker/main/LICENSE.md"
+  }
+}

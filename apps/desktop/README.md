@@ -129,16 +129,21 @@ pnpm --filter @mahoshojo/desktop run dev
 `pnpm run sync:desktop-version`，不要单独手改派生文件。
 
 ```bash
-# 产出 Windows NSIS 安装包（含前端构建与 Rust release 编译）
+# 产出 Windows NSIS 安装包（需通过环境变量提供 Tauri 更新签名密钥与口令）
 pnpm build:desktop
-# 产物：apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+# 产物：apps/desktop/src-tauri/target/release/bundle/nsis/*.exe 及 .sig
 ```
 
 安装包为按当前用户安装的 NSIS（无需管理员），界面语言简体中文/英文随系统，
 WebView2 缺失时在线下载引导。内部跨设备验收清单与升级/数据红线见
 [Desktop 安装包构建与内部验收](../../docs/runbooks/2026-10-19_201500_Desktop安装包构建与内部验收.md)；
-CI 打包流水线为 `.github/workflows/desktop-package.yml`，只做内部分发，
-不含签名、updater 与 Release。
+内部打包使用 `.github/workflows/desktop-package.yml`，通过临时配置关闭签名产物，
+无需发布密钥；正式签名候选使用 `desktop-release-candidate.yml`。两者均仅手动触发，普通 push 不打包，
+也不会自动创建 GitHub Release。具体密钥管理、候选整理与手动发布步骤见
+[Desktop 正式版候选与发布](../../docs/runbooks/2026-10-26_220000_Desktop正式版候选与发布.md)。
+
+正式构建会生成并打包 JS / Windows Rust 第三方许可清单，可在设置页离线查看。
+0.1.0 起“设置 → 高级”提供手动签名更新；Beta 首次升级仍需手动下载安装包。
 
 ## 类型检查口径
 

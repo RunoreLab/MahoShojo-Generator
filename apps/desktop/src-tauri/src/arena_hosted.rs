@@ -576,6 +576,19 @@ pub struct ArenaState {
     flights: Mutex<HashMap<Product, Arc<Mutex<Flight>>>>,
 }
 impl ArenaState {
+    /// Unknown/nonterminal Hosted requests must be resolved before replacing the app.
+    /// Holding the map prevents a new flight from starting before installer handoff.
+    pub(crate) fn while_idle<T>(&self, action: impl FnOnce() -> T) -> Result<T, ()> {
+        let flights = self.flights.try_lock().map_err(|_| ())?;
+        for flight in flights.values() {
+            let flight = flight.try_lock().map_err(|_| ())?;
+            if !flight.terminal && !flight.revoked {
+                return Err(());
+            }
+        }
+        Ok(action())
+    }
+
     pub fn new(stories: Arc<StoryStore>) -> Result<Self, ArenaError> {
         let http = reqwest::Client::builder()
             // Fixed credential-bearing origins must not inherit a third-party environment proxy.

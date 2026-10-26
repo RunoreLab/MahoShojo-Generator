@@ -68,6 +68,7 @@ mod sse;
 mod store;
 #[cfg(test)]
 mod test_fixture;
+mod updater;
 mod web_package;
 mod webpkg_instance;
 
@@ -102,6 +103,29 @@ fn desktop_runtime_info(app: tauri::AppHandle) -> DesktopRuntimeInfo {
         arch: std::env::consts::ARCH.to_string(),
         packaged: !cfg!(debug_assertions),
     }
+}
+
+#[tauri::command]
+async fn check_desktop_update(
+    app: tauri::AppHandle,
+    state: State<'_, updater::UpdateState>,
+) -> Result<updater::CheckResult, updater::UpdateError> {
+    updater::check(app, state.inner().clone()).await
+}
+
+#[tauri::command]
+async fn install_desktop_update(
+    app: tauri::AppHandle,
+    state: State<'_, updater::UpdateState>,
+    version: String,
+    on_event: tauri::ipc::Channel<updater::Progress>,
+) -> Result<(), updater::UpdateError> {
+    updater::install(app, state.inner().clone(), version, on_event).await
+}
+
+#[tauri::command]
+fn cancel_desktop_update(state: State<'_, updater::UpdateState>) -> bool {
+    state.cancel()
 }
 
 /// 写入或覆盖一条持久 secret。
@@ -2205,6 +2229,9 @@ pub fn run() {
         }
     };
     tauri::Builder::default()
+        // Official updater is Native-only; none of its plugin commands are granted.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updater::UpdateState::default())
         .manage(rooms)
         .append_invoke_initialization_script(arena_room_tauri::DOCUMENT_SCRIPT)
         .on_page_load(|webview, payload| arena_room_tauri::page_load(webview, payload.event()))
@@ -2317,6 +2344,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             desktop_runtime_info,
+            check_desktop_update,
+            install_desktop_update,
+            cancel_desktop_update,
             set_provider_secret,
             has_provider_secret,
             delete_provider_secret,

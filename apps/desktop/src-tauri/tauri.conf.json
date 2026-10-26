@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "MahoShojo Generator",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0",
   "identifier": "me.colanns.mahoshojo.desktop",
   "build": {
     "beforeDevCommand": "pnpm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "pnpm run build",
+    "beforeBuildCommand": "pnpm run generate:notices:rust && pnpm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -37,7 +37,7 @@
     "targets": [
       "nsis"
     ],
-    "createUpdaterArtifacts": false,
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -58,5 +58,16 @@
       }
     }
   },
-  "plugins": {}
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQ1ODYyOUI0NEI1OTY4MTUKUldRVmFGbEx0Q21HUmNrYXBBVEdtSGRDT1BoUEVTWFlZekkxTmJpVmd3V09NRUNqN0xoVHQ5NWUK",
+      "endpoints": [
+        "https://mahoshojo.colanns.me/desktop/updates/stable/latest.json"
+      ],
+      "requireSignedVersion": true,
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
 }

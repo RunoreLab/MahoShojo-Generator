@@ -1,6 +1,6 @@
 [package]
 name = "mahoshojo-desktop"
-version = "0.1.0-beta.1"
+version = "0.1.0"
 description = "MahoShojo Generator 本地桌面客户端"
 edition = "2021"
 rust-version = "1.90"
@@ -55,6 +55,9 @@ tempfile = "3"
 # 可预测 ID，未获 capability 的 webview 可猜 ID 窃取可信 webview 的 Channel 数据
 # （ADR-desktop-tauri-v1 §2）。
 tauri = { version = "2.11.6", features = [] }
+# Official signed updater, MIT/Apache-2.0. Rust-only API; no plugin IPC grant.
+# v2 NSIS uses the installer directly, so legacy v1 archive support is unnecessary.
+tauri-plugin-updater = { version = "2.14.0", default-features = false, features = ["rustls-tls", "system-proxy"] }
 # RFC3339 解析，用于把本地卡 updatedAt 规范化成 UTC epoch 毫秒的 keyset 排序键。
 # 不自己写日期解析：闰年、世纪闰年、offset 边界这类错误极难靠肉眼保证，而排序键算错会
 # 直接表现为 keyset 漏读。MIT / Apache-2.0，纯 Rust。

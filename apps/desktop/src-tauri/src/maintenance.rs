@@ -34,8 +34,8 @@
 //!
 //! `DESK-068` 记录了机制选择。`tauri-plugin-single-instance` 按 app id 判定，而 V1 需要的是
 //! "同一数据目录不被两个进程同时打开"——dev 构建与另一个构建可以有不同 app id 却指向同一个
-//! `app_data_dir`，那正是要防的场景，且用插件还会被迫在 V1 引入第一个 Tauri 插件
-//! （`DESK-011` 默认禁止）。
+//! `app_data_dir`，那正是要防的场景。单实例仍不需要插件；`DESK-011` 的 updater
+//! 例外只允许 Native 内部调用，不改变这里的数据目录锁语义。
 //!
 //! advisory 锁由 OS 持有、随进程死亡自动释放：这正是想要的失败模式——崩溃**不得**永久锁死用户。
 
@@ -229,6 +229,25 @@ impl MaintenanceGate {
         state.active_writers += 1;
         Ok(WritePermit {
             gate: Arc::clone(self),
+        })
+    }
+
+    /// Updating must never terminate a live writer or wait behind a backup/restore.
+    pub fn try_enter_maintenance(
+        self: &Arc<Self>,
+        label: &'static str,
+    ) -> Result<MaintenancePermit, MaintenanceRejection> {
+        let mut state = self
+            .state
+            .try_lock()
+            .map_err(|_| MaintenanceRejection::MaintenanceBusy)?;
+        if state.maintenance.is_some() || state.active_writers != 0 {
+            return Err(MaintenanceRejection::MaintenanceBusy);
+        }
+        state.maintenance = Some(label);
+        Ok(MaintenancePermit {
+            gate: Arc::clone(self),
+            label,
         })
     }
 

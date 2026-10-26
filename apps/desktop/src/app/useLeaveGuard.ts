@@ -2,8 +2,74 @@ import { useEffect, useRef, useState } from 'react';
 import { useBlocker } from '@tanstack/react-router';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { registerBusyOperation } from './busy-operations';
 
 const DEFAULT_BUSY_MESSAGE = '仍有操作在进行，请等待完成后再离开或关闭窗口。';
+
+type NativeGuard = {
+  isBusy: () => boolean;
+  getConfirmLeave: () => (() => boolean) | undefined;
+  blocked: () => void;
+  ready: () => void;
+  failed: () => void;
+};
+const nativeGuards = new Set<NativeGuard>();
+type NativeListener = { disposed: boolean; status: 'pending' | 'ready' | 'failed'; release?: () => void };
+let nativeListener: NativeListener | null = null;
+
+// Tauri 的每个 close listener 都独立决定是否 destroy 窗口，必须统一协调全部守卫。
+const registerNativeGuard = (guard: NativeGuard) => {
+  nativeGuards.add(guard);
+  if (nativeListener) {
+    if (nativeListener.status === 'ready') guard.ready();
+    else if (nativeListener.status === 'failed') guard.failed();
+  } else {
+    const listener: NativeListener = { disposed: false, status: 'pending' };
+    nativeListener = listener;
+    void (async () => {
+      try {
+        const release = await getCurrentWindow().onCloseRequested((event) => {
+          // StrictMode 的旧异步注册可能晚到，不能自行放行关闭。
+          if (listener.disposed) { event.preventDefault(); return; }
+          const busy = [...nativeGuards].filter((entry) => entry.isBusy());
+          // 有不可中断工作时先阻止关闭，不提前询问是否丢弃其他草稿。
+          const blocking = busy.filter((entry) => !entry.getConfirmLeave());
+          if (blocking.length > 0) {
+            event.preventDefault();
+            blocking.forEach((entry) => entry.blocked());
+            return;
+          }
+          for (const entry of busy) {
+            if (!entry.getConfirmLeave()?.()) {
+              event.preventDefault();
+              entry.blocked();
+              return;
+            }
+          }
+        });
+        if (listener.disposed) release();
+        else {
+          listener.release = release;
+          listener.status = 'ready';
+          nativeGuards.forEach((entry) => entry.ready());
+        }
+      } catch {
+        if (!listener.disposed) {
+          listener.status = 'failed';
+          nativeGuards.forEach((entry) => entry.failed());
+        }
+      }
+    })();
+  }
+  return () => {
+    nativeGuards.delete(guard);
+    if (nativeGuards.size === 0 && nativeListener) {
+      nativeListener.disposed = true;
+      nativeListener.release?.();
+      nativeListener = null;
+    }
+  };
+};
 
 /**
  * 在途操作离开守卫：`isBusy` 为真时阻止路由导航、页面刷新与原生窗口关闭。
@@ -26,6 +92,8 @@ export const useLeaveGuard = (
   messageRef.current = busyMessage;
   const [ready, setReady] = useState(!isTauri());
   const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => registerBusyOperation(() => busyRef.current()), []);
 
   useBlocker({
     shouldBlockFn: () => {
@@ -50,33 +118,13 @@ export const useLeaveGuard = (
 
   useEffect(() => {
     if (!isTauri()) return;
-    let disposed = false;
-    let unlisten: (() => void) | undefined;
-    getCurrentWindow().onCloseRequested((event) => {
-      // Tauri 会在每个未 preventDefault 的回调后自行 destroy；晚到的旧 listener
-      // 不得绕过 StrictMode 重挂后新 listener 的在途保护。
-      if (disposed) {
-        event.preventDefault();
-        return;
-      }
-      if (!busyRef.current()) return;
-      if (confirmLeaveRef.current?.()) return;
-      event.preventDefault();
-      setMessage(messageRef.current);
-    }).then((release) => {
-      // StrictMode 或导航可能早于异步注册返回；晚到的 handle 也必须释放。
-      if (disposed) release();
-      else {
-        unlisten = release;
-        setReady(true);
-      }
-    }).catch(() => {
-      if (!disposed) setMessage(initializationFailureMessage);
+    return registerNativeGuard({
+      isBusy: () => busyRef.current(),
+      getConfirmLeave: () => confirmLeaveRef.current,
+      blocked: () => setMessage(messageRef.current),
+      ready: () => setReady(true),
+      failed: () => { setReady(false); setMessage(initializationFailureMessage); },
     });
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
   }, [initializationFailureMessage]);
 
   return { ready, message: !isBusy() && ready ? null : message };

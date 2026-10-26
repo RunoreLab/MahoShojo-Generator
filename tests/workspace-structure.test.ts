@@ -658,6 +658,9 @@ describe('desktop workspace app ownership', () => {
 
     expect(commands).toEqual([
       'desktop_runtime_info',
+      'check_desktop_update',
+      'install_desktop_update',
+      'cancel_desktop_update',
       'set_provider_secret',
       'has_provider_secret',
       'delete_provider_secret',
@@ -1112,9 +1115,14 @@ it('runs maintenance commands off the IPC thread and inside a maintenance window
     // 不可信内容只能走独立 webview，因此主文档内不允许任何 frame。
     expect(csp).toContain("frame-src 'none'");
 
-    // 发行与 updater 属于 D5，D0 不预先打开。
-    expect(tauriConfig.bundle?.createUpdaterArtifacts).toBe(false);
-    expect(Object.keys(tauriConfig.plugins ?? {})).toEqual([]);
+    // D5.2 仅向 Native 开放 updater；renderer 仍走自有窄 commands。
+    expect(tauriConfig.bundle?.createUpdaterArtifacts).toBe(true);
+    expect(tauriConfig.plugins).toEqual({ updater: {
+      pubkey: readFileSync(path.join(tauriDirectory, 'updater-public-key.pub'), 'utf8').trim(),
+      endpoints: ['https://mahoshojo.colanns.me/desktop/updates/stable/latest.json'],
+      requireSignedVersion: true,
+      windows: { installMode: 'passive' },
+    } });
   });
 });
 
