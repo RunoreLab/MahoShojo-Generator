@@ -1,7 +1,7 @@
 /**
  * 共源百科目录。
  *
- * 它是 52 篇百科的**元数据权威**：标题、摘要、分类与关键词都在这里。Markdown 正文本身不携带
+ * 它是百科条目的**元数据权威**：标题、摘要、分类与关键词都在这里。Markdown 正文本身不携带
  * frontmatter，因此正文与目录各有一份标题——`stripLeadingMatchingTitle` 存在的理由正是这个约定，
  * 而不是它自己是个 hack。
  *
@@ -98,6 +98,14 @@ export const encyclopediaEntries: EncyclopediaEntry[] = [
     contentFile: 'site-guide.md',
     categoryId: 'guide',
     keywords: ['新手', '入口', '流程', '速查'],
+  },
+  {
+    slug: 'desktop-client',
+    title: '桌面客户端：安装、更新与本地数据',
+    summary: 'Windows 桌面版正式发布状态、安装校验、Beta 升级、网页本地库隔离与常见故障。',
+    contentFile: 'desktop-client.md',
+    categoryId: 'guide',
+    keywords: ['桌面版', '客户端', 'Desktop', 'Tauri', 'Windows', '下载', '安装', '升级', '本地数据', '/download'],
   },
   {
     slug: 'auth-migration',

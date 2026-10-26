@@ -25,6 +25,7 @@ describe('navigation config', () => {
       '/character-manager',
       '/character-party',
       '/local-library',
+      '/download',
       '/questionnaire-editor',
       '/sublimation',
       '/tachie',
@@ -91,6 +92,7 @@ describe('navigation config', () => {
     expect(getTopbarCoverage('/encyclopedia/[slug]')).toEqual({ isCovered: true, activeGroupId: 'knowledge' });
     expect(getTopbarCoverage('/pvp/room-7')).toEqual({ isCovered: false, activeGroupId: null });
     expect(getTopbarCoverage('/messages')).toEqual({ isCovered: true, activeGroupId: null });
+    expect(getTopbarCoverage('/download')).toEqual({ isCovered: true, activeGroupId: null });
     expect(getTopbarCoverage('/investigation')).toEqual({ isCovered: true, activeGroupId: 'knowledge' });
   });
 

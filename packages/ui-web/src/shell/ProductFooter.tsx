@@ -26,6 +26,8 @@ export interface ProductFooterProps {
   readonly resolveInternalHref?: (href: string) => string;
   readonly onNavigateExternal?: (href: string) => void;
   readonly renderExternalLink?: (link: ExternalLinkRenderProps) => ReactNode;
+  /** 宿主专属的补充链接，如 Web-only 下载页；Desktop 不注入。 */
+  readonly platformLinks?: ReactNode;
   readonly externalBlockedReason?: string;
 }
 
@@ -40,6 +42,7 @@ export function ProductFooter({
   resolveInternalHref,
   onNavigateExternal,
   renderExternalLink,
+  platformLinks,
   externalBlockedReason = DEFAULT_BLOCKED_REASON,
 }: ProductFooterProps) {
   const external = (href: string, label: ReactNode, title?: string): ReactNode => {
@@ -126,7 +129,7 @@ export function ProductFooter({
         &nbsp;强力支持
       </p>
       <p>{external('https://docs.qq.com/form/page/DYmdrdWFQdmZCSGdZ', '反馈问题')}</p>
-      <p>{internal('/encyclopedia', '百科')}</p>
+      <p>{internal('/encyclopedia', '百科')}{platformLinks ? <> · {platformLinks}</> : null}</p>
       <p>{external('https://github.com/RunoreLab/MahoShojo-Generator', 'RunoreLab/MahoShojo-Generator')}</p>
     </footer>
   );

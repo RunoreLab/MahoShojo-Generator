@@ -218,6 +218,7 @@ describe('HomePageView', () => {
       onNavigate={navigate}
       resolveInternalHref={(href) => `#${href}`}
       account={<div data-testid="account-slot">账号欢迎</div>}
+      platformPromotion={<a href="/download" data-testid="desktop-promotion-slot">桌面客户端下载</a>}
       platformNotice="平台说明"
       platformTools={<button>本机工具</button>}
       footer={<footer>页脚</footer>}
@@ -226,6 +227,10 @@ describe('HomePageView', () => {
     expect(card.className).toBe('card');
     expect(card.querySelector('[data-testid="home-logo-light"]')).not.toBeNull();
     expect(card.querySelector('[data-testid="account-slot"]')).not.toBeNull();
+    const promotion = card.querySelector('[data-testid="desktop-promotion-slot"]');
+    expect(promotion?.getAttribute('href')).toBe('/download');
+    expect(card.textContent!.indexOf('账号欢迎')).toBeLessThan(card.textContent!.indexOf('桌面客户端下载'));
+    expect(card.textContent!.indexOf('桌面客户端下载')).toBeLessThan(card.textContent!.indexOf('新手推荐'));
     const grid = card.querySelector('[data-testid="home-feature-grid"]')!;
     expect(grid.parentElement?.className).toBe('mt-4');
     expect(card.textContent!.indexOf('平台说明')).toBeGreaterThan(card.textContent!.indexOf('设定来源'));

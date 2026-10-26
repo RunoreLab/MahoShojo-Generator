@@ -18,6 +18,7 @@ export default function Footer({ className = 'footer', textWhite = false }: Foot
     <ProductFooter
       className={className}
       textWhite={textWhite}
+      platformLinks={<Link prefetch={false} href="/download" className="footer-link">桌面端下载</Link>}
       assetSource={{ baseUrl: '/' }}
       renderInternalLink={({ href, className: linkClassName, children }) => (
         <Link prefetch={false} href={href} className={linkClassName}>

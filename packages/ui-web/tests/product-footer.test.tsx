@@ -89,6 +89,14 @@ describe('ProductFooter', () => {
     expect(encyclopedia).not.toBeUndefined();
   });
 
+  it('renders optional Web-only platform links without adding them to Desktop by default', () => {
+    render(<ProductFooter assetSource={ASSET_SOURCE} />);
+    expect(container.querySelector('a[href="/download"]')).toBeNull();
+
+    render(<ProductFooter assetSource={ASSET_SOURCE} platformLinks={<a href="/download">桌面端下载</a>} />);
+    expect(container.querySelector('a[href="/download"]')?.textContent).toBe('桌面端下载');
+  });
+
   it('switches the afdian logo variant with textWhite and joins the asset root', () => {
     render(<ProductFooter assetSource={ASSET_SOURCE} />);
     expect(container.querySelector('img')?.getAttribute('src')).toBe('/app/afdian.svg');

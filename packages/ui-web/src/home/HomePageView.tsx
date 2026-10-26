@@ -11,6 +11,8 @@ import {
 export interface HomePageViewProps extends Omit<HomeFeatureGridProps, 'categories'> {
   /** 身份读取、徽章和登录动作由宿主投影，不在共享首页发起请求。 */
   readonly account?: ReactNode;
+  /** Web 宿主可选的发现入口（如桌面客户端下载），不污染共享功能目录。 */
+  readonly platformPromotion?: ReactNode;
   readonly platformNotice?: ReactNode;
   readonly platformTools?: ReactNode;
   readonly footer?: ReactNode;
@@ -24,6 +26,7 @@ export function HomePageView({
   resolveInternalHref,
   unavailable,
   account,
+  platformPromotion,
   platformNotice,
   platformTools,
   footer,
@@ -34,6 +37,7 @@ export function HomePageView({
         <div className="card">
           <HomeHero assetSource={assetSource} subtitle="欢迎来到魔法国度！选择一个项目开始玩耍吧！" />
           {account}
+          {platformPromotion}
           <HomeEncyclopediaCard
             assetSource={assetSource}
             onNavigate={onNavigate}

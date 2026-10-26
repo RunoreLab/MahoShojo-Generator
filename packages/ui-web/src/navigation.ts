@@ -45,6 +45,7 @@ export const TOPBAR_COVERED_ROUTES = [
   '/character-manager',
   '/character-party',
   '/local-library',
+  '/download',
   '/questionnaire-editor',
   '/sublimation',
   '/tachie',

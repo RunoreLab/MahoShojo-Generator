@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 import {
@@ -11,6 +12,7 @@ import {
 } from '@mahoshojo/ui-web/home';
 
 import Footer from '@/components/Footer';
+import { DESKTOP_RELEASE, getPublishedDesktopRelease } from '@/lib/desktop-release';
 import { useAuth } from '@/lib/useAuth';
 import { UserWithTitle } from '@/components/UserTitle';
 import type { CapabilitySnapshot } from '@mahoshojo/ui-web/capability';
@@ -37,6 +39,7 @@ const WEB_ASSET_SOURCE: HomeAssetSource = { baseUrl: '/' };
 export function HomePage() {
   const router = useRouter();
   const { user, userBadges, isAuthenticated, loading } = useAuth();
+  const desktopPublished = getPublishedDesktopRelease(DESKTOP_RELEASE) !== null;
 
   return (
     <HomePageView
@@ -61,6 +64,27 @@ export function HomePage() {
                 void router.push(href);
               }}
             />
+      )}
+      platformPromotion={(
+        <aside
+          data-testid="desktop-download-promotion"
+          aria-label="桌面客户端下载"
+          className="mx-auto mb-5 flex max-w-2xl flex-col gap-2 rounded-xl border border-pink-200 bg-pink-50/80 p-4 text-sm dark:bg-pink-950/20 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div>
+            <p className="font-semibold text-(--app-text)">
+              🖥️ 桌面客户端 · {desktopPublished ? '正式版已发布' : '正式版筹备中'}
+            </p>
+            <p className="mt-1 text-(--app-text-muted)">Windows 版独立应用，创作与本地作品管理更加方便。</p>
+          </div>
+          <Link
+            prefetch={false}
+            href="/download"
+            className="shrink-0 font-semibold text-pink-700 underline underline-offset-4 hover:text-pink-800"
+          >
+            {desktopPublished ? '下载 Windows 版' : '了解桌面版与发布进度'}
+          </Link>
+        </aside>
       )}
       footer={<Footer className="footer" />}
     />
