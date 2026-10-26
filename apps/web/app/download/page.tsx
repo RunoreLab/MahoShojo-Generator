@@ -2,20 +2,24 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Download } from 'lucide-react';
 
-import { DESKTOP_RELEASE, getPublishedDesktopRelease } from '@/lib/desktop-release';
+import { DESKTOP_RELEASE } from '@/lib/desktop-release';
+import { getDesktopRelease } from '@/lib/desktop-release-server';
+
+export const revalidate = 300;
 
 export const metadata: Metadata = {
   title: '桌面客户端下载 - 魔法少女生成器',
   description: '查看魔法少女生成器 Windows 桌面版的正式发布状态、安装方式与数据迁移提醒。',
 };
 
-export default function DesktopDownloadPage() {
-  const published = getPublishedDesktopRelease(DESKTOP_RELEASE);
+export default async function DesktopDownloadPage() {
+  const release = await getDesktopRelease();
+  const published = release.status === 'published' ? release : null;
 
   return (
     <main className="magic-background-white min-h-screen px-4 py-8 sm:py-12">
       <div className="mx-auto max-w-4xl">
-        <section className="card rounded-2xl border border-(--app-border-strong) p-6 sm:p-10">
+        <section className="rounded-2xl border border-(--app-border-strong) bg-(--app-surface) p-6 shadow-(--app-shadow-lg) sm:p-10">
           <span className="inline-flex rounded-full border border-(--app-border-strong) bg-(--app-surface) px-3 py-1 text-xs font-medium text-(--app-text)">
             Windows 64 位 · 桌面客户端
           </span>
@@ -47,10 +51,11 @@ export default function DesktopDownloadPage() {
               </>
             ) : (
               <>
-                <p className="font-semibold text-(--app-text)">正式版 v{DESKTOP_RELEASE.version} 正在准备中</p>
+                <p className="font-semibold text-(--app-text)">{release.status === 'unavailable' ? '暂时无法查询下载状态' : `正式版 v${DESKTOP_RELEASE.version} 正在准备中`}</p>
                 <p className="mt-2 text-sm leading-relaxed text-(--app-text-muted)">
-                  桌面端已完成多轮 Beta 测试，目前正在收尾发布构建、更新机制和正式安装包验收。
-                  <strong> 正式版安装包尚未开放下载。</strong>请留意本站公告；现在无需寻找第三方安装包。
+                  {release.status === 'unavailable'
+                    ? 'GitHub 暂时不可达或请求受限，请稍后重试，也可以通过下方项目链接查看 Releases。'
+                    : '桌面端已完成多轮 Beta 测试，目前正在收尾正式安装包验收。正式版安装包尚未开放下载，请留意本站公告。'}
                 </p>
               </>
             )}
@@ -60,7 +65,7 @@ export default function DesktopDownloadPage() {
             <div className="rounded-xl border border-(--app-border) p-4">
               <h2 className="font-semibold text-(--app-text)">首次安装</h2>
               <p className="mt-2 text-sm leading-relaxed text-(--app-text-muted)">
-                首发计划提供 Windows x64 安装程序。缺少 Microsoft WebView2 运行时的设备，安装时需要联网下载；
+                首发支持 Windows 11 x64；Windows 10 22H2 兼容情况以发布说明为准。缺少 Microsoft WebView2 运行时的设备，安装时需要联网下载；
                 在线账号、公开库以及云端 AI 服务仍需要网络。
               </p>
             </div>

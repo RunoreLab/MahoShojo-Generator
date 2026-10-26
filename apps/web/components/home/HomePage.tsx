@@ -12,7 +12,6 @@ import {
 } from '@mahoshojo/ui-web/home';
 
 import Footer from '@/components/Footer';
-import { DESKTOP_RELEASE, getPublishedDesktopRelease } from '@/lib/desktop-release';
 import { useAuth } from '@/lib/useAuth';
 import { UserWithTitle } from '@/components/UserTitle';
 import type { CapabilitySnapshot } from '@mahoshojo/ui-web/capability';
@@ -39,7 +38,6 @@ const WEB_ASSET_SOURCE: HomeAssetSource = { baseUrl: '/' };
 export function HomePage() {
   const router = useRouter();
   const { user, userBadges, isAuthenticated, loading } = useAuth();
-  const desktopPublished = getPublishedDesktopRelease(DESKTOP_RELEASE) !== null;
 
   return (
     <HomePageView
@@ -73,7 +71,7 @@ export function HomePage() {
         >
           <div>
             <p className="font-semibold text-(--app-text)">
-              🖥️ 桌面客户端 · {desktopPublished ? '正式版已发布' : '正式版筹备中'}
+              🖥️ Windows 桌面客户端
             </p>
             <p className="mt-1 text-(--app-text-muted)">Windows 版独立应用，创作与本地作品管理更加方便。</p>
           </div>
@@ -82,7 +80,7 @@ export function HomePage() {
             href="/download"
             className="shrink-0 font-semibold text-(--app-text) underline underline-offset-4"
           >
-            {desktopPublished ? '下载 Windows 版' : '了解桌面版与发布进度'}
+            查看版本与下载
           </Link>
         </aside>
       )}

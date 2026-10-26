@@ -119,10 +119,12 @@ export async function prepareDesktopRelease(options) {
   const signatureName = `${installerName}.sig`;
   const signatureBytes = await readRegularFile(path.join(bundleDir, signatureName), { maxSize: 16 * 1024 });
   const signature = validateSignature(signatureBytes.toString('utf8').trim(), { pubkey, version });
-  const url = `https://github.com/${REPOSITORY}/releases/download/${tag}/${encodeURIComponent(installerName)}`;
+  // GitHub 可能重命名含空格的资产；归档时使用固定 ASCII 名称，签名字节保持不变。
+  const publishedInstallerName = `MahoShojo-Generator_${version}_x64-setup.exe`;
+  const url = `https://github.com/${REPOSITORY}/releases/download/${tag}/${publishedInstallerName}`;
   const manifest = { version, notes, platforms: { 'windows-x86_64': { signature, url } } };
   const assets = new Map([
-    [installerName, installer], [signatureName, signatureBytes],
+    [publishedInstallerName, installer], [`${publishedInstallerName}.sig`, signatureBytes],
     ['latest.json', Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`)],
     ['RELEASE_NOTES.md', Buffer.from(`${notes}\n`)],
   ]);

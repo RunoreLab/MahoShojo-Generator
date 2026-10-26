@@ -115,11 +115,12 @@ describe('desktop release staging', () => {
   test.each([['0.1.0', 'stable'], ['0.1.0-rc.1', 'rc']])('stages same bytes, checksums and exact encoded URL for %s', async (version, channel) => {
     const args = await fixture(version, channel);
     const result = await prepareDesktopRelease(args);
+    const publishedName = `MahoShojo-Generator_${version}_x64-setup.exe`;
     expect(result.installer.sha256).toBe(createHash('sha256').update(args.installer).digest('hex'));
-    expect(await readFile(path.join(args.outputDir, args.installerName))).toEqual(args.installer);
+    expect(await readFile(path.join(args.outputDir, publishedName))).toEqual(args.installer);
     const manifest = JSON.parse(await readFile(path.join(args.outputDir, 'latest.json'), 'utf8'));
     expect(manifest).toEqual({ version, notes: '# 发行说明\n\n测试候选。', platforms: { 'windows-x86_64': {
-      signature: makeSignature(version), url: `https://github.com/RunoreLab/MahoShojo-Generator/releases/download/desktop-v${version}/${encodeURIComponent(args.installerName)}`,
+      signature: makeSignature(version), url: `https://github.com/RunoreLab/MahoShojo-Generator/releases/download/desktop-v${version}/${publishedName}`,
     } } });
     const metadata = JSON.parse(await readFile(path.join(args.outputDir, 'release-metadata.json'), 'utf8'));
     expect(metadata).toMatchObject({ commit: args.commit, channel, state: 'candidate-not-published' });
@@ -131,7 +132,7 @@ describe('desktop release staging', () => {
     }
     expect(await readdir(args.outputDir)).toHaveLength(6);
     await expect(prepareDesktopRelease(args)).rejects.toMatchObject({ code: 'EEXIST' });
-    expect(await readFile(path.join(args.outputDir, args.installerName))).toEqual(args.installer);
+    expect(await readFile(path.join(args.outputDir, publishedName))).toEqual(args.installer);
   });
 
   test.each(['missing-signature', 'empty-installer', 'wrong-version', 'extra-installer', 'malformed-signature', 'wrong-signed-version'])('rejects incomplete/ambiguous bundle: %s', async (fault) => {
