@@ -1,8 +1,12 @@
-import { afterEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { DESKTOP_RELEASE, parsePublishedDesktopRelease } from '../lib/desktop-release';
 import { getDesktopRelease } from '../lib/desktop-release-server';
 import { GET } from '../app/desktop/updates/stable/latest.json/route';
+
+const { withEdgeCacheMock } = vi.hoisted(() => ({ withEdgeCacheMock: vi.fn() }));
+
+vi.mock('../lib/edge-cache', () => ({ withEdgeCache: withEdgeCacheMock }));
 
 const baseUrl = `https://github.com/${DESKTOP_RELEASE.repository}/releases/download/desktop-v0.1.0`;
 const installer = 'MahoShojo-Generator_0.1.0_x64-setup.exe';
@@ -16,6 +20,11 @@ const completeRelease = () => ({
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+
+beforeEach(() => {
+  withEdgeCacheMock.mockReset();
+  withEdgeCacheMock.mockImplementation((_request, _options, handler) => handler());
 });
 
 describe('manual GitHub release publication', () => {
@@ -48,7 +57,12 @@ describe('manual GitHub release publication', () => {
     const response = await GET();
     expect(response.status).toBe(307);
     expect(response.headers.get('Location')).toBe(`${baseUrl}/latest.json`);
-    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/releases/tags/desktop-v0.1.0'), expect.objectContaining({ next: { revalidate: 300 } }));
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/releases/tags/desktop-v0.1.0'), expect.objectContaining({ cache: 'no-store' }));
+    const [cacheRequest, cacheOptions] = withEdgeCacheMock.mock.calls[0] ?? [];
+    expect(cacheRequest).toBeInstanceOf(Request);
+    expect(cacheRequest.headers.get('cookie')).toBeNull();
+    expect(cacheRequest.headers.get('authorization')).toBeNull();
+    expect(cacheOptions).toEqual({ key: 'https://mahoshojo.invalid/_edge-cache/desktop-release/0.1.0', ttlSeconds: 300 });
   });
 
   test('an unpublished release means no update, without an installer link', async () => {

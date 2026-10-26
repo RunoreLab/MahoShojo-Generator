@@ -1,7 +1,7 @@
 import { getDesktopRelease } from '@/lib/desktop-release-server';
 
 // 204 无响应体，不能交给 Next 的 ISR 响应重建（空字符串 body + 204 会抛错）。
-// 仅动态生成这层响应；getDesktopRelease 中显式设置的 fetch 缓存仍为五分钟。
+// 已验证发布投影由共享 edge cache 控制五分钟；未发布/不可用状态不缓存。
 export const revalidate = 0;
 
 /** 固定官网入口，清单和安装包仍由同一个手动发布的 GitHub Release 提供。 */

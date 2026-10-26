@@ -5,7 +5,8 @@ import { Download } from 'lucide-react';
 import { DESKTOP_RELEASE } from '@/lib/desktop-release';
 import { getDesktopRelease } from '@/lib/desktop-release-server';
 
-export const revalidate = 300;
+// 发布状态使用显式 runtime cache；不让构建期 ISR 固定筹备态页面。
+export const revalidate = 0;
 
 export const metadata: Metadata = {
   title: '桌面客户端下载 - 魔法少女生成器',
