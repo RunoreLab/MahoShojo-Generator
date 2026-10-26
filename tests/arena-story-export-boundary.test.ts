@@ -14,7 +14,7 @@ describe('story export shared leaf entrypoints', () => {
       entryPoints: [path.join(domain, manifest.exports[`./${name}`])],
       bundle: true, platform: 'browser', format: 'esm', write: false, metafile: true,
     });
-    const sources = Object.keys(bundled.metafile!.inputs).map((file) => path.relative(root, path.resolve(file)));
+    const sources = Object.keys(bundled.metafile!.inputs).map((file) => path.relative(root, path.resolve(file)).split(path.sep).join('/'));
     expect(sources.length).toBeGreaterThan(0);
     expect(sources.every((file) => file.startsWith('packages/domain/src/'))).toBe(true);
     expect(bundled.metafile!.outputs[Object.keys(bundled.metafile!.outputs)[0]].imports).toEqual([]);
