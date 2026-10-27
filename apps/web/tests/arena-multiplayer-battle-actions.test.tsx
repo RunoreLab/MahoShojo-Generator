@@ -16,6 +16,8 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const mocks = vi.hoisted(() => ({
   handleGenerate: vi.fn(async () => {}),
   stopGeneration: vi.fn(),
+  confirmGenerateAfterUnconfirmedCancel: vi.fn(),
+  isCooldown: false,
   isGenerating: false,
   arenaGenerationConnectionState: null as ArenaGenerationConnectionState | null,
   isRecoveringArenaGeneration: false,
@@ -36,12 +38,13 @@ vi.mock('@/components/arena/hooks/useBattleEngine', () => ({
   useBattleEngine: () => ({
     handleGenerate: mocks.handleGenerate,
     stopGeneration: mocks.stopGeneration,
+    confirmGenerateAfterUnconfirmedCancel: mocks.confirmGenerateAfterUnconfirmedCancel,
     isGenerating: mocks.isGenerating,
     arenaGenerationConnectionState: mocks.arenaGenerationConnectionState,
     isRecoveringArenaGeneration: mocks.isRecoveringArenaGeneration,
     arenaGenerationStatusNotice: mocks.arenaGenerationStatusNotice,
-    isCooldown: false,
-    remainingTime: 0,
+    isCooldown: mocks.isCooldown,
+    remainingTime: mocks.isCooldown ? 30 : 0,
     providerCooldownMode: 'system',
     otherRemainingTime: 0,
     streamSoftTimeoutWarning: null,
@@ -147,6 +150,8 @@ beforeEach(() => {
   battleState = useBattleStore.getState();
   mocks.handleGenerate.mockClear();
   mocks.stopGeneration.mockClear();
+  mocks.confirmGenerateAfterUnconfirmedCancel.mockClear();
+  mocks.isCooldown = false;
   mocks.isGenerating = false;
   mocks.arenaGenerationConnectionState = null;
   mocks.isRecoveringArenaGeneration = false;
@@ -228,18 +233,33 @@ describe('Arena multiplayer BattleActions authority gate', () => {
     expect(mocks.stopGeneration).toHaveBeenCalledOnce();
   });
 
-  it('停止生成请求处理中统一展示文案并禁用重复操作', async () => {
-    mocks.isGenerating = true;
+  it('本地结束后继续显示服务器确认状态，禁用新生成且移除停止按钮', async () => {
+    mocks.isGenerating = false;
     mocks.arenaGenerationConnectionState = 'cancelling';
-    mocks.arenaGenerationStatusNotice = '正在请求服务器停止生成，请稍候。';
+    mocks.arenaGenerationStatusNotice = '已停止本地接收，正在请求服务器停止生成。';
 
     const button = await render();
-    expect(button.textContent).toContain('正在停止生成');
+    expect(button.textContent).toContain('正在确认服务器');
+    expect(button.disabled).toBe(true);
+    expect(document.body.querySelector('[data-arena-generation-status]')?.textContent).toContain('已停止本地接收');
 
     const stopButton = document.body.querySelector<HTMLButtonElement>('[aria-label="正在停止…"]');
-    expect(stopButton).not.toBeNull();
-    expect(stopButton?.disabled).toBe(true);
-    expect(stopButton?.textContent).toContain('正在停止…');
+    expect(stopButton).toBeNull();
+  });
+
+  it.each([false, true])('取消未确认时显式提示重复费用风险并遵守冷却（冷却=%s）', async (cooldown) => {
+    mocks.arenaGenerationConnectionState = 'cancel_unconfirmed';
+    mocks.arenaGenerationStatusNotice = '生成可能仍在后台继续。';
+    mocks.isCooldown = cooldown;
+    const button = await render();
+    expect(button.disabled).toBe(true);
+    const notice = document.body.querySelector('[data-arena-generation-status]')!;
+    expect(notice.textContent).toContain('可能仍在运行并产生费用');
+    const riskButton = notice.querySelector('button')!;
+    expect(riskButton.disabled).toBe(cooldown);
+    await act(async () => riskButton.click());
+    expect(mocks.confirmGenerateAfterUnconfirmedCancel).toHaveBeenCalledTimes(cooldown ? 0 : 1);
+    if (cooldown) expect(notice.textContent).toContain('还需 30 秒');
   });
 
   it('成员只显示等待房主且按钮不可提交', async () => {

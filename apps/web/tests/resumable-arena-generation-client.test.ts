@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 
 import {
   ARENA_GENERATION_ACTOR_TOKEN_HEADER,
@@ -1297,6 +1298,55 @@ describe('resumable Arena generation client', () => {
     }
   });
 
+  it.each(['cancelling', 'cancel_unconfirmed'] as const)('reload of %s requires acknowledgement of the exact cancelled request before creating', async (state) => {
+    const storage = new MemoryStorage();
+    const abort = new AbortController();
+    const first = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream', body: { generationRequestId: 'request-before-reload' }, headers: {}, storage,
+      generationRequestId: 'request-before-reload', signal: abort.signal,
+      fetcher: async () => response(new ReadableStream()),
+    });
+    await first.body!.cancel('reload');
+    for (const [key, value] of storage.values) {
+      if (key.startsWith(ARENA_GENERATION_CLIENT_STATE_KEY)) storage.setItem(key, JSON.stringify({ ...JSON.parse(value), state }));
+    }
+    const onIdentity = vi.fn(), onState = vi.fn();
+    const fetcher = vi.fn(async () => response('id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n'));
+    const input = { endpoint: '/api/arena/generate-stream', body: { generationRequestId: 'request-after-reload' }, headers: {}, storage,
+      generationRequestId: 'request-after-reload', fetcher, onRequestIdentity: onIdentity, onStateChange: onState };
+    await expect(openArenaGenerationStream(input)).rejects.toThrow('ARENA_GENERATION_CANCEL_UNCONFIRMED');
+    expect(onIdentity).toHaveBeenLastCalledWith('request-before-reload');
+    expect(onState).toHaveBeenLastCalledWith('cancel_unconfirmed');
+    await expect(openArenaGenerationStream({ ...input, abandonCancelledRequestId: 'request-wrong-intent' }))
+      .rejects.toThrow('ARENA_GENERATION_CANCEL_UNCONFIRMED');
+    expect(fetcher).not.toHaveBeenCalled();
+    const second = await openArenaGenerationStream({ ...input, abandonCancelledRequestId: 'request-before-reload' });
+    await second.text();
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(readPersistedArenaGeneration(storage)?.generationRequestId).toBe('request-after-reload');
+  });
+
+  it('recognizes legacy cancellation even when the next attempt has a new transport request id', async () => {
+    const storage = new MemoryStorage();
+    const hash = (body: string) => createHash('sha256').update(body).digest('hex');
+    storage.setItem(ARENA_GENERATION_CLIENT_STATE_KEY, JSON.stringify({
+      version: 3, generationRequestId: 'request-legacy-cancel', generationId: 'generation-legacy-cancel',
+      lastEventId: null, state: 'cancel_unconfirmed', updatedAt: '2026-10-27T00:00:00.000Z',
+      endpoint: '/api/arena/generate-stream', routePin: null,
+      bodyHash: hash('{"generationRequestId":"request-legacy-cancel","mode":"daily"}'),
+    }));
+    const fetcher = vi.fn();
+    await expect(openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream', body: { generationRequestId: 'request-new-attempt', mode: 'daily' },
+      headers: {}, storage, fetcher, generationRequestId: 'request-new-attempt',
+    })).rejects.toThrow('ARENA_GENERATION_CANCEL_UNCONFIRMED');
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(readPersistedArenaGeneration(storage)).toMatchObject({
+      generationRequestId: 'request-legacy-cancel', state: 'cancel_unconfirmed',
+      bodyHash: hash('{"generationRequestId":"request-legacy-cancel","mode":"daily"}'),
+    });
+  });
+
   it('a late cancel receipt from a different body does not replace the latest diagnostic pointer', async () => {
     let finishCancel!: (response: Response) => void;
     const storage = new MemoryStorage();
@@ -1313,6 +1363,7 @@ describe('resumable Arena generation client', () => {
     const second = await openArenaGenerationStream({
       endpoint: '/api/arena/generate-stream', body: { story: 'new' }, headers: {}, storage,
       generationRequestId: 'request-new-body',
+      abandonCancelledRequestId: 'request-old-body',
       fetcher: async () => response('id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n'),
     });
     await second.text();

@@ -220,6 +220,7 @@ export interface BattleStoreState {
   isGenerating: boolean;
   /** 当前可恢复生成的连接生命周期状态；仅保留在内存，不持久化。 */
   arenaGenerationConnectionState: ArenaGenerationConnectionState | null;
+  arenaGenerationCancellationRequestId: string | null;
   isRedoingUpdates: boolean;
   /** 权威角色更新与本地 repair 共用的进程内写入锁。 */
   isCombatantMutationPending: boolean;

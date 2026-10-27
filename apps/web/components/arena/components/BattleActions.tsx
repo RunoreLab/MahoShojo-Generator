@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react';
+import { RotateCw } from 'lucide-react';
 import { getAuthSnapshot, subscribeAuthSnapshot } from '@/lib/auth-client-store';
 
 import { ProviderCooldownNotice } from '@/components/ai/ProviderCooldownNotice';
@@ -96,6 +97,7 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
   const {
     handleGenerate,
     stopGeneration,
+    confirmGenerateAfterUnconfirmedCancel,
     isGenerating,
     isRecoveringArenaGeneration,
     arenaGenerationConnectionState,
@@ -268,6 +270,8 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
     if (roomAction.inRoom && roomAction.reason === 'recovery') return '确认并重试同一次启动';
     if (roomAction.inRoom && roomAction.reason === 'connection') return '等待房间重新连接…';
     if (roomAction.inRoom && roomAction.reason === 'active') return '房间战报生成中…';
+    if (!roomAction.inRoom && arenaGenerationConnectionState === 'cancelling') return '本地已停止，正在确认服务器…';
+    if (!roomAction.inRoom && arenaGenerationConnectionState === 'cancel_unconfirmed') return '停止结果未确认';
     if (isCooldown) return `记者赶稿中...请等待 ${remainingTime} 秒`;
     if (isGenerating) {
       if (isRecoveringArenaGeneration) return '正在恢复上一场战报…';
@@ -305,6 +309,8 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
           disabled={
             isGenerating ||
             isCooldown ||
+            (!roomAction.inRoom && (arenaGenerationConnectionState === 'cancelling'
+              || arenaGenerationConnectionState === 'cancel_unconfirmed')) ||
             (roomAction.inRoom && !roomAction.canStart && !roomAction.canRetry) ||
             (!roomAction.inRoom && (battleMode === 'daily' || battleMode === 'scenario'
               ? combatants.length < 1
@@ -329,19 +335,28 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
           />
         ) : null}
       </div>
-      {isGenerating && arenaGenerationStatusNotice ? (
+      {arenaGenerationStatusNotice && !roomAction.inRoom ? (
         <div
-          className={`mt-2 rounded-lg border px-3 py-2 text-center text-xs ${
-            isRecoveringArenaGeneration
-              ? 'border-sky-300 bg-sky-50 text-sky-900'
-              : 'border-amber-300 bg-amber-50 text-amber-900'
-          }`}
+          className="mt-2 rounded-lg border border-(--app-border) bg-(--app-surface) px-3 py-2 text-center text-xs text-(--app-text)"
           role="status"
           aria-live="polite"
           aria-atomic="true"
           data-arena-generation-status="true"
         >
           <div className="font-medium">{arenaGenerationStatusNotice}</div>
+          {!isGenerating && isCooldown ? (
+            <div className="mt-1">生成通道冷却中，还需 {remainingTime} 秒；此倒计时与服务器停止确认分别计算。</div>
+          ) : null}
+          {arenaGenerationConnectionState === 'cancel_unconfirmed' ? (
+            <div className="mt-2">
+              <div>重新生成会创建新任务，上一场可能仍在运行并产生费用。</div>
+              <button type="button" className="btn-secondary mt-2" disabled={isCooldown || isGenerating}
+                onClick={confirmGenerateAfterUnconfirmedCancel}>
+                <RotateCw className="mr-1 inline-block h-4 w-4" aria-hidden="true" />
+                确认风险并重新生成
+              </button>
+            </div>
+          ) : null}
           {isRecoveringArenaGeneration ? (
             <div className="mt-1">
               上一场战报可能仍在服务器生成。点击“放弃恢复”会请求停止这场生成；如果服务器暂时无法确认，生成可能仍在后台继续。

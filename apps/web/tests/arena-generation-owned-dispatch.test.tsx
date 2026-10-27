@@ -80,6 +80,7 @@ const expectOwnerA = (init?: RequestInit) => {
 };
 
 beforeEach(async () => {
+  mocks.cooldown.mockClear();
   vi.stubGlobal('crypto', webcrypto);
   localStorage.clear(); sessionStorage.clear();
   await authStorage.setAuth(b); rawB = localStorage.getItem(AUTH_STORAGE_KEY)!;
@@ -203,6 +204,19 @@ describe('BattleEngine real auth → intent → C0 ownership boundary', () => {
     await act(async () => { switchIdentity(rawB); current.stopGeneration(); await settlesSoon(task); });
     expect(business).toHaveBeenCalledOnce();
     expect(business.mock.calls.every(([, init]) => init?.method === 'POST')).toBe(true);
+    expect(useBattleStore.getState().arenaGenerationConnectionState).toBeNull();
+    business.mockResolvedValueOnce(completed());
+    await act(async () => { await current.handleGenerate(); });
+    // The old actor's request cannot be cancelled under the new identity.
+    // Its persisted uncertainty remains actionable through the risk decision.
+    expect(useBattleStore.getState().arenaGenerationConnectionState).toBe('cancel_unconfirmed');
+    expect(business).toHaveBeenCalledOnce();
+    await act(async () => { await current.confirmGenerateAfterUnconfirmedCancel(); });
+    expect(business).toHaveBeenCalledTimes(2);
+    expect(business.mock.calls.every(([, init]) => init?.method === 'POST')).toBe(true);
+    expect(new Headers(business.mock.calls[1][1]?.headers).get('Authorization')).toBe('Bearer synthetic-b');
+    expect(JSON.parse(String(business.mock.calls[1][1]?.body)).generationRequestId)
+      .not.toBe(JSON.parse(String(business.mock.calls[0][1]?.body)).generationRequestId);
   });
 
   it.each(['pending-create', 'active-stream'] as const)('same-owner USER cancellation still dispatches from %s with the original headers', async (stage) => {
@@ -245,7 +259,7 @@ describe('BattleEngine real auth → intent → C0 ownership boundary', () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it('an older cancelled request finally cannot clear the replacement controller or block its USER cancel', async () => {
+  it('stops locally immediately, gates a second create until acknowledgement, and ignores old cleanup', async () => {
     const firstEntered = deferred<void>(), secondEntered = deferred<void>(), firstCancelEntered = deferred<void>();
     const cancelGate = deferred<Response>();
     let creates = 0, cancels = 0;
@@ -263,16 +277,133 @@ describe('BattleEngine real auth → intent → C0 ownership boundary', () => {
     await act(async () => { first = current.handleGenerate(); await firstEntered.promise; });
     await act(async () => {
       current.stopGeneration();
-      // Supersede synchronously while the old cancel is still preparing headers:
-      // its authority is the unchanged identity, not the latest generation slot.
-      second = current.handleGenerate();
-      await settlesSoon(Promise.all([firstCancelEntered.promise, secondEntered.promise]).then(() => undefined));
+      expect(useBattleStore.getState()).toMatchObject({ isGenerating: false, isStreaming: false,
+        arenaGenerationConnectionState: 'cancelling' });
+      await current.handleGenerate();
+      await settlesSoon(Promise.all([first, firstCancelEntered.promise]).then(() => undefined));
     });
-    // The old POST has settled, but C0 is still awaiting its independent cancel response.
+    expect(creates).toBe(1);
     await act(async () => { cancelGate.resolve(new Response(null, { status: 202 })); await settlesSoon(first); });
+    await act(async () => {
+      await vi.waitFor(() => expect(useBattleStore.getState().arenaGenerationConnectionState).toBe('cancelled'));
+      second = current.handleGenerate(); await secondEntered.promise;
+    });
     await act(async () => { current.stopGeneration(); await settlesSoon(second); });
     expect(creates).toBe(2); expect(cancels).toBe(2);
     for (const [, init] of business.mock.calls) expectOwnerA(init);
     expect(business.mock.calls.filter(([, init]) => init?.method === 'POST').every(([, init]) => init?.signal?.reason === STREAM_ABORT_REASON_USER)).toBe(true);
+  });
+
+  it('keeps partial text and requires an explicit risk decision after an unconfirmed cancel', async () => {
+    const entered = deferred<void>();
+    business.mockImplementationOnce(async () => {
+      entered.resolve();
+      return stream(new ReadableStream({ start(controller) {
+        controller.enqueue(new TextEncoder().encode('id: 1-0\nevent: markdown\ndata: {"chunk":"停止前的正文"}\n\n'));
+      } }));
+    }).mockResolvedValueOnce(new Response(null, { status: 503 }));
+    let task!: Promise<void>;
+    await act(async () => {
+      task = current.handleGenerate(); await entered.promise;
+      await vi.waitFor(() => expect(useBattleStore.getState().streamingMarkdown).toBe('停止前的正文'));
+      current.stopGeneration(); await settlesSoon(task);
+      await vi.waitFor(() => expect(useBattleStore.getState().arenaGenerationConnectionState).toBe('cancel_unconfirmed'));
+    });
+    expect(useBattleStore.getState()).toMatchObject({ isGenerating: false, isStreaming: false,
+      streamingMarkdown: '停止前的正文' });
+    expect(mocks.update).not.toHaveBeenCalled();
+    await act(async () => { await current.handleGenerate(); });
+    expect(business).toHaveBeenCalledTimes(2);
+    const cancelledRequestId = useBattleStore.getState().arenaGenerationCancellationRequestId;
+    // Simulate a reload losing transient Zustand state while sessionStorage survives.
+    await act(async () => { useBattleStore.getState().setArenaGenerationConnectionState(null);
+      await current.handleGenerate(); });
+    expect(business).toHaveBeenCalledTimes(2);
+    expect(useBattleStore.getState()).toMatchObject({ isGenerating: false,
+      arenaGenerationConnectionState: 'cancel_unconfirmed', arenaGenerationCancellationRequestId: cancelledRequestId });
+    business.mockResolvedValueOnce(completed());
+    await act(async () => { await current.confirmGenerateAfterUnconfirmedCancel(); });
+    expect(business).toHaveBeenCalledTimes(3);
+    expect(useBattleStore.getState().streamingMarkdown).toBe('安全的完整故事');
+  });
+
+  it('superseding an active stream still cancels the old producer and keeps the replacement stoppable', async () => {
+    let creates = 0;
+    business.mockImplementation(async (url, init) => {
+      if (url.endsWith('/cancel')) return new Response(null, { status: 202 });
+      creates += 1;
+      return stream(new ReadableStream(), `generation-owned-${creates}`);
+    });
+    let first!: Promise<void>, second!: Promise<void>;
+    await act(async () => {
+      first = current.handleGenerate();
+      await vi.waitFor(() => expect(useBattleStore.getState().isStreaming).toBe(true));
+      second = current.handleGenerate(); await settlesSoon(first);
+      await vi.waitFor(() => expect(creates).toBe(2));
+      await vi.waitFor(() => expect(useBattleStore.getState().isStreaming).toBe(true));
+    });
+    expect(business.mock.calls[0][1]?.signal?.reason).toBe(STREAM_ABORT_REASON_USER);
+    await act(async () => { current.stopGeneration(); await settlesSoon(second); });
+    await vi.waitFor(() => expect(business.mock.calls.filter(([url]) => url.endsWith('/cancel'))).toHaveLength(2));
+    expect(business.mock.calls.filter(([url]) => url.endsWith('/cancel')).map(([url]) => url)).toEqual([
+      expect.stringContaining('/generation-owned-1/cancel'), expect.stringContaining('/generation-owned-2/cancel'),
+    ]);
+  });
+
+  it('does not retain a cancellation gate after the account changes during confirmation', async () => {
+    const entered = deferred<void>(), cancelEntered = deferred<void>(), receipt = deferred<Response>();
+    business.mockImplementationOnce(async (_url, init) => { entered.resolve(); return abortableCreate(init); })
+      .mockImplementationOnce(async () => { cancelEntered.resolve(); return receipt.promise; });
+    let task!: Promise<void>;
+    await act(async () => { task = current.handleGenerate(); await entered.promise; current.stopGeneration();
+      await settlesSoon(task); await cancelEntered.promise; switchIdentity(rawB); });
+    await act(async () => { receipt.resolve(new Response(null, { status: 202 }));
+      await vi.waitFor(() => expect(useBattleStore.getState().arenaGenerationConnectionState).toBeNull()); });
+    business.mockResolvedValueOnce(completed());
+    await act(async () => { await current.handleGenerate(); });
+    expect(business).toHaveBeenCalledTimes(3);
+  });
+
+  it('stopping local work after a terminal event does not wait for an unnecessary cancellation', async () => {
+    await act(async () => useBattleStore.setState({ settings: {
+      ...useBattleStore.getState().settings, writeArenaHistory: true,
+    } }));
+    const entered = deferred<void>(), gate = deferred<void>();
+    mocks.update.mockImplementationOnce(async () => { entered.resolve(); await gate.promise; });
+    let task!: Promise<void>;
+    await act(async () => { task = current.handleGenerate(); await entered.promise; current.stopGeneration(); });
+    expect(useBattleStore.getState()).toMatchObject({ isGenerating: false, isStreaming: false,
+      arenaGenerationConnectionState: null });
+    await act(async () => { gate.resolve(); await task; });
+    expect(business).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['system', 20_000, 100_000], ['system', 130_000, 0], ['custom', 1_000, 2_000], ['custom', 4_000, 0],
+  ] as const)('manual stop uses only remaining %s cooldown after %i ms', async (mode, elapsed, remaining) => {
+    if (mode === 'custom') await act(async () => useBattleStore.setState({
+      userProviderConfig: { providerId: 'kourichat', modelId: 'gemini-2.5-flash', apiKey: 'synthetic-key' },
+    }));
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    const entered = deferred<void>();
+    business.mockImplementationOnce(async (_input, init) => { entered.resolve(); return abortableCreate(init); })
+      .mockResolvedValueOnce(new Response(null, { status: 202 }));
+    let task!: Promise<void>;
+    await act(async () => { task = current.handleGenerate(); await entered.promise; });
+    clock.mockReturnValue(1_000_000 + elapsed);
+    await act(async () => { current.stopGeneration(); await settlesSoon(task); });
+    expect(mocks.cooldown).toHaveBeenCalledExactlyOnceWith(remaining);
+  });
+
+  it('stops during asynchronous preparation without sending a request or starting cooldown', async () => {
+    const entered = deferred<void>(), gate = deferred<void>();
+    mocks.resolveRandom.mockImplementationOnce(async () => { entered.resolve(); await gate.promise; });
+    let task!: Promise<void>;
+    await act(async () => { task = current.handleGenerate(); await entered.promise; current.stopGeneration(); });
+    expect(useBattleStore.getState()).toMatchObject({ isGenerating: false, isStreaming: false,
+      arenaGenerationConnectionState: null });
+    await act(async () => { gate.resolve(); await task; });
+    expect(business).not.toHaveBeenCalled();
+    expect(mocks.cooldown).not.toHaveBeenCalled();
   });
 });

@@ -125,6 +125,7 @@ export type ArenaRoomGenerationPreflightPrompt = Readonly<{
 }>;
 
 let sharedGenerationAbortController: AbortController | null = null;
+let sharedGenerationStop: (() => void) | null = null;
 let latestResultNavigationRequest: string | null = null;
 
 const isStreamInterruptedError = (error: unknown): boolean => {
@@ -417,11 +418,17 @@ export const useBattleEngine = () => {
     [router]
   );
 
-  const handleGenerate = useCallback(async () => {
+  const handleGenerate = useCallback(async (abandonCancelledRequestId?: string) => {
     let lastArenaConnectionState: ArenaGenerationConnectionState | null = null;
     const roomAction = arenaRoomRuntime
       ? resolveArenaRoomGenerationAction(arenaRoomRuntime.state)
       : { inRoom: false, canStart: true, canRetry: false, reason: null } as const;
+    const liveState = useBattleStore.getState();
+    if (!roomAction.inRoom && (liveState.arenaGenerationConnectionState === 'cancelling'
+      || liveState.arenaGenerationConnectionState === 'cancel_unconfirmed')) {
+      setError(arenaGenerationConnectionNotice(liveState.arenaGenerationConnectionState));
+      return;
+    }
     if (roomAction.inRoom && roomAction.canRetry && arenaRoomRuntime) {
       const outcome = await dispatchArenaRoomGenerationRetry({
         controller: arenaRoomRuntime.controller,
@@ -486,13 +493,18 @@ export const useBattleEngine = () => {
     }
 
     const generationRequestId = secureRandomUUID();
+    let activeGenerationRequestId = generationRequestId;
     latestResultNavigationRequest = generationRequestId;
     const initialRequestIdentity = roomAction.inRoom ? null : captureAuthIdentity();
     let requestAuth: OwnedAuthHeaders | null = null;
     const requestAbortController = !roomAction.inRoom && generationMode === 'stream' ? new AbortController() : null;
+    let generationDispatchedAt: number | null = null;
+    let resumableClientStarted = false;
+    let generationTerminalObserved = false;
     const isLatestRequest = () => latestResultNavigationRequest === generationRequestId;
     const isRequestIdentityCurrent = () => (requestAuth?.identity ?? initialRequestIdentity)?.isCurrent() ?? true;
-    const canCommit = () => isLatestRequest() && isRequestIdentityCurrent();
+    const canCommit = () => isLatestRequest() && isRequestIdentityCurrent()
+      && requestAbortController?.signal.reason !== STREAM_ABORT_REASON_USER;
     const ensureRequestIdentityCurrent = () => {
       if (isRequestIdentityCurrent()) return;
       // C0 的恢复循环会吞单次读取错误；撤销自身 signal 才会停止旧身份恢复。
@@ -525,6 +537,28 @@ export const useBattleEngine = () => {
       newsReport: null,
     });
     setIsGenerating(true);
+    if (requestAbortController) {
+      sharedGenerationAbortController?.abort(STREAM_ABORT_REASON_USER);
+      sharedGenerationAbortController = requestAbortController;
+      sharedGenerationStop = () => {
+        if (!isLatestRequest() || requestAbortController.signal.aborted) return;
+        const state = resumableClientStarted && !generationTerminalObserved && isRequestIdentityCurrent()
+          ? 'cancelling' : null;
+        setArenaGenerationConnectionState(state);
+        setError(!isRequestIdentityCurrent() ? null : state ? null : generationTerminalObserved
+          ? '已停止本地处理，服务器生成已结束。' : '已停止生成准备，尚未发送生成请求。');
+        setIsGenerating(false);
+        setIsStreaming(false);
+        setStreamSoftTimeoutWarning(null);
+        requestAbortController.abort(STREAM_ABORT_REASON_USER);
+        // 手动停止按请求发出时间计算剩余冷却，不在停止后重新等待完整时长。
+        if (generationDispatchedAt !== null) {
+          const duration = providerCooldownConfig.currentMode === 'custom'
+            ? providerCooldownConfig.customDurationMs : providerCooldownConfig.systemDurationMs;
+          startCooldown(Math.max(0, duration - Math.max(0, Date.now() - generationDispatchedAt)));
+        }
+      };
+    }
     const narrativeDraftOwner = captureNarrativeDraftOwner();
     useNarrativeDraftsStore.getState().setScope(narrativeDraftOwner.scope);
     const autoRetainNarrativeDraft = useNarrativeDraftsStore.getState().autoRetain;
@@ -969,8 +1003,6 @@ export const useBattleEngine = () => {
 
 	      if (generationMode === 'stream') {
 	        const abortController = requestAbortController!;
-	        sharedGenerationAbortController?.abort(STREAM_ABORT_REASON_USER);
-	        sharedGenerationAbortController = abortController;
           const draftEvidence = createHostedNarrativeDraftEvidence();
           const draftCreatedAt = new Date().toISOString();
           // 传输 finally 会 abort 做资源清理，不能把成功结果误判为取消。
@@ -1007,10 +1039,12 @@ export const useBattleEngine = () => {
                 placement: 'hono-primary' | 'next-dr';
                 dispatcher: ReturnType<typeof createPinnedGenerationApiSafeReadDispatcher>;
               } | null = null;
+              resumableClientStarted = true;
               const response = await openArenaGenerationStream({
                   endpoint,
                   body: requestBody,
                   generationRequestId,
+                  abandonCancelledRequestId,
                   headers: requestHeaders,
                   signal: abortController.signal,
                   fetcher: (input, init, routePin, onRoutePinSelected) => {
@@ -1024,7 +1058,13 @@ export const useBattleEngine = () => {
                       return pinnedReadDispatcher.dispatcher.dispatch(input, init);
                     }
                     if (input === endpoint && (init?.method ?? 'GET').toUpperCase() === 'POST') {
-                      generationIntent ??= generationApiIntentLatch.tryAcquire(requestDependencies);
+                      generationIntent ??= generationApiIntentLatch.tryAcquire({
+                        ...requestDependencies,
+                        beforeDispatch: () => {
+                          beforeDispatch();
+                          generationDispatchedAt ??= Date.now();
+                        },
+                      });
                       if (!generationIntent) {
                         throw new Error('已有生成请求正在处理中，请勿重复提交。');
                       }
@@ -1046,14 +1086,31 @@ export const useBattleEngine = () => {
                     isGenerationApiClientErrorCode(error, 'AMBIGUOUS_OPERATION_OUTCOME')
                   ),
                   getInitialRoutePin: () => generationIntent?.getRoutePin() ?? null,
-                  onRequestIdentity: draftEvidence.onRequestIdentity,
+                  onRequestIdentity: (requestId) => {
+                    activeGenerationRequestId = requestId;
+                    draftEvidence.onRequestIdentity(requestId);
+                  },
                   observeResponse: draftEvidence.observeResponse,
                   onTerminalBoundary: draftEvidence.onTerminalBoundary,
                   onStateChange: (state) => {
                     lastArenaConnectionState = state;
+                    if (['completed', 'failed', 'cancelled', 'producer_lost'].includes(state)) {
+                      generationTerminalObserved = true;
+                    }
+                    if (state === 'cancelling' || state === 'cancelled' || state === 'cancel_unconfirmed') {
+                      if (!isLatestRequest()) return;
+                      if (!isRequestIdentityCurrent()) {
+                        setArenaGenerationConnectionState(null);
+                        return;
+                      }
+                      useBattleStore.setState({ arenaGenerationConnectionState: state,
+                        arenaGenerationCancellationRequestId: state === 'cancelled' ? null : activeGenerationRequestId });
+                      setError(null);
+                      return;
+                    }
                     if (!canCommit()) return;
                     setArenaGenerationConnectionState(state);
-                    if (isArenaGenerationRecoveryState(state) || state === 'cancelling') {
+                    if (isArenaGenerationRecoveryState(state)) {
                       setError(null);
                       return;
                     }
@@ -2005,6 +2062,10 @@ export const useBattleEngine = () => {
       startCooldown();
 	    } catch (error) {
           if (!canCommit()) return;
+          if (lastArenaConnectionState === 'cancel_unconfirmed') {
+            setError(null);
+            return;
+          }
 	      const shouldTreatAsInterrupted = generationMode === 'stream' && isStreamInterruptedError(error);
 	      if (shouldTreatAsInterrupted) {
           const abortReason = requestAbortController?.signal.reason;
@@ -2021,9 +2082,15 @@ export const useBattleEngine = () => {
 	        setNewsReport(null);
 	      }
 	    } finally {
-          if (sharedGenerationAbortController === requestAbortController) sharedGenerationAbortController = null;
+	          if (sharedGenerationAbortController === requestAbortController) {
+            sharedGenerationAbortController = null;
+            sharedGenerationStop = null;
+          }
           if (isLatestRequest()) {
-            setArenaGenerationConnectionState(null);
+            if ((requestAbortController?.signal.reason !== STREAM_ABORT_REASON_USER
+              && lastArenaConnectionState !== 'cancel_unconfirmed') || !isRequestIdentityCurrent()) {
+              setArenaGenerationConnectionState(null);
+            }
             setArenaRoomGenerationPreflight(null);
             setIsGenerating(false);
             setIsStreaming(false);
@@ -2049,6 +2116,9 @@ export const useBattleEngine = () => {
     materials,
     selectedQuestionnaires,
     userProviderConfig,
+    providerCooldownConfig.currentMode,
+    providerCooldownConfig.customDurationMs,
+    providerCooldownConfig.systemDurationMs,
     settings,
     selectedLanguage,
     storyLength,
@@ -2084,11 +2154,16 @@ export const useBattleEngine = () => {
   ]);
 
   const stopGeneration = useCallback(() => {
-    if (sharedGenerationAbortController) {
-      setArenaGenerationConnectionState('cancelling');
-    }
-    sharedGenerationAbortController?.abort(STREAM_ABORT_REASON_USER);
-  }, [setArenaGenerationConnectionState]);
+    sharedGenerationStop?.();
+  }, []);
+
+  const confirmGenerateAfterUnconfirmedCancel = useCallback(() => {
+    const state = useBattleStore.getState();
+    if (state.arenaGenerationConnectionState !== 'cancel_unconfirmed' || !state.arenaGenerationCancellationRequestId) return;
+    const requestId = state.arenaGenerationCancellationRequestId;
+    setArenaGenerationConnectionState(null);
+    return handleGenerate(requestId);
+  }, [handleGenerate, setArenaGenerationConnectionState]);
 
   const handleRetryUpdates = useCallback(async () => {
     const state = useBattleStore.getState();
@@ -2162,6 +2237,7 @@ export const useBattleEngine = () => {
   return {
     handleGenerate,
     stopGeneration,
+    confirmGenerateAfterUnconfirmedCancel,
     handleRetryUpdates,
     isGenerating,
     arenaGenerationConnectionState,

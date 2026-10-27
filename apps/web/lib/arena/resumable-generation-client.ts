@@ -50,6 +50,8 @@ export type OpenArenaGenerationStreamOptions = {
   ): Promise<Response>;
   storage?: StoragePort | null;
   generationRequestId?: string;
+  /** Explicit risk acknowledgement for this exact persisted cancelled intent. */
+  abandonCancelledRequestId?: string;
   maxReconnectAttempts?: number;
   baseReconnectDelayMs?: number;
   cancelConfirmationTimeoutMs?: number;
@@ -245,6 +247,19 @@ export const openArenaGenerationStream = async (
   const bodyHash = await sha256Hex(canonicalJson(options.body));
   const stateIdentity = await sha256Hex(`${options.endpoint}\n${bodyHash}`);
   const scopedStateKey = `${ARENA_GENERATION_CLIENT_STATE_KEY}:${stateIdentity}`;
+  const previous = readPersistedArenaGeneration(storage, scopedStateKey);
+  const latest = readPersistedArenaGeneration(storage);
+  // Cancellation is an intent-level decision. A new request ID or changed form
+  // must not hide the latest unresolved stop behind a different body-scoped key.
+  const unconfirmed = [latest, previous].find(value => value?.endpoint === options.endpoint
+    && ['cancelling', 'cancel_unconfirmed'].includes(value.state));
+  if (unconfirmed && options.abandonCancelledRequestId !== unconfirmed.generationRequestId) {
+    // Reloading loses the in-flight receipt observer, not the possibility of a
+    // running producer. Require an explicit decision for this original intent.
+    options.onRequestIdentity?.(unconfirmed.generationRequestId);
+    options.onStateChange?.('cancel_unconfirmed');
+    throw Object.assign(new Error('ARENA_GENERATION_CANCEL_UNCONFIRMED'), { name: 'AbortError' });
+  }
   let initialHeaders: Headers;
   let createBody: string;
   let claimedState = false;

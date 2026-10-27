@@ -1,5 +1,7 @@
 # 文档导航
 
+2026-10-27 Arena 停止体验：[修复与本地验收](./reports/2026-10-27_210500_竞技场停止生成体验修复.md)记录 Web 本地即时结束、独立取消确认、剩余冷却与刷新后的风险门禁；共享客户端与 Desktop 兼容回归、本地浏览器矩阵已通过，未部署生产。
+
 2026-10-27 Desktop 0.1.0 已[正式发布](https://github.com/RunoreLab/MahoShojo-Generator/releases/tag/desktop-v0.1.0)：
 [发行 runbook 与验收记录](./runbooks/2026-10-26_220000_Desktop正式版候选与发布.md)记录最终 GitHub 签名制品、构建证明、Windows 11 安装交接、本地库迁移与生产部署；
 [0.1.0 发布说明](./references/2026-10-26_224500_Desktop010发布说明.md)随 Release 分发，
