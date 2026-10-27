@@ -208,7 +208,7 @@ Cloudflare Pages 部署环境变量需显式设置 `PNPM_VERSION=11.28.6`，避�
 <div align="center">
   <p>本项目在线版本的大模型能力由</p>
   <p><b><a href="https://github.com/KouriChat/KouriChat"> 
-    <img width="180" src="https://static.kourichat.com/pic/KouriChat.webp"/></br>
+    <img width="180" src="https://api.kourichat.com/KouriChat.avif"/></br>
     基于 LLM 的情感陪伴程序</br>
     <span style="font-size: 20px">KouriChat</span>
   </a></b></p>
