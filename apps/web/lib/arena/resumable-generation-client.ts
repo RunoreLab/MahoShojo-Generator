@@ -114,13 +114,16 @@ const save = (
   storage: StoragePort | null,
   key: string,
   value: PersistedArenaGeneration,
+  claimPointer: boolean,
 ): void => {
   try {
     const serialized = JSON.stringify(value);
     storage?.setItem(key, serialized);
     // Keep the legacy pointer for diagnostics and older callers. The resume path
     // itself only reads the body-scoped key, so parallel tabs/intents cannot steal it.
-    storage?.setItem(ARENA_GENERATION_CLIENT_STATE_KEY, serialized);
+    if (claimPointer || readPersistedArenaGeneration(storage)?.generationRequestId === value.generationRequestId) {
+      storage?.setItem(ARENA_GENERATION_CLIENT_STATE_KEY, serialized);
+    }
   } catch {
     // Resume persistence is best effort; the live stream remains authoritative.
   }
@@ -244,8 +247,10 @@ export const openArenaGenerationStream = async (
   const scopedStateKey = `${ARENA_GENERATION_CLIENT_STATE_KEY}:${stateIdentity}`;
   let initialHeaders: Headers;
   let createBody: string;
+  let claimedState = false;
   return openArenaGenerationStreamClient({
     endpoint: options.endpoint, bodyHash, signal: options.signal,
+    localStopMode: 'immediate',
     generationRequestId: options.generationRequestId,
     maxReconnectAttempts: options.maxReconnectAttempts, baseReconnectDelayMs: options.baseReconnectDelayMs,
     cancelConfirmationTimeoutMs: options.cancelConfirmationTimeoutMs,
@@ -254,7 +259,11 @@ export const openArenaGenerationStream = async (
     onTerminalBoundary: options.onTerminalBoundary,
   }, {
     loadState: () => readPersistedArenaGeneration(storage, scopedStateKey),
-    saveState: (value) => save(storage, scopedStateKey, value),
+    saveState: (value) => {
+      const claimPointer = !claimedState;
+      claimedState = true;
+      save(storage, scopedStateKey, value, claimPointer);
+    },
     createRequestId: secureRandomUUID, encodeUtf8, waitForReconnectOpportunity,
     isInitialCreateOutcomeAmbiguous: options.isInitialCreateOutcomeAmbiguous ?? shouldRecoverInitialCreateError,
     classifyExplicitAbort: (reason) => reason === STREAM_ABORT_REASON_CONTENT_POLICY

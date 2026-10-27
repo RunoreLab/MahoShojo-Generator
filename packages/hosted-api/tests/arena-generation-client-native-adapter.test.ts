@@ -55,7 +55,7 @@ const nativeHarness = (
   };
   const ports: ArenaGenerationClientPorts = {
     loadState: () => previous,
-    saveState: (state) => { saved.push(structuredClone(state)); },
+    saveState: (state) => { previous = structuredClone(state); saved.push(previous); },
     createRequestId: () => REQUEST_ID,
     encodeUtf8: (value) => new TextEncoder().encode(value),
     waitForReconnectOpportunity: async (milliseconds) => { waits.push(milliseconds); },
@@ -198,6 +198,77 @@ describe('Arena client finite Native-shaped adapter', () => {
     expect(stopSignal).not.toBe(controller.signal);
     expect(stopSignal?.aborted).toBe(true);
     expect(run.states).toEqual(['connecting', 'generating', 'cancelling', 'cancel_unconfirmed']);
+  });
+
+  it('immediate 本地停止不等待取消回执或 reader 清理，稍后仍投影真实回执', async () => {
+    let confirm!: (_response: Response) => void;
+    const controller = new AbortController();
+    const run = nativeHarness([stream(new ReadableStream<Uint8Array>({
+      cancel: () => new Promise<void>(() => {}),
+    }))], null, { signal: controller.signal, localStopMode: 'immediate' });
+    run.ports.transport.cancel = () => new Promise<Response>((resolve) => { confirm = resolve; });
+    const opened = await openArenaGenerationStreamClient(run.options, run.ports);
+    const body = opened.text();
+    controller.abort('user');
+    expect(await body).toBe('');
+    expect(run.states.at(-1)).toBe('cancelling');
+    confirm(new Response(null, { status: 202 }));
+    await vi.waitFor(() => expect(run.states.at(-1)).toBe('cancelled'));
+  });
+
+  it.each(['create', 'lookup', 'resume'] as const)('immediate 在 %s 挂起时停止且忽略迟到响应', async (operation) => {
+    let finish!: (_response: Response) => void;
+    const controller = new AbortController();
+    const previous = operation === 'create' ? null : publicState({
+      generationId: operation === 'lookup' ? null : GENERATION_ID,
+      state: operation === 'lookup' ? 'unknown' : 'generating',
+    });
+    const run = nativeHarness([], previous, { signal: controller.signal, localStopMode: 'immediate' });
+    run.ports.transport[operation] = () => new Promise<Response>((resolve) => { finish = resolve; });
+    run.ports.transport.cancel = async () => new Response(null, { status: 202 });
+    const opening = openArenaGenerationStreamClient(run.options, run.ports);
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    controller.abort('user');
+    await expect(opening).rejects.toMatchObject({ name: 'AbortError', message: 'ARENA_GENERATION_CANCELLED' });
+    await vi.waitFor(() => expect(run.states.at(-1)).toBe('cancelled'));
+    const states = [...run.states];
+    const dispose = vi.fn();
+    finish(stream(new ReadableStream<Uint8Array>({ cancel: dispose })));
+    await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce());
+    expect(run.states).toEqual(states);
+    expect(run.ports.observeResponse).not.toHaveBeenCalled();
+  });
+
+  it('默认模式的挂起初始 transport 在取消确认后也会结束', async () => {
+    const controller = new AbortController();
+    const run = nativeHarness([], null, { signal: controller.signal });
+    run.ports.transport.create = () => new Promise<Response>(() => {});
+    run.ports.transport.cancel = async () => new Response(null, { status: 202 });
+    const opening = openArenaGenerationStreamClient(run.options, run.ports);
+    controller.abort('user');
+    await expect(opening).rejects.toMatchObject({ name: 'AbortError' });
+    expect(run.states.at(-1)).toBe('cancelled');
+  });
+
+  it('旧取消的迟到回执不能覆盖同一持久槽的新任务或通知旧状态', async () => {
+    let confirm!: (_response: Response) => void;
+    const controller = new AbortController();
+    const run = nativeHarness([stream(new ReadableStream<Uint8Array>()), stream(DONE)], null,
+      { signal: controller.signal, localStopMode: 'immediate' });
+    run.ports.transport.cancel = () => new Promise<Response>((resolve) => { confirm = resolve; });
+    const first = await openArenaGenerationStreamClient(run.options, run.ports);
+    controller.abort('user');
+    await first.text();
+    const second = await openArenaGenerationStreamClient({ ...run.options, signal: undefined,
+      generationRequestId: 'request-native-new' }, run.ports);
+    await second.text();
+    expect(run.saved.at(-1)?.generationRequestId).toBe('request-native-new');
+    const savedCount = run.saved.length;
+    const states = [...run.states];
+    confirm(new Response(null, { status: 202 }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(run.saved).toHaveLength(savedCount);
+    expect(run.states).toEqual(states);
   });
 
   it('browser 显式子路径仅打包 client + SSE，无宿主 IO 或 server/Native 依赖且可独立运行', async () => {

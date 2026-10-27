@@ -193,6 +193,7 @@ describe('Arena 恢复抽取：708907 旧 Web 行为金样', () => {
       const opened = await openArenaGenerationStream(run.input);
       controller.abort(STREAM_ABORT_REASON_USER);
       expect(await opened.text()).toBe('');
+      await vi.waitFor(() => expect(run.states.at(-1)).toBe(finalState));
       expect(run.calls).toEqual([createCall, { method: 'POST', path: `/api/arena/generations/${GENERATION_ID}/cancel`,
         pin: null, body: { reason: 'user' } }]);
       expect(run.states).toEqual(['connecting', 'generating', 'cancelling', finalState]);
@@ -203,6 +204,7 @@ describe('Arena 恢复抽取：708907 旧 Web 行为金样', () => {
     controller.abort(STREAM_ABORT_REASON_USER);
     const run = options([new Response(null, { status: 404 })], { signal: controller.signal });
     await expect(openArenaGenerationStream(run.input)).rejects.toThrow('ARENA_GENERATION_CANCELLED');
+    await vi.waitFor(() => expect(run.states.at(-1)).toBe('cancel_unconfirmed'));
     expect(run.calls).toEqual([{ method: 'DELETE', path: ENDPOINT, pin: null,
       body: { generationRequestId: REQUEST_ID, reason: 'user' } }]);
     expect(run.states).toEqual(['connecting', 'cancelling', 'cancel_unconfirmed']);
@@ -245,6 +247,7 @@ describe('Arena 恢复抽取：708907 旧 Web 行为金样', () => {
     const opened = await openArenaGenerationStream(run.input);
     controller.abort(STREAM_ABORT_REASON_USER);
     await opened.text();
+    await vi.waitFor(() => expect(run.states.at(-1)).toBe('cancelled'));
     expect(wire).toEqual([{ path: `${prefix}${ENDPOINT}`, method: 'POST' },
       { path: `${prefix}/api/arena/generations/${GENERATION_ID}/cancel`, method: 'POST' }]);
     expect(run.states).toEqual(['connecting', 'generating', 'cancelling', 'cancelled']);

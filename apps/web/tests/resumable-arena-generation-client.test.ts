@@ -1235,7 +1235,7 @@ describe('resumable Arena generation client', () => {
       done: true,
     });
     expect(states).toContain('cancelling');
-    expect(states.at(-1)).toBe('cancel_unconfirmed');
+    await vi.waitFor(() => expect(states.at(-1)).toBe('cancel_unconfirmed'));
     expect(states).not.toContain('cancelled');
   });
 
@@ -1265,7 +1265,91 @@ describe('resumable Arena generation client', () => {
       value: undefined,
       done: true,
     });
-    expect(states.at(-1)).toBe('cancel_unconfirmed');
+    await vi.waitFor(() => expect(states.at(-1)).toBe('cancel_unconfirmed'));
+  });
+
+  it('returns local EOF before the cancellation deadline and ignores a late successful receipt after timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      let finishCancel!: (response: Response) => void;
+      const states: string[] = [];
+      const abort = new AbortController();
+      const opened = await openArenaGenerationStream({
+        endpoint: '/api/arena/generate-stream', body: {}, headers: {}, storage: new MemoryStorage(),
+        generationRequestId: 'request-immediate-stop', signal: abort.signal,
+        onStateChange: (state) => states.push(state),
+        fetcher: async (url) => url.includes('/cancel')
+          ? new Promise<Response>((resolve) => { finishCancel = resolve; })
+          : response(new ReadableStream<Uint8Array>({ cancel: () => new Promise<void>(() => {}) })),
+      });
+      const read = opened.body!.getReader().read();
+      abort.abort('user');
+      expect(await read).toEqual({ done: true, value: undefined });
+      expect(states.at(-1)).toBe('cancelling');
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(states.at(-1)).toBe('cancel_unconfirmed');
+      finishCancel(new Response(null, { status: 202 }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(states.at(-1)).toBe('cancel_unconfirmed');
+      expect(states).not.toContain('cancelled');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a late cancel receipt from a different body does not replace the latest diagnostic pointer', async () => {
+    let finishCancel!: (response: Response) => void;
+    const storage = new MemoryStorage();
+    const abort = new AbortController();
+    const first = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream', body: { story: 'old' }, headers: {}, storage,
+      generationRequestId: 'request-old-body', signal: abort.signal,
+      fetcher: async (url) => url.includes('/cancel')
+        ? new Promise<Response>((resolve) => { finishCancel = resolve; })
+        : response(new ReadableStream<Uint8Array>()),
+    });
+    abort.abort('user');
+    await first.text();
+    const second = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream', body: { story: 'new' }, headers: {}, storage,
+      generationRequestId: 'request-new-body',
+      fetcher: async () => response('id: 1-0\nevent: done\ndata: {"status":"completed"}\n\n'),
+    });
+    await second.text();
+    const latest = storage.getItem(ARENA_GENERATION_CLIENT_STATE_KEY);
+    expect(readPersistedArenaGeneration(storage)?.generationRequestId).toBe('request-new-body');
+    finishCancel(new Response(null, { status: 202 }));
+    await vi.waitFor(() => expect([...storage.values.values()].some((value) => {
+      try { const state = JSON.parse(value); return state.generationRequestId === 'request-old-body' && state.state === 'cancelled'; }
+      catch { return false; }
+    })).toBe(true));
+    expect(storage.getItem(ARENA_GENERATION_CLIENT_STATE_KEY)).toBe(latest);
+  });
+
+  it('stops immediately while a reconnect transport ignores abort and discards its eventual response', async () => {
+    let finishResume!: (response: Response) => void;
+    const abort = new AbortController();
+    const fetcher = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
+      if (url.includes('/cancel')) return new Response(null, { status: 202 });
+      if (init?.method === 'GET') return new Promise<Response>((resolve) => { finishResume = resolve; });
+      return response(new ReadableStream<Uint8Array>({ start(controller) { controller.close(); } }));
+    });
+    const states: string[] = [];
+    const opened = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream', body: {}, headers: {}, storage: new MemoryStorage(),
+      generationRequestId: 'request-stop-hanging-resume', signal: abort.signal, fetcher,
+      baseReconnectDelayMs: 1, onStateChange: (state) => states.push(state),
+    });
+    const read = opened.body!.getReader().read();
+    await vi.waitFor(() => expect(finishResume).toBeTypeOf('function'));
+    abort.abort('user');
+    expect(await readWithDeadline(read)).toEqual({ done: true, value: undefined });
+    await vi.waitFor(() => expect(states.at(-1)).toBe('cancelled'));
+    const previousStates = [...states];
+    const dispose = vi.fn();
+    finishResume(response(new ReadableStream<Uint8Array>({ cancel: dispose })));
+    await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce());
+    expect(states).toEqual(previousStates);
   });
 
   it('does not resume after explicit abort wins during reconnect backoff', async () => {
@@ -1371,7 +1455,7 @@ describe('resumable Arena generation client', () => {
     await postStarted;
 
     abort.abort('user');
-    await expect(opened).rejects.toThrow('aborted');
+    await expect(opened).rejects.toMatchObject({ name: 'AbortError', message: 'ARENA_GENERATION_CANCELLED' });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const pendingCancel = fetcher.mock.calls.find(([, init]) => init?.method === 'DELETE');

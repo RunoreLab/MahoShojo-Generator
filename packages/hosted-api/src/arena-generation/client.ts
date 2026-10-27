@@ -50,7 +50,7 @@ export const arenaGenerationConnectionNotice = (
     return '正在恢复上一场战报生成。';
   }
   if (state === 'producer_lost') return '生成进程已丢失，无法安全自动重试。';
-  if (state === 'cancelling') return '正在请求服务器停止生成，请稍候。';
+  if (state === 'cancelling') return '已停止本地接收，正在请求服务器停止生成。';
   if (state === 'cancelled') {
     return '服务器已接受停止请求。当前预览可能不完整，但可继续查看。';
   }
@@ -91,6 +91,8 @@ export type ArenaGenerationClientOptions = {
   maxReconnectAttempts?: number;
   baseReconnectDelayMs?: number;
   cancelConfirmationTimeoutMs?: number;
+  /** Release the local subscriber immediately while cancellation is confirmed separately. */
+  localStopMode?: 'immediate';
   random?: () => number;
   now?: () => Date;
   getInitialRoutePin?(): GenerationApiRoutePin | null;
@@ -211,12 +213,56 @@ export const openArenaGenerationStreamClient = async (
   let currentReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   let stopped = false;
   let explicitlyAborted = false;
-  let cancelConfirmationPromise: Promise<void> | null = null;
   let terminal = false;
   let connectedViaResume = false;
   let rejectedEvent = false;
   let lastReadBuffer = '';
+  let releaseLocalStop!: () => void;
+  let localStopReleased = false;
+  const pendingOperationStops = new Set<() => void>();
+  const localStop = new Promise<void>((resolve) => {
+    releaseLocalStop = () => {
+      if (localStopReleased) return;
+      localStopReleased = true;
+      resolve();
+      for (const stop of pendingOperationStops) stop();
+      pendingOperationStops.clear();
+    };
+  });
+  const cancellationError = (): Error => Object.assign(new Error('ARENA_GENERATION_CANCELLED'), { name: 'AbortError' });
+  // Remove settled reads instead of accumulating one pending Promise.race
+  // reaction per chunk on a long-lived stop promise.
+  const waitForOperation = <T>(operation: Promise<T>): Promise<T> => new Promise((resolve, reject) => {
+    const stop = (): void => { pendingOperationStops.delete(stop); reject(cancellationError()); };
+    if (localStopReleased) {
+      void operation.catch(() => undefined);
+      reject(cancellationError());
+      return;
+    }
+    pendingOperationStops.add(stop);
+    void operation.then((value) => {
+      if (pendingOperationStops.delete(stop)) resolve(value);
+    }, (error: unknown) => {
+      if (pendingOperationStops.delete(stop)) reject(error);
+    });
+  });
+  // Response completion can arrive after a host ignored abort. Dispose of it
+  // without observing metadata, publishing state or starting recovery.
+  const waitForResponse = (operation: Promise<Response>): Promise<Response> => waitForOperation(operation.then(async (response) => {
+    if (stopped) {
+      void response.body?.cancel('generation stopped').catch(() => undefined);
+      await localStop;
+      throw cancellationError();
+    }
+    return response;
+  }));
+  const ownsPersistedState = (): boolean => {
+    if (!stopped) return true;
+    const current = ports.loadState();
+    return !current || current.generationRequestId === generationRequestId;
+  };
   const persistCurrentState = (): void => {
+    if (!ownsPersistedState()) return;
     ports.saveState({
       version: 3,
       generationRequestId,
@@ -230,7 +276,7 @@ export const openArenaGenerationStreamClient = async (
     });
   };
   const acceptInitialRoutePin = (selected: GenerationApiRoutePin): void => {
-    if (routePin || !isGenerationApiRoutePin(selected)) return;
+    if (stopped || routePin || !isGenerationApiRoutePin(selected)) return;
     routePin = Object.freeze({ placement: selected.placement });
     persistCurrentState();
   };
@@ -240,16 +286,19 @@ export const openArenaGenerationStreamClient = async (
     if (isGenerationApiRoutePin(selected)) acceptInitialRoutePin(selected);
   };
   const updateState = (next: ArenaGenerationConnectionState): void => {
+    if (stopped && !['cancelling', 'cancelled', 'cancel_unconfirmed'].includes(next)) return;
+    if (!ownsPersistedState()) return;
     state = next;
-    options.onStateChange?.(next);
     persistCurrentState();
+    options.onStateChange?.(next);
   };
 
   const fetchResume = async (): Promise<Response> => {
     if (!isGenerationIdentifier(generationId)) throw new Error('ARENA_GENERATION_ID_MISSING');
     updateState('resuming');
     connectedViaResume = true;
-    return ports.transport.resume({ generationId, lastEventId, signal: options.signal, routePin: routePin ?? undefined });
+    if (stopped) { await localStop; throw cancellationError(); }
+    return waitForResponse(ports.transport.resume({ generationId, lastEventId, signal: options.signal, routePin: routePin ?? undefined }));
   };
 
   updateState(state);
@@ -262,15 +311,16 @@ export const openArenaGenerationStreamClient = async (
     updateState('cancelling');
     void currentReader?.cancel(cancelReason).catch(() => undefined);
     const cancelController = new AbortController();
-    const cancelRequest = ports.transport.cancel({
+    if (options.localStopMode === 'immediate') releaseLocalStop();
+    const cancelRequest = Promise.resolve().then(() => ports.transport.cancel({
       generationId, generationRequestId, reason: cancelReason, signal: cancelController.signal,
-    }).then(async (response) => {
+    })).then(async (response) => {
       if (response.status === 202) {
-        await response.body?.cancel('cancel accepted').catch(() => undefined);
+        void response.body?.cancel('cancel accepted').catch(() => undefined);
         return true;
       }
       if (!response.ok) {
-        await response.body?.cancel('cancel rejected').catch(() => undefined);
+        void response.body?.cancel('cancel rejected').catch(() => undefined);
         return false;
       }
       try {
@@ -282,7 +332,7 @@ export const openArenaGenerationStreamClient = async (
         return false;
       }
     }).catch(() => false);
-    cancelConfirmationPromise = new Promise<boolean>((resolve) => {
+    void new Promise<boolean>((resolve) => {
       const timer = setTimeout(() => {
         cancelController.abort('cancel-confirmation-timeout');
         resolve(false);
@@ -294,20 +344,21 @@ export const openArenaGenerationStreamClient = async (
       });
     }).then((confirmed) => {
       updateState(confirmed ? 'cancelled' : 'cancel_unconfirmed');
+      releaseLocalStop();
     });
   };
   options.signal?.addEventListener('abort', cancelOnExplicitAbort, { once: true });
   if (options.signal?.aborted) cancelOnExplicitAbort();
   if (stopped) {
-    await cancelConfirmationPromise;
-    throw new Error('ARENA_GENERATION_CANCELLED');
+    await localStop;
+    throw cancellationError();
   }
-  const fetchCreate = (): Promise<Response> => ports.transport.create({
+  const fetchCreate = (): Promise<Response> => waitForResponse(ports.transport.create({
     generationRequestId, signal: options.signal, onRoutePinSelected: acceptInitialRoutePin,
-  });
-  const fetchLookup = (): Promise<Response> => ports.transport.lookup({
+  }));
+  const fetchLookup = (): Promise<Response> => waitForResponse(ports.transport.lookup({
     generationRequestId, signal: options.signal, routePin: routePin ?? undefined,
-  });
+  }));
   const fetchResumeWithRetry = async (): Promise<Response> => {
     let attempt = 0;
     while (true) {
@@ -318,16 +369,16 @@ export const openArenaGenerationStreamClient = async (
           || resumed.status === 429
           || resumed.status >= 500;
         if (!transient || attempt >= maxAttempts) return resumed;
-        await resumed.body?.cancel('retry initial generation resume').catch(() => undefined);
+        await waitForOperation(resumed.body?.cancel('retry initial generation resume').catch(() => undefined) ?? Promise.resolve());
       } catch (error) {
         if (options.signal?.aborted || attempt >= maxAttempts) throw error;
       }
       updateState('reconnecting');
       const exponential = Math.min(30_000, baseDelayMs * (2 ** attempt));
-      await ports.waitForReconnectOpportunity(
+      await waitForOperation(ports.waitForReconnectOpportunity(
         Math.floor(exponential * (0.75 + random() * 0.5)),
         options.signal,
-      );
+      ));
       attempt += 1;
     }
   };
@@ -349,10 +400,10 @@ export const openArenaGenerationStreamClient = async (
     for (let attempt = 0; attempt < lookupAttempts; attempt += 1) {
       if (attempt > 0) {
         const exponential = Math.min(30_000, baseDelayMs * (2 ** (attempt - 1)));
-        await ports.waitForReconnectOpportunity(
+        await waitForOperation(ports.waitForReconnectOpportunity(
           Math.floor(exponential * (0.75 + random() * 0.5)),
           options.signal,
-        );
+        ));
       }
       if (options.signal?.aborted) throw new Error('ARENA_GENERATION_CANCELLED');
       let lookup: Response;
@@ -366,7 +417,7 @@ export const openArenaGenerationStreamClient = async (
       if (lookup.ok) {
         let payload: unknown = null;
         try {
-          payload = await lookup.json();
+          payload = await waitForOperation(lookup.json());
         } catch (error) {
           if (options.signal?.aborted) throw error;
           // A malformed success is ambiguous and consumes the same lookup budget.
@@ -392,7 +443,7 @@ export const openArenaGenerationStreamClient = async (
         updateState('unknown');
         return lookup;
       }
-      await lookup.body?.cancel('retry generation request lookup').catch(() => undefined);
+      await waitForOperation(lookup.body?.cancel('retry generation request lookup').catch(() => undefined) ?? Promise.resolve());
     }
     updateState('unknown');
     throw new Error('ARENA_GENERATION_STATE_UNKNOWN');
@@ -428,7 +479,7 @@ export const openArenaGenerationStreamClient = async (
         if (completeSuccess) {
           response = created;
         } else if (ambiguous) {
-          await created.body?.cancel('recover incomplete generation handshake').catch(() => undefined);
+          await waitForOperation(created.body?.cancel('recover incomplete generation handshake').catch(() => undefined) ?? Promise.resolve());
           response = generationId ? await fetchResumeWithRetry() : await recoverInitial();
         } else {
           updateState('failed');
@@ -437,7 +488,7 @@ export const openArenaGenerationStreamClient = async (
       }
     }
   } catch (error) {
-    if (explicitlyAborted) await cancelConfirmationPromise;
+    if (explicitlyAborted) await localStop;
     options.signal?.removeEventListener('abort', cancelOnExplicitAbort);
     throw error;
   }
@@ -452,6 +503,11 @@ export const openArenaGenerationStreamClient = async (
   const encoder = { encode: ports.encodeUtf8 };
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
+      // Local EOF is independent of a stuck reader or transport. Default hosts
+      // retain confirmation-before-EOF; opted-in hosts observe the receipt later.
+      void localStop.then(() => {
+        try { controller.close(); } catch { /* Subscriber already closed. */ }
+      });
       const pump = async (): Promise<void> => {
         let reconnectAttempt = 0;
         const reconnect = async (): Promise<void> => {
@@ -463,10 +519,10 @@ export const openArenaGenerationStreamClient = async (
             updateState('reconnecting');
             if (stopped || terminal) return;
             const exponential = Math.min(30_000, baseDelayMs * (2 ** reconnectAttempt));
-            await ports.waitForReconnectOpportunity(
+            await waitForOperation(ports.waitForReconnectOpportunity(
               Math.floor(exponential * (0.75 + random() * 0.5)),
               options.signal,
-            );
+            ));
             if (stopped || terminal) return;
             reconnectAttempt += 1;
             try {
@@ -493,11 +549,12 @@ export const openArenaGenerationStreamClient = async (
             let buffer = '';
             try {
               while (!stopped) {
-                const next = await currentReader.read();
+                const next = await waitForOperation(currentReader.read());
+                if (stopped) break;
                 if (next.done) break;
                 buffer += decoder.decode(next.value, { stream: true }).replace(/\r\n?/gu, '\n');
                 let separator = buffer.indexOf('\n\n');
-                while (separator >= 0) {
+                while (separator >= 0 && !stopped) {
                   const block = buffer.slice(0, separator);
                   buffer = buffer.slice(separator + 2);
                   const parsed = parseGenerationSseBlock(block);
@@ -515,6 +572,7 @@ export const openArenaGenerationStreamClient = async (
                     try { options.onTerminalBoundary?.(Object.freeze({ kind: 'terminal', bufferedTail: buffer + decoder.decode(), rejectedEvent })); }
                     catch { /* Observation must not change delivery or recovery semantics. */ }
                   }
+                  if (stopped) break;
                   controller.enqueue(encoder.encode(`${block}\n\n`));
                   // Transport comments are not generation progress or persisted replay events.
                   if (parsed) updateState(nextTerminal ?? 'generating');
@@ -555,7 +613,7 @@ export const openArenaGenerationStreamClient = async (
           }
         } finally {
           if (explicitlyAborted) {
-            await cancelConfirmationPromise;
+            await localStop;
             try {
               controller.close();
             } catch {
