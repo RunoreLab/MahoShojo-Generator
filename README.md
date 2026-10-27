@@ -1,6 +1,6 @@
 <!-- markdownlint-disable MD033 MD041 -->
 <p align="center">
-  <img src="./apps/web/public/logo.svg" width="300" height="200" alt="MahoGen">
+  <img src="./content/brand/logo.svg" width="300" height="200" alt="MahoGen">
 </p>
 
 <div align="center">
@@ -151,19 +151,12 @@ Cloudflare Pages 部署环境变量需显式设置 `PNPM_VERSION=11.28.6`，避�
 
 查看详细的开发进度和完成功能，请参阅 [CHANGELOG.md](./CHANGELOG.md)
 
-## 🧭 开发规范（关键）
+## 🧭 开发规范
 
 - 命名规范采用“分层统一 + 边界映射”，适用于全项目，不限于鉴权模块。
 - 详细说明见 [docs/NAMING_CONVENTIONS_2026-02-28.md](./docs/NAMING_CONVENTIONS_2026-02-28.md)。
 - 当前路由统一使用 App Router；历史迁移评估见 [docs/reports/2026-06-03_204053_App_Router迁移评估.md](./docs/reports/2026-06-03_204053_App_Router迁移评估.md)。
 - 新增 Web API 默认使用 `apps/web/app/api/**/route.ts` Route Handler；不要新增 `pages/` 或 `pages/api/` 入口。
-
-- [x] 核心 AI 生成系统
-- [x] 角色成长与竞技场系统
-- [x] 云端存储与用户系统
-- [x] 排位系统与排行榜
-- [x] 多人模式
-- [ ] 系统通用化与模块化
 
 ### 项目结构与模块划分
 - 本项目基于 Next.js + `@opennextjs/cloudflare` + Cloudflare D1 数据库 + Tailwind 4 + Vercel AI SDK 编写。
@@ -203,7 +196,13 @@ Cloudflare Pages 部署环境变量需显式设置 `PNPM_VERSION=11.28.6`，避�
 
 ## 📊 统计
 
-[![Stargazers over time](https://starchart.cc/RunoreLab/MahoShojo-Generator.svg?variant=adaptive)](https://starchart.cc/RunoreLab/MahoShojo-Generator)
+<a href="https://www.star-history.com/?repos=runorelab%2Fmahoshojo-generator&type=timeline&legend=bottom-right">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=runorelab/mahoshojo-generator&type=date&theme=dark&legend=bottom-right" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=runorelab/mahoshojo-generator&type=date&legend=bottom-right" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=runorelab/mahoshojo-generator&type=date&legend=bottom-right" />
+ </picture>
+</a>
 
 ## 🧡 致谢
 <div align="center">
@@ -217,25 +216,6 @@ Cloudflare Pages 部署环境变量需显式设置 `PNPM_VERSION=11.28.6`，避�
   <p><b>GitHub</b> | <a href="https://github.com/KouriChat/KouriChat">https://github.com/KouriChat/KouriChat</a></p>
   <p><b>项目官网</b> | <a href="https://kourichat.com/">https://kourichat.com/</a></p>
 </div>
-
-## 📁 项目结构
-
-```
-MahoShojo-Generator/
-├── apps/
-│   ├── web/                # Next/OpenNext source、tests、assets 与 deploy unit
-│   │   ├── app/            # App Router 页面与 Route Handlers
-│   │   ├── components/     # Web UI 组件
-│   │   ├── lib/            # Web runtime/adapters
-│   │   └── public/         # 静态资源
-│   ├── api/                # Hono Node API deployment unit
-│   └── d1-gateway/         # Cloudflare D1 Gateway Worker
-├── packages/               # 显式 exports 的共享领域、contract 与 runtime core
-├── config/                 # 跨 runtime route inventory
-├── drizzle/                # D1 migration history
-├── scripts/                # repository boundary/naming/data tooling
-└── tests/                  # repository ownership/integration contracts
-```
 
 ---
 
