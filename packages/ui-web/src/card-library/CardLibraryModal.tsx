@@ -293,18 +293,16 @@ export function CardLibraryModal({
   const cardsPerPage = 12;
   const [cardMetaById, setCardMetaById] = useState<Record<string, { techScore: number | null; techLevel: string | null; strictTier: string | null; isNative: boolean | null }>>({});
   const [authorBadgesById, setAuthorBadgesById] = useState<Record<number, BadgeDefinition[]>>({});
-  const effectiveAllowedTypes = useMemo<DataCardType[]>(() => {
-    const candidates = selectedType === 'all'
-      ? (Array.isArray(allowedTypes) && allowedTypes.length > 0 ? allowedTypes : ONLINE_DATA_CARD_TYPES)
-      : [selectedType];
-    const seen = new Set<DataCardType>();
-    return candidates.filter((type): type is DataCardType => {
-      const result = OnlineDataCardTypeSchema.safeParse(type);
-      if (!result.success || seen.has(result.data)) return false;
-      seen.add(result.data);
-      return true;
-    });
-  }, [allowedTypes, selectedType]);
+  // 类型限制按集合内容比较：宿主选卡后重新创建同值数组不代表查询变化。
+  // 以协议类型顺序规范化，重复项、排列变化和无效项也不会触发重查/页码归一。
+  const allowedTypeCandidates = selectedType === 'all'
+    ? (Array.isArray(allowedTypes) && allowedTypes.length > 0 ? allowedTypes : ONLINE_DATA_CARD_TYPES)
+    : [selectedType];
+  const allowedTypesKey = ONLINE_DATA_CARD_TYPES.filter((type) => allowedTypeCandidates.includes(type)).join(',');
+  const effectiveAllowedTypes = useMemo<DataCardType[]>(
+    () => allowedTypesKey ? allowedTypesKey.split(',') as DataCardType[] : [],
+    [allowedTypesKey],
+  );
   const effectiveAllowedTypeSet = useMemo(() => new Set<DataCardType>(effectiveAllowedTypes), [effectiveAllowedTypes]);
 
   // 【新增】高级筛选的状态
@@ -554,12 +552,12 @@ export function CardLibraryModal({
   }, [isOpen, activeTab, accountKey, host.auth.credentialEpoch]);
   useEffect(() => {
     if (!isOpen || isPublicTab) return;
-    const status = activeTab === 'my' ? myPage.status : activeTab === 'favorites' ? favoritesPage.status : null;
-    const total = activeTab === 'my' ? myPage.total : favoritesPage.total;
+    const status = activeTab === 'my' ? myPage.status : activeTab === 'favorites' ? favoritesPage.status : localCards.status;
+    const total = activeTab === 'my' ? myPage.total : activeTab === 'favorites' ? favoritesPage.total : localCards.total;
     if (status === 'success' && currentPage > Math.max(1, Math.ceil(total / cardsPerPage))) {
       setCurrentPage(Math.max(1, Math.ceil(total / cardsPerPage)));
     }
-  }, [isOpen, isPublicTab, activeTab, myPage.status, myPage.total, favoritesPage.status, favoritesPage.total, currentPage, cardsPerPage]);
+  }, [isOpen, isPublicTab, activeTab, myPage.status, myPage.total, favoritesPage.status, favoritesPage.total, localCards.status, localCards.total, currentPage, cardsPerPage]);
   useEffect(() => {
     if (!isOpen || !isAuthenticated) return;
     // 收藏 id 是账号私有偏好：写入打发起时的身份标签，渲染只投影当前身份——
@@ -2637,6 +2635,7 @@ export function CardLibraryModal({
           {(
             (activeTab === 'my' && myPage.total > cardsPerPage) ||
             (activeTab === 'favorites' && favoritesPage.total > cardsPerPage) ||
+            (isLocalTab && (localTotalPages > 1 || currentPage > 1)) ||
             (isPublicTab && (
               publicViewMode === 'cache'
                 ? cachedViewShown && ((cachedView?.totalPages ?? 1) > 1 || currentPage > 1)

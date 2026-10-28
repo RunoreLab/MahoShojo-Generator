@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, useEffect } from 'react';
+import { act, useEffect, useState } from 'react';
 import { DataCardSummarySchema } from '@mahoshojo/contracts/data-cards';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
@@ -262,6 +262,126 @@ const publicCard = (id: string) => ({
   updated_at: '2026-01-01T00:00:00Z', usage_count: 0, like_count: 0, favorite_count: 0,
   is_recommended: 0, username: 'author', roleType: 'magical-girl', nativeAllowed: false,
   has_pending_update: false, tag_ids: [] as string[], favorited_at: null,
+});
+
+test.each(['public', 'my', 'favorites', 'local'] as const)(
+  '%s 第二页连续选择角色时，同内容 allowedTypes 新数组不重置页码或重查列表',
+  async (tab) => {
+    const rows = Array.from({ length: 24 }, (_, index) => publicCard(String(index)));
+    const fetchPublicCards = vi.fn<CardLibraryHost['online']['fetchPublicCards']>(async (query) => ({
+      ok: true, status: 200,
+      data: { success: true, cards: rows.slice(query.offset, query.offset + query.limit), total: 24, nextOffset: null },
+    }));
+    const fetchSummaryPage = vi.fn<CardLibraryHost['online']['fetchSummaryPage']>(async (_source, query) => ({
+      success: true, cards: rows.slice(Number(query.offset ?? 0), Number(query.offset ?? 0) + Number(query.limit ?? 12))
+        .map((row) => DataCardSummarySchema.parse({ ...row, user_id: 7 })), total: 24, nextOffset: null,
+    }));
+    const { host } = createHost(rows.map((row) => record(row.id)), {
+      auth: { status: 'authenticated', userId: 7, userBadges: [] },
+      online: { fetchPublicCards, fetchSummaryPage, loadFullCard: vi.fn(async (row: any) => publicCard(row.id)) },
+    });
+    function ArenaSelection() {
+      const [selected, setSelected] = useState<string[]>([]);
+      return <CardLibraryModal host={host} isOpen onClose={() => {}} selectedType="character"
+        allowedTypes={['character']} initialTab={tab} visibleTabs={[tab]} selectionMode="multi"
+        selectedSelectionIds={selected} onToggleCard={(_card, nextSelected, context) => {
+          setSelected((previous) => nextSelected ? [...previous, context.selectionId] : previous.filter((id) => id !== context.selectionId));
+        }} />;
+    }
+    await act(async () => root.render(<ArenaSelection />));
+    await settle();
+    await click([...document.querySelectorAll('button')].find((node) => node.textContent?.trim() === '下一页')!);
+    await settle();
+    expect(document.body.textContent).toContain('第 2 页');
+    const requestCounts = [fetchPublicCards.mock.calls.length, fetchSummaryPage.mock.calls.length, vi.mocked(host.local.repository.list).mock.calls.length];
+    for (const id of ['12', '13']) {
+      const name = tab === 'local' ? `本地角色 ${id}` : `公开角色 ${id}`;
+      const row = [...document.querySelectorAll('h4')].find((node) => node.textContent === name)!;
+      expect(row).toBeTruthy();
+      await click(row);
+      await settle();
+      expect(document.body.textContent).toContain('第 2 页');
+      expect(document.querySelectorAll('button[aria-label="移除"]')).toHaveLength(Number(id) - 11);
+    }
+    expect([fetchPublicCards.mock.calls.length, fetchSummaryPage.mock.calls.length, vi.mocked(host.local.repository.list).mock.calls.length]).toEqual(requestCounts);
+  },
+);
+
+test('类型集合排列不重查；真正改变类型、排序、搜索和来源时回到第一页', async () => {
+  const fetchPublicCards = vi.fn<CardLibraryHost['online']['fetchPublicCards']>(async (query) => ({
+    ok: true, status: 200,
+    data: { success: true, cards: Array.from({ length: 12 }, (_, index) => ({
+      ...publicCard(`${query.type}-${query.offset + index}`), type: query.type,
+    })), total: 24, nextOffset: null },
+  }));
+  const { host } = createHost(Array.from({ length: 24 }, (_, index) => record(String(index))), { online: { fetchPublicCards } });
+  const props: Parameters<typeof CardLibraryModal>[0] = {
+    host, isOpen: true, onClose: vi.fn(), selectedType: 'all', initialTab: 'public',
+    visibleTabs: ['public', 'local'], allowedTypes: ['character', 'scenario'],
+  };
+  const nextPage = async () => {
+    await click([...document.querySelectorAll('button')].find((node) => node.textContent?.trim() === '下一页')!);
+    await settle();
+    expect(document.body.textContent).toContain('第 2 页');
+  };
+  await render(props);
+  await settle();
+  await nextPage();
+  const calls = fetchPublicCards.mock.calls.length;
+  await render({ ...props, allowedTypes: ['scenario', 'character', 'scenario'] });
+  await settle();
+  expect(document.body.textContent).toContain('第 2 页');
+  expect(fetchPublicCards).toHaveBeenCalledTimes(calls);
+  await render({ ...props, allowedTypes: ['scenario'] });
+  await settle();
+  expect(document.body.textContent).toContain('第 1 页');
+  expect(fetchPublicCards.mock.calls.at(-1)?.[0]).toMatchObject({ type: 'scenario', offset: 0 });
+  await nextPage();
+  const sort = document.querySelector('select')!;
+  await act(async () => {
+    sort.value = 'likes';
+    sort.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await settle();
+  expect(document.body.textContent).toContain('第 1 页');
+  expect(fetchPublicCards.mock.calls.at(-1)?.[0]).toMatchObject({ sortBy: 'likes', offset: 0 });
+  await nextPage();
+  const search = document.querySelector<HTMLInputElement>('input[type="text"]')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, '测试搜索');
+    search.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  // 输入事件提交后才调度防抖。
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 550)); });
+  expect(document.body.textContent).toContain('第 1 页');
+  expect(fetchPublicCards.mock.calls.at(-1)?.[0]).toMatchObject({ search: '测试搜索', offset: 0 });
+  await nextPage();
+  await click([...document.querySelectorAll('[role="tab"]')].find((node) => node.textContent?.includes('本地'))!);
+  await settle();
+  expect(document.body.textContent).not.toContain('第 2 页');
+  await click([...document.querySelectorAll('[role="tab"]')].find((node) => node.textContent?.includes('公开'))!);
+  await settle();
+  expect(document.body.textContent).toContain('第 1 页');
+});
+
+test('本地库删除最后一页唯一角色后回到仍有效的末页', async () => {
+  const items = Array.from({ length: 25 }, (_, index) => record(String(index)));
+  const { host } = createHost(items);
+  vi.mocked(host.local.repository.delete).mockImplementation(async (id) => {
+    items.splice(items.findIndex((item) => item.id === id), 1);
+  });
+  await render({ host, isOpen: true, onClose: vi.fn(), selectedType: 'character', initialTab: 'local', visibleTabs: ['local'] });
+  await settle();
+  for (let page = 0; page < 2; page += 1) {
+    await click([...document.querySelectorAll('button')].find((node) => node.textContent?.trim() === '下一页')!);
+  }
+  expect(document.body.textContent).toContain('第 3 页');
+  await click(document.querySelector('[aria-label="从本地库删除"]')!);
+  await click([...document.querySelectorAll('button')].filter((node) => node.textContent?.trim() === '删除').at(-1)!);
+  await settle();
+  expect(host.local.repository.delete).toHaveBeenCalledWith('24');
+  expect(document.body.textContent).toContain('第 2 页 / 2');
+  expect(document.body.textContent).toContain('本地角色 12');
 });
 
 /** 星标收藏按钮的「已收藏」投影：`取消收藏` title 只在 isFavorited 时出现。 */
