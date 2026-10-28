@@ -384,7 +384,7 @@ describe('safe failure evidence survives Arena export and restore', () => {
   it('preserves the actual Direct failure category without a native message or stale prior failure', async () => {
     const f = build(), source = makeDraft('daily', 'stream'); f.session.updateDraft(source);
     await f.session.generate({ ...native(''), invoke: async () => { throw { code: 'missing-secret', message: 'private-key-canary' }; } }, source, intent('stream'));
-    const failure = { source: 'client', stage: 'native-stream', code: 'missing-secret' };
+    const failure = { source: 'client', stage: 'native-stream', code: 'missing-secret', terminalStatus: 'unconfirmed', outputChars: 0 };
     expect(f.session.getSnapshot().failureDiagnostic).toEqual(failure);
     expect(JSON.parse(f.session.exportDocument()).result.failureDiagnostic).toEqual(failure);
     expect(f.session.exportDocument()).not.toContain('private-key-canary'); f.session.dispose();
@@ -395,6 +395,21 @@ describe('safe failure evidence survives Arena export and restore', () => {
     await reopened.generate(native(valid(true)), reopened.getSnapshot().draft, intent('stream'));
     expect(reopened.getSnapshot().phase).toBe('completed');
     expect(JSON.parse(reopened.exportDocument()).result.failureDiagnostic).toBeNull(); reopened.dispose();
+  });
+  it.each(['length', 'content-filter', 'tool-calls', 'other'])('keeps %s evidence after reopening without promoting the partial report', async finishReason => {
+    const f = build(), source = makeDraft('daily', 'stream'), text = '尚未确认完整的正文';
+    f.session.updateDraft(source);
+    await f.session.generate(native(text, finishReason), source, intent('stream'));
+    const failure = { source: 'client', stage: 'output', code: 'incomplete-output', terminalStatus: 'completed', finishReason, outputChars: text.length };
+    expect(f.session.getSnapshot()).toMatchObject({ phase: 'failed', rawText: text, candidates: null, failureDiagnostic: failure });
+    expect(JSON.parse(f.session.exportDocument()).result.failureDiagnostic).toEqual(failure);
+    expect(f.port.putIfAbsent).not.toHaveBeenCalled();
+    f.session.dispose();
+    const reopened = new DesktopArenaSession({ repository: f.port, storage: f.storage });
+    reopened.restoreDraft();
+    expect(reopened.getSnapshot()).toMatchObject({ rawText: text, candidates: null, failureDiagnostic: failure });
+    expect(JSON.parse(reopened.exportDocument()).result.failureDiagnostic).toEqual(failure);
+    reopened.dispose();
   });
 });
 

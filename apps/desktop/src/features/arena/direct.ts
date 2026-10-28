@@ -24,7 +24,7 @@ import { AiStreamProtocolError, collectAiStreamResult, looksLikeTrivialEmptyOutp
 import type { NarrativeDraftCompletion } from '@mahoshojo/domain/narrative-drafts';
 import { findAiProviderPreset } from '@mahoshojo/ai-core/provider-catalog';
 import { ARENA_CANONICAL_RESOURCE_LIMITS } from '@mahoshojo/contracts/arena-capabilities';
-import { AiExecutionRequestSchema, validateArenaAiInputJson, type AiExecutionResult, type AiExecutionUsage } from '@mahoshojo/contracts/ai-execution';
+import { AiExecutionRequestSchema, validateArenaAiInputJson, type AiExecutionFinishReason, type AiExecutionResult, type AiExecutionUsage } from '@mahoshojo/contracts/ai-execution';
 import { WebPackageRefSchema, type WebPackageRef } from '@mahoshojo/contracts/web-package';
 import type { BattleReportRenderSnapshotV1 } from '@mahoshojo/contracts';
 import { buildWebPackagePromptProjection, buildWebPackagePromptFromProjection, createWebPackageOverlayFromBase, type ResolvedWebPackage } from '@mahoshojo/web-package';
@@ -122,6 +122,14 @@ const knownDirectFailureCode = (code: string): DirectFailureCode | undefined =>
   Object.prototype.hasOwnProperty.call(directFailureMessages, code) ? code as DirectFailureCode : undefined;
 const directFailureMessage = (code: DirectFailureCode): string => `${directFailureMessages[code]}（${code}）已保留收到的正文。`;
 
+// These are validated canonical classifications, never arbitrary provider text.
+const incompleteOutputMessages: Record<Exclude<AiExecutionFinishReason, 'stop'>, string> = {
+  length: '生成达到模型或请求的输出 Token 上限，内容可能不完整。原文已保留；可检查最大输出 Token 设置，或缩小生成范围后手动重新生成。这是长度限制，不是桌面端按固定时长中断。',
+  'content-filter': '供应商的内容过滤机制中止了生成，原文已保留。请检查请求内容，必要时联系供应商。',
+  'tool-calls': '模型以工具调用结束，但当前战报流程无法执行这类工具调用，内容尚未确认完整。原文已保留；请检查模型与接口是否支持直接输出正文。',
+  other: '接口未提供可确认的正常结束原因，无法判断内容是否完整，也不能据此认定为超时。原文已保留；请复制错误摘要并检查供应商接口兼容性。',
+};
+
 /** One explicit request, one native execution; no provider retries or persistence. */
 export const executeArenaDirect = async (
   options: DesktopAiExecutionOptions,
@@ -155,7 +163,10 @@ export const executeArenaDirect = async (
   let failureStage: ArenaFailureStage = 'request';
   const failed = (code: string, message: string, invalid = false, draftCompletion?: NarrativeDraftCompletion): ArenaDirectOutcome => ({
     ...common(), status: invalid ? 'invalid-output' : 'failed', code, message,
-    failureDiagnostic: parseArenaFailureDiagnostic({ source: 'client', stage: failureStage, code })!,
+    failureDiagnostic: parseArenaFailureDiagnostic({ source: 'client', stage: failureStage, code,
+      ...(failureStage !== 'request' ? { terminalStatus: terminal?.status ?? 'unconfirmed', outputChars: rawText.length } : {}),
+      ...(terminal?.status === 'completed' ? { finishReason: terminal.finishReason } : {}),
+    })!,
     ...(draftCompletion && task.generationMode === 'stream' && input.reportFormat === 'markdown' && !story ? { draftCompletion } : {}),
   });
   if (signal.aborted) return cancelled();
@@ -282,8 +293,11 @@ export const executeArenaDirect = async (
     if (cause instanceof AiStreamProtocolError && cause.code === 'source-failed' && sourceFailureCode) {
       return failed(sourceFailureCode, directFailureMessage(sourceFailureCode));
     }
-    return failed('invalid-response', '生成连接或流协议失败，已保留收到的正文。', false,
-      cause instanceof AiStreamProtocolError && cause.code === 'missing-terminal' ? { kind: 'missing-terminal' } : undefined);
+    const missingTerminal = cause instanceof AiStreamProtocolError && cause.code === 'missing-terminal';
+    return failed('invalid-response', missingTerminal
+      ? '生成连接已结束，但未收到可验证的完整终态，无法确认内容是否完整。已保留收到的正文；请检查网络或供应商接口，并复制错误摘要排查。'
+      : '生成连接或流协议失败，已保留收到的正文。', false,
+      missingTerminal ? { kind: 'missing-terminal' } : undefined);
   }
   if (signal.aborted) return cancelled();
   if (terminal.status === 'cancelled') return cancelled();
@@ -298,7 +312,7 @@ export const executeArenaDirect = async (
   reasoning = terminal.output.reasoning ?? reasoning;
   usage = terminal.usage ? { ...usage, ...terminal.usage } : usage;
   if (presentation) presentation = { ...presentation, aiModel: terminal.resolvedModelId ?? task.modelId };
-  if (terminal.finishReason !== 'stop') return failed('incomplete-output', '生成未正常结束，原文已保留。', true,
+  if (terminal.finishReason !== 'stop') return failed('incomplete-output', incompleteOutputMessages[terminal.finishReason], true,
     terminal.finishReason === 'length' ? { kind: 'trusted-length' } : undefined);
   let report: ArenaBattleReport;
   let impacts: ArenaBattleAiImpact[] = [];

@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ArenaBackupNotice, DesktopArenaRecoveryControls, arenaRecoveryStatusLabel, buildArenaSafeDiagnostic } from '../src/features/arena/recovery-controls';
+import { parseArenaFailureDiagnostic } from '../src/features/arena/failure-diagnostic';
 
 let container: HTMLDivElement, root: Root;
 const props = () => ({
@@ -105,6 +106,26 @@ describe('Arena recovery controls', () => {
 
 
 describe('safe native failure category projection', () => {
+  it('retains closed termination evidence through saved diagnostic parsing and copy', () => {
+    const saved = JSON.stringify({ source: 'client', stage: 'output', code: 'incomplete-output', terminalStatus: 'completed',
+      finishReason: 'length', outputChars: 256, model: 'PRIVATE-MODEL', message: 'PRIVATE-MESSAGE', text: 'PRIVATE-STORY' });
+    const failureDiagnostic = parseArenaFailureDiagnostic(JSON.parse(saved));
+    expect(failureDiagnostic).toEqual({ source: 'client', stage: 'output', code: 'incomplete-output', terminalStatus: 'completed', finishReason: 'length', outputChars: 256 });
+    const summary = buildArenaSafeDiagnostic({ phase: 'failed', hosted: null, response: null, failureDiagnostic });
+    expect(summary).toContain('流终态：completed'); expect(summary).toContain('结束原因：length');
+    expect(summary).toContain('已接收正文长度：256'); expect(summary).not.toContain('PRIVATE');
+    expect(parseArenaFailureDiagnostic({ source: 'client', stage: 'output', code: 'incomplete-output' }))
+      .toEqual({ source: 'client', stage: 'output', code: 'incomplete-output' });
+  });
+  it.each([NaN, Infinity, -1, 0.5, Number.MAX_SAFE_INTEGER + 1, 'PRIVATE-LENGTH'])('discards unsafe termination evidence and length %s', outputChars => {
+    const failureDiagnostic = { source: 'client', stage: 'output', code: 'incomplete-output', terminalStatus: 'PRIVATE-STATUS',
+      finishReason: 'PRIVATE-REASON', outputChars };
+    const summary = buildArenaSafeDiagnostic({ phase: 'failed', hosted: null, response: null, failureDiagnostic });
+    expect(summary).not.toMatch(/PRIVATE|流终态|结束原因|已接收正文长度/);
+    expect(parseArenaFailureDiagnostic({ ...failureDiagnostic, terminalStatus: 'unconfirmed', finishReason: 'stop' })).not.toHaveProperty('finishReason');
+    expect(parseArenaFailureDiagnostic({ ...failureDiagnostic, source: 'server', terminalStatus: 'completed', finishReason: 'length', outputChars: 10 }))
+      .toEqual({ source: 'server', stage: 'output', code: 'unclassified' });
+  });
   it('includes a Direct category and phase, never arbitrary native fields', () => {
     const summary = buildArenaSafeDiagnostic({ phase: 'failed', hosted: null, response: null,
       failureDiagnostic: { source: 'client', stage: 'native-stream', code: 'missing-secret', message: 'private-key-canary', requestId: 'private-request' } });

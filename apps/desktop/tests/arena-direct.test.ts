@@ -123,6 +123,65 @@ describe('typed Arena Direct adapter', () => {
     expect(active.invoke.mock.calls.filter(([cmd]) => cmd.startsWith('stream_'))).toHaveLength(1);
     expect(active.invoke.mock.calls.filter(([cmd]) => cmd === 'cancel_direct_ai')).toHaveLength(1);
   });
+  it.each([
+    ['length', '输出 Token 上限'],
+    ['content-filter', '内容过滤机制'],
+    ['tool-calls', '工具调用'],
+    ['other', '未提供可确认的正常结束原因'],
+  ] as const)('explains %s without promoting partial output or retrying', async (finishReason, explanation) => {
+    for (const generationMode of ['stream', 'non-stream'] as const) {
+      const raw = generationMode === 'stream' ? streamText : JSON.stringify(report);
+      const native = harness(raw, events => {
+        const terminal = events.at(-1)!;
+        if (terminal.type === 'result' && terminal.result.status === 'completed') terminal.result.finishReason = finishReason;
+        return events;
+      });
+      const outcome = await executeArenaDirect(native.options, input(), task(generationMode), host(), new AbortController().signal);
+      expect(outcome).toMatchObject({ status: 'invalid-output', code: 'incomplete-output', rawText: raw,
+        message: expect.stringContaining(explanation), failureDiagnostic: { source: 'client', stage: 'output', code: 'incomplete-output',
+          terminalStatus: 'completed', finishReason, outputChars: raw.length } });
+      expect(outcome).not.toHaveProperty('historyCandidate');
+      expect(outcome).not.toHaveProperty('report');
+      expect(native.invoke).toHaveBeenCalledOnce();
+      if (finishReason === 'length' && generationMode === 'stream') expect(outcome).toHaveProperty('draftCompletion.kind', 'trusted-length');
+      else expect(outcome).not.toHaveProperty('draftCompletion');
+    }
+  });
+  it('distinguishes a missing terminal from a completed stream with an unknown reason', async () => {
+    const native = harness('保留的正文', events => events.slice(0, -1));
+    const outcome = await executeArenaDirect(native.options, input(), task(), host(), new AbortController().signal);
+    expect(outcome).toMatchObject({ status: 'failed', code: 'invalid-response', rawText: '保留的正文',
+      message: expect.stringContaining('未收到可验证的完整终态'),
+      failureDiagnostic: { terminalStatus: 'unconfirmed', outputChars: 5 }, draftCompletion: { kind: 'missing-terminal' } });
+    if (outcome.status !== 'failed') throw new Error('expected missing-terminal failure');
+    expect(outcome.failureDiagnostic).not.toHaveProperty('finishReason');
+    expect(native.invoke).toHaveBeenCalledOnce();
+  });
+  it('waits beyond the Web duration limit while Direct is still producing and accepts the eventual stop once', async () => {
+    vi.useFakeTimers();
+    try {
+      let release!: () => void;
+      const pending = new Promise<void>(resolve => { release = resolve; });
+      const native = harness();
+      const invoke = vi.fn(withFixtureStreamReceipt(async (_command: string, args?: Record<string, unknown>) => {
+        const request = args!.request as AiExecutionRequest;
+        const channel = args!.onEvent as { onmessage: (event: AiStreamEvent) => void };
+        const identity = { requestId: request.requestId, contractVersion: 1 as const, mode: request.mode };
+        channel.onmessage({ ...identity, type: 'started', sequence: 0 });
+        channel.onmessage({ ...identity, type: 'text-delta', sequence: 1, delta: '长时间生成的正文' });
+        await pending;
+        channel.onmessage({ ...identity, type: 'result', sequence: 2,
+          result: { ...identity, status: 'completed', finishReason: 'stop', output: { text: '长时间生成的正文' } } });
+      }));
+      const settled = vi.fn();
+      const result = executeArenaDirect({ ...native.options, invoke }, input(), task(), host(), new AbortController().signal).then(value => { settled(); return value; });
+      await vi.advanceTimersByTimeAsync(20 * 60_000);
+      expect(settled).not.toHaveBeenCalled(); expect(invoke).toHaveBeenCalledOnce();
+      release();
+      expect(await result).toMatchObject({ status: 'completed', rawText: '长时间生成的正文' });
+      expect(invoke).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+  });
   it('does not expose reasoning or trailers as display Markdown or trust trailer usage', async () => {
     const native = harness(); const partials: string[] = [];
     const result = await executeArenaDirect(native.options, input(), task(), host(), new AbortController().signal, partial => partials.push(partial.markdown));

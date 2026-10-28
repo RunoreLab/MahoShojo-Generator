@@ -30,7 +30,11 @@ export const buildArenaSafeDiagnostic = ({ phase, location, hosted, response, fa
   if (phase !== 'failed' && !response) return null;
   const failure = parseArenaFailureDiagnostic(failureDiagnostic);
   const failureLines = failure ? [`执行错误码：${failure.code}`, `失败阶段：${failure.stage}`,
-    ...(failure.dispatchState ? [`发出状态：${failure.dispatchState}`] : [])] : [];
+    ...(failure.dispatchState ? [`发出状态：${failure.dispatchState}`] : []),
+    ...(failure.terminalStatus ? [`流终态：${failure.terminalStatus}`] : []),
+    ...(failure.finishReason ? [`结束原因：${failure.finishReason}`] : []),
+    ...(failure.outputChars !== undefined ? [`已接收正文长度：${failure.outputChars}（UTF-16 代码单元）`] : []),
+  ] : [];
   if (!hosted) return [ `生成方式：${(failure?.source ?? location) === 'client' ? '客户端' : (failure?.source ?? location) === 'server' ? '服务器' : '未记录'}`, '状态：未完成', ...failureLines, '说明：本次生成未完成；此摘要不包含角色正文、账号或连接密钥。'].join('\n');
   const validHttpStatus = (value: unknown): number | null => typeof value === 'number' && Number.isInteger(value) && value >= 100 && value <= 599 ? value : null;
   const observedStatus = validHttpStatus(response?.httpStatus) ?? validHttpStatus(hosted.responseStatus);
