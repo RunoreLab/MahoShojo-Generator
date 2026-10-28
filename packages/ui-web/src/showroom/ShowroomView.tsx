@@ -1,8 +1,9 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { DEFAULT_NOVELAI_SETTINGS } from '@mahoshojo/ai-core/novelai';
 import { Download, ExternalLink, RefreshCw, RotateCw, X } from 'lucide-react';
 
 import { CHARACTER_CARD_EXPORTER_LABEL, MAGICAL_GIRL_CARD_GRADIENT, MagicalGirlCard } from '../character-card';
+import { AiProviderCustomSelect } from '../ai-provider';
 import { CardForgeThemeEditor, CardForgeSourceFields } from '../card-forge';
 import { BattleReportCardWidthSettings } from '../arena/BattleReportCardWidthSettings';
 import { resolveBattleReportCardManualWidthPx, type BattleReportCardWidthSettingsValue } from '../arena/battle-report-card-width';
@@ -275,6 +276,7 @@ function FormsSection() {
           helper="连接中断时只找回同一次生成的内容；停止任务需要服务器确认。" />
       </div>
       <NovelAISettingsSample />
+      <AiSelectScrollSample />
       <div className="flex flex-col gap-2 border-t border-(--app-border) pt-4">
         <h3 className="text-sm font-medium text-(--app-text-muted)">battle-lite 共享类</h3>
         <p className="battle-lite-strong-text">.battle-lite-strong-text —— 主文本</p>
@@ -287,6 +289,30 @@ function FormsSection() {
       </div>
     </div>
   );
+}
+
+function AiSelectScrollSample() {
+  const [value, setValue] = useState('12');
+  const [progress, setProgress] = useState(0);
+  const [updating, setUpdating] = useState(false);
+  useEffect(() => {
+    if (!updating) return;
+    const timer = window.setInterval(() => setProgress(count => count + 1), 500);
+    return () => window.clearInterval(timer);
+  }, [updating]);
+  return <section className="max-w-md space-y-3" aria-label="模型选择器滚动样板">
+    <h3 className="text-sm font-medium text-(--app-text-muted)">模型选择器滚动</h3>
+    <p className="text-sm text-(--app-text-muted)">展开后滚动页面或悬停不应拉回位置；方向键、Home、End 只定位菜单内选项。</p>
+    <AiProviderCustomSelect value={value} onChange={setValue} placeholder="样板模型"
+      options={Array.from({ length: 16 }, (_, index) => ({
+        value: String(index), label: `样板模型 ${index + 1}`, description: '用于检查长列表滚动与键盘导航',
+        group: index < 8 ? '内置模型' : '自定义模型',
+      }))}
+      actions={[{ id: 'reset', label: '重置样板模型' }]} onAction={() => setValue('12')} />
+    <button type="button" className="btn-secondary inline-flex items-center gap-2" aria-pressed={updating} onClick={() => setUpdating(value => !value)}>
+      <RefreshCw className="h-4 w-4" aria-hidden="true" />{updating ? '停止模拟更新' : '模拟生成更新'}（{progress}）
+    </button>
+  </section>;
 }
 
 function NovelAISettingsSample() {

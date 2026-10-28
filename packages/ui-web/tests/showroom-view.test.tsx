@@ -45,6 +45,27 @@ it('renders every registered section, the real result card, and a working modal 
   expect(document.querySelector('[role="dialog"]')).not.toBeNull();
 });
 
+it('模型选择器样板在模拟生成更新时保留长菜单与活动项', () => {
+  vi.useFakeTimers();
+  try {
+    act(() => root.render(<ShowroomView />));
+    const sample = container.querySelector('[aria-label="模型选择器滚动样板"]')!;
+    const update = sample.querySelector<HTMLButtonElement>('button[aria-pressed]')!;
+    act(() => update.click());
+    const trigger = sample.querySelector<HTMLButtonElement>('[role="combobox"]')!;
+    act(() => trigger.click());
+    const active = trigger.getAttribute('aria-activedescendant');
+    expect(sample.querySelectorAll('[role="option"]')).toHaveLength(16);
+    act(() => vi.advanceTimersByTime(1500));
+    expect(update.textContent).toContain('停止模拟更新（3）');
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+    expect(trigger.getAttribute('aria-activedescendant')).toBe(active);
+    act(() => update.click());
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it('renders production image feedback with explicit stop/resume, unknown submission and a seed-zero result', () => {
   act(() => root.render(<ShowroomView />));
   const sample = container.querySelector('[aria-label="图片生成任务与结果样板"]')!;

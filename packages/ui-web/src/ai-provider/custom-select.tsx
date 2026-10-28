@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -36,6 +37,10 @@ export interface AiProviderCustomSelectProps {
 type NavItem =
   | { type: 'option'; option: AiProviderSelectOption; id: string }
   | { type: 'action'; action: AiProviderSelectAction; id: string };
+
+const EMPTY_ACTIONS: readonly AiProviderSelectAction[] = [];
+
+type ActiveNavigation = { index: number; revealId?: string };
 
 /**
  * 弹层可见区域上界：视口 ∩ 各滚动/裁切祖先。
@@ -112,7 +117,7 @@ export const AiProviderCustomSelect = ({
   placeholder,
   disabled = false,
   renderAvailabilityBadge,
-  actions = [],
+  actions = EMPTY_ACTIONS,
   onAction,
 }: AiProviderCustomSelectProps) => {
   const [openRequested, setOpenRequested] = useState(false);
@@ -121,7 +126,8 @@ export const AiProviderCustomSelect = ({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const listId = useId();
-  const [activeIndex, setActiveIndex] = useState(-1);
+  const [activeNavigation, setActiveNavigation] = useState<ActiveNavigation>({ index: -1 });
+  const activeIndex = activeNavigation.index;
   // 裁切边界内空间不足时向上展开并按可见高度限高
   //（DESK-AIP-002：窄窗/缩放/滚动祖先不裁切弹层）。
   const [openUpward, setOpenUpward] = useState(false);
@@ -151,8 +157,8 @@ export const AiProviderCustomSelect = ({
 
   const closeMenu = useCallback((restoreFocus = false) => {
     setOpenRequested(false);
-    setActiveIndex(-1);
-    if (restoreFocus) triggerRef.current?.focus();
+    setActiveNavigation({ index: -1 });
+    if (restoreFocus) triggerRef.current?.focus({ preventScroll: true });
   }, []);
 
   // 禁用不仅锁定触发器，也撤销已展开菜单与 Escape 层；解锁不恢复旧展开意图。
@@ -169,7 +175,7 @@ export const AiProviderCustomSelect = ({
         setMenuMaxHeight(placement.maxHeight);
       }
       setOpenRequested(true);
-      setActiveIndex(() => {
+      const index = (() => {
         if (preferredIndex !== undefined) return preferredIndex;
         const selectedIndex = options.findIndex(
           (option) => option.value === value && option.disabled !== true,
@@ -177,7 +183,8 @@ export const AiProviderCustomSelect = ({
         if (selectedIndex >= 0) return selectedIndex;
         const firstEnabled = navItems.findIndex(navItemEnabled);
         return firstEnabled >= 0 ? firstEnabled : navItems.length > 0 ? 0 : -1;
-      });
+      })();
+      setActiveNavigation({ index, revealId: navItems[index]?.id });
     },
     [navItems, options, value],
   );
@@ -201,23 +208,35 @@ export const AiProviderCustomSelect = ({
 
   const moveActive = useCallback(
     (delta: number) => {
-      setActiveIndex((current) => {
-        if (navItems.length === 0) return -1;
-        const next = Math.min(Math.max(current + delta, 0), navItems.length - 1);
-        return next;
+      setActiveNavigation((current) => {
+        const index = navItems.length === 0
+          ? -1
+          : Math.min(Math.max(current.index + delta, 0), navItems.length - 1);
+        return { index, revealId: navItems[index]?.id };
       });
     },
-    [navItems.length],
+    [navItems],
   );
 
-  // 键盘激活项滚入视口；jsdom 等环境没有 scrollIntoView 时静默跳过。
-  useEffect(() => {
-    if (!isOpen || activeIndex < 0) return;
-    const item = navItems[activeIndex];
-    if (!item) return;
-    const element = menuRef.current?.querySelector(`#${CSS.escape(item.id)}`);
-    (element as HTMLElement | null | undefined)?.scrollIntoView?.({ block: 'nearest' });
-  }, [activeIndex, isOpen, navItems]);
+  // 仅打开/键盘导航请求定位；悬停与宿主更新只改变高亮，不接管滚动。
+  // 不用 scrollIntoView：它会连带滚动祖先甚至整个文档，与用户手势争抢位置。
+  useLayoutEffect(() => {
+    if (!isOpen || !activeNavigation.revealId) return;
+    const menu = menuRef.current;
+    const element = menu?.querySelector<HTMLElement>(`#${CSS.escape(activeNavigation.revealId)}`);
+    if (!menu || !element) return;
+    const menuRect = menu.getBoundingClientRect();
+    const itemRect = element.getBoundingClientRect();
+    if (menu.clientHeight === 0 || itemRect.height === 0) return;
+    const top = menuRect.top + menu.clientTop;
+    const bottom = top + menu.clientHeight;
+    if (itemRect.top < top) {
+      menu.scrollTop += itemRect.top - top;
+    } else if (itemRect.bottom > bottom) {
+      // 单项高于菜单时保持顶部可见，不反复在上下边缘之间跳动。
+      menu.scrollTop += Math.min(itemRect.bottom - bottom, itemRect.top - top);
+    }
+  }, [activeNavigation, isOpen]);
 
   const handleDocumentClick = useCallback((event: MouseEvent) => {
     if (!containerRef.current) return;
@@ -245,9 +264,10 @@ export const AiProviderCustomSelect = ({
   // 弹层打开期间选项/动作集合变化时，把 activeIndex 收敛回合法范围。
   useEffect(() => {
     if (!isOpen) return;
-    setActiveIndex((current) =>
-      navItems.length === 0 ? -1 : Math.min(current, navItems.length - 1),
-    );
+    setActiveNavigation((current) => {
+      const index = navItems.length === 0 ? -1 : Math.min(current.index, navItems.length - 1);
+      return index === current.index ? current : { index };
+    });
   }, [isOpen, navItems.length]);
 
   // 窗口尺寸变化时重算翻开方向与限高；祖先 scroll 不需要处理——
@@ -286,11 +306,11 @@ export const AiProviderCustomSelect = ({
         break;
       case 'Home':
         event.preventDefault();
-        setActiveIndex(navItems.length > 0 ? 0 : -1);
+        setActiveNavigation({ index: navItems.length > 0 ? 0 : -1, revealId: navItems[0]?.id });
         break;
       case 'End':
         event.preventDefault();
-        setActiveIndex(navItems.length - 1);
+        setActiveNavigation({ index: navItems.length - 1, revealId: navItems[navItems.length - 1]?.id });
         break;
       case 'Enter':
       case ' ':
@@ -345,7 +365,7 @@ export const AiProviderCustomSelect = ({
       aria-selected={option.value === value}
       aria-disabled={option.disabled === true}
       className={optionClassName(option, id)}
-      onMouseEnter={() => setActiveIndex(flatIndex)}
+      onMouseEnter={() => setActiveNavigation({ index: flatIndex })}
       onClick={() => activateItem(navItems[flatIndex])}
     >
       <div className="flex flex-1 flex-col items-start gap-1">
@@ -403,7 +423,7 @@ export const AiProviderCustomSelect = ({
           id={`${listId}-menu`}
           ref={menuRef}
           style={{ maxHeight: `${menuMaxHeight}px` }}
-          className={`battle-lite-select-menu absolute z-30 w-full overflow-y-auto rounded-lg ${
+          className={`battle-lite-select-menu absolute z-30 w-full overflow-y-auto overscroll-y-contain rounded-lg ${
             openUpward ? 'bottom-full mb-2' : 'mt-2'
           }`}
         >
@@ -441,7 +461,7 @@ export const AiProviderCustomSelect = ({
                     className={`battle-lite-select-option flex w-full items-start gap-2 px-4 py-3 text-left transition-colors ${
                       action.disabled === true ? 'cursor-not-allowed opacity-60' : ''
                     } ${isActive(id) ? 'battle-lite-select-option-focus' : ''}`}
-                    onMouseEnter={() => setActiveIndex(flatIndex)}
+                    onMouseEnter={() => setActiveNavigation({ index: flatIndex })}
                     onClick={() => activateItem(navItems[flatIndex])}
                   >
                     <div className="flex flex-1 flex-col items-start gap-1">
