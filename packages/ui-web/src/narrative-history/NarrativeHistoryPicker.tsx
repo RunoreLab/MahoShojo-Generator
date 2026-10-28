@@ -1,7 +1,9 @@
 'use client';
 
 import { createPortal } from 'react-dom';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Upload } from 'lucide-react';
+import { generationActionClassNames } from '../generation-actions';
 
 import { useBaseModalAccessibility } from '../modal/BaseModal';
 import {
@@ -26,17 +28,28 @@ export type NarrativeHistoryPickerProps = {
   onClose: () => void;
   initialSelectedIds?: string[];
   onConfirm: (entries: NarrativeHistoryEntry[]) => void;
+  /** The host owns validation and storage; the picker only renders the shared import action. */
+  onImportFile?: (file: File) => void;
+  importLabel?: string;
+  importHint?: string;
+  importStatus?: string | null;
+  importError?: string | null;
+  busy?: boolean;
+  disabled?: boolean;
 };
 
 const normalizeQuery = (value: string): string => value.trim().toLowerCase();
 
 export function NarrativeHistoryPicker({ isOpen, onClose, initialSelectedIds, onConfirm,
   entries, lastUpdatedAt, sort, onSort, formatDateTime, sourceHint, readStatus, title = '选择竞技场叙事历史',
+  onImportFile, importLabel = '导入历史 JSON', importHint, importStatus, importError, busy = false, disabled = false,
 }: NarrativeHistoryPickerProps) {
+  const fileInput = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<Record<string, true>>({});
 
   const closeAndReset = () => {
+    if (busy) return;
     setQuery('');
     setSelectedIds({});
     onClose();
@@ -106,7 +119,7 @@ export function NarrativeHistoryPicker({ isOpen, onClose, initialSelectedIds, on
   const handleClearSelection = () => setSelectedIds({});
 
   const handleConfirm = () => {
-    if (readStatus === 'ready') onConfirm(selectedEntriesForConfirm);
+    if (!busy && !disabled && readStatus === 'ready') onConfirm(selectedEntriesForConfirm);
   };
 
   if (!isOpen) return null;
@@ -130,13 +143,13 @@ export function NarrativeHistoryPicker({ isOpen, onClose, initialSelectedIds, on
               共 {entries.length} 条{lastUpdatedAt ? `｜最近更新：${formatDateTime(lastUpdatedAt)}` : ''}｜已选 {selectedCount} 条
             </div>
           </div>
-          <button ref={initialFocusRef} type="button" aria-label="关闭对话框" className="text-gray-500 hover:text-gray-700 text-2xl leading-none" onClick={closeAndReset}>
+          <button ref={initialFocusRef} type="button" disabled={busy} aria-label="关闭对话框" className="text-gray-500 hover:text-gray-700 text-2xl leading-none" onClick={closeAndReset}>
             ×
           </button>
         </div>
 
         <div className="p-4 border-b space-y-3">
-          <fieldset disabled={readStatus !== 'ready'} className="flex items-center gap-2 flex-wrap">
+          <fieldset disabled={busy || disabled || readStatus !== 'ready'} className="flex items-center gap-2 flex-wrap">
             <input
               className="input-field text-sm flex-1 min-w-[12rem]"
               placeholder="搜索标题或正文…"
@@ -171,6 +184,19 @@ export function NarrativeHistoryPicker({ isOpen, onClose, initialSelectedIds, on
           <p className="text-[11px] text-gray-500">
             {sourceHint}
           </p>
+          {onImportFile ? <div className="space-y-2">
+            <input ref={fileInput} type="file" accept=".json,application/json" className="hidden" aria-label={importLabel}
+              disabled={busy || disabled} onChange={(event) => {
+                const file = event.target.files?.[0]; event.target.value = '';
+                if (file && !busy && !disabled) onImportFile(file);
+              }} />
+            <button type="button" className={`${generationActionClassNames.secondary} inline-flex items-center gap-2`} disabled={busy || disabled} onClick={() => fileInput.current?.click()}>
+              <Upload size={16} aria-hidden="true" />{busy ? '正在导入…' : importLabel}
+            </button>
+            {importHint ? <p className="text-xs text-(--app-text-muted)">{importHint}</p> : null}
+            {importStatus ? <p role="status" className="text-sm text-(--app-text)">{importStatus}</p> : null}
+            {importError ? <p role="alert" className="text-sm text-(--app-text)">{importError}</p> : null}
+          </div> : null}
         </div>
 
         <div className="flex-1 overflow-auto p-4">
@@ -183,6 +209,7 @@ export function NarrativeHistoryPicker({ isOpen, onClose, initialSelectedIds, on
                 <button
                   key={entry.id}
                   type="button"
+                  disabled={busy || disabled}
                   className={[
                     'w-full text-left border rounded-lg p-3 transition-colors',
                     selectedIds[entry.id]
@@ -196,6 +223,7 @@ export function NarrativeHistoryPicker({ isOpen, onClose, initialSelectedIds, on
                       type="checkbox"
                       className="mt-1 h-4 w-4 text-purple-600 border-gray-300 rounded"
                       checked={Boolean(selectedIds[entry.id])}
+                      disabled={busy || disabled}
                       onChange={() => toggleId(entry.id)}
                       onClick={(e) => e.stopPropagation()}
                     />
@@ -221,13 +249,13 @@ export function NarrativeHistoryPicker({ isOpen, onClose, initialSelectedIds, on
         </div>
 
         <div className="p-4 border-t flex items-center justify-end gap-2">
-          <button type="button" className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200" onClick={closeAndReset}>
+          <button type="button" disabled={busy} className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200" onClick={closeAndReset}>
             取消
           </button>
           <button
             type="button"
             className="px-4 py-2 text-sm bg-purple-600 text-white rounded hover:bg-purple-700"
-            disabled={readStatus !== 'ready'}
+            disabled={busy || disabled || readStatus !== 'ready'}
             onClick={handleConfirm}
           >
             {selectedCount > 0 ? `使用选中（${selectedCount} 条）` : '不使用叙事历史'}

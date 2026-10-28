@@ -265,7 +265,7 @@ describe('Desktop Arena independent session', () => {
     storage.values.set(ARENA_DRAFT_KEY, '{broken'); const broken = new DesktopArenaSession({ storage, repository: port }); broken.updateDraft(draft);
     expect(storage.values.get(ARENA_DRAFT_KEY)).toBe('{broken'); expect(broken.hasUnsavedDraft()).toBe(true); expect(broken.exportDocument()).toContain('源卡设定'); broken.dispose();
   });
-  it.each(['direct-remote', undefined] as const)('restored history preserves known execution %s without inventing a default', async (executionMode) => {
+  it.each(['direct-remote', undefined] as const)('restored editable history does not attribute its whole collection to the last execution %s', async (executionMode) => {
     const { session, storage, port, records } = build(); const draft = makeDraft(); session.updateDraft(draft);
     await session.generate(native(valid(false)), draft, { ...intent(), mode: 'direct-remote' }); session.dispose();
     const stored = JSON.parse(storage.values.get(ARENA_DRAFT_KEY)!);
@@ -274,8 +274,7 @@ describe('Desktop Arena independent session', () => {
     const restored = new DesktopArenaSession({ storage, repository: port }); restored.setScope('restored'); restored.restoreDraft();
     expect(await restored.save('history')).toBe(true);
     const card = [...records.values()][0]!; expect(card.provenance.kind).toBe('unsigned');
-    if (executionMode) expect(card.provenance).toMatchObject({ execution: executionMode });
-    else expect(card.provenance).not.toHaveProperty('execution');
+    expect(card.provenance).not.toHaveProperty('execution');
     restored.dispose();
   });
   it('successful near-output-limit report can exceed storage envelope, remains complete and exportable', async () => {

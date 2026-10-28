@@ -63,3 +63,26 @@ it('共享模态语义支持 Escape，并恢复原滚动锁', async () => {
   props.isOpen = false; await render(); expect(document.body.style.overflow).toBe('auto');
   document.body.style.overflow = '';
 });
+
+it('空列表和读取错误仍可导入，选择文件后由宿主处理且可再次选择同名文件', async () => {
+  props.entries = []; props.readStatus = 'error'; props.onImportFile = vi.fn();
+  props.importLabel = '导入 JSON 并保存到本机'; props.importHint = '从网页导出后导入';
+  await render(); expect(button('导入 JSON').disabled).toBe(false);
+  const file = new File(['{}'], 'history.json', { type: 'application/json' });
+  const input = document.querySelector<HTMLInputElement>('input[type=file]')!;
+  Object.defineProperty(input, 'files', { value: [file], configurable: true });
+  await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })));
+  expect(props.onImportFile).toHaveBeenCalledWith(file); expect(input.value).toBe('');
+  props.importError = '保存失败，原文件未改动'; await render();
+  expect(document.body.textContent).toContain('保存失败，原文件未改动');
+  expect(props.onConfirm).not.toHaveBeenCalled();
+});
+it('导入后刷新条目保留已选历史；忙碌时不能关闭、确认或改变选择', async () => {
+  props.onImportFile = vi.fn(); await render(); await click('先发生');
+  props.busy = true; await render();
+  expect(button('使用选中').disabled).toBe(true); expect(button('取消').disabled).toBe(true);
+  await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  expect(props.onClose).not.toHaveBeenCalled();
+  props.busy = false; props.entries = [...entries, { ...entries[0], id: 'imported', title: '新导入' }]; await render();
+  await click('使用选中'); expect(props.onConfirm).toHaveBeenCalledWith([entries[0]]);
+});

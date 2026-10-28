@@ -620,11 +620,43 @@ describe('Desktop /battle journey against loopback fixture', () => {
   });
   it('EOF/failure and disk failure retain full export; retry stores once without replay', async () => {
     saveDraft(draft('daily', 'stream')); await mount(); eof = true; await click('生成战报');
-    await vi.waitFor(() => expect(container.textContent).toContain('生成连接或流协议失败')); expect(docs.size).toBe(0); await click('下载会话备份');
+    await vi.waitFor(() => expect(container.textContent).toContain('未收到可验证的完整终态')); expect(docs.size).toBe(0); await click('下载会话备份');
     expect(JSON.parse(mocks.download.mock.calls.at(-1)![1]).result.rawText).toContain(text);
     eof = false; vi.mocked(window.confirm).mockReturnValue(true); await click('生成战报'); await vi.waitFor(() => expect(container.textContent).toContain('生成完成。'));
     failSave = true; await click('保存叙事历史到本地库'); expect(container.textContent).toContain('完整原文仍在内存');
     failSave = false; await click('保存叙事历史到本地库'); await click('保存叙事历史到本地库'); expect(docs.size).toBe(1); expect(calls()).toHaveLength(2);
+  });
+  it.each(['battle', 'arena'] as const)('/%s 从历史选择器导入网页 JSON，关闭重开仍可引用且不覆盖活动历史', async product => {
+    const key = product === 'battle' ? ARENA_DRAFT_KEY : ADVANCED_ARENA_DRAFT_KEY;
+    const original = draft('daily', 'stream');
+    localStorage.setItem(key, JSON.stringify({ version: 1, draft: original }));
+    window.location.hash = `#/${product}`; await mount();
+    expect(button('查看 / 编辑活动叙事历史')).toBeTruthy();
+    await click('引用本地叙事历史');
+    await vi.waitFor(() => expect(document.querySelector('input[type=file][aria-label="导入 JSON 并保存到本机"]')).not.toBeNull());
+    const entry = { id: 'from-web', title: '网页迁移片段', content: '网页导出的完整正文', createdAt: '2026-10-28T00:00:00.000Z', updatedAt: '2026-10-28T00:00:00.000Z' };
+    const payload = { templateId: 'narrative-history', version: 1, updatedAt: entry.updatedAt, entries: [entry], extension: { keep: true } };
+    let finish!: (text: string) => void;
+    const file = { name: 'web-history.json', size: 100, text: () => new Promise<string>(resolve => { finish = resolve; }) } as File;
+    await act(async () => {
+      const input = document.querySelector<HTMLInputElement>('input[type=file][aria-label="导入 JSON 并保存到本机"]')!;
+      Object.defineProperty(input, 'files', { value: [file] }); input.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await act(async () => { expect(scopeClose().preventDefault).toHaveBeenCalled(); });
+    expect(button('取消', document.querySelector('[role="dialog"]')!).disabled).toBe(true);
+    await act(async () => finish(JSON.stringify(payload)));
+    await vi.waitFor(() => expect(document.body.textContent).toContain('已保存到本机（1 条）'));
+    await vi.waitFor(() => expect(document.body.textContent).toContain('网页迁移片段'));
+    expect([...docs.values()].find(item => item.cardType === 'history')?.data).toEqual(payload);
+    await click('取消', document.querySelector('[role="dialog"]')!); await click('引用本地叙事历史');
+    await vi.waitFor(() => expect(document.body.textContent).toContain('网页迁移片段'));
+    await act(async () => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(item => item.textContent?.includes('网页迁移片段'))!.click());
+    await click('使用选中（1 条）');
+    const saved = JSON.parse(localStorage.getItem(key)!).draft as ArenaDraft;
+    expect(saved.historyReferences).toHaveLength(1);
+    expect(saved.historyReferences[0].content).toBe(entry.content);
+    expect(saved.narrativeHistoryEntries).toEqual(original.narrativeHistoryEntries);
+    expect(calls()).toHaveLength(0);
   });
   it('locks target edits during a pending response, then switching never replays cancelled generation', async () => {
     hold = true; saveDraft(draft('daily', 'stream')); await mount(); await click('生成战报'); await vi.waitFor(() => expect(release).toBeTypeOf('function'));

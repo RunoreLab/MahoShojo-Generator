@@ -29,7 +29,7 @@ import type { NarrativeHistorySort } from '@mahoshojo/domain/narrative-history-o
 import { getArenaCardLibrarySelectionOptions, AdvancedArenaHeader, ArenaPageLinks, ArenaRankingLinks, AdvancedArenaPageView, ArenaEditorWorkspaceLayout, buildArenaEditorSections, BattleLitePageView, BattleLiteHeader, ArenaRosterSection, ArenaRankingQueueFeedback, ArenaRosterImportPanel, ArenaMaterialSection, ArenaScenarioSection, BattleModeSelector, ArenaCharacterDatabaseSelector, StoryOptionsPanel, CharacterPresetPicker, ArenaDataSettingsPanel, NarrativeHistorySettings, type ArenaRosterSectionModel, type ArenaScenarioSectionModel, type StoryLengthOption } from '@mahoshojo/ui-web/arena';
 import { ArenaReportFormatSelectorView, BattleReportCard, StreamingBattleReportCard, CombatantUpdatesPresentation } from '@mahoshojo/ui-web/arena-report';
 import { Button, CardLibraryModal, mapPublicDataCardRowToSourceData, type CardLibrarySelectionContext } from '@mahoshojo/ui-web/card-library';
-import { NarrativeHistoryPicker, NarrativeDraftsPanel, NarrativeLegacyDraftsSection } from '@mahoshojo/ui-web/narrative-history';
+import { NarrativeDraftsPanel, NarrativeLegacyDraftsSection } from '@mahoshojo/ui-web/narrative-history';
 import { buildNarrativeDraftArchive, type NarrativeDraft } from '@mahoshojo/domain/narrative-drafts';
 import { GenerationModeSwitcher, StreamStopButton, useResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
 import { ThemeImage } from '@mahoshojo/ui-web/media';
@@ -39,6 +39,8 @@ import { generationActionClassNames, generationSubmitClassName } from '@mahoshoj
 import { DesktopArenaSession, arenaReadinessMessage, arenaReferenceCount, inheritedArenaAdjudication, type ArenaDraft, type DesktopArenaProduct } from '../features/arena/session';
 import { getCombatantAdjudicationSourceKey, removeAdjudicationEventsForKeys } from '@mahoshojo/domain/arena-adjudication-events';
 import { AdvancedArenaControls } from '../features/arena/advanced-controls';
+import { DesktopArenaHistoryControls } from '../features/arena/history-controls';
+import { DesktopArenaHistoryPicker } from '../features/arena/history-picker';
 import { readDesktopMemberRandomCharacter as readDesktopRandomPublicCharacter } from '../features/arena/room-member-source-data';
 import { retainDesktopArenaSelectionSource } from '../features/arena/strict-source';
 import { prepareDesktopStrictDraft } from '../features/arena/strict-preparation';
@@ -171,15 +173,20 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
   const resultActionLocks = useArenaResultActionLocks(invoke);
   const [advancedBusy, setAdvancedBusy] = useState(false);
   const advancedBusyRef = useRef(false);
-  const onAdvancedBusy = useCallback((value: boolean) => { advancedBusyRef.current = value; setAdvancedBusy(value); }, []);
+  // Each editor/import owns a slot so finishing one cannot release another operation's leave guard.
+  const controlBusy = useRef({ advanced: false, history: false, historyImport: false });
+  const onAdvancedBusy = useCallback((value: boolean) => { controlBusy.current.advanced = value; advancedBusyRef.current = Object.values(controlBusy.current).some(Boolean); setAdvancedBusy(advancedBusyRef.current); }, []);
+  const onHistoryBusy = useCallback((value: boolean) => { controlBusy.current.history = value; advancedBusyRef.current = Object.values(controlBusy.current).some(Boolean); setAdvancedBusy(advancedBusyRef.current); }, []);
+  const onHistoryImportBusy = useCallback((value: boolean) => { controlBusy.current.historyImport = value; advancedBusyRef.current = Object.values(controlBusy.current).some(Boolean); setAdvancedBusy(advancedBusyRef.current); }, []);
   const ownerEpoch = useRef(0), preparing = useRef(false), historyLoading = useRef(false);
-  const dirtyControls = useRef({ roster: false, rosterTeam: false, scenario: false, material: false, ai: false, advanced: false });
+  const dirtyControls = useRef({ roster: false, rosterTeam: false, scenario: false, material: false, ai: false, advanced: false, history: false });
   const onRosterDirty = useCallback((dirty: boolean) => { dirtyControls.current.roster = dirty; }, []);
   const onRosterTeamDirty = useCallback((dirty: boolean) => { dirtyControls.current.rosterTeam = dirty; }, []);
   const onScenarioDirty = useCallback((dirty: boolean) => { dirtyControls.current.scenario = dirty; }, []);
   const onMaterialDirty = useCallback((dirty: boolean) => { dirtyControls.current.material = dirty; }, []);
   const onAiDirty = useCallback((dirty: boolean) => { dirtyControls.current.ai = dirty; }, []);
   const onAdvancedDirty = useCallback((value: boolean) => { dirtyControls.current.advanced = value; }, []);
+  const onHistoryDirty = useCallback((value: boolean) => { dirtyControls.current.history = value; }, []);
   const reportCardWidth = useDesktopReportCardWidth();
   const cardWidthPx = resolveBattleReportCardManualWidthPx(reportCardWidth.value);
   const draft = state.draft;
@@ -724,6 +731,7 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
           </> : null}
           <ArenaDataSettingsPanel value={draft.settings} onChange={(patch) => update({ settings: { ...draft.settings, ...patch } })} disabled={disabled} footerNote={<p className="text-xs">设置与角色工作副本保存在本机草稿；原始库卡保持不变。</p>} />
           <NarrativeHistorySettings value={draft.settings} onChange={(patch) => update({ settings: { ...draft.settings, ...patch } })} disabled={disabled} persistenceNote="完成后追加正式历史。未完成草稿的自动保留请使用下面的独立本机开关。" readingNote="只有正式历史用于提示词，未完成草稿仅供查看和导出。" />
+          <DesktopArenaHistoryControls session={session} draft={draft} scope={scope} disabled={disabled} importInput={performImport} onDirtyChange={onHistoryDirty} onBusyChange={onHistoryBusy} />
           <button type="button" className={secondary} disabled={disabled} onClick={() => setHistoryOpen(true)}>引用本地叙事历史</button>
           <p className="text-xs">已引用 {draft.historyReferences.length} 条；正式 {draft.narrativeHistoryEntries.length} 条 · 未完成草稿 {draft.narrativeDrafts?.length ?? 0} 条</p>
           {draftArchive.error && <p role="alert" className="text-xs">{draftArchive.error}</p>}
@@ -823,7 +831,7 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
         ...(draft.battleMode === 'scenario' ? [{ kind: 'scenario' as const, autoOpen: draft.scenario.content === null, description: `主情景与 ${draft.auxScenarios.length} 个辅助情景`, defaultOpen: true, keepMounted: true, content: slots.scenario }] : []),
         { kind: 'materials', description: `参考项 ${referenceCount}/256`, defaultOpen: false, keepMounted: true, content: slots.materials },
         { kind: 'settings', description: '角色工作副本与叙事历史', defaultOpen: false, keepMounted: true, content: settings },
-        { kind: 'story', description: '辅助设定、活动历史编辑与 AI 目标', defaultOpen: true, keepMounted: true, content: slots.storyOptions },
+        { kind: 'story', description: '辅助设定与 AI 目标', defaultOpen: true, keepMounted: true, content: slots.storyOptions },
         { kind: 'generationMode', description: 'Markdown 或 Web 源码；流式/非流式', defaultOpen: true, content: slots.generationMode },
         { kind: 'generationActions', description: '确认设置后生成，可随时下载会话备份', collapsible: false, content: <div hidden={roomState.constrained}>{slots.actions}</div> },
       ])} /></fieldset>
@@ -838,8 +846,8 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
       {...librarySelectionOptions}
       selectedSelectionIds={library === 'scenario' ? undefined : selectedLibraryIds.filter((id): id is string => id !== null)}
       selectedType={library === 'material' ? 'all' : library === 'auxScenario' ? 'scenario' : library ?? 'character'} allowedTypes={library === 'material' ? undefined : [library === 'auxScenario' ? 'scenario' : library ?? 'character']} allowDeckImport={false} />
-    <NarrativeHistoryPicker isOpen={historyOpen && !roomState.constrained} onClose={() => setHistoryOpen(false)} entries={historySource?.entries ?? []} lastUpdatedAt={historySource?.lastUpdatedAt ?? null} sort={historySort} onSort={setHistorySort}
-      readStatus={historySource?.status ?? 'loading'} formatDateTime={(value) => value} sourceHint={historySource?.message ?? '本地库只读引用，源记录保持不变。'}
+    <DesktopArenaHistoryPicker onBusyChange={onHistoryImportBusy} repository={repository} onImported={() => setHistoryRevision((value) => value + 1)} scopeKey={scope} disabled={disabled} isOpen={historyOpen && !roomState.constrained} onClose={() => setHistoryOpen(false)} entries={historySource?.entries ?? []} lastUpdatedAt={historySource?.lastUpdatedAt ?? null} sort={historySort} onSort={setHistorySort}
+      readStatus={historySource?.status ?? 'loading'} formatDateTime={(value) => value} sourceHint={historySource?.message ?? '引用不会修改源记录；导入 JSON 会保存独立的本地历史卡。'}
       onConfirm={(entries) => { update({ historyReferences: entries }); setHistoryOpen(false); }} />
     {historyOpen && !roomState.constrained && historySource?.status === 'error' ? <button type="button" className={secondary} onClick={() => setHistoryRevision((value) => value + 1)}>重试读取历史</button> : null}
   </>;

@@ -258,7 +258,7 @@ export class DesktopArenaSession {
     const validated = validateArenaDraft(withoutNarrativeDrafts(draft), this.dependencies.product);
     if (this.state.draft.narrativeDrafts) validated.narrativeDrafts = this.state.draft.narrativeDrafts; else delete validated.narrativeDrafts;
     this.dirty = true;
-    this.publish({ draft: validated, draftSaved: false, ...(this.dependencies.product === 'arena' ? { saveStatus: 'idle' as const, saveError: null } : {}) }); this.retryDraftSave();
+    this.publish({ draft: validated, draftSaved: false, saveStatus: 'idle', saveError: null }); this.retryDraftSave();
   }
   async importInput(load: (signal: AbortSignal) => Promise<(draft: ArenaDraft) => ArenaDraft>): Promise<void> {
     if (this.disposed || this.isBusy() || this.state.pendingRestore) throw new Error('请先完成当前操作。');
@@ -267,7 +267,7 @@ export class DesktopArenaSession {
     try { const apply = await load(controller.signal); if (!this.current(scope, epoch) || controller.signal.aborted) throw new Error('选择已失效，请重试。');
       const draft = validateArenaDraft(withoutNarrativeDrafts(apply(clone(this.state.draft))), this.dependencies.product);
       if (this.state.draft.narrativeDrafts) draft.narrativeDrafts = this.state.draft.narrativeDrafts;
-      this.dirty = true; this.publish({ draft, draftSaved: false, ...(this.dependencies.product === 'arena' ? { saveStatus: 'idle' as const, saveError: null } : {}) }); this.retryDraftSave();
+      this.dirty = true; this.publish({ draft, draftSaved: false, saveStatus: 'idle', saveError: null }); this.retryDraftSave();
     } finally { if (this.importController === controller) this.importController = null; this.publish({ importing: false }); }
   }
   restoreDraft() {
@@ -636,8 +636,8 @@ export class DesktopArenaSession {
     const entries = clone([...this.state.draft.narrativeHistoryEntries]);
     if (kind === 'history' && !entries.length) return false;
     const occurredAt = kind === 'characters' ? (hostedCandidates ?? candidates)!.occurredAt : this.state.draft.historyUpdatedAt ?? entries.at(-1)!.updatedAt;
-    // Advanced history can combine manual/imported/generated entries; no single execution mode owns the card.
-    const executionMode = kind === 'history' && this.dependencies.product === 'arena' ? undefined : this.resultMode;
+    // Both Arena routes can combine manual/imported/generated history; no single execution mode owns the card.
+    const executionMode = kind === 'history' ? undefined : this.resultMode;
     const items = kind === 'history'
       ? [{ cardType: 'history' as const, title: 'Arena 叙事历史', data: { templateId: 'narrative-history', version: 1, title: 'Arena 叙事历史', updatedAt: occurredAt, entries } }]
       : hostedCandidates ? hostedCandidates.items.filter(item => !selected || item === selected).map(item => ({ cardType: 'character' as const, title: String(item.data.codename || item.data.name || '战后角色'), data: clone(item.data), provenance: item.provenance }))

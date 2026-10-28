@@ -20,6 +20,7 @@ import { generationActionClassNames } from '../generation-actions';
 import { ImageGenerationFeedback, ImageGenerationResultView, NovelAISettingsFields } from '../image-generation';
 import type { HomeAssetSource } from '../home/feature-catalog';
 import { BaseModal } from '../modal';
+import { NarrativeHistoryPicker } from '../narrative-history';
 import { ProductFooter } from '../shell';
 import { QuestionnaireNavigationActions } from '../questionnaire';
 import { ScenarioResultContent } from '../scenario';
@@ -307,12 +308,20 @@ function NovelAISettingsSample() {
 }
 
 function OverlaySection({ onOpen }: { onOpen: () => void }) {
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyHint, setHistoryHint] = useState<string | null>(null);
   return (
     <div className={`${PANEL_CLASS} flex flex-wrap items-center gap-3`}>
       <button type="button" className={generationActionClassNames.secondary} onClick={onOpen}>
         打开示例对话框
       </button>
       <p className="text-sm text-(--app-text-muted)">共源 BaseModal：Escape 栈顶消费、焦点圈留、初始焦点在关闭按钮。</p>
+      <button type="button" className={generationActionClassNames.secondary} onClick={() => setHistoryOpen(true)}>打开叙事历史导入样板</button>
+      <NarrativeHistoryPicker isOpen={historyOpen} onClose={() => setHistoryOpen(false)} entries={[]} lastUpdatedAt={null}
+        sort="updated_desc" onSort={() => {}} formatDateTime={value => value} readStatus="ready"
+        sourceHint="本机历史列表为空时，导入入口仍然可见。" onConfirm={() => setHistoryOpen(false)}
+        onImportFile={file => setHistoryHint(`已选择 ${file.name}。样板仅演示反馈，不写入本地库。`)}
+        importLabel="导入 JSON 并保存到本机" importHint="支持网页端导出的正式叙事历史 JSON。" importStatus={historyHint} />
     </div>
   );
 }
