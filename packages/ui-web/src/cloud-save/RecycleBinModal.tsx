@@ -7,6 +7,7 @@ import { OwnedCardDeleteDialog, useOwnedCardDelete } from './OwnedCardDeleteDial
 import type { OwnedCardDeletePort } from './owned-card-delete';
 import { createOwnedCardRestoreController, type OwnedCardRestorePort } from './owned-card-restore';
 import { BaseModal } from '../modal/BaseModal';
+import { PageJump } from '../pagination';
 
 export interface OwnedRecycleBinReadPort {
   isCurrent(): boolean;
@@ -142,7 +143,9 @@ export function RecycleBinModal({ isOpen, onClose, port, limit, type: fixedType,
           {deletion.controller && <button type="button" disabled={disabled} className="rounded bg-red-500 px-3 py-1 text-xs text-white" onClick={() => { if (!operation.current && !latest.current.busy && !['reading', 'writing', 'unknown'].includes(restoration?.getSnapshot().phase ?? 'idle')) void deletion.controller?.beginRecycle(card.id); }}>永久删除…</button>}
         </div>
       </div>)}</div>}
-      {page && <div className="mt-4 flex items-center justify-center gap-3 text-sm"><button type="button" disabled={disabled || offset === 0} onClick={() => setOffset(Math.max(0, offset - 12))}>上一页</button><span>第 {Math.floor(offset / 12) + 1} 页</span><button type="button" disabled={disabled || page.nextOffset === null} onClick={() => { if (page.nextOffset !== null) setOffset(page.nextOffset); }}>下一页</button></div>}
+      {page && <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-sm"><button type="button" disabled={disabled || offset === 0} onClick={() => setOffset(Math.max(0, offset - 12))}>上一页</button><span>第 {Math.floor(offset / 12) + 1} 页</span><button type="button" disabled={disabled || page.nextOffset === null} onClick={() => { if (page.nextOffset !== null) setOffset(page.nextOffset); }}>下一页</button>
+        <PageJump currentPage={Math.floor(offset / 12) + 1} totalPages={Math.max(1, Math.ceil(page.filteredCount / 12))} disabled={disabled} onPageChange={next => setOffset((next - 1) * 12)} />
+      </div>}
     </BaseModal>
     <OwnedCardDeleteDialog controller={deletion.controller} />
     {isOpen && selected && detailsCard && DetailsModal && <DetailsModal isOpen onClose={() => setSelected(null)} source={{ kind: 'owned' }} isOwner card={detailsCard} />}

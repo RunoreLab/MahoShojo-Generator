@@ -1,5 +1,7 @@
 'use client';
 
+import { PageJump } from '../pagination';
+
 import { useMemo } from 'react';
 import { Download } from 'lucide-react';
 
@@ -134,7 +136,7 @@ export function PresetGridPicker<T extends GridPreset>({
       </div>
 
       {presets.length > PRESETS_PER_PAGE && (
-        <div className="flex justify-center items-center mt-4 space-x-2">
+        <div className="flex flex-wrap justify-center items-center mt-4 gap-2">
           <button
             type="button"
             onClick={() => onPageChange(Math.max(1, safePage - 1))}
@@ -158,6 +160,7 @@ export function PresetGridPicker<T extends GridPreset>({
           >
             下一页
           </button>
+          <PageJump currentPage={safePage} totalPages={totalPages} onPageChange={onPageChange} disabled={disabled} label={`${title}分页跳转`} />
         </div>
       )}
     </div>

@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./pagination": {
+      "types": "./src/pagination/index.tsx",
+      "import": "./src/pagination/index.tsx",
+      "default": "./src/pagination/index.tsx"
+    },
     "./me": {
       "types": "./src/me/index.tsx",
       "import": "./src/me/index.tsx",

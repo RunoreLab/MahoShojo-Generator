@@ -307,6 +307,42 @@ test.each(['public', 'my', 'favorites', 'local'] as const)(
   },
 );
 
+test.each(['public', 'my', 'favorites', 'local'] as const)('%s 直接跳至第十页，不请求中间页', async (tab) => {
+  const rows = Array.from({ length: 120 }, (_, index) => publicCard(String(index)));
+  const fetchPublicCards = vi.fn<CardLibraryHost['online']['fetchPublicCards']>(async (query) => ({
+    ok: true, status: 200,
+    data: { success: true, cards: rows.slice(query.offset, query.offset + query.limit), total: 120, nextOffset: null },
+  }));
+  const fetchSummaryPage = vi.fn<CardLibraryHost['online']['fetchSummaryPage']>(async (_source, query) => ({
+    success: true, cards: rows.slice(Number(query.offset ?? 0), Number(query.offset ?? 0) + Number(query.limit ?? 12))
+      .map(row => DataCardSummarySchema.parse({ ...row, user_id: 7 })), total: 120, nextOffset: null,
+  }));
+  const { host } = createHost(rows.map(row => record(row.id)), {
+    auth: { status: 'authenticated', userId: 7, userBadges: [] }, online: { fetchPublicCards, fetchSummaryPage },
+  });
+  await act(async () => root.render(<CardLibraryModal host={host} isOpen onClose={() => {}}
+    selectedType="character" initialTab={tab} visibleTabs={[tab]} allowedTypes={['character']} />));
+  await settle();
+  const counts = () => [fetchPublicCards.mock.calls.length, fetchSummaryPage.mock.calls.length, vi.mocked(host.local.repository.list).mock.calls.length];
+  const before = counts();
+  const input = document.querySelector<HTMLInputElement>('input[aria-label="跳转页码"]')!;
+  expect(input).not.toBeNull();
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '10');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  expect(counts()).toEqual(before);
+  await click([...document.querySelectorAll('button')].find(node => node.textContent?.trim() === '跳转')!);
+  await settle();
+  expect(document.body.textContent).toContain('第 10 页');
+  expect(document.body.textContent).toContain(tab === 'local' ? '本地角色 108' : '公开角色 108');
+  if (tab === 'public') {
+    expect(fetchPublicCards.mock.calls.slice(before[0]).map(([query]) => query.offset)).toEqual([108]);
+  } else if (tab !== 'local') {
+    expect(fetchSummaryPage.mock.calls.slice(before[1]).map(([, query]) => query.offset)).toEqual([108]);
+  } else expect(counts()).toEqual(before);
+});
+
 test('类型集合排列不重查；真正改变类型、排序、搜索和来源时回到第一页', async () => {
   const fetchPublicCards = vi.fn<CardLibraryHost['online']['fetchPublicCards']>(async (query) => ({
     ok: true, status: 200,

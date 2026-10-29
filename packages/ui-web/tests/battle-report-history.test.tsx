@@ -47,6 +47,14 @@ describe('shared report history UI', () => {
       data={{ ...list, page: 10_000, total: 1_000_000 }} loading={false} refreshing={false} error={null} onRefresh={vi.fn()} onOpenDetails={vi.fn()} />));
     expect(button('下一页').disabled).toBe(true); expect(container.textContent).toContain('/ 10000 页');
     await click('下一页'); expect(change).not.toHaveBeenCalled();
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="跳转页码"]')!;
+    const type = async (value: string) => act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await type('10001'); expect(button('跳转').disabled).toBe(true);
+    await type('9999'); expect(change).not.toHaveBeenCalled();
+    await click('跳转'); expect(change).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ page: 9999 }));
   });
   it('preserves source labels and optional Web regenerate action', async () => {
     const regenerate = vi.fn();

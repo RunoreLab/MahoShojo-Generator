@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { PageJump } from '../pagination';
 import { createPortal } from 'react-dom';
 import DataCard from '../card-library/DataCard';
 import EditCardForm from './EditCardForm';
@@ -823,7 +824,7 @@ function DataCardsModalScope({
 
               {/* 分页控件 */}
               {totalPages > 1 && (
-                <div className="flex justify-center items-center gap-2 pt-4 border-t">
+                <div className="flex flex-wrap justify-center items-center gap-2 pt-4 border-t">
                   <button
                     onClick={() => onPageChange(Math.max(1, safeCurrentPage - 1))}
                     disabled={safeCurrentPage === 1}
@@ -841,6 +842,7 @@ function DataCardsModalScope({
                   >
                     下一页
                   </button>
+                  <PageJump currentPage={safeCurrentPage} totalPages={totalPages} onPageChange={onPageChange} disabled={busy || loading} />
                 </div>
               )}
           </>

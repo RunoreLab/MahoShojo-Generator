@@ -94,6 +94,7 @@ describe('Desktop actual anonymous ranking browser', () => {
   it('paginates the real list only through Top300 without total or background traversal', async () => {
     mocks.invoke.mockImplementation(async (_command, { request }) => request.kind !== 'leaderboard' ? response(request) : ({ kind: request.kind, data: { success: true, items: Array.from({ length: 50 }, (_, index) => ({ ...fixture.responses.leaderboard.items[0], rank: request.offset + index + 1, entityId: `row-${request.offset + index}` })) } }));
     await render(); expect(mocks.invoke).toHaveBeenCalledTimes(3);
+    expect(container.querySelector('[aria-label="跳转页码"]')).toBeNull();
     for (let i = 0; i < 5; i++) await click('下一页');
     expect(container.textContent).toContain('第 6 页'); expect(button('下一页').disabled).toBe(true);
     expect(mocks.invoke.mock.calls.filter((call) => call[1].request.kind === 'leaderboard').map((call) => call[1].request.offset)).toEqual([0, 50, 100, 150, 200, 250]);
@@ -139,6 +140,26 @@ describe('Desktop actual anonymous ranking browser', () => {
       expect(container.querySelector('[data-row-key="data_card:archive-54"]')).not.toBeNull();
       expect(mocks.invoke).toHaveBeenCalledTimes(calls);
     } finally { HTMLElement.prototype.scrollIntoView = originalScroll; window.requestAnimationFrame = originalFrame; window.cancelAnimationFrame = originalCancel; }
+  });
+  it('jumps directly to page 3 of a large archive without another archive or intermediate leaderboard request', async () => {
+    mocks.invoke.mockImplementation(async (_command, { request }) => request.kind !== 'archive' ? response(request) : ({ kind: 'archive', data: { ...fixture.responses.archive,
+      entities: Array.from({ length: 130 }, (_, index) => ({ ...fixture.responses.archive.entities[0], entityId: `archive-jump-${index}`,
+        displayName: `跳页归档角色${index}`, queues: { strict: { ...fixture.responses.archive.entities[0]!.queues.strict, rating: 3000 - index } } })),
+      totalEligible: { strict: 130, free: 0 },
+    } }));
+    await render(); await select(0, 'S3');
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(50);
+    const jumpInput = container.querySelector<HTMLInputElement>('[aria-label="跳转页码"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(jumpInput, '3');
+      jumpInput.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await click('跳转');
+    expect(container.textContent).toContain('第 3 页');
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(30);
+    expect(container.textContent).toContain('跳页归档角色100');
+    expect(mocks.invoke.mock.calls.filter((call) => call[1].request.kind === 'archive')).toHaveLength(1);
+    expect(mocks.invoke.mock.calls.filter((call) => call[1].request.kind === 'leaderboard').map((call) => call[1].request.offset)).toEqual([0]);
   });
   it('distinguishes empty, rate limit and failure, then retries without account refresh', async () => {
     mocks.invoke.mockImplementation(async (_command, { request }) => request.kind === 'leaderboard' ? { kind: 'leaderboard', data: { success: true, items: [] } } : response(request));

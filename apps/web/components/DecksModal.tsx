@@ -6,6 +6,7 @@ import { addLikedDeck, getLikedDecks } from '@/lib/localStorage';
 import { buildTitleDisplay } from '@/lib/text';
 import { getDeckStatus, getDeckVisibilityValue } from '@/lib/deck-status';
 import { ModalTabs, modalTabIds } from '@/components/shared/ModalTabs';
+import { PageJump } from '@mahoshojo/ui-web/pagination';
 
 type DeckTab = 'my' | 'public' | 'favorites';
 
@@ -605,9 +606,16 @@ export default function DecksModal({ isOpen, onClose, onImportDeck }: DecksModal
                         {candidates.length ? '刷新失败，当前显示上次成功结果：' : ''}{addPage.error}
                         <button onClick={addPage.reload} disabled={addPage.loading} className="ml-2 px-3 py-2">重试</button>
                       </div>}
-                      {addSource === 'my' && addPage.total > 12 && <div className="flex gap-3 items-center text-sm">
+                      {addSource === 'my' && addPage.total > 12 && <div className="flex flex-wrap gap-3 items-center text-sm">
                         <button disabled={addOffset === 0 || addPage.loading} onClick={() => setAddOffset((value) => Math.max(0, value - 12))}>上一页</button>
                         <span>第 {Math.floor(addOffset / 12) + 1} / {Math.ceil(addPage.total / 12)} 页</span>
+                        <PageJump
+                          currentPage={Math.floor(addOffset / 12) + 1}
+                          totalPages={Math.ceil(addPage.total / 12)}
+                          onPageChange={(page) => setAddOffset((page - 1) * 12)}
+                          disabled={addPage.loading}
+                          label="跳转到角色卡页"
+                        />
                         <button disabled={addOffset + 12 >= addPage.total || addPage.loading} onClick={() => setAddOffset((value) => value + 12)}>下一页</button>
                       </div>}
 

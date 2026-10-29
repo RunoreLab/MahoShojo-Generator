@@ -1,3 +1,4 @@
+import { PageJump } from '../pagination';
 import type { CardDetailsSource } from '../card-details';
 import { describeLocalCardProvenance } from '../local-cards/presentation';
 // card-library/CardLibraryModal.tsx
@@ -2646,7 +2647,7 @@ export function CardLibraryModal({
                     : (displayCards.length >= cardsPerPage || currentPage > 1)
             ))
           ) &&
-            <div className="flex justify-center items-center gap-2 pt-4 border-t mt-4">
+            <div className="flex flex-wrap justify-center items-center gap-2 pt-4 border-t mt-4">
               <button
                 onClick={() => handlePageChange(currentPage - 1)}
                 disabled={currentPage === 1}
@@ -2679,6 +2680,8 @@ export function CardLibraryModal({
               >
                 下一页
               </button>
+              {currentTabTotalPages !== null && <PageJump key={activeTab} currentPage={currentPage} totalPages={currentTabTotalPages}
+                disabled={listLoading || listIdle} onPageChange={handlePageChange} />}
             </div>
           }
             </div>

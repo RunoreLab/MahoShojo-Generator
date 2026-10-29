@@ -21,6 +21,7 @@ import { generationActionClassNames } from '../generation-actions';
 import { ImageGenerationFeedback, ImageGenerationResultView, NovelAISettingsFields } from '../image-generation';
 import type { HomeAssetSource } from '../home/feature-catalog';
 import { BaseModal } from '../modal';
+import { PageJump } from '../pagination';
 import { NarrativeHistoryPicker } from '../narrative-history';
 import { ProductFooter } from '../shell';
 import { QuestionnaireNavigationActions } from '../questionnaire';
@@ -236,6 +237,15 @@ function QuestionnaireNavigationSample() {
   </section>;
 }
 
+function PageJumpSample() {
+  const [page, setPage] = useState(1);
+  return <section className={`${PANEL_CLASS} flex flex-wrap items-center gap-3`} aria-label="分页跳转样板">
+    <span>第 {page} / 100 页</span>
+    <PageJump currentPage={page} totalPages={100} onPageChange={setPage} />
+    <PageJump currentPage={5} totalPages={100} onPageChange={() => {}} disabled label="加载中分页跳转" />
+  </section>;
+}
+
 function ControlsSection() {
   return <div className="flex flex-col gap-4">
     <div className={`${PANEL_CLASS} flex flex-wrap items-center gap-3`}>
@@ -246,6 +256,7 @@ function ControlsSection() {
       <button type="button" className={generationActionClassNames.secondary} disabled>禁用次要操作</button>
     </div>
     <QuestionnaireNavigationSample />
+    <PageJumpSample />
   </div>;
 }
 

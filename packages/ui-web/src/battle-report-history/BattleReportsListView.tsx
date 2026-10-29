@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { PageJump } from '../pagination';
 import { RefreshCcw, Search, X } from 'lucide-react';
 import type { BattleReportFilters, BattleReportList } from '@mahoshojo/contracts/battle-report-history';
 import { BATTLE_REPORT_MAX_PAGE, DEFAULT_BATTLE_REPORT_FILTERS } from '@mahoshojo/contracts/battle-report-history';
@@ -302,7 +303,7 @@ export function BattleReportsListView({ filters, onFiltersChange, searchInput, o
             <div className="text-xs text-gray-600">
               第 <span className="font-semibold">{page}</span> / {totalPages} 页
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 className="rounded-lg border bg-white px-3 py-2 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
@@ -319,6 +320,7 @@ export function BattleReportsListView({ filters, onFiltersChange, searchInput, o
               >
                 下一页
               </button>
+              <PageJump currentPage={page} totalPages={totalPages} onPageChange={setPage} disabled={loading || refreshing || !!error} />
             </div>
           </div>
         </>

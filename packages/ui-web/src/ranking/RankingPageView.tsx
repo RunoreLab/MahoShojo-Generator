@@ -8,6 +8,7 @@ import { defaultFilters, normalizeFilters, filtersKey, LIVE_LEADERBOARD_TOP_RANK
   rankingTransportFilters, type RankingFilters } from '@mahoshojo/domain/public-ranking';
 import { getScenarioPresetByFilename } from '@mahoshojo/domain/scenario-presets';
 import { TechBadge, TierBadge, buildTitleDisplay } from '../card-library';
+import { PageJump } from '../pagination';
 import { LeaderboardSeasonExtrema } from './LeaderboardSeasonExtrema';
 import { formatRankingDateTime as formatDateTime, isMissingRankingArchive } from './presentation';
 
@@ -980,7 +981,14 @@ export function RankingPageView({ useRankingQuery, readRanking, Link, cache, onO
                           <span className="ml-2 text-xs text-gray-500">更新中…</span>
                         ) : null}
                       </div>
-                      <div className="flex items-center gap-2 text-sm">
+                      <div className="flex flex-wrap items-center gap-2 text-sm">
+                        {isArchiveMode && <PageJump
+                          currentPage={pageIndex}
+                          totalPages={Math.max(1, Math.ceil(historyTotal / limit))}
+                          onPageChange={(page) => setOffset((page - 1) * limit)}
+                          disabled={listIsLoading || listIsError}
+                          label="跳转到赛季快照页"
+                        />}
                         <button
                           type="button"
                           onClick={() => setOffset((v) => Math.max(0, v - limit))}
@@ -1292,7 +1300,14 @@ export function RankingPageView({ useRankingQuery, readRanking, Link, cache, onO
                           </div>
                         ) : null}
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {isArchiveMode && <PageJump
+                          currentPage={pageIndex}
+                          totalPages={Math.max(1, Math.ceil(historyTotal / limit))}
+                          onPageChange={(page) => setOffset((page - 1) * limit)}
+                          disabled={listIsLoading || listIsError}
+                          label="跳转到赛季快照页"
+                        />}
                         <button
                           type="button"
                           onClick={() => setOffset((v) => Math.max(0, v - limit))}

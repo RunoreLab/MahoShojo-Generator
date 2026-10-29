@@ -23,6 +23,22 @@ beforeEach(() => {
     DetailsModal: ({ card, onClose }) => <BaseModal isOpen title="详情" onClose={onClose}><pre>{card.data}</pre></BaseModal> };
 });
 afterEach(() => { act(() => root.unmount()); element.remove(); });
+it('使用当前类型总数限制跳转，直接读取目标 offset', async () => {
+  port.readPage = vi.fn(async () => ({ ...page, total: 1000, filteredCount: 60 }));
+  await render({ type: 'questionnaire' });
+  const input = document.querySelector<HTMLInputElement>('input[aria-label="跳转页码"]')!;
+  const type = async (value: string) => act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await type('6'); expect(button('跳转').disabled).toBe(true);
+  await type('5'); expect(port.readPage).toHaveBeenCalledTimes(1);
+  await click('跳转');
+  expect(port.readPage).toHaveBeenCalledTimes(2);
+  expect(port.readPage).toHaveBeenLastCalledWith({ limit: 12, offset: 48, type: 'questionnaire' }, expect.any(AbortSignal));
+  expect(text()).toContain('第 5 页');
+});
+
 it('双端真实列表摘要先行，显示原可见性/审核/删除时间，详情按需；无写slots不出现写按钮', async () => {
   await render(); expect(text()).toContain('账号回收站：8/5'); expect(text()).toContain('原可见性：封禁'); expect(text()).toContain('未通过'); expect(text()).toContain('删除于');
   expect(port.readDetail).not.toHaveBeenCalled(); expect(button('恢复')).toBeUndefined(); expect(button('彻底删除')).toBeUndefined();

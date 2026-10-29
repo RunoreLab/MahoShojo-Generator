@@ -1,5 +1,7 @@
 'use client';
 
+import { PageJump } from '../pagination';
+
 import { useEffect, useId, useMemo, useState, type DragEvent, type ReactNode } from 'react';
 import { isMagicTeaPartyPinned } from '@mahoshojo/domain/magic-tea-party/organization';
 import type { MagicTeaPartySession } from '@mahoshojo/domain/magic-tea-party/types';
@@ -350,7 +352,7 @@ export function MagicTeaPartySessionList({
             </div>
           )}
         </div>
-        <div className="mt-3 flex items-center justify-between gap-2 text-xs text-gray-600">
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-gray-600">
           <button
             type="button"
             className="rounded-md border border-gray-200 bg-white px-2 py-1 disabled:cursor-not-allowed disabled:opacity-50"
@@ -367,6 +369,8 @@ export function MagicTeaPartySessionList({
           >
             下一页
           </button>
+          <PageJump currentPage={currentPage} totalPages={totalPages} disabled={busy}
+            onPageChange={next => { onSelectionViewChange?.(); setPage(next); }} />
         </div>
       </fieldset>
         {children}

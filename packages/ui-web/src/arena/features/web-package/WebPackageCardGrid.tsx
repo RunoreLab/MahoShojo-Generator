@@ -1,5 +1,7 @@
 'use client';
 
+import { PageJump } from '../../../pagination';
+
 import { Download, HardDrive, Info, Loader2, Package, Trash2 } from 'lucide-react';
 import { useMemo, useState, type ReactNode } from 'react';
 
@@ -196,7 +198,7 @@ export function WebPackageCardGrid({
       </div>
 
       {totalPages > 1 ? (
-        <div className="flex items-center justify-center gap-2 text-sm">
+        <div className="flex flex-wrap items-center justify-center gap-2 text-sm">
           <button
             type="button"
             className={buttonClassName({ variant: 'secondary', size: 'md' })}
@@ -214,6 +216,7 @@ export function WebPackageCardGrid({
           >
             下一页
           </button>
+          <PageJump currentPage={safePage} totalPages={totalPages} onPageChange={setPage} />
         </div>
       ) : null}
     </div>
