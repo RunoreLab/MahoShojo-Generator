@@ -207,7 +207,7 @@ const assertConstrained = () => {
   for (const control of container.querySelectorAll('textarea, [aria-label="API Key"], [role="combobox"]')) {
     if (control.closest('[aria-label="本次房间服务器生成选择"]')) continue;
     if (mocks.owner?.getSnapshot().session?.self.role !== 'host') expect(control.closest('[hidden]')).not.toBeNull();
-    expect(control.matches(':disabled')).toBe(true);
+    if (!mocks.owner?.canEditHostDraft()) expect(control.matches(':disabled')).toBe(true);
   }
   for (const label of ['生成战报', '发布配置', '提交提案', '开始协作生成', '发起生成', '启用严格排位']) expect(button(label, room())).toBeUndefined();
   assertNoExecution();
@@ -844,6 +844,72 @@ describe('Desktop /arena Room journey through the real route and Native bridge',
     expect(container.querySelector('[aria-label="战报结果"]')?.textContent).toContain(reportText);
     expect(getDesktopAiConfigStore().getSnapshot().modelsByProfileId[profile.id]?.selectedModelId).toBe('ordinary-selected-model');
     assertNoExecution();
+  });
+
+  it('lets an online host add preset characters and main/auxiliary scenarios, then publish explicitly', async () => {
+    seedOrdinary(savedDraft({ battleMode: 'scenario' })); await mount(); await open();
+    const creating = await startAction('创建多人房间', 'create');
+    const authority = await confirmMembership(creating, 'host'); await publishOnline(authority);
+    const draft = () => JSON.parse(ordinarySnapshot().advanced!).draft as ArenaDraft;
+    const beforeCount = draft().combatants.length;
+    const preset = container.querySelector<HTMLButtonElement>('button[aria-label^="选择预设角色："]')!;
+    expect(preset).toBeTruthy(); expect(preset.matches(':disabled')).toBe(false);
+    await act(async () => preset.click());
+    await vi.waitFor(() => expect(draft().combatants).toHaveLength(beforeCount + 1));
+    await act(async () => buttons().find(node => node.textContent?.includes('预设情景（内置）'))!.click());
+    const scenarioPreset = [...container.querySelectorAll<HTMLButtonElement>('button[aria-label]')].find(node => node.getAttribute('aria-label')!.startsWith('选择预设情景：'))!;
+    expect(scenarioPreset).toBeTruthy(); expect(scenarioPreset.matches(':disabled')).toBe(false);
+    await act(async () => scenarioPreset.click());
+    await vi.waitFor(() => expect(draft().scenario.content).not.toBeNull());
+    const auxiliaryPreset = [...container.querySelectorAll<HTMLButtonElement>('button[aria-label]')].find(node => node.getAttribute('aria-label')!.startsWith('选择预设情景：'))!;
+    await act(async () => auxiliaryPreset.click());
+    await vi.waitFor(() => expect(draft().auxScenarios).toHaveLength(1));
+    expect(port.actions.map(value => value.action.kind)).toEqual(['create']);
+    await click('比较本地与房间设置', room());
+    await vi.waitFor(() => expect(button('发布已比较的设置', room())).toBeDefined());
+    await click('发布已比较的设置', room()); const publishing = await startAction('确认发布房间配置', 'config');
+    expect(publishing.action).toMatchObject({ kind: 'config', request: { sharedConfig: { combatants: expect.any(Array), scenario: expect.any(Object), auxScenarios: expect.any(Array) } } });
+    expect(preset.matches(':disabled')).toBe(true); assertNoExecution();
+  });
+
+  it('allows an online host to select a main scenario from the real shared library', async () => {
+    seedOrdinary(savedDraft({ battleMode: 'scenario' })); await mount(); await open();
+    const creating = await startAction('创建多人房间', 'create');
+    const authority = await confirmMembership(creating, 'host'); await publishOnline(authority);
+    const original = mocks.invoke.getMockImplementation()!;
+    const card = { ...publicCard, type: 'scenario', name: '房主在线情景', updated_at: '2026-10-31T01:00:00Z',
+      data: JSON.stringify({ templateId: '通用情景', title: '房主在线情景', content: '完整舞台' }) };
+    mocks.invoke.mockImplementation(async (command: string, args: Record<string, unknown> = {}) => {
+      const request = args.request as { routeId?: string; query?: Record<string, string> } | undefined;
+      if (command === 'cloud_card_library_request' && request?.routeId === 'public-data-cards.query')
+        return { status: 200, body: request.query?.id ? { success: true, card } : { success: true, cards: [card], total: 1 } };
+      return original(command, args);
+    });
+    await click('浏览在线情景库');
+    const library = document.querySelector<HTMLElement>('[role="dialog"][aria-label="选择情景数据卡"]')!;
+    expect(library).not.toBeNull();
+    await act(async () => buttons(library).find(item => item.textContent?.startsWith('公开'))!.click());
+    const row = [...library.querySelectorAll<HTMLElement>('.grid > .relative')].find(item => item.querySelector('h4')?.textContent === card.name)!;
+    expect(row).toBeTruthy();
+    const select = row.matches('[role="button"][aria-label^="选择"]') ? row : null;
+    expect(select).not.toBeNull(); await act(async () => select!.click());
+    await vi.waitFor(() => expect(JSON.parse(ordinarySnapshot().advanced!).draft.scenario.content?.title).toBe(card.name));
+    expect(port.actions.map(value => value.action.kind)).toEqual(['create']); assertNoExecution();
+  });
+
+  it('drops a pending host preset import if room freshness is lost before the source returns', async () => {
+    seedOrdinary(); await mount(); await open();
+    const creating = await startAction('创建多人房间', 'create');
+    const authority = await confirmMembership(creating, 'host'); await publishOnline(authority);
+    const before = ordinarySnapshot().advanced, pending = deferred<Response>();
+    vi.mocked(fetch).mockImplementationOnce(() => pending.promise);
+    const preset = container.querySelector<HTMLButtonElement>('button[aria-label^="选择预设角色："]')!;
+    await act(async () => preset.click());
+    await port.deliver({ kind: 'status', state: 'offline' });
+    await act(async () => pending.resolve(new Response(JSON.stringify({ templateId: '通用角色', name: '迟到角色', content: '不能导入' }))));
+    expect(ordinarySnapshot().advanced).toBe(before);
+    expect(preset.matches(':disabled')).toBe(true);
+    expect(port.actions.map(value => value.action.kind)).toEqual(['create']); assertNoExecution();
   });
 
   it('edits only four local host story fields while preserving authority and requiring a fresh explicit publish', async () => {

@@ -241,7 +241,12 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
   roomStartAllowed.current = () => !resultActionLocks.isSourceLocked() && guard.ready && !strictActiveRef.current && !session.isBusy() && !storyOwner.isBusy() && !storyOwner.hosted?.hasCandidate() && !storyOwner.getSnapshot().hosted?.slots[product] && !packageOwner.isBusy() && !preparing.current && !diagnosisFlight.current && !advancedBusyRef.current && !session.getSnapshot().pendingRestore && !aiStore.isPreparingGeneration() && !aiStore.getSnapshot().generationActive && !aiStore.getSnapshot().savingConnection && !aiStore.getSnapshot().savingCredential && !aiStore.getSnapshot().deletingConnection;
   const resultActionsDisabled = !guard.ready || busy || state.pendingRestore || roomState.constrained;
   const disabled = resultActionsDisabled || resultActionLocks.sourceLocked;
-  const update = (patch: Partial<ArenaDraft>) => { if (!resultActionLocks.isSourceLocked() && !roomOwner.isConstrained() && !disabled) session.updateDraft({ ...session.getSnapshot().draft, ...patch }); };
+  const roomEditorBlocked = () => roomOwner.isConstrained() && !roomOwner.canEditHostDraft();
+  const editorDisabled = !guard.ready || busy || state.pendingRestore || resultActionLocks.sourceLocked || roomEditorBlocked();
+  // A callback must belong to the same account/Document and room snapshot as the rendered editor.
+  const editorIdentity = roomOwner.confirmationOwner(), editorAuthority = roomState.session;
+  const editorCurrent = () => !roomEditorBlocked() && roomOwner.confirmationOwner() === editorIdentity && roomOwner.getSnapshot().session === editorAuthority;
+  const update = (patch: Partial<ArenaDraft>) => { if (!resultActionLocks.isSourceLocked() && !editorDisabled && editorCurrent()) session.updateDraft({ ...session.getSnapshot().draft, ...patch }); };
   const resultRef = useRef<HTMLDivElement>(null);
   useResultAutoScroll(resultRef, state.phase === 'completed' || state.phase === 'generating' && Boolean(state.markdown.trim() || state.reasoning.trim()), { restored: state.restored });
   useEffect(() => {
@@ -261,8 +266,8 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
     setFeedback({ message: cause instanceof Error ? cause.message : '操作失败，原输入仍保留。', presentation });
   };
   const performImport = async (load: Parameters<DesktopArenaSession['importInput']>[0]) => {
-    if (resultActionLocks.isSourceLocked() || roomOwner.isConstrained() || !guard.ready || diagnosisFlight.current || preparing.current || aiState.generationActive || packageOwner.isBusy()) throw new Error('请等待当前操作完成。');
-    const epoch = ownerEpoch.current; setError(null); try { await session.importInput(load); } catch (cause) { if (epoch === ownerEpoch.current && !(cause instanceof Error && cause.name === 'AbortError')) reportError(cause); throw cause; }
+    if (resultActionLocks.isSourceLocked() || !editorCurrent() || !guard.ready || diagnosisFlight.current || preparing.current || aiState.generationActive || packageOwner.isBusy()) throw new Error('请等待当前操作完成。');
+    const epoch = ownerEpoch.current; setError(null); try { await session.importInput(async signal => { const apply = await load(signal); return current => { if (!editorCurrent()) throw new DOMException('Aborted', 'AbortError'); return apply(current); }; }); } catch (cause) { if (epoch === ownerEpoch.current && !(cause instanceof Error && cause.name === 'AbortError')) reportError(cause); throw cause; }
   };
   const prepareStrict = async (season: PublicSeasonMeta) => {
     if (resultActionLocks.isSourceLocked() || roomOwner.isConstrained() || disabled || preparing.current || strictPreparation.current || session.isBusy() || storyOwner.isBusy() || aiStore.getSnapshot().savingConnection || aiStore.getSnapshot().savingCredential || aiStore.getSnapshot().deletingConnection) return;
@@ -306,9 +311,9 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
     return (current) => applyCharacters(current, items, warnings, true);
   });
   const selectPreset = async (filename: string, nextSelected: boolean, selectionSignal?: AbortSignal): Promise<void | false> => {
-    if (disabled || session.isBusy() || selectionSignal?.aborted) return false;
+    if (editorDisabled || session.isBusy() || selectionSignal?.aborted) return false;
     const epoch = ownerEpoch.current;
-    const currentSelection = () => epoch === ownerEpoch.current && !selectionSignal?.aborted && !roomOwner.isConstrained();
+    const currentSelection = () => epoch === ownerEpoch.current && !selectionSignal?.aborted && editorCurrent();
     const original = session.getSnapshot().draft;
     const indices = original.combatants.flatMap((item, index) => isArenaRealCombatant(item) && item.isPreset && item.filename === filename ? [index] : []);
     if (!nextSelected) {
@@ -381,7 +386,7 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
     return selected;
   };
   const randomMatchCharacter = async () => {
-    if (disabled || matchingRequest.current || draft.combatants.length >= limits.maxCombatants) return;
+    if (editorDisabled || matchingRequest.current || draft.combatants.length >= limits.maxCombatants) return;
     const token = Symbol(), epoch = ownerEpoch.current;
     matchingRequest.current = token; setIsMatchingCharacter(true);
     try {
@@ -397,9 +402,9 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
     finally { if (matchingRequest.current === token) { matchingRequest.current = null; setIsMatchingCharacter(false); } }
   };
   const toggleSelectedCharacter = async (_payload: unknown, selected: boolean, context: CardLibrarySelectionContext): Promise<void | false> => {
-    if (disabled || context.signal?.aborted) return false;
+    if (editorDisabled || context.signal?.aborted) return false;
     const epoch = ownerEpoch.current, selectionId = context.rowSelectionId ?? context.selectionId;
-    const currentSelection = () => epoch === ownerEpoch.current && !context.signal?.aborted && !roomOwner.isConstrained();
+    const currentSelection = () => epoch === ownerEpoch.current && !context.signal?.aborted && editorCurrent();
     let applied = false;
     try {
       await performImport(async signal => {
@@ -431,10 +436,10 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
     library === 'character' ? toggleSelectedCharacter(payload, selected, context) : Promise.resolve(false);
   const toggleReferenceCard = async (_payload: unknown, selected: boolean, context: CardLibrarySelectionContext): Promise<void | false> => {
     const purpose = library;
-    if (!purpose || purpose === 'character' || disabled || context.signal?.aborted) return false;
+    if (!purpose || purpose === 'character' || editorDisabled || context.signal?.aborted) return false;
     const epoch = ownerEpoch.current, pickerEpoch = libraryEpoch.current;
     const currentSelection = () => epoch === ownerEpoch.current && pickerEpoch === libraryEpoch.current
-      && !context.signal?.aborted && !roomOwner.isConstrained();
+      && !context.signal?.aborted && editorCurrent();
     let applied = false;
     try {
       await performImport(async signal => current => {
@@ -454,7 +459,7 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
     return applied && currentSelection() ? undefined : false;
   };
   const chooseCard = (payload: unknown, context: CardLibrarySelectionContext) => toggleReferenceCard(payload, true, context);
-  const openLibrary = (purpose: LibraryPurpose) => { if (disabled) return; libraryEpoch.current += 1; setLibrary(purpose); void cloudStore.refresh(); };
+  const openLibrary = (purpose: LibraryPurpose) => { if (editorDisabled || !editorCurrent()) return; libraryEpoch.current += 1; setLibrary(purpose); void cloudStore.refresh(); };
   const librarySelectionOptions = getArenaCardLibrarySelectionOptions({
     purpose: library ?? 'character', characterCount: draft.combatants.length, characterMaxSelected: limits.maxCombatants,
     auxiliaryScenarioCount: draft.auxScenarios.length, materialCount: draft.materials.length,
@@ -477,13 +482,13 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
     rowExtras: row => rosterExtras[row.index],
     rows: draft.combatants.map((item, index) => ({ key: String(index), displayName: isArenaRealCombatant(item) ? arenaItemName(item.data) : item.filename, typeLabel: isArenaRealCombatant(item) ? getCombatantTypeLabel(item.type) : '随机占位符', guidance: isArenaRealCombatant(item) ? item.characterGuidance ?? '' : '', index, teamKey: item.teamId ? String(item.teamId) : null, isPlaceholder: !isArenaRealCombatant(item) })),
     teams: draft.teams.map((team) => ({ key: String(team.id), name: team.name, memberKeys: draft.combatants.flatMap((item, index) => item.teamId === team.id ? [String(index)] : []), collapsed: collapsedTeams.has(String(team.id)) })),
-    disabled, combatantCountLabel: `${draft.combatants.length}/${limits.maxCombatants}`, combatantCapReached: draft.combatants.length >= limits.maxCombatants,
+    disabled: editorDisabled, combatantCountLabel: `${draft.combatants.length}/${limits.maxCombatants}`, combatantCapReached: draft.combatants.length >= limits.maxCombatants,
     capabilities: { reorderRows: true, removeRows: true, editGuidance: true, ranking: true, addPlaceholders: true, clearRoster: true, createTeams: true, renameTeams: true, removeTeams: true, reorderTeams: true, assignTeamMembers: true, reorderTeamMembers: true, collapseTeams: true },
     actions: {
       moveRow: (from, to) => update({ combatants: moveArenaItem(draft.combatants, from, to) }),
       removeRow: (key) => update(product === 'arena' ? removeAdvancedCombatants(draft, [Number(key)]) : { combatants: draft.combatants.filter((_, index) => index !== Number(key)) }),
       setGuidance: (key, value) => update({ combatants: draft.combatants.map((item, index) => index === Number(key) && isArenaRealCombatant(item) ? { ...item, characterGuidance: value } : item) }),
-      addPlaceholder: type => { if (disabled || draft.combatants.length >= limits.maxCombatants) return; update({ combatants: [...draft.combatants, { type, id: crypto.randomUUID(), filename: type === 'random-magical-girl' ? '随机魔法少女' : '随机残兽' }] }); }, clearRoster: () => update(product === 'arena' ? removeAdvancedCombatants(draft, draft.combatants.map((_, index) => index)) : { combatants: [] }),
+      addPlaceholder: type => { if (editorDisabled || draft.combatants.length >= limits.maxCombatants) return; update({ combatants: [...draft.combatants, { type, id: crypto.randomUUID(), filename: type === 'random-magical-girl' ? '随机魔法少女' : '随机残兽' }] }); }, clearRoster: () => update(product === 'arena' ? removeAdvancedCombatants(draft, draft.combatants.map((_, index) => index)) : { combatants: [] }),
       createTeam: () => { const id = Math.max(0, ...draft.teams.map((team) => team.id)) + 1; update({ teams: [...draft.teams, { id, name: `分队 ${id}` }] }); return String(id); },
       renameTeam: (key, name) => update({ teams: draft.teams.map((team) => String(team.id) === key ? { ...team, name } : team) }),
       removeTeam: (key) => update({ teams: draft.teams.filter((team) => String(team.id) !== key), combatants: draft.combatants.map((item) => String(item.teamId) === key ? Object.fromEntries(Object.entries(item).filter(([field]) => field !== 'teamId')) as typeof item : item) }),
@@ -494,7 +499,7 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
     },
   };
   const scenario: ArenaScenarioSectionModel = {
-    disabled, isAuthenticated: !!cloudState.account, isMatchingBlocked: true, isMatchingScenario: false, mainName: draft.scenarioDisplayName, mainIsNative: false,
+    disabled: editorDisabled, isAuthenticated: !!cloudState.account, isMatchingBlocked: true, isMatchingScenario: false, mainName: draft.scenarioDisplayName, mainIsNative: false,
     auxScenarios: product === 'arena' ? draft.auxScenarios.map((item, index) => ({ key: String(index), title: arenaItemName(item.content), isNative: false })) : [], auxBudgetLine: `参考项合计 ${referenceCount}/256`, auxBudgetExhausted: referenceCount >= limits.maxReferenceItemsSanity, presets: SCENARIO_PRESET_LIST, presetsLoading: false, presetsError: null,
     selectedPresetFilenames: [...(draft.scenario.isPreset && draft.scenario.fileName ? [draft.scenario.fileName] : []), ...(product === 'arena' ? draft.auxScenarios.flatMap((item) => item.isPreset && item.fileName ? [item.fileName] : []) : [])], loadingPresetFilename: null,
     capabilities: { browseMain: true, randomMatchMain: false, clearMain: true, uploadMain: true, pasteMain: true, presetRefs: true,
@@ -756,21 +761,21 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
         header: <><BattleLiteHeader Link={libraryHost.platform.Link} draftSharing="independent" illustrationAvailable={false} logo={<ThemeImage lightSrc="/arena-black.svg" darkSrc="/arena-white.svg" width={300} height={84} alt="魔法少女竞技场" />} />{sessionNotice}</>,
         rankingLinks: <ArenaRankingLinks Link={libraryHost.platform.Link} onOpenRankingModal={roomState.constrained ? undefined : () => setRankingOpen(true)} />,
         pageLinks: <ArenaPageLinks Link={libraryHost.platform.Link} variant="lite" />,
-        presets: <><CharacterPresetPicker grouped={characterPresets} magicalGirlPage={magicalGirlPage} onMagicalGirlPageChange={setMagicalGirlPage} canshouPage={canshouPage} onCanshouPageChange={setCanshouPage} disabled={disabled} maxSelected={limits.maxCombatants} selectedCountOverride={draft.combatants.length} selectedFilenames={draft.combatants.filter((item) => isArenaRealCombatant(item) && item.isPreset).map((item) => item.filename)} loadingFilename={state.importing ? loadingPresetFilename : null} onToggle={(preset) => togglePreset(preset.filename)} onDownload={presetDownload.download} downloadDisabled={presetDownload.downloading} />
+        presets: <><CharacterPresetPicker grouped={characterPresets} magicalGirlPage={magicalGirlPage} onMagicalGirlPageChange={setMagicalGirlPage} canshouPage={canshouPage} onCanshouPageChange={setCanshouPage} disabled={editorDisabled} maxSelected={limits.maxCombatants} selectedCountOverride={draft.combatants.length} selectedFilenames={draft.combatants.filter((item) => isArenaRealCombatant(item) && item.isPreset).map((item) => item.filename)} loadingFilename={state.importing ? loadingPresetFilename : null} onToggle={(preset) => togglePreset(preset.filename)} onDownload={presetDownload.download} downloadDisabled={presetDownload.downloading} />
           {presetDownload.feedback && <p role={presetDownload.feedback.kind === 'error' ? 'alert' : 'status'} className={`mb-4 text-sm ${presetDownload.feedback.kind === 'error' ? 'text-red-600' : 'text-gray-600'}`}>{presetDownload.feedback.message}</p>}</>,
         database: <><ArenaCharacterDatabaseSelector className="!mb-0" title={null} layout={product === 'battle' ? 'column' : 'row'}
           onOpenCharacterModal={() => openLibrary('character')} onRandomMatchCharacter={() => { void randomMatchCharacter(); }}
-          isAuthenticated={libraryHost.auth.status !== 'unauthenticated'} isGenerating={disabled} isMatching={isMatchingCharacter ? 'character' : null}
+          isAuthenticated={libraryHost.auth.status !== 'unauthenticated'} isGenerating={editorDisabled} isMatching={isMatchingCharacter ? 'character' : null}
           combatantCount={draft.combatants.length} maxCombatants={limits.maxCombatants}
           loginLink={<libraryHost.platform.Link href="/character-manager" className="battle-lite-link underline">登录后可访问私有数据卡</libraryHost.platform.Link>} />
           <div className={product === 'battle' ? 'battle-lite-muted-text mt-2 text-xs' : 'mt-1 text-xs text-gray-600'}>
             提示：浏览在线角色库可选择公开/私有数据卡；随机匹配仅从公开角色库中抽取。
           </div></>,
-        localImport: <ArenaRosterImportPanel disabled={disabled} limitReached={draft.combatants.length >= limits.maxCombatants} onUpload={uploadCharacters} onPaste={pasteCharacters} onDirtyChange={onRosterDirty} />,
+        localImport: <ArenaRosterImportPanel disabled={editorDisabled} limitReached={draft.combatants.length >= limits.maxCombatants} onUpload={uploadCharacters} onPaste={pasteCharacters} onDirtyChange={onRosterDirty} />,
         roster: <ArenaRosterSection model={roster} emptyLabel="尚未添加角色" onDirtyChange={onRosterTeamDirty} />,
-        mode: <BattleModeSelector value={draft.battleMode} onChange={(battleMode) => { if (product === 'arena' && draft.battleMode === 'scenario' && battleMode !== 'scenario' && dirtyControls.current.scenario && !window.confirm('切换模式会关闭情景编辑，放弃尚未导入的情景文本？')) return; update({ battleMode }); }} disabled={disabled} />,
+        mode: <BattleModeSelector value={draft.battleMode} onChange={(battleMode) => { if (product === 'arena' && draft.battleMode === 'scenario' && battleMode !== 'scenario' && dirtyControls.current.scenario && !window.confirm('切换模式会关闭情景编辑，放弃尚未导入的情景文本？')) return; update({ battleMode }); }} disabled={editorDisabled} />,
         scenario: <ArenaScenarioSection model={scenario} presentation={product === 'battle' ? { variant: 'lite', hasMain: !!draft.scenario.content, summary: draft.scenarioDisplayName ?? '未选择' } : undefined} onDirtyChange={onScenarioDirty} />,
-        materials: <ArenaMaterialSection onDirtyChange={onMaterialDirty} model={{ disabled, items: materials.map((item, index) => ({ key: String(index), name: item.name, sourceLabel: item.sourceType, fileName: item.fileName })),
+        materials: <ArenaMaterialSection onDirtyChange={onMaterialDirty} model={{ disabled: editorDisabled, items: materials.map((item, index) => ({ key: String(index), name: item.name, sourceLabel: item.sourceType, fileName: item.fileName })),
           notice: '素材仅作为参考；本地与缓存来源不代表服务器认证。', hasReferenceCapacity: referenceCount < limits.maxReferenceItemsSanity,
           capabilities: { browseOnline: true, clearAll: true, upload: true, paste: true, reorder: true },
           actions: { openModal: () => openLibrary('material'), clearAll: () => update({ materials: [] }),
@@ -820,9 +825,9 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
     {rosterDetails && !roomState.constrained ? <DesktopCardDetailsModal isOpen onClose={() => setRosterDetails(null)} {...rosterDetails} /> : null}
     {product === 'arena' ? <AdvancedArenaPageView
       header={<AdvancedArenaHeader Link={libraryHost.platform.Link} draftSharing="independent" illustrationAvailable={false} logo={<ThemeImage lightSrc="/arena-black.svg" darkSrc="/arena-white.svg" width={320} height={90} alt="魔法少女竞技场" />} />}
-      links={<><ArenaRankingLinks Link={libraryHost.platform.Link} onOpenRankingModal={roomState.constrained ? undefined : () => setRankingOpen(true)} /><ArenaPageLinks Link={libraryHost.platform.Link} variant="full" onNavigateExternal={openFixed} /></>} beforeWorkspace={<>{sessionNotice}<DesktopArenaRoomPanel createReportPorts={onError => createDesktopBattleReportPorts({ username: cloudState.verification === 'verified' ? cloudState.account?.username : null, onNavigateExternal: openContent, onError, onExportingChange: onReportExportingChange })} languages={languages} owner={roomOwner} draft={draft} isDraftCurrent={value => session.getSnapshot().draft === value} disabled={!guard.ready || busy || state.pendingRestore || strictActive} authenticated={cloudState.verification === 'verified' && cloudState.authFlow.kind === 'idle' && !!cloudState.account} displayName={cloudState.account?.username ?? '玩家'} onAuthenticate={() => { void cloudStore.requestAuth(); }} /><DesktopRoomStoryDraft roomOwner={roomOwner} localSession={session} languages={languages} isEditingAllowed={() => roomStartAllowed.current()} /></>} result={<fieldset className="min-w-0" disabled={roomState.constrained} hidden={roomState.constrained}>{result}{slots.storySession}</fieldset>} homeLink={slots.homeLink} footer={slots.footer}>
+      links={<><ArenaRankingLinks Link={libraryHost.platform.Link} onOpenRankingModal={roomState.constrained ? undefined : () => setRankingOpen(true)} /><ArenaPageLinks Link={libraryHost.platform.Link} variant="full" onNavigateExternal={openFixed} /></>} beforeWorkspace={<>{sessionNotice}<DesktopArenaRoomPanel createReportPorts={onError => createDesktopBattleReportPorts({ username: cloudState.verification === 'verified' ? cloudState.account?.username : null, onNavigateExternal: openContent, onError, onExportingChange: onReportExportingChange })} languages={languages} owner={roomOwner} draft={draft} isDraftCurrent={value => session.getSnapshot().draft === value} disabled={!guard.ready || busy || state.pendingRestore || strictActive} authenticated={cloudState.verification === 'verified' && cloudState.authFlow.kind === 'idle' && !!cloudState.account} displayName={cloudState.account?.username ?? '玩家'} onAuthenticate={() => { void cloudStore.requestAuth(); }} /><DesktopRoomStoryDraft roomOwner={roomOwner} localSession={session} languages={languages} isEditingAllowed={() => roomStartAllowed.current() && roomOwner.canEditHostDraft()} /></>} result={<fieldset className="min-w-0" disabled={roomState.constrained} hidden={roomState.constrained}>{result}{slots.storySession}</fieldset>} homeLink={slots.homeLink} footer={slots.footer}>
       {roomState.memberModel && memberWorkspaceSession ? <DesktopRoomMemberWorkspace owner={roomOwner} model={roomState.memberModel} session={memberWorkspaceSession} languages={languages} /> : null}
-      {roomState.constrained ? <p>普通 Arena 草稿、结果和模型选择已保留在本机。结束房间操作或明确断开本机连接后，可恢复普通操作。</p> : null}<fieldset className="min-w-0" disabled={roomState.constrained} hidden={roomState.constrained && !roomHostPreview}><ArenaEditorWorkspaceLayout preview={roomHostPreview} disabled={disabled} sections={buildArenaEditorSections([
+      {roomState.constrained ? <p>房主可在下方编辑本地角色、情景和素材，再比较并明确发布到房间；修改不会自动同步。普通结果和模型选择仍保留在本机。</p> : null}<fieldset className="min-w-0" disabled={roomEditorBlocked()} hidden={roomState.constrained && !roomHostPreview}><ArenaEditorWorkspaceLayout preview={roomHostPreview} disabled={editorDisabled} sections={buildArenaEditorSections([
         { kind: 'presetCharacters', description: '选择内置角色', defaultOpen: true, content: slots.presets },
         { kind: 'characterDatabase', description: `当前已选 ${draft.combatants.length}/${limits.maxCombatants}`, defaultOpen: true, content: slots.database },
         { kind: 'localImport', description: '上传或粘贴角色 JSON', defaultOpen: true, keepMounted: true, content: slots.localImport },
@@ -840,7 +845,7 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
       copy={{ modeDescription: '不同模式决定故事风格', storyOptionsDescription: '设置故事方向、历史读写和 AI 目标' }} slots={slots} />}
     <DesktopArenaRankingModal key={scope} isOpen={rankingOpen && !roomState.constrained} onClose={() => setRankingOpen(false)} host={libraryHost}
       selectionDisabledReason={disabled ? '请先完成当前生成、恢复或导入操作，再调整参战者。' : null} combatants={draft.combatants} maxCombatants={limits.maxCombatants} onToggleCharacter={toggleSelectedCharacter} onTogglePreset={selectPreset} onSelectionError={setError} />
-    <CardLibraryModal host={libraryHost} isOpen={library !== null && !roomState.constrained} onClose={closeLibrary}
+    <CardLibraryModal host={libraryHost} isOpen={library !== null && !roomEditorBlocked()} onClose={closeLibrary}
       onSelectCard={library === 'scenario' ? chooseCard : undefined}
       onToggleCard={library === 'character' ? toggleCharacterCard : library === 'scenario' ? undefined : toggleReferenceCard}
       {...librarySelectionOptions}

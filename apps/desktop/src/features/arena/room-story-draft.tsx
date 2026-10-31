@@ -35,7 +35,7 @@ export function DesktopRoomStoryDraft({ roomOwner, localSession, languages, isEd
   };
   return <section aria-label="房主本地故事设置" className="mt-4 space-y-3">
     <h3 className="font-semibold">房主本地故事设置</h3>
-    <p>这里只修改本机草稿，并尝试自动保存，不更新房间。修改后需重新比较，再明确确认发布；角色、来源、模型与普通生成仍保持锁定。</p>
+    <p>这里只修改本机草稿，并尝试自动保存，不更新房间。修改后需重新比较，再明确确认发布；角色与情景可在下方编辑；模型与普通生成仍保持锁定。</p>
     {local.draftError ? <p role="alert">{local.draftError}</p> : null}
     <StoryOptionsPanel idPrefix="room-host-draft" isGenerating={!canEdit()} enableUserGuidance languages={languages}
       userGuidance={local.draft.settings.userGuidance} onUserGuidanceChange={value => change('userGuidance', value)}

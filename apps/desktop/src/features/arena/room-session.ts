@@ -441,6 +441,11 @@ export class DesktopArenaRoomSession {
   confirmationOwner = (): symbol | null => this.current() ? this.owner!.token : null;
   isBusy = () => this.current() && this.state.busy;
   isConstrained = () => this.current() && this.state.constrained;
+  /** Local host edits never change authority until an explicit compare/publish. */
+  canEditHostDraft = () => this.current() && this.state.phase === 'online' && this.state.snapshotReceived
+    && this.state.session?.self.role === 'host' && this.state.session.self.membershipState === 'active'
+    && !this.state.busy && !this.state.unknown && !this.state.configTracking && !blocksProposalTracking(this.state.proposalTracking)
+    && (!this.state.session.snapshot.activeGeneration || terminalGeneration(this.state.session.snapshot.activeGeneration.state));
   needsLeaveConfirmation = () => this.current() && (this.state.busy || this.state.memberModel !== null || this.state.session !== null || this.state.unknown !== null || this.state.configTracking !== null || blocksProposalTracking(this.state.proposalTracking));
   async open(): Promise<symbol | null> {
     if (this.disposed) return null;

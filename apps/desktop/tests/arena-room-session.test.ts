@@ -231,6 +231,18 @@ const resolved = (requestId: string, value: ArenaRoomSessionResponse, proposalId
       revision: value.snapshot.revision, controlSeq: value.snapshot.controlSeq, sharedConfig: value.snapshot.sharedConfig, snapshot: value.snapshot } },
 });
 
+it('permits local editing only for the current online active host without an active generation', async () => {
+  const h = await harness();
+  const value = ArenaRoomSessionResponseSchema.parse({ ...host, snapshot: { ...host.snapshot, activeGeneration: null } });
+  await joinRoom(h, value); expect(h.session.canEditHostDraft()).toBe(false);
+  await installOnlineSnapshot(h, value); expect(h.session.canEditHostDraft()).toBe(true);
+  await h.receive({ kind: 'status', state: 'offline' }); expect(h.session.canEditHostDraft()).toBe(false);
+  await installOnlineSnapshot(h, value); expect(h.session.canEditHostDraft()).toBe(true);
+  h.session.detach(); expect(h.session.canEditHostDraft()).toBe(false);
+  const m = await harness(); await joinRoom(m); await installOnlineSnapshot(m, member);
+  expect(m.session.canEditHostDraft()).toBe(false);
+});
+
 describe('Desktop Arena Room session through the real Native bridge', () => {
   const startHost = () => ArenaRoomSessionResponseSchema.parse({ ...host, snapshot: { ...host.snapshot,
     activeGeneration: null, sharedConfig: { ...host.snapshot.sharedConfig, battleMode: 'daily', combatants: [host.snapshot.sharedConfig.combatants[0]], teams: [], scenario: null, auxScenarios: [], materials: [] } } });
