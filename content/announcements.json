@@ -1,5 +1,13 @@
 [
   {
+    "id": "20261031-desktop-v011",
+    "date": "2026-10-31",
+    "title": "🖥️ 桌面版 v0.1.1：问题修复与体验优化",
+    "publisher": "MahoShojo Generator 管理组",
+    "pinned": true,
+    "content": "桌面版 v0.1.1 已正式发布，本次主要修复使用问题并改善交互体验。\n\n### 修复与优化\n\n- 修复角色库连续选卡与翻页问题，多个列表支持输入页码直接跳转。\n- 对齐竞技场叙事历史操作，支持将历史角色直接导入本地库。\n- 改善 Arena 与魔法茶会对旧版情景卡的兼容，保留原卡扩展与元数据字段。\n- 修复模型选择菜单滚动抖动，改善 Direct 生成终止时的错误说明。\n- 恢复在线房主对角色与情景的编辑，修复房间进度读取过早推进生成状态的问题。\n\n### 如何升级\n\n0.1.0 用户可在“设置 → 高级 → 应用更新”手动检查，也可从[官方下载页](https://mahoshojo.colanns.me/download)获取 Windows x64 安装包覆盖安装。升级前请保存内容、备份重要作品并结束在途操作，不要先卸载或清理应用数据。\n\n本次补丁未新增本地数据库迁移。Beta 用户首次升级仍需手动下载安装包，并遵循既有迁移提示。\n\n[完整发布说明与校验文件](https://github.com/RunoreLab/MahoShojo-Generator/releases/tag/desktop-v0.1.1) · [桌面客户端指南](https://mahoshojo.colanns.me/encyclopedia/desktop-client)"
+  },
+  {
     "id": "20261027-desktop-v010",
     "date": "2026-10-27",
     "title": "🖥️ 魔法少女生成器桌面版 v0.1.0 正式发布！",
