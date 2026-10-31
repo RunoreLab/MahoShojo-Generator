@@ -1171,6 +1171,36 @@ describe('Arena Room generation coordinator', () => {
     expect(unknown.publisher.attach).not.toHaveBeenCalled();
   });
 
+  it('准备期间反复读取 reserved generation 不挂接 publisher 或提前推进 Room running', async () => {
+    const harness = await createHarness();
+    await harness.service.start({
+      roomId: 'room-1', accountUserId: 101,
+      request: startRequest(), sourceRequest: sourceRequest(),
+    });
+    harness.finishPublisher();
+    await harness.memberships.join({ roomId: 'room-1', accountUserId: 202, displayName: 'Member' });
+    harness.createPublisher.mockClear();
+    vi.mocked(harness.generation.readOwnedProjection).mockResolvedValue({ kind: 'found', projection: {
+      generationId: 'generation-1', generationRequestId: 'request-1234',
+      status: 'reserved', markdown: '', resumeCursor: null,
+      updatedAt: '2026-08-28T00:02:00.000Z', finalAuthoritative: false,
+      resultAvailable: false, generationRecordId: null, errorCode: null,
+    } });
+    const restarted = createArenaRoomGenerationService({
+      memberships: harness.memberships, materializer: harness.materializer,
+      generation: harness.generation, createPublisher: harness.createPublisher,
+      now: () => '2026-08-28T00:02:00.000Z',
+    });
+    for (const accountUserId of [101, 202, 101]) {
+      await expect(restarted.read({ roomId: 'room-1', generationId: 'generation-1', accountUserId }))
+        .resolves.toMatchObject({ status: 'reserved', generation: { state: 'starting' } });
+    }
+    expect(harness.generation.resumeOwnedSubscription).not.toHaveBeenCalled();
+    expect(harness.createPublisher).not.toHaveBeenCalled();
+    expect(harness.generation.startFromHostRequest).toHaveBeenCalledTimes(1);
+    expect(harness.store.state?.snapshot.activeGeneration?.state).toBe('starting');
+  });
+
   it('active member 只能读取 current generation；running projection 先 reconcile Room 再只读 resume attach', async () => {
     const harness = await createHarness();
     const request = startRequest();

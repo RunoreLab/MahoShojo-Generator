@@ -126,12 +126,13 @@ const createD1 = () => {
 // core reservation exists. Releasing it resumes the original captured start.
 type Barrier = 'room-reserved-core-absent' | 'original-token-bound' | 'running-won';
 type Variant = 'default' | 'legacy-off' | 'flag-off-reconcile' | 'd1-unavailable'
+  | 'read-reserved-legacy' | 'read-reserved-gated'
   | 'preflight-rejection' | 'rejection-won' | 'reserved-cancel-retry' | 'seeded-expired'
   | 'room-missing' | 'room-ttl' | 'epoch' | 'host' | 'closed' | 'deadline' | 'malformed-deadline' | 'token' | 'intent' | 'old-lease' | 'next-lease';
 const cancelAtBarrier = async (barrier: Barrier, variant: Variant = 'default') => {
   const roomId = `starting-cancel-${barrier}-${variant}`;
   const generationRequestId = `request-${barrier}-${variant}`;
-  const denyAdmission = !['default', 'legacy-off', 'flag-off-reconcile', 'd1-unavailable', 'preflight-rejection', 'rejection-won', 'reserved-cancel-retry', 'seeded-expired'].includes(variant);
+  const denyAdmission = !['default', 'legacy-off', 'read-reserved-legacy', 'read-reserved-gated', 'flag-off-reconcile', 'd1-unavailable', 'preflight-rejection', 'rejection-won', 'reserved-cancel-retry', 'seeded-expired'].includes(variant);
   let markKeys: string[] = [];
   const actorKey = `pvp-room:${roomId}`;
   const keyPrefix = 'localstartingcancel';
@@ -242,7 +243,7 @@ const cancelAtBarrier = async (barrier: Barrier, variant: Variant = 'default') =
         if (variant === 'rejection-won') { entered.resolve(); await release.promise; }
         return result;
       } catch (error) { console.log(JSON.stringify({ kind: 'fixture-start-error', error: String(error) })); throw error; }
-    } }, startingCancelEnabled: variant !== 'legacy-off',
+    } }, startingCancelEnabled: variant !== 'legacy-off' && variant !== 'read-reserved-legacy',
   });
   const generationId = await port.deriveGenerationId({ roomId, generationRequestId });
   const start = coordinator.start({
@@ -264,6 +265,19 @@ const cancelAtBarrier = async (barrier: Barrier, variant: Variant = 'default') =
     const expectedGeneration = DesktopRoomGenerationIdentitySchema.parse(Object.fromEntries(Object.entries(persisted!.snapshot.activeGeneration!).filter(([key]) => !['state', 'startedAt', 'finishedAt'].includes(key))));
     const exactCancel = () => coordinator.cancel({ roomId, generationId, accountUserId: 101, request: { expectedRoomEpoch: host.roomEpoch }, ...(variant === 'legacy-off' ? {} : { expectedGeneration }) });
     const before = await store.readState({ generationId, actorKey });
+    if (variant === 'read-reserved-legacy' || variant === 'read-reserved-gated') {
+      // Members can read after Room reservation while the producer prepares.
+      for (let read = 0; read < 2; read += 1) {
+        await coordinator.read({ roomId, generationId, accountUserId: 101 });
+        assert.equal((await roomStore.load(roomId))?.snapshot.activeGeneration?.state, 'starting');
+        assert.equal(executions, 0);
+      }
+      release.resolve();
+      const result = await deadline(start, 'original producer after concurrent reserved reads');
+      assert.ok('value' in result);
+      assert.equal(executions, 1);
+      return;
+    }
     if (variant === 'rejection-won') {
       assert.equal(before?.terminal?.status, 'failed');
       assert.equal(before?.roomAdmission?.generationRequestId, generationRequestId);
@@ -413,6 +427,10 @@ try {
   assert.equal((await client.configGet('save')).save, '');
   assert.equal((await client.configGet('appendonly')).appendonly, 'no');
   console.log(JSON.stringify({ kind: 'environment', redisVersion: /^redis_version:(.+)$/mu.exec(info)?.[1]?.trim(), transport: 'private-loopback-tcp', persistence: 'disabled', productionData: false }));
+  for (const variant of ['read-reserved-legacy', 'read-reserved-gated'] as const) {
+    await cancelAtBarrier('original-token-bound', variant);
+    console.log(JSON.stringify({ kind: 'pass', variant }));
+  }
   for (const barrier of ['room-reserved-core-absent', 'original-token-bound', 'running-won'] as const) {
     await cancelAtBarrier(barrier);
     console.log(JSON.stringify({ kind: 'pass', barrier }));

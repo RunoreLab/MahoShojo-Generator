@@ -659,8 +659,10 @@ export const createArenaRoomGenerationService = (
     if (
       attach
       && !publisher
-      && (result.projection.status === 'reserved'
-        || result.projection.status === 'running'
+      // Attaching a publisher mirrors Room to running. A reserved producer
+      // still needs its starting checkpoint for atomic execution admission.
+      // Reads during prompt preparation must not advance that checkpoint.
+      && (result.projection.status === 'running'
         || result.projection.status === 'finalizing')
     ) {
       const resumed = await options.generation.resumeOwnedSubscription({
