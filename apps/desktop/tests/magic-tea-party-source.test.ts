@@ -62,6 +62,33 @@ describe('Desktop tea local JSON card sources', () => {
     expect(scenarios.every(item => item.source === 'local' && !item.isNative && !item.dataCardId && !item.signature)).toBe(true);
   });
 
+  it('consumes historical scenario field shapes without applying the new-card editor schema', () => {
+    const structured = {
+      title: '旧雾港', elements: { scene: '港口的夜晚', events: ['钟声', { description: '启航' }], roles: { captain: '船长' } },
+      metadata: { author: '作者', signature: 'unverified' }, _battle_story: { futureVersion: true, chapters: '旧格式' },
+    };
+    const generalScenario = {
+      templateId: '通用情景', name: '旧故事', content: '完整情景',
+      _battle_story: { futureVersion: true, chapters: '旧格式' },
+    };
+    const scenarios = parseDesktopTeaScenarios(JSON.stringify([structured, generalScenario]), ids());
+    expect(scenarios.map(item => item.card)).toEqual([structured, { ...generalScenario, title: generalScenario.name }]);
+    expect(scenarios.map(item => item.title)).toEqual(['旧雾港', '旧故事']);
+    expect(scenarios.every(item => !item.isNative && !item.signature && !item.dataCardId)).toBe(true);
+  });
+
+  it.each([
+    { title: '缺少结构或正文' },
+    { title: '非法结构', elements: '场景' },
+    { templateId: '通用情景', title: '非法正文', content: [] },
+    { title: '  ', elements: {} },
+  ])('preflights invalid scenarios after historical cards without allocating any identities: %j', invalid => {
+    const createId = ids();
+    const historical = { title: '旧情景', elements: { events: ['事件'] } };
+    expect(() => parseDesktopTeaScenarios(JSON.stringify([historical, invalid]), createId)).toThrow();
+    expect(createId).not.toHaveBeenCalled();
+  });
+
   it('uses LocalCardRecordV1.data as payload and does not guess document envelopes', () => {
     const record = { schemaVersion: 1, storageLocation: 'local', cardType: 'character', id: 'local-old', data: general, cloudRef: { cardId: 'online' } };
     expect(parseDesktopTeaRoles(JSON.stringify(record.data), ids())[0].card).toEqual(general);

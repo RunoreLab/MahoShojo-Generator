@@ -1,6 +1,6 @@
 import { ARENA_CANONICAL_CAPABILITIES, ARENA_CANONICAL_RESOURCE_LIMITS } from '@mahoshojo/contracts/arena-capabilities';
 import { SafeJsonValueSchema } from '@mahoshojo/contracts/json-value';
-import { GeneralScenarioSchema, ScenarioSchema } from '@mahoshojo/domain/data-card-schemas';
+import { ArenaScenarioSchema } from '@mahoshojo/domain/arena-scenario';
 import { PRESET_LIST } from '@mahoshojo/domain/presets';
 import { normalizeScenarioPresetFilename } from '@mahoshojo/domain/scenario-presets';
 import type { ArenaDraft } from './session';
@@ -28,8 +28,7 @@ export const fetchArenaPreset = async (kind: 'character' | 'scenario', filename:
 };
 export const parseArenaScenario = (text: string): Record<string, unknown> => {
   const value = parseArenaJson(text);
-  const scenario = ScenarioSchema.safeParse(value); if (scenario.success) return scenario.data;
-  const general = GeneralScenarioSchema.safeParse(value); if (general.success) return general.data;
+  const scenario = ArenaScenarioSchema.safeParse(value); if (scenario.success) return scenario.data;
   throw new Error('情景 JSON 格式不受支持。');
 };
 export const addArenaCombatants = (draft: ArenaDraft, combatants: ArenaDraft['combatants']): ArenaDraft => {

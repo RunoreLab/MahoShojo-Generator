@@ -2,7 +2,7 @@ import { SafeJsonValueSchema } from '@mahoshojo/contracts/json-value';
 import { MAX_DESKTOP_LOCAL_CARD_DOCUMENT_BYTES } from '@mahoshojo/contracts/desktop-ipc';
 import { exceedsUtf8ByteLimit } from '@mahoshojo/domain/data-card-size';
 import { inferDataCardTemplate, type DataCardTemplate } from '@mahoshojo/domain/data-cards';
-import { CanshouSchema, MagicalGirlSchema, ScenarioSchema, parseDataCardByTemplate } from '@mahoshojo/domain/data-card-schemas';
+import { CanshouSchema, MagicalGirlSchema, parseDataCardByTemplate } from '@mahoshojo/domain/data-card-schemas';
 import { convertTavernToGeneralCard, isLikelyTavernCard, type TavernCardCandidate } from '@mahoshojo/domain/tavern-card';
 import type { MagicTeaPartyRole, MagicTeaPartyScenario } from '@mahoshojo/domain/magic-tea-party/types';
 
@@ -39,15 +39,13 @@ const parseCards = (text: string): Card[] => {
 const knownFields = {
   'magical-girl': Object.keys(MagicalGirlSchema.innerType().shape),
   canshou: Object.keys(CanshouSchema.innerType().shape),
-  scenario: Object.keys(ScenarioSchema.innerType().shape),
 };
 
-const validatedCard = (original: Card, template: DataCardTemplate): Card => {
+const validatedCard = (original: Card, template: Exclude<DataCardTemplate, 'scenario' | 'general-scenario'>): Card => {
   // Validate the shared known schema, but keep the original nested objects instead of Zod's
   // stripping/defaulted output. Unknown extensions are data, not new runtime options.
   const card = { ...original };
-  if (template === 'general-scenario' && typeof card.title !== 'string' && typeof card.name === 'string') card.title = card.name;
-  const keys = template === 'magical-girl' || template === 'canshou' || template === 'scenario' ? knownFields[template] : null;
+  const keys = template === 'magical-girl' || template === 'canshou' ? knownFields[template] : null;
   const validation = keys ? Object.fromEntries(keys.filter(key => Object.hasOwn(card, key)).map(key => [key, card[key]])) : card;
   try { parseDataCardByTemplate(template, validation); } catch { return invalidCard(); }
   return card;
@@ -91,7 +89,10 @@ export const parseDesktopTeaScenarios = (text: string, createId: () => string): 
   const prepared = parseCards(text).map(original => {
     const template = inferDataCardTemplate({ ...original });
     if (template !== 'scenario' && template !== 'general-scenario') return error('未识别到情景卡，请使用结构化情景或通用情景 JSON。');
-    const card = validatedCard(original, template);
+    // Tea consumes the same identifiable scenario payloads as Web. The editor schema
+    // describes new structured cards, not every historical shape used as prompt data.
+    const card = { ...original };
+    if (template === 'general-scenario' && typeof card.title !== 'string' && typeof card.name === 'string') card.title = card.name;
     const title = String(card.title).trim();
     if (!title) return invalidCard();
     return { title, ...(typeof card.templateId === 'string' ? { templateId: card.templateId } : {}), source: 'local' as const, isNative: false, card };

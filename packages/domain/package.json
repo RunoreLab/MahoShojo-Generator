@@ -257,6 +257,7 @@
     "./arena-history-id": "./src/arena-history-id.ts",
     "./arena-post-battle-candidates": "./src/arena-post-battle-candidates.ts",
     "./story-length": "./src/story-length.ts",
+    "./arena-scenario": "./src/arena-scenario.ts",
     "./arena-file-parser": "./src/arena-file-parser.ts",
     "./arena-character-validator": "./src/arena-character-validator.ts",
     "./arena-materials": "./src/arena-materials.ts",
