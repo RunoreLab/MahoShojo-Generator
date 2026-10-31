@@ -1,6 +1,6 @@
 /** Fixed public target for the currently supported stable Desktop release. */
 export const DESKTOP_RELEASE = {
-  version: '0.1.0',
+  version: '0.1.1',
   repository: 'RunoreLab/MahoShojo-Generator',
 } as const;
 

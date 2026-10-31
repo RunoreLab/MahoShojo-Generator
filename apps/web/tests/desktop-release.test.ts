@@ -8,10 +8,10 @@ const { withEdgeCacheMock } = vi.hoisted(() => ({ withEdgeCacheMock: vi.fn() }))
 
 vi.mock('../lib/edge-cache', () => ({ withEdgeCache: withEdgeCacheMock }));
 
-const baseUrl = `https://github.com/${DESKTOP_RELEASE.repository}/releases/download/desktop-v0.1.0`;
-const installer = 'MahoShojo-Generator_0.1.0_x64-setup.exe';
+const baseUrl = `https://github.com/${DESKTOP_RELEASE.repository}/releases/download/desktop-v0.1.1`;
+const installer = 'MahoShojo-Generator_0.1.1_x64-setup.exe';
 const completeRelease = () => ({
-  tag_name: 'desktop-v0.1.0', draft: false, prerelease: false,
+  tag_name: 'desktop-v0.1.1', draft: false, prerelease: false,
   assets: [installer, `${installer}.sig`, 'SHA256SUMS.txt', 'latest.json'].map((name) => ({
     name, state: 'uploaded', size: 100, browser_download_url: `${baseUrl}/${name}`,
   })),
@@ -34,13 +34,13 @@ beforeEach(() => {
 describe('manual GitHub release publication', () => {
   test('opens downloads only for the complete published stable release', () => {
     expect(parsePublishedDesktopRelease(completeRelease())).toEqual({
-      status: 'published', version: '0.1.0', installerUrl: `${baseUrl}/${installer}`,
+      status: 'published', version: '0.1.1', installerUrl: `${baseUrl}/${installer}`,
       sha256Url: `${baseUrl}/SHA256SUMS.txt`, manifestUrl: `${baseUrl}/latest.json`,
     });
   });
 
   test.each([
-    { draft: true }, { prerelease: true }, { tag_name: 'desktop-v0.1.0-rc.1' },
+    { draft: true }, { prerelease: true }, { tag_name: 'desktop-v0.1.1-rc.1' },
     { tag_name: 'desktop-v0.0.9' }, { assets: [] },
   ])('does not publish incomplete or non-final release: %j', (override) => {
     expect(parsePublishedDesktopRelease({ ...completeRelease(), ...override })).toBeNull();
@@ -68,7 +68,7 @@ describe('manual GitHub release publication', () => {
     expect(cacheRequest).toBeInstanceOf(Request);
     expect(cacheRequest.headers.get('cookie')).toBeNull();
     expect(cacheRequest.headers.get('authorization')).toBeNull();
-    expect(cacheOptions).toEqual({ key: 'https://mahoshojo.colanns.me/_edge-cache/desktop-release/0.1.0', ttlSeconds: 300, awaitCacheWrite: true });
+    expect(cacheOptions).toEqual({ key: 'https://mahoshojo.colanns.me/_edge-cache/desktop-release/0.1.1', ttlSeconds: 300, awaitCacheWrite: true });
   });
 
   test('an unpublished release means no update, without an installer link', async () => {
