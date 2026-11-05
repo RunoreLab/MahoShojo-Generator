@@ -91,3 +91,5 @@ export function ImageGenerationResultView({ imageUrl, seed, download }: ImageGen
 }
 
 export { NovelAISettingsFields, type NovelAISettingsFieldsProps } from './NovelAISettingsFields';
+
+export { ModelScopeSettingsFields, type ModelScopeSettingsFieldsProps } from './ModelScopeSettingsFields';

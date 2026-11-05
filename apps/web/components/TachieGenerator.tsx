@@ -4,12 +4,11 @@ import { useState, useEffect, useRef } from "react";
 import {
   DEFAULT_MODELSCOPE_MODEL,
   DEFAULT_MODELSCOPE_SIZE,
-  MODELSCOPE_SIZE_OPTIONS,
   isModelScopePresetSize,
   type ModelScopePresetSize,
 } from '@mahoshojo/ai-core/modelscope';
 import { generateTachieWithProgress, type TachieGenerationRequest, type TachieGenerationResult, type TachieSource } from "@/lib/tachie/manager";
-import { ImageGenerationFeedback, ImageGenerationResultView } from '@mahoshojo/ui-web/image-generation';
+import { ImageGenerationFeedback, ImageGenerationResultView, ModelScopeSettingsFields } from '@mahoshojo/ui-web/image-generation';
 import { normalizeModelScopeToken } from "@/lib/tachie/modelscope/error";
 import { DEFAULT_NOVELAI_SETTINGS, normalizeNovelAIToken } from '@/lib/tachie/novelai';
 import { NovelAISettingsFields } from '@/components/tachie/NovelAISettings';
@@ -361,24 +360,7 @@ export default function TachieGenerator({
               </div>
             </div>
 
-            <div className="input-group">
-              <label htmlFor="modelscopeSize" className="input-label">
-                图片尺寸
-              </label>
-              <select
-                id="modelscopeSize"
-                value={modelscopeSize}
-                onChange={(e) => setModelscopeSize(e.target.value as ModelScopePresetSize)}
-                className="input-field"
-                disabled={isGenerating}
-              >
-                {MODELSCOPE_SIZE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <ModelScopeSettingsFields size={modelscopeSize} onSizeChange={setModelscopeSize} disabled={isGenerating} />
           </>
         )}
       </div>

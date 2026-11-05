@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { DEFAULT_MODELSCOPE_SIZE, DEFAULT_MODELSCOPE_MODEL, type ModelScopePresetSize } from '@mahoshojo/ai-core/modelscope';
 import { DEFAULT_NOVELAI_SETTINGS } from '@mahoshojo/ai-core/novelai';
 import { Download, ExternalLink, RefreshCw, RotateCw, X } from 'lucide-react';
 
@@ -18,7 +19,7 @@ import { AdvancedArenaPageView } from '../arena/AdvancedArenaPageView';
 import { BattleLitePageView } from '../arena/BattleLitePageView';
 import { GenerationModeSwitcher, type GenerationMode } from '../details-controls/GenerationModeSwitcher';
 import { generationActionClassNames } from '../generation-actions';
-import { ImageGenerationFeedback, ImageGenerationResultView, NovelAISettingsFields } from '../image-generation';
+import { ImageGenerationFeedback, ImageGenerationResultView, NovelAISettingsFields, ModelScopeSettingsFields } from '../image-generation';
 import type { HomeAssetSource } from '../home/feature-catalog';
 import { BaseModal } from '../modal';
 import { PageJump } from '../pagination';
@@ -287,6 +288,7 @@ function FormsSection() {
           helper="连接中断时只找回同一次生成的内容；停止任务需要服务器确认。" />
       </div>
       <NovelAISettingsSample />
+      <ModelScopeSettingsSample />
       <AiSelectScrollSample />
       <div className="flex flex-col gap-2 border-t border-(--app-border) pt-4">
         <h3 className="text-sm font-medium text-(--app-text-muted)">battle-lite 共享类</h3>
@@ -324,6 +326,16 @@ function AiSelectScrollSample() {
       <RefreshCw className="h-4 w-4" aria-hidden="true" />{updating ? '停止模拟更新' : '模拟生成更新'}（{progress}）
     </button>
   </section>;
+}
+
+function ModelScopeSettingsSample() {
+  const [size, setSize] = useState<ModelScopePresetSize>(DEFAULT_MODELSCOPE_SIZE);
+  const [model, setModel] = useState(DEFAULT_MODELSCOPE_MODEL);
+  return <div className="space-y-4" role="group" aria-label="ModelScope 非秘密参数样板">
+    <ModelScopeSettingsFields size={size} onSizeChange={setSize} />
+    <ModelScopeSettingsFields compact size={size} onSizeChange={setSize} model={{ value: model, onChange: setModel }} />
+    <ModelScopeSettingsFields compact disabled size={size} onSizeChange={setSize} model={{ value: model, onChange: setModel }} />
+  </div>;
 }
 
 function NovelAISettingsSample() {

@@ -87,3 +87,10 @@ describe('VIS-SHOW-001 两端共源消费且不进生产面', () => {
     expect(manifest).toContain('./src/showroom/index.ts');
   });
 });
+
+it('ModelScope 样板回用真实生产字段且覆盖工坊与禁用态', () => {
+  expect(VIEW_SRC).toContain('<ModelScopeSettingsSample />');
+  expect(VIEW_SRC).toContain('<ModelScopeSettingsFields size=');
+  expect(VIEW_SRC).toContain('<ModelScopeSettingsFields compact size=');
+  expect(VIEW_SRC).toContain('<ModelScopeSettingsFields compact disabled size=');
+});

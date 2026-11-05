@@ -135,3 +135,12 @@ it('导入读取期间启动的任务在导入提交时失效，迟到图片不�
   await act(async () => finishImage(Response.json({ taskStatus: 'SUCCEED', outputImages: ['https://example.test/stale-import.png'] })));
   expect(container.querySelector('img[src="https://example.test/stale-import.png"]')).toBeNull();
 });
+
+it('工坊生图参数、令牌与提示词标签关联到各自控件', () => {
+  for (const name of ['ModelScope API 令牌', '图片尺寸', '模型（可选）', '提示词']) {
+    const label = [...container.querySelectorAll('label')].find(node => node.textContent?.trim().startsWith(name))!;
+    expect(label, name).toBeDefined();
+    expect(label.control, name).not.toBeNull();
+    expect(label.control?.id).toBe(label.htmlFor);
+  }
+});

@@ -1,16 +1,15 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useId } from 'react';
 import Link from 'next/link';
 import {
   DEFAULT_MODELSCOPE_MODEL,
   DEFAULT_MODELSCOPE_SIZE,
-  MODELSCOPE_SIZE_OPTIONS,
   isModelScopePresetSize,
   type ModelScopePresetSize,
 } from '@mahoshojo/ai-core/modelscope';
 import { CardForgeThemeEditor, CardForgePageView, CardForgeWorkspace, CardForgeSourceFields } from '@mahoshojo/ui-web/card-forge';
-import { ImageGenerationFeedback } from '@mahoshojo/ui-web/image-generation';
+import { ImageGenerationFeedback, ModelScopeSettingsFields } from '@mahoshojo/ui-web/image-generation';
 import { generateTachieWithProgress, type TachieGenerationRequest, type TachieGenerationResult } from '@/lib/tachie/manager';
 import { useGeneratedResultAutoScroll } from '@mahoshojo/ui-web/details-controls';
 import { useSearchParams } from 'next/navigation';
@@ -175,6 +174,7 @@ export function CardForgePage() {
 
   const [userProviderConfig, setUserProviderConfig] = useState<UserAIProviderConfig | null>(null);
 
+  const tachieFieldsId = useId();
   const [modelscopeToken, setModelscopeToken] = useState('');
   const [modelscopeModel, setModelscopeModel] = useState(DEFAULT_MODELSCOPE_MODEL);
   const [modelscopeSize, setModelscopeSize] = useState<ModelScopePresetSize>(DEFAULT_MODELSCOPE_SIZE);
@@ -671,7 +671,7 @@ export function CardForgePage() {
                 <div className="space-y-3">
                   {/* ModelScope 配置 */}
                   <div className="space-y-2">
-                    <label className="input-label text-xs">
+                    <label htmlFor={`${tachieFieldsId}-token`} className="input-label text-xs">
                       ModelScope API 令牌
                       <a
                         href="https://modelscope.cn/my/myaccesstoken"
@@ -683,6 +683,7 @@ export function CardForgePage() {
                       </a>
                     </label>
                     <input
+                      id={`${tachieFieldsId}-token`}
                       type="password"
                       value={modelscopeToken}
                       onChange={(e) => setModelscopeToken(e.target.value)}
@@ -692,32 +693,8 @@ export function CardForgePage() {
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="space-y-2">
-                      <label className="input-label text-xs">图片尺寸</label>
-                      <select
-                        value={modelscopeSize}
-                        onChange={(e) => setModelscopeSize(e.target.value as ModelScopePresetSize)}
-                        className="input-field w-full text-sm"
-                      >
-                        {MODELSCOPE_SIZE_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="input-label text-xs">模型（可选）</label>
-                      <input
-                        type="text"
-                        value={modelscopeModel}
-                        onChange={(e) => setModelscopeModel(e.target.value)}
-                        placeholder={DEFAULT_MODELSCOPE_MODEL}
-                        className="input-field w-full text-sm font-mono"
-                      />
-                    </div>
-                  </div>
+                  <ModelScopeSettingsFields compact size={modelscopeSize} onSizeChange={setModelscopeSize}
+                    model={{ value: modelscopeModel, onChange: setModelscopeModel }} />
 
                   <div className="flex items-center gap-3">
                     <label className="flex items-center gap-1.5 text-xs text-[var(--app-text-muted)] cursor-pointer">
@@ -743,8 +720,9 @@ export function CardForgePage() {
                   </div>
 
                   <div>
-                    <label className="input-label text-xs">提示词</label>
+                    <label htmlFor={`${tachieFieldsId}-prompt`} className="input-label text-xs">提示词</label>
                     <textarea
+                      id={`${tachieFieldsId}-prompt`}
                       value={tachiePrompt}
                       onChange={(e) => setTachiePrompt(e.target.value)}
                       placeholder="输入角色外观描述，用于生成立绘插图"

@@ -110,7 +110,7 @@ it.each([
   }));
   vi.stubGlobal('fetch', fetchMock);
   await act(async () => root.render(<TachieGenerator prompt="角色外观" />));
-  const size = container.querySelector<HTMLSelectElement>('#modelscopeSize')!;
+  const size = Array.from(container.querySelectorAll('label')).find(label => label.textContent === '图片尺寸')!.control as HTMLSelectElement;
   expect(size.value).toBe(expectedSize);
   expect([...size.options].map(option => option.text)).toEqual([
     '16:9 竖屏（928×1664）', '16:9 横屏（1664×928）', '正方形（1328×1328）',
