@@ -17,6 +17,10 @@
       "glm-5.1",
       "deepseek-v4-flash-0731",
       "minimax-m3.1-flash",
+      "step-3.5-flash",
+      "step-3.5-flash-2603",
+      "step-3.7-flash",
+      "step-5",
       "gemini-3.7-flash",
       "gemini-3.5-flash-lite"
     ]

@@ -431,6 +431,26 @@ export const SYSTEM_PROVIDER_OPTION: AIProviderOption = Object.freeze({
             description: '较低优先级备选，适合尝试不同的生成风格。由 Kouri AI 热情赞助。'
         },
         {
+            value: 'step-3.5-flash',
+            label: 'Step 3.5 Flash',
+            description: '阶跃星辰模型，据说比较擅长遵循角色设定、复杂提示词和篇幅约束。由 Kouri AI 热情赞助。'
+        },
+        {
+            value: 'step-3.5-flash-2603',
+            label: 'Step 3.5 Flash 2603',
+            description: '保留 2603 版本，供偏好指定版本的生成场景选择。由 Kouri AI 热情赞助。'
+        },
+        {
+            value: 'step-3.7-flash',
+            label: 'Step 3.7 Flash',
+            description: '阶跃星辰 Flash 系列模型，在多模态理解等方面有升级，但据说写作退步了。由 Kouri AI 热情赞助。'
+        },
+        {
+            value: 'step-5',
+            label: 'Step 5',
+            description: '阶跃星辰 Step 5，通用智能和复杂情景能力强大，创意写作能力优秀。由 Kouri AI 热情赞助。'
+        },
+        {
             value: 'gemini-3.7-flash',
             label: 'Gemini 3.7 Flash',
             description: 'Google 的新模型，据用户评测说很喜欢一惊一乍，还挺中二的。'
