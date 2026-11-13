@@ -82,7 +82,7 @@ export interface CardLibraryModalProps {
   allowCardDetails?: boolean;
 }
 
-export type BattleDataTab = 'my' | 'public' | 'recommended' | 'favorites' | 'local';
+export type BattleDataTab = 'my' | 'public' | 'favorites' | 'local';
 
 /**
  * 「最近一次已提交」值的镜像只能写于提交之后。layout effect 在 commit 内同步
@@ -377,17 +377,7 @@ export function CardLibraryModal({
     };
   }, [isOpen, modalLayerId]);
 
-  const buildPublicFilters = useCallback((source: Filters, tab: BattleDataTab) => {
-    if (tab === 'recommended') {
-      return { ...source, recommendedOnly: true };
-    }
-    if (source.recommendedOnly) {
-      return { ...source, recommendedOnly: false };
-    }
-    return source;
-  }, []);
-
-  const publicFilters = useMemo(() => buildPublicFilters(activeFilters, activeTab), [activeFilters, activeTab, buildPublicFilters]);
+  const publicFilters = activeFilters;
   // 公开库请求键覆盖 page/search/filter/tab/UUID 语义；任一变化都让旧结果先失效。
   const buildPublicRequestKey = useCallback((
     kind: 'list' | 'id',
@@ -432,7 +422,6 @@ export function CardLibraryModal({
         ...(accountTabsVisible ? (['my'] as const) : []),
         'local' as const,
         'public' as const,
-        'recommended' as const,
         ...(accountTabsVisible ? (['favorites'] as const) : []),
       ] as const);
 
@@ -447,7 +436,7 @@ export function CardLibraryModal({
     return out.length > 0 ? out : ['public'];
   }, [visibleTabs, accountTabsVisible]);
 
-  const isPublicTab = activeTab === 'public' || activeTab === 'recommended';
+  const isPublicTab = activeTab === 'public';
   // 私有/收藏摘要只继承这些 Tab 上实际可见且有语义的条件。
   // 公开库高级筛选（author/数值/roleType/native*/recommendedOnly）只随公开列表请求发送，
   // 避免切换 Tab 后界面已隐藏的筛选继续污染 my/favorites 查询（例如 owner=Alice 且 author=Bob 恒为空）。
@@ -2034,9 +2023,6 @@ export function CardLibraryModal({
   if (effectiveTabs.includes('public')) {
     tabItems.push({ value: 'public', label: `公开${typeLabel}` });
   }
-  if (effectiveTabs.includes('recommended')) {
-    tabItems.push({ value: 'recommended', label: '管理员推荐' });
-  }
   if (effectiveTabs.includes('favorites')) {
     tabItems.push({ value: 'favorites', label: '我的收藏', count: favoritesPage.hasLoaded ? favoritesPage.total : '—' });
   }
@@ -2054,7 +2040,7 @@ export function CardLibraryModal({
       if (next === 'my') loadUserDataCards();
       else if (next === 'local') localCards.reload();
       else if (next === 'favorites') favoritesPage.reload();
-      else if (next === 'public' || next === 'recommended') {
+      else if (next === 'public') {
         if (publicViewMode === 'cache') reloadCachedCurrentQuery(1);
         else reloadPublicCurrentQuery(1);
       }
@@ -2143,6 +2129,7 @@ export function CardLibraryModal({
               {isPublicTab && (
                 <button
                   onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                  aria-expanded={showAdvancedFilters}
                   className={`flex items-center gap-1 px-3 py-2 text-sm rounded-lg transition-colors ${isFilterActive ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
                 >
                   <Filter className="w-4 h-4" /> 高级筛选 <ChevronDown className={`w-4 h-4 transition-transform ${showAdvancedFilters ? 'rotate-180' : ''}`} />
@@ -2333,6 +2320,16 @@ export function CardLibraryModal({
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-4">
+                  <label className="inline-flex items-center gap-2 text-xs text-(--app-text)">
+                    <input
+                      type="checkbox"
+                      name="recommendedOnly"
+                      aria-label="仅看管理员推荐"
+                      checked={filters.recommendedOnly}
+                      onChange={handleFilterChange}
+                    />
+                    <span>仅看管理员推荐</span>
+                  </label>
                   <label className="inline-flex items-center gap-2 text-xs text-gray-700">
                     <input
                       type="checkbox"

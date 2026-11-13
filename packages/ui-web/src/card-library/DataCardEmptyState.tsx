@@ -8,7 +8,7 @@ import type { ReactNode } from 'react';
  * 唯一的入口（详情弹窗「存到本地库」）在他看不到的地方。这里按页签区分，
  * 并让每个空状态都明确告诉用户下一步能做什么。
  */
-export type DataCardEmptyStateTab = 'my' | 'public' | 'recommended' | 'favorites' | 'local';
+export type DataCardEmptyStateTab = 'my' | 'public' | 'favorites' | 'local';
 
 /**
  * 「这一页签本来就没有」和「搜索/筛选没命中」必须分开说。
@@ -176,9 +176,6 @@ export function DataCardEmptyState({
     }
     if (tab === 'favorites') {
       return { title: '还没有收藏', hint: '在其它页签点开「收藏」就能把卡片收进来，收藏同样保存在云端账号里。' };
-    }
-    if (tab === 'recommended') {
-      return { title: '暂时没有推荐内容', hint: '可以先按名称或标签搜索，或到公开库看看。' };
     }
     return {
       title: `公开库里还没有公开的${typeLabel}数据卡`,

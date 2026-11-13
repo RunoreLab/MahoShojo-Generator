@@ -77,7 +77,7 @@ describe('数据卡页签的 ARIA 与窄屏承载', () => {
 
     expect(rail().getAttribute('aria-label')).toBe('数据卡来源');
     expect(rail().getAttribute('aria-orientation')).toBe('horizontal');
-    expect(document.body.querySelectorAll('[role="tab"]').length).toBe(3);
+    expect(document.body.querySelectorAll('[role="tab"]').length).toBe(2);
     expect(tab('public').getAttribute('aria-selected')).toBe('true');
     expect(tab('public').getAttribute('aria-controls')).toBe('battle-data-source-panel-public');
     expect(tab('local').getAttribute('aria-controls')).toBe('battle-data-source-panel-local');
@@ -107,7 +107,6 @@ describe('数据卡页签的 ARIA 与窄屏承载', () => {
     expect([...document.body.querySelectorAll('[role="tab"]')].map((node) => node.textContent)).toEqual([
       '本地库 (—)',
       '公开角色',
-      '管理员推荐',
     ]);
     const counts = document.body.querySelectorAll('[role="tab"] .tabular-nums');
     expect([...counts].map((node) => node.textContent)).toEqual([' (—)']);
@@ -128,25 +127,23 @@ describe('数据卡页签的 ARIA 与窄屏承载', () => {
   });
 
   it('方向键在页签间移动并即时选中，首尾硬停而不是无限循环', async () => {
-    await render();
+    await render({ initialTab: 'local' });
 
     await press('ArrowRight');
-    expect(tab('recommended').getAttribute('aria-selected')).toBe('true');
-    expect(panel().id).toBe('battle-data-source-panel-recommended');
-    expect(document.activeElement).toBe(tab('recommended'));
+    expect(tab('public').getAttribute('aria-selected')).toBe('true');
+    expect(panel().id).toBe('battle-data-source-panel-public');
+    expect(document.activeElement).toBe(tab('public'));
 
-    // Material 明确不建议让可横向滚动的 tab 集无限循环。
     await press('ArrowRight');
-    expect(tab('recommended').getAttribute('aria-selected')).toBe('true');
+    expect(tab('public').getAttribute('aria-selected')).toBe('true');
 
-    await press('ArrowLeft');
     await press('ArrowLeft');
     expect(tab('local').getAttribute('aria-selected')).toBe('true');
     await press('ArrowLeft');
     expect(tab('local').getAttribute('aria-selected')).toBe('true');
 
     await press('End');
-    expect(tab('recommended').getAttribute('aria-selected')).toBe('true');
+    expect(tab('public').getAttribute('aria-selected')).toBe('true');
     await press('Home');
     expect(tab('local').getAttribute('aria-selected')).toBe('true');
   });
@@ -170,11 +167,11 @@ describe('数据卡页签的 ARIA 与窄屏承载', () => {
     expect((fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.length).toBeGreaterThan(before);
   });
 
-  it('initialTab 指定的页签即使在 rail 末端也是选中态', async () => {
-    await render({ initialTab: 'recommended' });
+  it('initialTab 指定的公开来源保持选中态', async () => {
+    await render({ initialTab: 'public' });
 
-    expect(tab('recommended').getAttribute('aria-selected')).toBe('true');
-    expect(panel().id).toBe('battle-data-source-panel-recommended');
+    expect(tab('public').getAttribute('aria-selected')).toBe('true');
+    expect(panel().id).toBe('battle-data-source-panel-public');
   });
 
   it('页签行 sticky 留在滚动容器内，往下翻列表时仍能切页签', async () => {

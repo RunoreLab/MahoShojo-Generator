@@ -126,6 +126,7 @@ it('公开库高级筛选不随 Tab 泄漏进我的卡/收藏摘要查询', asyn
   };
   await clickButton((text) => text === '公开角色');
   await clickButton((text) => text.includes('高级筛选'));
+  const beforeDraftChanges = fetchMock.mock.calls.length;
   const authorInput = document.querySelector<HTMLInputElement>('input[name="author"]');
   expect(authorInput).not.toBeNull();
   const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
@@ -133,8 +134,19 @@ it('公开库高级筛选不随 Tab 泄漏进我的卡/收藏摘要查询', asyn
     setValue?.call(authorInput, 'Bob');
     authorInput!.dispatchEvent(new Event('input', { bubbles: true }));
   });
+  const recommendedOnly = document.querySelector<HTMLInputElement>('input[name="recommendedOnly"]');
+  expect(recommendedOnly).not.toBeNull();
+  await act(async () => recommendedOnly!.click());
+  expect(fetchMock.mock.calls).toHaveLength(beforeDraftChanges);
   await clickButton((text) => text === '应用筛选');
-  expect(fetchMock.mock.calls.some((call) => String(call[0]).includes('author=Bob'))).toBe(true);
+  expect(fetchMock.mock.calls.some((call) => String(call[0]).includes('author=Bob') && String(call[0]).includes('recommendedOnly=1'))).toBe(true);
+  await clickButton((text) => text === '重置');
+  expect(document.querySelector<HTMLInputElement>('input[name="author"]')?.value).toBe('');
+  expect(document.querySelector<HTMLInputElement>('input[name="recommendedOnly"]')?.checked).toBe(false);
+  expect(fetchMock.mock.calls.at(-1)?.[0]).not.toMatch(/author=Bob|recommendedOnly=1/);
+  await act(async () => document.querySelector<HTMLInputElement>('input[name="recommendedOnly"]')!.click());
+  await clickButton((text) => text === '应用筛选');
+  expect(fetchMock.mock.calls.at(-1)?.[0]).toContain('recommendedOnly=1');
   await clickButton((text) => text.startsWith('我的角色 ('));
   expect([...document.querySelectorAll('button')].some((b) => typeof b.textContent === 'string' && b.textContent.includes('高级筛选'))).toBe(false);
   const myQueries = get.mock.calls.filter((call) => call[0] === 'my').map((call) => call[1] as Record<string, unknown>);
@@ -146,6 +158,13 @@ it('公开库高级筛选不随 Tab 泄漏进我的卡/收藏摘要查询', asyn
     }
   }
   expect(myQueries.at(-1)).toMatchObject({ sortBy: 'created_at', tagMatch: 'any' });
+  await clickButton((text) => text.includes('我的收藏'));
+  const favoriteQueries = get.mock.calls.filter((call) => call[0] === 'favorites').map((call) => call[1] as Record<string, unknown>);
+  expect(favoriteQueries.length).toBeGreaterThan(0);
+  for (const query of favoriteQueries) expect(query).not.toHaveProperty('recommendedOnly');
+  await clickButton((text) => text === '公开角色');
+  expect(document.querySelector<HTMLInputElement>('input[name="recommendedOnly"]')?.checked).toBe(true);
+  expect(fetchMock.mock.calls.at(-1)?.[0]).toContain('recommendedOnly=1');
 });
 
 it('同一查询刷新失败保留旧数据；翻页请求失败不得展示上一页结果', async () => {
@@ -257,7 +276,7 @@ it('公开库搜索 A 成功后搜索 B 失败，不把 A 的结果留在 B 的�
   expect(document.body.textContent).not.toContain('当前显示上次成功结果');
 });
 
-it('公开库切换到管理员推荐失败，不把公开库结果留在推荐结果区', async () => {
+it('公开库应用管理员推荐筛选失败，不把公开结果留在筛选结果区', async () => {
   const publicCardA = { ...card, id: 'public-a', name: '公开甲卡', is_public: 1 };
   vi.stubGlobal('fetch', makePublicBatchFetch((url) => {
     if (url.includes('recommendedOnly=1')) return new Response(null, { status: 500 });
@@ -267,9 +286,16 @@ it('公开库切换到管理员推荐失败，不把公开库结果留在推荐�
   await flushAsync();
   await flushAsync();
   expect(document.body.textContent).toContain('公开甲卡');
-  const recommendedTab = [...document.querySelectorAll('button')].find((b) => b.textContent === '管理员推荐');
-  expect(recommendedTab).toBeDefined();
-  await act(async () => recommendedTab!.click());
+  const advancedFilters = findButton((text) => text.includes('高级筛选'));
+  expect(advancedFilters).toBeDefined();
+  await act(async () => advancedFilters!.click());
+  const recommendedOnly = document.querySelector<HTMLInputElement>('input[name="recommendedOnly"]');
+  expect(recommendedOnly).toBeDefined();
+  await act(async () => recommendedOnly!.click());
+  expect(document.body.textContent).toContain('公开甲卡');
+  const applyFilters = findButton((text) => text === '应用筛选');
+  expect(applyFilters).toBeDefined();
+  await act(async () => applyFilters!.click());
   // 5xx 还需等一次 500ms 有界重试退避才进入最终错误态。
   await waitDebounceOrBackoff();
   expect(document.body.textContent).not.toContain('公开甲卡');
@@ -327,7 +353,7 @@ it('公开列表持续超时有界结束后进入错误态，不永久停留在�
   expect(document.body.textContent).not.toContain('暂无数据卡');
 });
 
-it('公开切推荐 Tab 只发一次列表请求，不产生被立即 abort 的多余请求', async () => {
+it('应用管理员推荐筛选只发一次列表请求，不产生被立即 abort 的多余请求', async () => {
   const listUrls: string[] = [];
   vi.stubGlobal('fetch', makePublicBatchFetch((url) => {
     listUrls.push(url);
@@ -337,9 +363,15 @@ it('公开切推荐 Tab 只发一次列表请求，不产生被立即 abort 的�
   await flushAsync();
   await flushAsync();
   const before = listUrls.length;
-  const recommendedTab = [...document.querySelectorAll('button')].find((b) => b.textContent === '管理员推荐');
-  expect(recommendedTab).toBeDefined();
-  await act(async () => recommendedTab!.click());
+  const advancedFilters = findButton((text) => text.includes('高级筛选'));
+  expect(advancedFilters).toBeDefined();
+  await act(async () => advancedFilters!.click());
+  const recommendedOnly = document.querySelector<HTMLInputElement>('input[name="recommendedOnly"]');
+  expect(recommendedOnly).toBeDefined();
+  await act(async () => recommendedOnly!.click());
+  const applyFilters = findButton((text) => text === '应用筛选');
+  expect(applyFilters).toBeDefined();
+  await act(async () => applyFilters!.click());
   await flushAsync();
   await flushAsync();
   expect(listUrls.length).toBe(before + 1);

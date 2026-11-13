@@ -63,7 +63,7 @@ archive manifest，但**没有任何 runtime 消费它**：无 IndexedDB adapter
 
 ### 2.4 选择体验
 
-- `BattleDataModal` 新增 `local` tab，与「我的 / 公开 / 管理员推荐 / 我的收藏」并列。
+- `BattleDataModal` 的 `local` tab 与「我的 / 公开 / 我的收藏」并列。2026-11-13 更新：原「管理员推荐」独立页签收敛为公开库高级筛选的「仅看管理员推荐」条件，双端共用；与其他高级条件一起应用、重置，不占用来源页签空间，也不增加新的数据源或请求协议。
 - 本地库 MUST **不做登录门控**：未登录、断网时仍可用，这正是它与 `my`/`favorites` 的根本差异。
 - 本地库卡片复用 `DataCard` 的渲染路径，但以 `storageLocation: 'local'` 切换动作集：
   点赞/收藏/分享/审核徽章 MUST NOT 出现，改为删除/导出/详情，并显式标注「本地库」。
@@ -108,7 +108,7 @@ archive manifest，但**没有任何 runtime 消费它**：无 IndexedDB adapter
 ### 2.7 多人边界
 
 本地库内容不进入房间共享状态。`ArenaRoomProposalWorkspace` 通过 `visibleTabs` 天然只暴露
-`public` / `recommended`；Proposal adapter 的 `manageLibrary` 为 `false`，任何本地库动作都只
+`public`（含高级筛选的管理员推荐条件）；Proposal adapter 的 `manageLibrary` 为 `false`，任何本地库动作都只
 报「多人模式不支持」，不静默失败。
 
 ---

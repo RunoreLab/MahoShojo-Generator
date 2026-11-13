@@ -38,7 +38,7 @@ function PublicSourcePicker({ open, kind, selectedIds, error, onClose, onSelect,
       setSourceError(null);
     } catch (cause) { setSourceError(cause instanceof Error ? cause.message : '在线数据卡选择无效'); }
   };
-  return <BattleDataModal isOpen={open} onClose={onClose} visibleTabs={['public', 'recommended']} initialTab="public"
+  return <BattleDataModal isOpen={open} onClose={onClose} visibleTabs={['public']} initialTab="public"
     selectedType={kind === 'character' ? 'character' : kind === 'material' ? 'all' : 'scenario'}
     allowedTypes={kind === 'material' ? [...ONLINE_DATA_CARD_TYPES] : undefined}
     titleOverride={kind === 'auxScenario' ? '选择辅助情景' : kind === 'material' ? '选择素材' : undefined}

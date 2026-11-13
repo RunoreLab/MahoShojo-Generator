@@ -53,7 +53,7 @@ export function DesktopArenaMemberPublicSourcePicker({ host, isCurrent, onRead, 
       if (pending.current === controller) { pending.current = null; setBusy(false); }
     }
   };
-  return <CardLibraryModal host={host} isOpen={props.open} onClose={close} visibleTabs={['public', 'recommended']} initialTab="public"
+  return <CardLibraryModal host={host} isOpen={props.open} onClose={close} visibleTabs={['public']} initialTab="public"
     selectedType={props.kind === 'character' ? 'character' : props.kind === 'material' ? 'all' : 'scenario'}
     allowedTypes={props.kind === 'material' ? [...ONLINE_DATA_CARD_TYPES] : [props.kind === 'character' ? 'character' : 'scenario']}
     titleOverride={props.kind === 'auxScenario' ? '选择辅助情景' : props.kind === 'material' ? '选择素材' : undefined}

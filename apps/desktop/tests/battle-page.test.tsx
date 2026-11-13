@@ -1743,7 +1743,7 @@ describe('Desktop Arena character-library parity', () => {
     expect(button('浏览在线角色库').parentElement?.classList.contains('flex-col')).toBe(product === 'battle');
     expect(button('随机匹配角色')).toBeTruthy();
     await click('浏览在线角色库');
-    for (const label of ['我的角色', '本地库', '公开角色', '管理员推荐', '我的收藏']) expect(tab(label), label).toBeTruthy();
+    for (const label of ['我的角色', '本地库', '公开角色', '我的收藏']) expect(tab(label), label).toBeTruthy();
     expect(tab('我的角色')?.getAttribute('aria-selected')).toBe('true');
     await act(async () => tab('我的角色')!.click()); await settle();
     expect(requests()).toContainEqual(expect.objectContaining({ routeId: 'data-cards.query', expectedUserId: 7,
@@ -1751,22 +1751,43 @@ describe('Desktop Arena character-library parity', () => {
     await act(async () => tab('我的收藏')!.click()); await settle();
     expect(requests()).toContainEqual(expect.objectContaining({ routeId: 'favorites.query', expectedUserId: 7,
       query: expect.objectContaining({ types: 'character', view: 'summary', offset: '0' }) }));
-    await act(async () => tab('管理员推荐')!.click()); await settle();
+    await act(async () => tab('公开角色')!.click()); await settle();
+    const advancedFilters = [...document.querySelectorAll<HTMLButtonElement>('button')]
+      .find(item => item.textContent?.includes('高级筛选'));
+    expect(advancedFilters).toBeTruthy();
+    await act(async () => advancedFilters!.click()); await settle();
+    const recommendedOnly = document.querySelector<HTMLInputElement>('input[name="recommendedOnly"]');
+    expect(recommendedOnly).toBeTruthy();
+    await act(async () => recommendedOnly!.click()); await settle();
+    await click('应用筛选');
     expect(requests().filter(item => item.routeId === 'public-data-cards.query').at(-1)?.query)
       .toMatchObject({ type: 'character', view: 'summary', recommendedOnly: '1', offset: '0' });
+    await act(async () => tab('我的角色')!.click()); await settle();
+    await act(async () => tab('我的收藏')!.click()); await settle();
     await act(async () => tab('公开角色')!.click()); await settle();
-    expect(requests().filter(item => item.routeId === 'public-data-cards.query').at(-1)?.query).not.toHaveProperty('recommendedOnly');
+    expect(document.querySelector<HTMLInputElement>('input[name="recommendedOnly"]')?.checked).toBe(true);
+    expect(requests().filter(item => item.routeId === 'public-data-cards.query').at(-1)?.query)
+      .toHaveProperty('recommendedOnly', '1');
     await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     await settle(); expect(document.querySelector('[role="dialog"]')).toBeNull();
-    await click('浏览在线角色库'); expect(tab('管理员推荐')).toBeTruthy();
+    await click('浏览在线角色库'); expect(tab('公开角色')).toBeTruthy();
     expect(calls()).toHaveLength(0); expect(docs.size).toBe(0);
   });
 
-  it.each(['battle', 'arena'] as const)('/%s keeps public recommendations and offline local cards available while signed out', async product => {
+  it.each(['battle', 'arena'] as const)('/%s keeps the public recommendation filter and offline local cards available while signed out', async product => {
     window.location.hash = `#/${product}`; await mount(); await openLibrarySection(); await click('浏览在线角色库');
-    for (const label of ['本地库', '公开角色', '管理员推荐']) expect(tab(label)).toBeTruthy();
+    for (const label of ['本地库', '公开角色']) expect(tab(label)).toBeTruthy();
     expect(tab('我的角色')).toBeUndefined(); expect(tab('我的收藏')).toBeUndefined();
     expect(tab('公开角色')?.getAttribute('aria-selected')).toBe('true');
+    const advancedFilters = [...document.querySelectorAll<HTMLButtonElement>('button')]
+      .find(item => item.textContent?.includes('高级筛选'));
+    expect(advancedFilters).toBeTruthy();
+    await act(async () => advancedFilters!.click()); await settle();
+    const recommendedOnly = document.querySelector<HTMLInputElement>('input[name="recommendedOnly"]');
+    expect(recommendedOnly).toBeTruthy(); expect(recommendedOnly!.disabled).toBe(false);
+    await act(async () => recommendedOnly!.click()); await settle(); await click('应用筛选');
+    expect(requests().filter(item => item.routeId === 'public-data-cards.query').at(-1)?.query)
+      .toHaveProperty('recommendedOnly', '1');
     expect(requests().some(item => ['data-cards.query', 'favorites.query'].includes(item.routeId))).toBe(false);
   });
 

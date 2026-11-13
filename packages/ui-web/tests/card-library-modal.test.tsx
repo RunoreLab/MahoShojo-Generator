@@ -946,6 +946,37 @@ const renderCacheBrowse = async (cache: ReturnType<typeof createCachePort>, onli
 
 const selectCachedRow = () => click(document.body.querySelector('[role="button"][aria-label="选择公开角色 card-c"]')!);
 
+test('管理员推荐条件在缓存视图中可应用、组合和重置，且不额外请求线上列表', async () => {
+  const cache = createCachePort([cachedEntry('card-c')]);
+  const fetchPublicCards = vi.fn<CardLibraryHost['online']['fetchPublicCards']>(async () => ({
+    ok: true, status: 200,
+    data: { success: true, cards: [publicCard('online-1')], total: 1, nextOffset: null },
+  }));
+  await renderCacheBrowse(cache, { fetchPublicCards });
+  const onlineBefore = fetchPublicCards.mock.calls.length;
+  const button = (text: string) => [...document.body.querySelectorAll('button')].find(node => node.textContent?.trim() === text)!;
+  await click(button('高级筛选'));
+  const recommended = document.querySelector<HTMLInputElement>('input[name="recommendedOnly"]')!;
+  expect(recommended.disabled).toBe(false);
+  const before = vi.mocked(cache.queryCachedCards).mock.calls.length;
+  await click(recommended);
+  const author = document.querySelector<HTMLInputElement>('input[name="author"]')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(author, 'author');
+    author.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  expect(cache.queryCachedCards).toHaveBeenCalledTimes(before);
+  await click(button('应用筛选'));
+  await settle();
+  expect(vi.mocked(cache.queryCachedCards).mock.calls.at(-1)?.[0]).toMatchObject({ recommendedOnly: true, author: 'author', offset: 0 });
+  expect(fetchPublicCards).toHaveBeenCalledTimes(onlineBefore);
+  await click(button('重置'));
+  await settle();
+  expect(recommended.checked).toBe(false);
+  expect(vi.mocked(cache.queryCachedCards).mock.calls.at(-1)?.[0]).toMatchObject({ recommendedOnly: undefined, author: undefined, offset: 0 });
+  expect(fetchPublicCards).toHaveBeenCalledTimes(onlineBefore);
+});
+
 test('缓存正文重验证：仅「404 + success:false + 撤回码」三证齐全才判撤回并即时移除行', async () => {
   // 在线侧确认撤回发生在 native 观察路径——mock 里翻转 withdrawn，
   // 模拟「404 证据落盘/登记后再重查」的权威计数。

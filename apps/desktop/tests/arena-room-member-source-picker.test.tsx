@@ -58,7 +58,7 @@ describe('real public CardLibrary member picker', () => {
   it('keeps single selection open until fresh validation and emits only the current reference', async () => {
     const pending = deferred<PublicResponse>(), picker = setup('scenario', () => pending.promise);
     await picker.render();
-    expect([...document.body.querySelectorAll('[role="tab"]')].map(tab => tab.textContent)).toEqual(['公开情景', '管理员推荐']);
+    expect([...document.body.querySelectorAll('[role="tab"]')].map(tab => tab.textContent)).toEqual(['公开情景']);
     expect(document.body.textContent).not.toContain('卡组导入'); expect(document.body.textContent).not.toContain('已缓存');
     await click(document.body.querySelector('[role="button"][aria-label="选择源卡"]'));
     expect(picker.onClose).not.toHaveBeenCalled(); expect(picker.onSelect).not.toHaveBeenCalled();
