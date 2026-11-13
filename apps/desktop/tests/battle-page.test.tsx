@@ -65,7 +65,8 @@ const rendered = (stream: boolean) => stream ? `# 车站重逢\n\n${text}${markd
 beforeAll(async () => {
   server = createServer((req, res) => { let body = ''; req.on('data', (part) => { body += part; }); req.on('end', () => {
     const request = JSON.parse(body) as AiExecutionRequest; received.push(request);
-    const stream = request.messages.length === 1;
+    // 两种格式都将 system 规则与 user 资料分开；按实际输出契约响应，不能从消息数推断格式。
+    const stream = !request.messages.some((message) => message.role === 'system' && message.content.includes('【结构化输出要求】'));
     res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ text: JSON.parse(request.arenaInputJson!).reportFormat === 'web' ? webTextOverride ?? `${webHtml}\n${webTrailer}` : rendered(stream), reasoning: '独立的推理' }));
   }); });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -402,6 +403,8 @@ describe('Desktop /battle journey against loopback fixture', () => {
       expect(button('重试角色更新')).toBeUndefined();
       await click('下载会话备份');
       const beforeDownload = JSON.parse(mocks.download.mock.calls.at(-1)![1]);
+      expect(received.at(-1)!.messages.map((message) => message.role)).toEqual(['system', 'user']);
+      expect(beforeDownload.result.rawText).toBe(rendered(output === 'stream'));
       const roleToggle = container.querySelector<HTMLButtonElement>('section[aria-label$="的战后变化"] button[aria-expanded]')!;
       expect(roleToggle.getAttribute('aria-expanded')).toBe('false');
       await act(async () => roleToggle.click());

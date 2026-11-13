@@ -420,17 +420,19 @@ describe('BattleDataModal accessibility and capabilities', () => {
     ) ?? [])].filter((element) => !element.matches(':disabled') && !element.hidden && element.getAttribute('aria-hidden') !== 'true');
     const firstDetailsFocusable = detailsFocusable[0];
     const lastDetailsFocusable = detailsFocusable.at(-1);
-    // 公开卡头部保留「更多 → 关闭」顺序；初始关闭焦点与 Tab 回环首元素不同。
+    // 头部“更多”与关闭入口保持顺序，共享卡片动作位于正文末尾。
     expect(firstDetailsFocusable?.textContent?.trim()).toBe('更多');
     expect(firstDetailsFocusable).not.toBe(detailsClose);
     expect(detailsFocusable[1]).toBe(detailsClose);
-    expect(lastDetailsFocusable?.textContent?.trim()).toBe('关闭');
+    expect(lastDetailsFocusable?.textContent?.trim()).toBe('存到本地库');
 
     // jsdom 不执行浏览器默认 Tab 移动；中间元素不应被任何一层强制回环。
+    const middleFocusable = detailsFocusable[2];
+    middleFocusable?.focus();
     const middleTab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
-    await act(async () => detailsClose?.dispatchEvent(middleTab));
+    await act(async () => middleFocusable?.dispatchEvent(middleTab));
     expect(middleTab.defaultPrevented).toBe(false);
-    expect(document.activeElement).toBe(detailsClose);
+    expect(document.activeElement).toBe(middleFocusable);
 
     lastDetailsFocusable?.focus();
     const forwardTab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });

@@ -48,7 +48,9 @@ it.each([
   expect(container.textContent).not.toContain('公开数据卡正文');
   expect([...container.querySelectorAll('h1, h2, h3, h4, h5, h6')].map((node) => node.textContent)).toContain('纯设定');
   expect(container.querySelector('img, audio, video, iframe')).toBeNull();
-  expect([...container.querySelectorAll('button')].map((element) => element.textContent)).toEqual(['', '关闭']);
+  const closeButton = container.querySelector<HTMLButtonElement>('button[aria-label="关闭问卷详情"]');
+  expect(closeButton).not.toBeNull();
+  expect([...container.querySelectorAll('button')]).toEqual([closeButton]);
   expect(container.querySelector('pre')?.textContent).toBe(JSON.stringify(questionnaire, null, 2));
   if (selectionId.startsWith('cache:')) {
     expect(container.textContent).toContain('最近成功读取：未知');

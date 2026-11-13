@@ -146,7 +146,8 @@ describe('Arena room Proposal workspace', () => {
 
     await act(async () => button('浏览在线角色库').click());
     const modal = container.querySelector('[data-testid="battle-data-modal"]');
-    expect(modal?.getAttribute('data-visible-tabs')).toBe('public,recommended');
+    // 管理员推荐现在作为公开库高级筛选，不再是独立页签。
+    expect(modal?.getAttribute('data-visible-tabs')).toBe('public');
     expect(modal?.getAttribute('data-allow-deck-import')).toBe('false');
     expect(modal?.getAttribute('data-allow-card-details')).toBe('false');
     expect(container.textContent).not.toContain('上传');
