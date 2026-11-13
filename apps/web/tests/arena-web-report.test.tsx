@@ -173,7 +173,10 @@ describe('Web 战报的本地执行许可', () => {
   it.each(BUILTIN_WEB_PACKAGE_PRESETS)(
     'executes the $title preset through the real Arena report consumer', async ({ packageRef }) => {
       const base = await resolveWebPackage(packageRef);
-      const content = '<!doctype html><html><head><title>独立创作的竞技场新闻</title><link rel="stylesheet" href="styles/tokens.css"></head><body><h1>独立创作的竞技场新闻</h1></body></html>';
+      const mediaType = base.manifest.generation.mediaType;
+      const content = mediaType === 'application/json'
+        ? new TextDecoder().decode(base.readFile(base.manifest.generation.example ?? base.manifest.generation.target)!)
+        : '<!doctype html><html><head><title>独立创作的竞技场新闻</title><link rel="stylesheet" href="styles/tokens.css"></head><body><h1>独立创作的竞技场新闻</h1></body></html>';
       const { generatedContent: _generated, ...artifact } = await createWebPackageOverlay(packageRef, content);
       expect(_generated).toBe(content);
       window.localStorage.setItem('arena.web-report-consent.v1.room.creative', 'accepted');
@@ -184,7 +187,7 @@ describe('Web 战报的本地执行许可', () => {
       ));
       await waitForReact(() => expect(container.querySelector('iframe')).toBeTruthy());
       expect(container.querySelector('iframe')!.getAttribute('sandbox')).toBe('allow-scripts');
-      expect(base.manifest.generation.mediaType).toBe('text/html');
+      expect(mediaType).toMatch(/^(text\/html|application\/json)$/);
       expect(container.querySelector('iframe')!.getAttribute('src')).toContain('/__web-package__/runner?instance=');
       expect(container.querySelector('iframe')!.getAttribute('srcdoc')).toBeNull();
       expect(container.querySelector('iframe')!.dataset.webPackageMode).toBe('restricted');
