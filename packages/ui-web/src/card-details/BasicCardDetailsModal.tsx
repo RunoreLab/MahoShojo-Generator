@@ -83,25 +83,25 @@ export function BasicCardDetailsModal({ isOpen, onClose, card, source, renderMar
   const { display, full } = buildTitleDisplay(card.name || '未命名');
   const typeLabel = { character: '角色', scenario: '剧本', history: '历史', questionnaire: '问卷' }[card.type] ?? '数据卡';
   return <div className={`${BASE_MODAL_ROOT_LAYOUT_CLASS_NAME} z-50 bg-black/50`}>
-    <div ref={dialogRef} role="dialog" aria-modal={obscured ? undefined : 'true'} aria-hidden={obscured ? 'true' : undefined} aria-labelledby={titleId} tabIndex={-1} className="flex max-h-[min(90dvh,calc(100dvh-2rem))] w-full max-w-4xl flex-col overflow-hidden rounded-lg bg-white text-gray-800">
-      <div className="flex shrink-0 items-center justify-between gap-3 border-b p-6">
-        <div className="flex min-w-0 items-center gap-3"><Info className="h-5 w-5 shrink-0 text-purple-600" /><div className="min-w-0"><h2 id={titleId} className="truncate text-xl font-bold" title={full}>{display}</h2><p className="mt-1 text-xs text-gray-500">类型：{typeLabel}</p></div></div>
-        <div className="relative flex shrink-0 items-center gap-2">{headerActions}<button type="button" ref={initialFocusRef} onClick={onClose} aria-label={`关闭${typeLabel}详情`} className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-600"><X className="h-5 w-5" /></button></div>
+    <div ref={dialogRef} role="dialog" aria-modal={obscured ? undefined : 'true'} aria-hidden={obscured ? 'true' : undefined} aria-labelledby={titleId} tabIndex={-1} className="flex max-h-[min(90dvh,calc(100dvh-2rem))] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-(--app-border) bg-(--app-surface-strong) text-(--app-text)">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-(--app-border) px-4 py-3 sm:px-6">
+        <div className="flex min-w-0 flex-1 basis-32 items-center gap-3"><Info className="hidden h-5 w-5 shrink-0 text-(--app-accent) sm:block" aria-hidden="true" /><div className="min-w-0"><h2 id={titleId} className="truncate text-lg font-bold sm:text-xl" title={full}>{display}</h2><p className="mt-1 truncate text-xs text-(--app-text-muted)">类型：{typeLabel}</p></div></div>
+        <div className="relative ml-auto flex shrink-0 items-center gap-2">{headerActions}<button type="button" ref={initialFocusRef} onClick={onClose} aria-label={`关闭${typeLabel}详情`} className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg p-2 text-(--app-text-muted) hover:bg-(--app-surface-80) hover:text-(--app-text) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--app-accent)"><X className="h-5 w-5" aria-hidden="true" /></button></div>
       </div>
       {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- 可滚动正文必须能独立获得键盘焦点，与 BaseModal 一致。 */}
-      <div className={`${BASE_MODAL_BODY_LAYOUT_CLASS_NAME} space-y-6 p-6`} role="region" aria-labelledby={titleId} tabIndex={0}>
+      <div className={`${BASE_MODAL_BODY_LAYOUT_CLASS_NAME} space-y-4 p-4 sm:p-6`} role="region" aria-labelledby={titleId} tabIndex={0}>
         {beforeOverview}
         <section className="space-y-2">
-          <h3 className="font-medium text-gray-700">概览</h3>
-          <p className="app-reading app-reading-width whitespace-pre-wrap text-sm text-gray-600">{card.description?.trim() ? card.description : '暂无简介'}</p>
-          <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500"><span className="flex items-center gap-1"><Heart className="h-3 w-3" />{card.likeCount ?? 0}</span><span className="flex items-center gap-1"><Star className="h-3 w-3" />{card.favoriteCount ?? 0}</span><span className="flex items-center gap-1"><Download className="h-3 w-3" />{card.usageCount ?? 0}</span></div>
-          <div className="flex flex-wrap items-center gap-4 text-[11px] text-gray-500"><span className="inline-flex items-center gap-1">作者：{card.author ?? '未知'}{card.authorBadges?.map((badge) => <Badge key={badge.id} badge={badge} size="sm" />)}</span><span title={card.createdAt}>创建：{formatDate(card.createdAt)}</span><span title={card.updatedAt}>更新：{formatDate(card.updatedAt)}</span></div>
-          <p className="text-xs text-gray-500">来源：{describeCardDetailsSource(source)}</p>
+          <h3 className="font-medium">概览</h3>
+          <p className="app-reading app-reading-width whitespace-pre-wrap break-words text-sm text-(--app-text-muted)">{card.description?.trim() ? card.description : '暂无简介'}</p>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-(--app-text-muted)"><span className="inline-flex flex-wrap items-center gap-1 break-all">作者：{card.author ?? '未知'}{card.authorBadges?.map((badge) => <Badge key={badge.id} badge={badge} size="sm" />)}</span><span className="flex items-center gap-1"><Heart className="h-3 w-3" aria-hidden="true" />{card.likeCount ?? 0}</span><span className="flex items-center gap-1"><Star className="h-3 w-3" aria-hidden="true" />{card.favoriteCount ?? 0}</span><span className="flex items-center gap-1"><Download className="h-3 w-3" aria-hidden="true" />{card.usageCount ?? 0}</span></div>
+          <p className="break-words text-xs text-(--app-text-muted)">来源：{describeCardDetailsSource(source)}</p>
         </section>
+        <section className="space-y-2"><h3 className="font-medium">{card.type === 'history' ? '内容' : '详细设定'}</h3><div className="break-words rounded-lg bg-(--app-surface-80) p-4"><CardDetailsBody key={card.type === 'scenario' ? JSON.stringify([card.id, card.data]) : undefined} data={card.data} renderMarkdown={card.type === 'scenario' ? (content) => <ScenarioMarkdownPreview content={content} renderMarkdown={renderMarkdown} /> : renderMarkdown} /></div></section>
+        <details className="border-t border-(--app-border) pt-3 text-xs text-(--app-text-muted)"><summary tabIndex={0} className="cursor-pointer py-2 focus-visible:outline-2 focus-visible:outline-(--app-accent)">创建与更新时间</summary><div className="flex flex-wrap gap-x-4 gap-y-2 pb-2"><span title={card.createdAt}>创建：{formatDate(card.createdAt)}</span><span title={card.updatedAt}>更新：{formatDate(card.updatedAt)}</span></div></details>
         {metadata}
-        <section className="space-y-2"><h3 className="font-medium text-gray-700">{card.type === 'history' ? '内容' : '详细设定'}</h3><div className="rounded-lg bg-gray-50 p-4"><CardDetailsBody key={card.type === 'scenario' ? JSON.stringify([card.id, card.data]) : undefined} data={card.data} renderMarkdown={card.type === 'scenario' ? (content) => <ScenarioMarkdownPreview content={content} renderMarkdown={renderMarkdown} /> : renderMarkdown} /></div></section>
       </div>
-      <div className="flex shrink-0 flex-wrap items-center justify-end gap-3 border-t bg-gray-50 p-6">{footer}<button type="button" onClick={onClose} className="rounded-lg bg-gray-200 px-4 py-2 text-gray-700 hover:bg-gray-300">关闭</button></div>
+      {footer && <div className="shrink-0 border-t border-(--app-border) bg-(--app-surface-strong) px-4 py-3 sm:px-6">{footer}</div>}
     </div>
   </div>;
 }

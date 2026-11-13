@@ -1,7 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { EntityRatingHistoryButton, type RankingDetailsTarget } from '@mahoshojo/ui-web/ranking';
 import { readDesktopRanking } from '../ranking/use-ranking-query';
-import { BasicCardDetailsModal } from '@mahoshojo/ui-web/card-details';
+import { BasicCardDetailsModal, CardDetailsActions } from '@mahoshojo/ui-web/card-details';
 import type { CardLibraryDetailsModalProps } from '@mahoshojo/ui-web/card-library';
 import { DENY_EXTERNAL_MEDIA, MarkdownBlock } from '@mahoshojo/ui-web/markdown';
 import { useExternalLinks } from '../external-links/external-links-provider';
@@ -54,15 +54,14 @@ function DesktopCardDetailsScope({ card, source, onSaveCopyToLocalLibrary, local
     renderMarkdown={(content) => <DesktopCardDetailsMarkdown content={content} />}
     beforeOverview={pendingNotice ? <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{pendingNotice}</p> : undefined}
     metadata={<section className="space-y-2 text-xs text-gray-500">{ratingHistoryEntity && <EntityRatingHistoryButton {...ratingHistoryEntity} readRanking={readDesktopRanking} onOpenChange={setIsRatingHistoryOpen} />}<p>原生：未确认（本机未验证）；未查询线上指标</p>{card.tagIds?.length ? <p>标签 ID（未取得名称）：{card.tagIds.join('、')}</p> : null}</section>}
-    footer={<>
-      <div className="mr-auto">{actionError && <p role="alert" className="text-sm text-red-700">{actionError}</p>}{localLibrarySaveState?.message && <p role="status" className="text-sm text-gray-600">{localLibrarySaveState.message}</p>}</div>
-      <button type="button" disabled={busy} className="rounded-lg bg-blue-600 px-4 py-2 text-white disabled:opacity-50" onClick={() => void run(async () => {
+    footer={<CardDetailsActions downloadDisabled={busy} onDownload={() => void run(async () => {
         const data: unknown = JSON.parse(card.data);
         if (!data || typeof data !== 'object') throw new Error('正文格式无效，无法下载数据卡');
         const name = (card.name.trim() || '数据卡').replace(/[\\/:*?"<>|\n\r\t]/g, '_');
         await downloadTextFile(`${name}.json`, JSON.stringify(data, null, 2));
-      })}>下载 JSON</button>
-      {onSaveCopyToLocalLibrary && <button type="button" disabled={busy || localLibrarySaveState?.busy} className="rounded-lg bg-emerald-600 px-4 py-2 text-white disabled:opacity-50" onClick={() => void run(onSaveCopyToLocalLibrary)}>{localLibrarySaveState?.busy || busy ? '处理中…' : '存到本地库'}</button>}
-    </>}
+      })} onSave={onSaveCopyToLocalLibrary ? () => void run(onSaveCopyToLocalLibrary) : undefined}
+      saveBusy={busy || localLibrarySaveState?.busy} saveBusyLabel="处理中…"
+      feedback={<>{actionError && <p role="alert" className="text-sm text-red-700">{actionError}</p>}{localLibrarySaveState?.message && <p role="status" className="text-sm text-(--app-text-muted)">{localLibrarySaveState.message}</p>}</>}
+    />}
   />;
 }

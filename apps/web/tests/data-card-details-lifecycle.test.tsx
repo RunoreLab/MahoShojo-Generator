@@ -29,7 +29,7 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
 describe('Web 原详情实际消费 shared，宿主 metadata 有版本与生命周期围栏', () => {
   it.each([{ kind: 'local', label: '当前输入副本' }, { kind: 'cache', lastSuccessAt: date }, { kind: 'preset' }] satisfies CardDetailsSource[])('显式 %j 即使保留云 ID/时间/signature 也不联网或声称原生', async (source) => {
-    await render(source); expect(fetch).not.toHaveBeenCalled(); expect(container.textContent).toContain('本机未验证'); expect(container.textContent).toContain('完整正文'); expect(container.textContent).not.toContain('服务器判断）：是'); expect(container.textContent).not.toContain('更多');
+    await render(source); expect(fetch).not.toHaveBeenCalled(); expect(container.textContent).toContain('本机未验证'); expect(container.textContent).toContain('完整正文'); expect(container.textContent).not.toContain('服务器判断）：是'); expect(container.querySelector('[aria-label="更多操作"]')).not.toBeNull(); expect(container.querySelector('[data-card-actions]')).toBeNull();
   });
   it('共享正文区域可获得键盘焦点且使用同一详情标题', async () => {
     await render({ kind: 'local' });
@@ -38,6 +38,26 @@ describe('Web 原详情实际消费 shared，宿主 metadata 有版本与生命�
     expect(region.tabIndex).toBe(0);
     expect(region.getAttribute('aria-labelledby')).toBe(dialog.getAttribute('aria-labelledby'));
     region.focus(); expect(document.activeElement).toBe(region);
+  });
+  it('更多操作使用独立 Escape 层，关闭后焦点返回，移出披露面板时收起', async () => {
+    await render({ kind: 'public' });
+    const trigger = container.querySelector<HTMLButtonElement>('[aria-label="更多操作"]')!;
+    const dialog = container.querySelector<HTMLElement>('[role="dialog"]')!;
+    const parentClose = dialog.querySelector<HTMLButtonElement>('[aria-label="关闭角色详情"]')!;
+    await act(async () => { trigger.focus(); trigger.click(); });
+    expect(container.querySelector('[data-card-actions]')).not.toBeNull();
+    expect(document.activeElement?.textContent).toBe('卡牌工坊');
+
+    await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(container.querySelector('[data-card-actions]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    expect(container.querySelector('[role="dialog"]')).toBe(dialog);
+
+    await act(async () => { trigger.click(); });
+    const report = container.querySelector<HTMLButtonElement>('[data-card-actions] button:nth-child(2)')!;
+    expect(report.textContent).toContain('举报此卡');
+    await act(async () => parentClose.focus());
+    expect(container.querySelector('[data-card-actions]')).toBeNull();
   });
   it('预设保持宿主的排位历史入口，只有点击才读取历史且不查 metadata', async () => {
     vi.mocked(fetch).mockResolvedValue(response({ success: true, entityType: 'preset', entityId: 'preset.json', queue: 'strict', items: [] }));

@@ -51,7 +51,7 @@ export const SHOWROOM_SECTIONS: readonly ShowroomSectionMeta[] = [
   {
     id: 'overlay',
     title: '弹层',
-    summary: '共源 BaseModal 原语：Escape 层级栈、焦点圈留与背景点按与生产一致；叙事历史选择器的空列表、JSON 导入入口与反馈；数据卡公开库的管理员推荐高级筛选。',
+    summary: '共源 BaseModal 原语：Escape 层级栈、焦点圈留与背景点按与生产一致；叙事历史选择器的空列表、JSON 导入入口与反馈；数据卡公开库的管理员推荐高级筛选；数据卡详情正文优先、来源提示、响应式主次操作及更多披露面板，覆盖不同来源、保存中与下载校验中。',
   },
   {
     id: 'result-surfaces',

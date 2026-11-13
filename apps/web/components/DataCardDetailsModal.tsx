@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Download, ChevronDown, ChevronUp, Flag, MoreHorizontal, Layers, HardDrive } from 'lucide-react';
+import { ChevronDown, ChevronUp, Flag, Layers } from 'lucide-react';
 import { MarkdownBlock } from '@/components/MarkdownBlock';
 import { DataCardReportModal } from '@/components/data-card-reports/DataCardReportModal';
 import { formatDateTime } from '@/lib/constants';
@@ -12,7 +12,7 @@ import type { DataCardReportCapabilityDto, DataCardReportDraft } from '@/lib/dat
 import type { BadgeDefinition } from '@/types/badge';
 import type { OnlineDataCardType } from '@mahoshojo/contracts/data-cards';
 import { isReducedMotionActive } from '@mahoshojo/ui-web/device-preferences';
-import { BasicCardDetailsModal, type CardDetailsSource } from '@mahoshojo/ui-web/card-details';
+import { BasicCardDetailsModal, CardDetailsActions, CardDetailsMoreActions, type CardDetailsSource } from '@mahoshojo/ui-web/card-details';
 
 type ApiTag = {
   id: string;
@@ -217,7 +217,6 @@ function DataCardDetailsModalScope({
   const [reportCapabilityError, setReportCapabilityError] = useState<string | null>(null);
   const reportRequestIdRef = useRef(0);
   const reportAbortRef = useRef<AbortController | null>(null);
-  const [isMoreActionsOpen, setIsMoreActionsOpen] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [reportSubmitError, setReportSubmitError] = useState<string | null>(null);
@@ -382,7 +381,6 @@ function DataCardDetailsModalScope({
       setIsEditingTags(false);
       setSaveTagsError(null);
       setDownloadError(null);
-      setIsMoreActionsOpen(false);
       setIsReportModalOpen(false);
       setReportSubmitError(null);
       return;
@@ -398,7 +396,6 @@ function DataCardDetailsModalScope({
     setIsEditingTags(false);
     setSaveTagsError(null);
     setDownloadError(null);
-    setIsMoreActionsOpen(false);
     setIsReportModalOpen(false);
     setReportSubmitError(null);
     return () => {
@@ -659,7 +656,6 @@ function DataCardDetailsModalScope({
         }
 
         setIsReportModalOpen(false);
-        setIsMoreActionsOpen(false);
         void reloadReportCapability(resolvedCloudCardId);
       } catch (error) {
         setReportSubmitError(String(error));
@@ -677,48 +673,28 @@ function DataCardDetailsModalScope({
       <BasicCardDetailsModal isOpen={isOpen} onClose={onClose} card={card} source={source} fallbackFocusRef={fallbackFocusRef}
         obscured={isReportModalOpen || isRatingHistoryOpen}
         renderMarkdown={(content) => <MarkdownBlock content={content} variant="light" className="text-sm" />}
-        headerActions={<>
-            {canShowReportActions ? (
-              <button
-                ref={moreActionsButtonRef}
-                type="button"
-                onClick={() => setIsMoreActionsOpen((prev) => !prev)}
-                className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
-              >
-                <MoreHorizontal className="w-4 h-4" />
-                <span>更多</span>
-              </button>
-            ) : null}
-            {canShowReportActions && isMoreActionsOpen ? (
-              <div className="absolute right-12 top-12 z-10 w-72 rounded-xl border border-gray-200 bg-white p-2 shadow-xl">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (reportCapability?.canReport) {
-                      setIsReportModalOpen(true);
-                      setIsMoreActionsOpen(false);
-                    }
-                  }}
-                  disabled={reportCapabilityLoading || !reportCapability?.canReport}
-                  className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-400"
-                  title={reportCapability?.reportDisabledReason ?? undefined}
-                >
-                  <span className="inline-flex items-center gap-2">
-                    <Flag className="w-4 h-4" />
-                    <span>举报此卡</span>
-                  </span>
-                  <span className="text-xs text-gray-400">
-                    {reportCapabilityLoading ? '加载中' : reportCapability?.canReport ? '可用' : '不可用'}
-                  </span>
-                </button>
-                {reportCapabilityError ? (
-                  <div className="px-3 pb-1 text-xs text-red-600">举报能力加载失败：{reportCapabilityError}</div>
-                ) : reportCapability?.reportDisabledReason ? (
-                  <div className="px-3 pb-1 text-xs text-gray-500">{reportCapability.reportDisabledReason}</div>
-                ) : null}
-              </div>
-            ) : null}
-        </>}
+        headerActions={<CardDetailsMoreActions buttonRef={moreActionsButtonRef} actions={[
+          {
+            id: 'card-forge', label: '卡牌工坊', icon: <Layers className="h-4 w-4 shrink-0" aria-hidden="true" />,
+            title: '将此数据卡发送到卡牌工坊生成卡牌风格卡面',
+            onSelect: () => {
+              try { sessionStorage.setItem('card-forge-source-data', card.data); } catch { /* ignore */ }
+              onClose();
+              window.location.href = '/card-forge';
+            },
+          },
+          ...(canShowReportActions ? [{
+            id: 'report', label: '举报此卡', icon: <Flag className="h-4 w-4 shrink-0" aria-hidden="true" />,
+            onSelect: () => setIsReportModalOpen(true),
+            disabled: reportCapabilityLoading || !reportCapability?.canReport,
+            title: reportCapability?.reportDisabledReason ?? undefined,
+            detail: reportCapabilityLoading ? '加载中' : reportCapability?.canReport ? '可用' : '不可用',
+          }] : []),
+        ]} feedback={canShowReportActions && (reportCapabilityError
+          ? <p className="px-3 py-2 text-xs text-red-600">举报能力加载失败：{reportCapabilityError}</p>
+          : reportCapability?.reportDisabledReason
+            ? <p className="px-3 py-2 text-xs text-(--app-text-muted)">{reportCapability.reportDisabledReason}</p>
+            : null)} />}
         beforeOverview={<>
           {pendingNotice && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-sm px-3 py-2">
@@ -982,82 +958,27 @@ function DataCardDetailsModalScope({
           </section>
 
         </> : <p className="text-xs text-gray-500">原生：未确认（本机未验证）；未查询线上指标</p>}
-        footer={<>
-          <div className="min-h-[18px]">
-            {downloadError && (
-              <div className="text-xs text-red-600">{downloadError}</div>
-            )}
+        footer={<CardDetailsActions
+          onDownload={downloadDataCard}
+          downloadDisabled={!canDownloadCard}
+          downloadLabel={isCloudDataCard && metaLoading && !canDownloadCard ? '校验中…' : canDownloadCard ? '下载 JSON' : '不可下载'}
+          downloadTitle={canDownloadCard
+            ? isCloudDataCard ? '下载云端数据卡 JSON' : '下载本地/预设数据卡 JSON'
+            : metaLoading ? '正在校验权限...' : metaError ? '无权下载该数据卡' : '暂不可下载'}
+          onSave={onSaveCopyToLocalLibrary ? () => {
+            const request = ++localCopyRequestRef.current;
+            setLocalCopyError(null);
+            void Promise.resolve().then(onSaveCopyToLocalLibrary).catch((cause: unknown) => {
+              if (request === localCopyRequestRef.current) setLocalCopyError(cause instanceof Error ? cause.message : '保存本地副本失败');
+            });
+          } : undefined}
+          saveBusy={localLibrarySaveState?.busy === true}
+          feedback={<>
+            {downloadError && <div role="alert" className="text-xs text-red-600">{downloadError}</div>}
             {localCopyError && <div role="alert" className="text-xs text-red-600">{localCopyError}</div>}
-            {localLibrarySaveState?.message && (
-              <div className="text-xs text-gray-600" role="status">{localLibrarySaveState.message}</div>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                try {
-                  sessionStorage.setItem('card-forge-source-data', card.data);
-                } catch {
-                  /* ignore */
-                }
-                onClose();
-                window.location.href = '/card-forge';
-              }}
-              className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors inline-flex items-center gap-2"
-              title="将此数据卡发送到卡牌工坊生成卡牌风格卡面"
-            >
-              <Layers className="w-4 h-4" />
-              <span>卡牌工坊</span>
-            </button>
-            <button
-              onClick={downloadDataCard}
-              disabled={!canDownloadCard}
-              className={`px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-2 ${
-                canDownloadCard
-                  ? 'bg-blue-600 text-white hover:bg-blue-700'
-                  : 'bg-blue-200 text-blue-50 cursor-not-allowed'
-              }`}
-              title={
-                canDownloadCard
-                  ? isCloudDataCard
-                    ? '下载云端数据卡 JSON'
-                    : '下载本地/预设数据卡 JSON'
-                  : metaLoading
-                    ? '正在校验权限...'
-                    : metaError
-                      ? '无权下载该数据卡'
-                      : '暂不可下载'
-              }
-            >
-              <Download className="w-4 h-4" />
-              <span>
-                {isCloudDataCard && metaLoading && !canDownloadCard
-                  ? '校验中...'
-                  : canDownloadCard
-                    ? '下载'
-                    : '不可下载'}
-              </span>
-            </button>
-            {onSaveCopyToLocalLibrary ? (
-              <button
-                onClick={() => {
-                  const request = ++localCopyRequestRef.current;
-                  setLocalCopyError(null);
-                  void Promise.resolve().then(onSaveCopyToLocalLibrary).catch((cause: unknown) => {
-                    if (request === localCopyRequestRef.current) setLocalCopyError(cause instanceof Error ? cause.message : '保存本地副本失败');
-                  });
-                }}
-                disabled={localLibrarySaveState?.busy === true}
-                className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors inline-flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                title="把这张数据卡的正文复制一份存入本机本地库，不会影响线上记录"
-              >
-                <HardDrive className="w-4 h-4" />
-                <span>{localLibrarySaveState?.busy === true ? '保存中...' : '存到本地库'}</span>
-              </button>
-            ) : null}
-          </div>
-        </>}
+            {localLibrarySaveState?.message && <div className="text-xs text-(--app-text-muted)" role="status">{localLibrarySaveState.message}</div>}
+          </>}
+        />}
       />
       <DataCardReportModal
         isOpen={isReportModalOpen}

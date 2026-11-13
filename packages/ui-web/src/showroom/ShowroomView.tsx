@@ -31,6 +31,7 @@ import { ScenarioResultContent } from '../scenario';
 import { SHOWROOM_MAGICAL_GIRL } from './fixtures';
 import { LocalImagesSample } from './LocalImagesSample';
 import { CardLibrarySample } from './CardLibrarySample';
+import { CardDetailsSample } from './CardDetailsSample';
 import { SHOWROOM_SECTIONS, type ShowroomSectionId } from './sections';
 
 export interface ShowroomViewProps {
@@ -372,6 +373,7 @@ function OverlaySection({ onOpen }: { onOpen: () => void }) {
       <p className="text-sm text-(--app-text-muted)">共源 BaseModal：Escape 栈顶消费、焦点圈留、初始焦点在关闭按钮。</p>
       <button type="button" className={generationActionClassNames.secondary} onClick={() => setHistoryOpen(true)}>打开叙事历史导入样板</button>
       <CardLibrarySample />
+      <CardDetailsSample />
       <NarrativeHistoryPicker isOpen={historyOpen} onClose={() => setHistoryOpen(false)} entries={[]} lastUpdatedAt={null}
         sort="updated_desc" onSort={() => {}} formatDateTime={value => value} readStatus="ready"
         sourceHint="本机历史列表为空时，导入入口仍然可见。" onConfirm={() => setHistoryOpen(false)}

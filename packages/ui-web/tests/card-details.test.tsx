@@ -2,7 +2,7 @@
 import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BasicCardDetailsModal, CardDetailsBody } from '../src/card-details';
+import { BasicCardDetailsModal, CardDetailsActions, CardDetailsBody } from '../src/card-details';
 import { BaseModal } from '../src/modal';
 const card = { id: 'same', name: '通用详情', description: '原简介', type: 'history' as const, data: '{"content":"正文"}', isPublic: false, author: '本机作者', createdAt: '2026-01-01T01:02:00Z', updatedAt: '2026-02-01T01:02:00Z' };
 const markdown = (content: string) => <p>{content}</p>;
@@ -11,6 +11,33 @@ const renderHtml = (node: ReactNode) => { act(() => root.render(node)); return c
 beforeEach(() => { (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true; container = document.createElement('div'); document.body.append(container); root = createRoot(container); });
 afterEach(() => { act(() => root.unmount()); container.remove(); });
 describe('共源基础详情', () => {
+  it('依能力显示下载/保存动作，保持主次、禁用状态与回执边界', () => {
+    const download = vi.fn();
+    const save = vi.fn();
+    renderHtml(<CardDetailsActions onDownload={download} onSave={save} />);
+    const downloadButton = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('下载 JSON'))!;
+    const saveButton = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('存到本地库'))!;
+    expect(downloadButton.className).toContain('--secondary');
+    expect(saveButton.className).toContain('--primary');
+    expect(saveButton.disabled).toBe(false);
+    expect(container.querySelector('[role="status"], [role="alert"]')).toBeNull();
+    act(() => downloadButton.click());
+    act(() => saveButton.click());
+    expect(download).toHaveBeenCalledOnce();
+    expect(save).toHaveBeenCalledOnce();
+
+    renderHtml(<CardDetailsActions onDownload={download} onSave={save} saveBusy />);
+    expect([...container.querySelectorAll('button')][1]?.disabled).toBe(true);
+    expect(container.querySelector('[role="status"], [role="alert"]')).toBeNull();
+
+    renderHtml(<CardDetailsActions onDownload={download} />);
+    const downloadOnly = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('下载 JSON'))!;
+    expect(container.textContent).not.toContain('存到本地库');
+    expect(downloadOnly.className).toContain('--primary');
+    expect(container.querySelector('[role="status"], [role="alert"]')).toBeNull();
+    act(() => downloadOnly.click());
+    expect(download).toHaveBeenCalledTimes(2);
+  });
   it.each(['character', 'scenario', 'history', 'questionnaire'] as const)('保留 %s 通用正文、作者日期和显式来源，无宿主动作不造按钮', async (type) => {
     await act(async () => root.render(<BasicCardDetailsModal isOpen onClose={() => {}} card={{ ...card, type }} source={{ kind: 'cache', lastSuccessAt: '2026-03-01T00:00:00Z' }} renderMarkdown={markdown} />));
     expect(container.textContent).toContain('本机作者'); expect(container.textContent).toContain('缓存快照'); expect(container.textContent).toContain('正文'); expect(container.querySelector('[title="2026-01-01T01:02:00Z"]')).not.toBeNull(); expect(container.textContent).not.toContain('下载 JSON'); expect(container.textContent).not.toContain('存到本地库');
@@ -30,6 +57,18 @@ describe('共源基础详情', () => {
     expect(title.className).toContain('truncate');
     expect(title.getAttribute('title')).toBe(longName);
     expect(dialog.className).toContain('max-h-[min(90dvh,calc(100dvh-2rem))]');
+  });
+  it('缩短页脚并在正文后折叠日期元信息', () => {
+    renderHtml(<BasicCardDetailsModal isOpen card={card} source={{ kind: 'local' }} onClose={() => {}} renderMarkdown={markdown} />);
+    const dialog = container.querySelector<HTMLElement>('[role="dialog"]')!;
+    const detailHeading = [...dialog.querySelectorAll('h3')].find(heading => heading.textContent === '内容')!;
+    const dateDetails = dialog.querySelector('details')!;
+    expect(dateDetails.querySelector('summary')?.textContent).toBe('创建与更新时间');
+    // 共享焦点圈留通过显式 tabindex 纳入原生 summary，不能在正文区提前环绕。
+    expect(dateDetails.querySelector('summary')?.tabIndex).toBe(0);
+    expect(detailHeading.compareDocumentPosition(dateDetails) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(dialog.querySelectorAll('button[aria-label^="关闭"]')).toHaveLength(1);
+    expect(dialog.querySelector('button')?.textContent).not.toContain('关闭');
   });
   it.each(['oops', 'null', '12', '"text"'])('无效正文 %s 明确报错', (data) => {
     const html = renderHtml(<CardDetailsBody data={data} renderMarkdown={markdown} />);
@@ -61,7 +100,10 @@ describe('共源基础详情', () => {
     )].filter((element) => !element.matches(':disabled') && !element.hidden && element.getAttribute('aria-hidden') !== 'true');
     const first = focusable[0]!;
     const last = focusable.at(-1)!;
-    expect(last.textContent).toBe('关闭');
+    expect(details.querySelector('button[aria-label^="关闭"]')).toBe(close);
+    expect(details.querySelector('button[aria-label="更多操作"]')).toBeNull();
+    expect(details.querySelector('[data-card-actions]')).toBeNull();
+    expect(last).not.toBe(close);
     if (withHeaderAction) {
       expect(first.textContent).toBe('更多');
       expect(first).not.toBe(close);
