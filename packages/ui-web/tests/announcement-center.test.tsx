@@ -12,6 +12,7 @@ import type { AnnouncementDismissalStore } from '../src/announcement/index';
 import type { Announcement } from '@mahoshojo/contracts/announcements';
 import { ShellEscapeMenu } from '../src/shell/EscapeMenu';
 import { useUnsavedPageGuard } from '../src/client/useUnsavedPageGuard';
+import { getBaseModalLayoutClassNames } from '../src/modal/BaseModal';
 
 let container: HTMLDivElement;
 let root: Root;
@@ -203,6 +204,22 @@ describe('AnnouncementCenter', () => {
     expect(document.body.lastElementChild).toBe(spacer());
     expect(container.querySelector('.announcement-spacer')).toBeNull();
     expect(observers[0].observe).toHaveBeenCalledWith(ticker, { box: 'border-box' });
+  });
+
+  it('keeps the ticker below modal layers and the announcement dialog above them', () => {
+    render(<AnnouncementCenter announcements={ANNOUNCEMENTS} dismissal={makeDismissal()} />);
+
+    const ticker = container.querySelector('.announcement-ticker')!;
+    const tickerZ = Number(ticker.className.match(/(?:^|\s)z-(\d+)(?:\s|$)/)?.[1]);
+    const baseModalRootClassName = getBaseModalLayoutClassNames().rootClassName;
+    const modalZ = Number(baseModalRootClassName.match(/(?:^|\s)z-(\d+)(?:\s|$)/)?.[1]);
+    expect(tickerZ).toBe(40);
+    expect(modalZ).toBe(50);
+    expect(tickerZ).toBeLessThan(modalZ);
+
+    click(trigger());
+    const dialogLayer = container.querySelector('.announcement-fade')!;
+    expect(dialogLayer.className).toContain('z-(--app-z-modal)');
   });
 
   it('loads announcement markdown only for a selected detail and renders its body', async () => {

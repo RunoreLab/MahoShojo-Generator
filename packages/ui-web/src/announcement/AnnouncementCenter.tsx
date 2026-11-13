@@ -233,7 +233,7 @@ export function AnnouncementCenter({
       {/* 公告栏主体 */}
       <div
         ref={tickerRef}
-        className="announcement-ticker announcement-pause-on-hover fixed bottom-0 left-0 right-0 w-full bg-gray-900/90 backdrop-blur-lg text-gray-200 flex items-center justify-between border-t border-white/10 shadow-lg z-[1000]"
+        className="announcement-ticker announcement-pause-on-hover fixed bottom-0 left-0 right-0 w-full bg-gray-900/90 backdrop-blur-lg text-gray-200 flex items-center justify-between border-t border-white/10 shadow-lg z-40"
       >
         <button
           ref={triggerRef}
@@ -283,7 +283,7 @@ export function AnnouncementCenter({
       {/* 详情弹窗 */}
       {isModalOpen && (
         <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1001] announcement-fade"
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-(--app-z-modal) announcement-fade"
           onClick={handleCloseModal}
         >
           <div
