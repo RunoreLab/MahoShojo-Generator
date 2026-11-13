@@ -2,10 +2,12 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { App } from './app/App';
+import { initializeDesktopZoom } from './features/zoom/use-desktop-zoom';
 import { markBootPoint, reportBootTimeline } from './platform/boot-timing';
 import './styles/globals.css';
 
 markBootPoint('js-module-eval');
+initializeDesktopZoom();
 
 const container = document.getElementById('root');
 if (!container) {

@@ -21,6 +21,7 @@
         "minHeight": 450,
         "preventOverflow": true,
         "resizable": true,
+        "zoomHotkeysEnabled": false,
         "center": true,
         "backgroundColor": "#0b1220"
       }

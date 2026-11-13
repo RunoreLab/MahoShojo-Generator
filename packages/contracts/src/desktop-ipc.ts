@@ -6,10 +6,19 @@ import { OnlineDataCardTypeSchema } from './data-cards';
 import {
   DESKTOP_PUBLIC_CACHE_MAX_BUDGET_BYTES,
   DESKTOP_PUBLIC_CACHE_MIN_BUDGET_BYTES,
+  isDesktopZoomPercent,
 } from './desktop-config';
 import { MAX_SECRET_REF_LENGTH, SECRET_REF_PATTERN, SecretRefSchema, isSecretRef } from './secret-ref';
 import { WebPackageMediaTypeSchema, WebPackagePathSchema } from './web-package';
 import { utf8ByteLimitedStringSchema } from './wire-size';
+
+/** 固定主窗口的显示操作，不接受 window/webview label 或其他目标。 */
+export const DesktopMainWindowZoomRequestSchema = z.object({
+  zoomPercent: z.number().int().refine(isDesktopZoomPercent),
+}).strict();
+export type DesktopMainWindowZoomRequest = z.infer<typeof DesktopMainWindowZoomRequestSchema>;
+export const DesktopMainWindowZoomResponseSchema = DesktopMainWindowZoomRequestSchema;
+export type DesktopMainWindowZoomResponse = z.infer<typeof DesktopMainWindowZoomResponseSchema>;
 
 /** Native backup 的标识只能选择本机备份，不能充当路径。新增契约不改变 portable archive。 */
 export const DesktopBackupIdSchema = z.string().max(128).regex(

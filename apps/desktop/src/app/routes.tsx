@@ -22,6 +22,7 @@ import { useTopbarAvatar } from '../features/account/use-topbar-avatar';
 import { DesktopAnnouncementCenter } from '../features/announcements/desktop-announcement-center';
 import { useTopbarMessages } from '../features/messages/topbar-messages';
 import { useDesktopConfig } from '../features/config/use-desktop-config';
+import { DesktopZoomFeedback } from '../features/zoom/DesktopZoomSettingsCard';
 import { usePublicCachePolicySync } from '../features/public-cache/use-public-cache-policy-sync';
 import { ExternalLinksProvider, useExternalLinks } from '../features/external-links/external-links-provider';
 import { buildCapabilitySnapshot } from './capabilities';
@@ -198,6 +199,7 @@ const DesktopShellInner = () => {
       }
     >
       <DesktopAnnouncementCenter />
+      <DesktopZoomFeedback />
       <Outlet />
     </AppShell>
     {/*

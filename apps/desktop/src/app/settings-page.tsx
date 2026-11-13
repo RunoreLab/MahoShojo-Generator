@@ -21,6 +21,7 @@ import { AiConnectionsPanel } from '../features/ai-config/AiConnectionsPanel';
 import { DesktopConfigFeedback } from '../features/config/DesktopConfigFeedback';
 import { DesktopConfigFileCard } from '../features/config/DesktopConfigFileCard';
 import { EscapeMenuSettingsCard } from '../features/config/EscapeMenuSettingsCard';
+import { DesktopZoomSettingsCard } from '../features/zoom/DesktopZoomSettingsCard';
 import { OnlineSettingsSection } from '../features/config/OnlineSettingsSection';
 import { PublicCacheSettingsCard } from '../features/public-cache/PublicCacheSettingsCard';
 import { WebPackageDiagnosticsPanel } from '../features/webpkg/WebPackageDiagnosticsPanel';
@@ -181,6 +182,7 @@ export const DesktopSettings = () => {
           content: (
             <>
               <AppearanceSettingsSection />
+              <DesktopZoomSettingsCard />
               <EscapeMenuSettingsCard />
             </>
           ),

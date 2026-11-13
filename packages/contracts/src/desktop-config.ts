@@ -14,6 +14,8 @@
  *   默认 `true`；非法值按 `true`（更保守）处理并诊断（DESK-PARITY-003）。
  * - `desktop.escapeMenu.enabled`：Esc 快捷菜单开关，boolean，默认 `true`；
  *   非法值按 `true` 处理并诊断（D5.1-N1，DESK-PARITY-007）。
+ * - `desktop.zoomPercent`：可信主窗口缩放档位，默认 `100`；非法值按
+ *   100% 处理并诊断（DISP-001）。
  * - `publicLibraryCache.captureEnabled` / `maxBytes` / `whenFull`：公开库
  *   持久缓存策略（D5.1-K1，DESK-CACHE-008）。默认捕获开启、预算 256 MiB、
  *   满额暂停。该组的降级不是逐字段回默认：任一字段无法校验即整组降级为
@@ -28,6 +30,12 @@
  */
 
 export const DESKTOP_CONFIG_FILE_VERSION = 1;
+
+/** 主窗口页面缩放档位；设置、快捷键和 Native IPC 共用此域。 */
+export const DESKTOP_ZOOM_PERCENT_OPTIONS = [80, 90, 100, 110, 125, 150, 175, 200] as const;
+export type DesktopZoomPercent = (typeof DESKTOP_ZOOM_PERCENT_OPTIONS)[number];
+export const isDesktopZoomPercent = (value: unknown): value is DesktopZoomPercent =>
+  typeof value === 'number' && DESKTOP_ZOOM_PERCENT_OPTIONS.includes(value as DesktopZoomPercent);
 
 /** `announcements.checkPolicy` 的合法取值（公告 store 与设置页共用同一字面量）。 */
 export type AnnouncementsCheckPolicy = 'on-launch' | 'manual';
@@ -67,6 +75,8 @@ export interface DesktopConfigValues {
   readonly confirmContentLinks: boolean;
   /** `desktop.escapeMenu.enabled` */
   readonly escapeMenuEnabled: boolean;
+  /** `desktop.zoomPercent`，只作用于可信主窗口。 */
+  readonly zoomPercent: DesktopZoomPercent;
   /** `publicLibraryCache.captureEnabled` */
   readonly publicCacheCaptureEnabled: boolean;
   /** `publicLibraryCache.maxBytes`；`'unlimited'` = 显式不设上限 */
@@ -79,6 +89,7 @@ export const DESKTOP_CONFIG_DEFAULTS: DesktopConfigValues = {
   announcementsCheckPolicy: 'on-launch',
   confirmContentLinks: true,
   escapeMenuEnabled: true,
+  zoomPercent: 100,
   publicCacheCaptureEnabled: true,
   publicCacheMaxBytes: DESKTOP_PUBLIC_CACHE_DEFAULT_MAX_BYTES,
   publicCacheWhenFull: 'pause',
@@ -99,7 +110,7 @@ export interface DesktopConfigDocumentExtras {
   readonly topLevel: Readonly<Record<string, unknown>>;
   readonly announcements: Readonly<Record<string, unknown>>;
   readonly externalLinks: Readonly<Record<string, unknown>>;
-  /** `$.desktop` 下除 `escapeMenu` 外的未登记键。 */
+  /** `$.desktop` 下除 `escapeMenu` / `zoomPercent` 外的未登记键。 */
   readonly desktop: Readonly<Record<string, unknown>>;
   /** `$.desktop.escapeMenu` 下除 `enabled` 外的未登记键。 */
   readonly desktopEscapeMenu: Readonly<Record<string, unknown>>;
@@ -277,6 +288,7 @@ export const parseDesktopConfigText = (text: string): DesktopConfigParseResult =
   }
 
   let escapeMenuEnabled = DESKTOP_CONFIG_DEFAULTS.escapeMenuEnabled;
+  let zoomPercent = DESKTOP_CONFIG_DEFAULTS.zoomPercent;
   if ('desktop' in doc) {
     if (!isPlainObject(doc.desktop)) {
       diagnostics.push({
@@ -286,8 +298,15 @@ export const parseDesktopConfigText = (text: string): DesktopConfigParseResult =
     } else {
       Object.assign(
         extras.desktop,
-        collectExtras(doc.desktop, new Set(['escapeMenu']), '$.desktop', diagnostics),
+        collectExtras(doc.desktop, new Set(['escapeMenu', 'zoomPercent']), '$.desktop', diagnostics),
       );
+      if (doc.desktop.zoomPercent !== undefined) {
+        if (isDesktopZoomPercent(doc.desktop.zoomPercent)) {
+          zoomPercent = doc.desktop.zoomPercent;
+        } else {
+          diagnostics.push({ path: '$.desktop.zoomPercent', message: '非法缩放档位，按默认 100% 处理' });
+        }
+      }
       const escapeMenu = doc.desktop.escapeMenu;
       if (escapeMenu !== undefined) {
         if (!isPlainObject(escapeMenu)) {
@@ -380,6 +399,7 @@ export const parseDesktopConfigText = (text: string): DesktopConfigParseResult =
       announcementsCheckPolicy,
       confirmContentLinks,
       escapeMenuEnabled,
+      zoomPercent,
       publicCacheCaptureEnabled,
       publicCacheMaxBytes,
       publicCacheWhenFull,
@@ -412,6 +432,7 @@ export const serializeDesktopConfig = (
       },
       desktop: {
         ...extras?.desktop,
+        zoomPercent: values.zoomPercent,
         escapeMenu: {
           ...extras?.desktopEscapeMenu,
           enabled: values.escapeMenuEnabled,

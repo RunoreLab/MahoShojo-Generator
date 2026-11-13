@@ -47,6 +47,7 @@ const stateWith = (overrides: Partial<DesktopConfigState>): DesktopConfigState =
     announcementsCheckPolicy: 'on-launch',
     confirmContentLinks: true,
     escapeMenuEnabled: true,
+    zoomPercent: 100,
     publicCacheCaptureEnabled: true,
     publicCacheMaxBytes: 268_435_456,
     publicCacheWhenFull: 'pause',

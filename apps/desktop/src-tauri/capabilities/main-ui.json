@@ -8,6 +8,7 @@
     "core:event:allow-unlisten",
     "core:window:allow-destroy",
     "allow-desktop-runtime-info",
+    "allow-set-main-window-zoom",
     "allow-check-desktop-update",
     "allow-install-desktop-update",
     "allow-cancel-desktop-update",

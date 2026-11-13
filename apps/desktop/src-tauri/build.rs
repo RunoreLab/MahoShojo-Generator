@@ -25,6 +25,7 @@ fn main() {
     tauri_build::try_build(
         attributes.app_manifest(tauri_build::AppManifest::new().commands(&[
             "desktop_runtime_info",
+            "set_main_window_zoom",
             "check_desktop_update",
             "install_desktop_update",
             "cancel_desktop_update",

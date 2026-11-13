@@ -16,6 +16,7 @@ const FIELD_LABELS: Record<keyof DesktopConfigValues, string> = {
   announcementsCheckPolicy: '公告检查',
   confirmContentLinks: '内容外链确认',
   escapeMenuEnabled: 'Esc 快捷菜单',
+  zoomPercent: '整体缩放',
   publicCacheCaptureEnabled: '缓存公开资料',
   publicCacheMaxBytes: '缓存大小上限',
   publicCacheWhenFull: '缓存满额策略',

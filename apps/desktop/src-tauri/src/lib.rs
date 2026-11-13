@@ -71,6 +71,7 @@ mod test_fixture;
 mod updater;
 mod web_package;
 mod webpkg_instance;
+mod window_zoom;
 
 use library::LocalLibrary;
 use provider_profile::DirectProviderExecutionProfile;
@@ -103,6 +104,14 @@ fn desktop_runtime_info(app: tauri::AppHandle) -> DesktopRuntimeInfo {
         arch: std::env::consts::ARCH.to_string(),
         packaged: !cfg!(debug_assertions),
     }
+}
+
+#[tauri::command]
+async fn set_main_window_zoom(
+    webview: tauri::Webview,
+    zoom_percent: u16,
+) -> Result<window_zoom::ZoomResponse, String> {
+    window_zoom::apply(&webview, zoom_percent).await
 }
 
 #[tauri::command]
@@ -2344,6 +2353,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             desktop_runtime_info,
+            set_main_window_zoom,
             check_desktop_update,
             install_desktop_update,
             cancel_desktop_update,

@@ -27,12 +27,28 @@ import {
   DesktopConfigFileStateSchema,
   DesktopConfigReadResultSchema,
   DesktopConfigWriteRequestSchema,
+  DesktopMainWindowZoomRequestSchema,
 } from '../src/desktop-ipc';
 
 const diagPaths = (text: string) =>
   parseDesktopConfigText(text).diagnostics.map((diagnostic) => diagnostic.path);
 
 describe('desktop config domain', () => {
+  it('accepts only registered zoom steps and preserves unknown desktop fields', () => {
+    for (const zoomPercent of [80, 90, 100, 110, 125, 150, 175, 200]) {
+      const result = parseDesktopConfigText(JSON.stringify({ version: 1, desktop: { zoomPercent, future: 7 } }));
+      expect(result.values.zoomPercent).toBe(zoomPercent);
+      expect(JSON.parse(serializeDesktopConfig(result.values, result.extras)).desktop).toMatchObject({ zoomPercent, future: 7 });
+      expect(DesktopMainWindowZoomRequestSchema.safeParse({ zoomPercent }).success).toBe(true);
+    }
+    for (const zoomPercent of [0, 79, 81, 201, 100.5, '125', null]) {
+      const result = parseDesktopConfigText(JSON.stringify({ version: 1, desktop: { zoomPercent } }));
+      expect(result.values.zoomPercent).toBe(100);
+      expect(result.diagnostics.map(({ path }) => path)).toContain('$.desktop.zoomPercent');
+      expect(DesktopMainWindowZoomRequestSchema.safeParse({ zoomPercent }).success).toBe(false);
+    }
+    expect(DesktopMainWindowZoomRequestSchema.safeParse({ zoomPercent: 125, webview: 'other' }).success).toBe(false);
+  });
   it('parses a minimal valid document and the shipped example', () => {
     const minimal = parseDesktopConfigText('{"version":1}');
     expect(minimal.fatal).toBe(false);
@@ -65,6 +81,7 @@ describe('desktop config domain', () => {
       announcementsCheckPolicy: 'manual',
       confirmContentLinks: false,
       escapeMenuEnabled: false,
+      zoomPercent: 100,
       publicCacheCaptureEnabled: false,
       publicCacheMaxBytes: 'unlimited',
       publicCacheWhenFull: 'evict-least-recently-used',
@@ -151,6 +168,7 @@ describe('desktop config domain', () => {
     });
     expect(doc.desktop).toEqual({
       futureDesktopKey: 1,
+      zoomPercent: 100,
       escapeMenu: { enabled: true, futureEscKey: 2 },
     });
   });
@@ -221,6 +239,7 @@ describe('desktop config domain', () => {
       announcementsCheckPolicy: 'manual' as const,
       confirmContentLinks: false,
       escapeMenuEnabled: false,
+      zoomPercent: 100 as const,
       publicCacheCaptureEnabled: true,
       publicCacheMaxBytes: 67108864,
       publicCacheWhenFull: 'evict-least-recently-used' as const,
@@ -239,7 +258,7 @@ describe('desktop config domain', () => {
       version: 1,
       announcements: { checkPolicy: 'manual' },
       externalLinks: { confirmContentLinks: false, futureLink: 'x' },
-      desktop: { escapeMenu: { enabled: false, futureEscKey: 2 } },
+      desktop: { zoomPercent: 100, escapeMenu: { enabled: false, futureEscKey: 2 } },
       publicLibraryCache: {
         futureCacheKey: 3,
         captureEnabled: true,

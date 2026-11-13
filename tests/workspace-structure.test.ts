@@ -658,6 +658,7 @@ describe('desktop workspace app ownership', () => {
 
     expect(commands).toEqual([
       'desktop_runtime_info',
+      'set_main_window_zoom',
       'check_desktop_update',
       'install_desktop_update',
       'cancel_desktop_update',
