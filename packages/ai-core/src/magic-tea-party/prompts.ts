@@ -310,7 +310,7 @@ const buildMagicTeaPartyMainPromptParts = (params: {
     systemLines.push('- updates：{"type":"updates","drafts":[...],"meta":{...}}。');
     systemLines.push('- notice：{"type":"notice","level":"error|warning|info","code":"...","message":"...","meta":{...}}。');
     systemLines.push('- notice 必须独立成行；level=error 时仅输出 notice。');
-    systemLines.push('- dialogue 必须包含 speakerId（来自角色 id），并尽量包含 speakerName。');
+    systemLines.push('- dialogue 必须包含 speakerId（精确使用资料中的角色原始 id，不得替换为姓名拼音、别名或自行编号），并尽量包含 speakerName。');
     systemLines.push('- choices 仅在需要时输出一行，items 默认 3~4；若有要求也可调整至 2~16 并保留标识。');
     systemLines.push('- summary/updates 仅在需要时输出，且必须位于正文/choices 之后。');
   } else {
@@ -666,6 +666,7 @@ export const buildMagicTeaPartySummarizePromptMessages = (params: {
     lines.push('3) 关键事件');
     lines.push('4) 未决事项');
     lines.push('5) 禁忌/边界');
+    lines.push('禁忌/边界仅摘录对话资料明确给出的约束；不得从剧情结果、猜测或通用合规措辞推导新禁令、弱点或能力限制，没有明确约束时写“无”。');
     lines.push('');
     lines.push('【输出格式（可输出“无”）】');
     lines.push('世界状态：...');
