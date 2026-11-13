@@ -20,5 +20,15 @@ export const PRESET_METADATA: readonly Readonly<{ packageRef: WebPackageRef; tit
     "title": "恋爱测评",
     "description": "I_moly 创作：分析角色的相处需求与六维难度，体验动态匹配评分、尊重角色意愿的假设后日谈与绘图提示词。",
     "downloadUrl": "web-package:builtin/creator.I_moly@1.0.4"
+  },
+  {
+    "packageRef": {
+      "id": "continuance.cx-archive-package",
+      "version": "1.3.3",
+      "digest": "sha256:3705aa32c51dab66df4b1ab3646afca98363cffd02ec0e3d286307c9c6806985"
+    },
+    "title": "存续院收容档案",
+    "description": "冉霖创作：用宣纸档案呈现异常观察、访谈、录像与时间轴，体验权限黑条、虚构认知检查和模块化附录。",
+    "downloadUrl": "web-package:builtin/continuance.cx-archive-package@1.3.3"
   }
 ];

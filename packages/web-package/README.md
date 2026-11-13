@@ -10,7 +10,9 @@ Visual Novel Lite、星屑社区、命运岔路从未部署，已删除其资产
 
 「竞技场新闻」由 AI 生成完整 HTML，资源包只提供可选素材与交互能力。详情/广告通过同一文档内的 hash 路由，评论/收藏/点赞/投票/订阅均为刷新即重置的内存模拟。具体引用约束与属性用法见 `presets/arena-news/ai/assets.json`；该目录会完整投影给 AI，不要求 AI 读取未投影的组件文件。通用物化器从已校验实例读取资源；HTTPS 资源仍受运行页 CSP、CORS 与浏览器策略限制。
 
-社区预设「恋爱测评」来自 I_moly 的群内投稿，AI 生成 JSON、固定引擎呈现评分与假设后日谈。默认资源均为文本，作者插图由用户点击后直接从外站加载；细节与接入修订见 `presets/romance-report/README.md`。当前展示内容与固定身份以 `preset-catalog.json` 为准。
+社区预设「恋爱测评」来自 I_moly 的群内投稿，AI 生成 JSON、固定引擎呈现评分与假设后日谈。默认资源均为文本，作者插图由用户点击后直接从外站加载；细节与接入修订见 `presets/romance-report/README.md`。
+
+「存续院收容档案」来自冉霖的群内投稿，AI 生成 JSON、固定引擎装配档案与附录。运行资源全部在包内，以文本和小型 SVG 实现；细节见 `presets/containment-archive/README.md`。当前展示内容与固定身份以 `preset-catalog.json` 为准。
 
 ## 入口与客户端传输
 

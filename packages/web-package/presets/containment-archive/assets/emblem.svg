@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 88 88" role="img" aria-label="存续院收容部徽记">
+  <rect x="3" y="3" width="82" height="82" fill="none" stroke="#8a7340" stroke-width="1.6"/>
+  <rect x="9" y="9" width="70" height="70" fill="none" stroke="#8a7340" stroke-width=".8" stroke-dasharray="3 3"/>
+  <circle cx="44" cy="44" r="26" fill="none" stroke="#8a7340" stroke-width="1.2"/>
+  <circle cx="44" cy="44" r="18" fill="none" stroke="#8a7340" stroke-width=".8"/>
+  <path d="M44 12V20 M44 68V76 M12 44H20 M68 44H76" stroke="#8a7340" stroke-width="1.4"/>
+  <path d="M30 30 L44 26 L58 30 L58 52 L44 58 L30 52 Z" fill="none" stroke="#8a7340" stroke-width="1"/>
+  <path d="M36 42 H52 M44 36 V50" stroke="#a8281e" stroke-width="1.6"/>
+</svg>

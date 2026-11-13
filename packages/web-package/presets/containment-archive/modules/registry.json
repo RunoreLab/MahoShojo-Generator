@@ -1,0 +1,25 @@
+{
+  "formatVersion": 1,
+  "description": "存续院收容档案 · 附录模块注册表。运行时只加载 data/archive.json 中 modules 声明的脚本；未声明模块不会被请求。",
+  "primitives": {
+    "note": {
+      "label": "过渡段",
+      "en": "Transition",
+      "clearance": "L1",
+      "description": "由 structure 中的 note 项生成，纯文本（自动转义，不解析 HTML），不加载脚本、不占章节编号、不进目录。"
+    }
+  },
+  "modules": [
+    { "id": "interview", "label": "访谈记录", "en": "Interview Log", "clearance": "L2", "script": "modules/interview.js", "defaultOrder": 1 },
+    { "id": "atlas", "label": "山海图志", "en": "Bestiary Entry", "clearance": "auto", "script": "modules/atlas.js", "defaultOrder": 2.5, "defaultAfter": "description" },
+    { "id": "log", "label": "监控录像", "en": "Surveillance Footage", "clearance": "L3", "script": "modules/log.js", "defaultOrder": 2 },
+    { "id": "timeline", "label": "事件时间轴", "en": "Incident Timeline", "clearance": "L3", "script": "modules/timeline.js", "defaultOrder": 3 },
+    { "id": "photo", "label": "影像资料", "en": "Photographic Record", "clearance": "L2", "script": "modules/photo.js", "defaultOrder": 4 },
+    { "id": "letter", "label": "封存信件", "en": "Sealed Correspondence", "clearance": "L4", "script": "modules/letter.js", "defaultOrder": 5 },
+    { "id": "sandbox", "label": "沙箱模拟", "en": "Sandbox Preview", "clearance": "L3", "script": "modules/sandbox.js", "defaultOrder": 6 },
+    { "id": "map", "label": "地点舆图", "en": "Site Survey", "clearance": "L2", "script": "modules/map.js", "defaultOrder": 7 },
+    { "id": "list", "label": "清单物证", "en": "Inventory & Evidence", "clearance": "L3", "script": "modules/list.js", "defaultOrder": 8 },
+    { "id": "report", "label": "行动报告", "en": "Action Report", "clearance": "L3", "script": "modules/report.js", "defaultOrder": 9 },
+    { "id": "sign", "label": "签批", "en": "Approval & Signatures", "clearance": "L4", "script": "modules/sign.js", "defaultOrder": 10 }
+  ]
+}

@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>存续院收容档案 · 只读归档</title>
+<meta name="description" content="存续院收容部标准收容档案。本页为只读归档，内容与附录由模块注册表装配。">
+<link rel="stylesheet" href="styles/archive.css">
+</head>
+<body data-theme="paper" class="is-gated">
+
+<a class="skip-link" href="#sheet">跳到档案正文</a>
+
+<div class="progress" id="progress"></div>
+
+<!-- ==================== 模因检视闸门 ==================== -->
+<div class="gate" id="gate" role="dialog" aria-modal="true" aria-labelledby="gateTitle" aria-describedby="gateDesc">
+  <div class="gate__box">
+    <svg class="gate__sigil" viewBox="0 0 140 140" aria-hidden="true">
+      <g class="r1" fill="none" stroke="currentColor" stroke-width="1">
+        <circle cx="70" cy="70" r="62" stroke-dasharray="3 7"/>
+        <circle cx="70" cy="70" r="54"/>
+      </g>
+      <g class="r2" fill="none" stroke="currentColor" stroke-width="1" opacity=".6">
+        <circle cx="70" cy="70" r="44" stroke-dasharray="12 6"/>
+      </g>
+      <path d="M70 26 L96 44 L96 88 L70 106 L44 88 L44 44 Z" fill="none" stroke="currentColor" stroke-width="1.4"/>
+      <text x="70" y="79" text-anchor="middle" font-size="30" fill="currentColor" font-family="KaiTi,STKaiti,serif">续</text>
+    </svg>
+    <div class="warn">模因检视 · MEMETIC SCREENING</div>
+    <h2 id="gateTitle">档案前置认知检查</h2>
+    <p id="gateDesc">这是虚构档案中的认知检查演出。开始阅读前，请在下方选出<b>不属于</b>模因污染特征的一项。</p>
+    <div class="gate__test" id="gateTest" role="group" aria-label="认知检查选项">
+      <button type="button" data-ok="0">无条件服从</button>
+      <button type="button" data-ok="1">必须署名</button>
+      <button type="button" data-ok="0">绝对胜利</button>
+      <button type="button" data-ok="0">一切归我</button>
+    </div>
+    <p class="gate__msg" id="gateMsg" role="status" aria-live="polite">请选择一项。</p>
+    <button type="button" class="gate__go" id="gateGo" disabled>进入档案</button>
+    <button type="button" class="gate__skip" id="gateSkip">跳过检查（仅本页演出）</button>
+  </div>
+</div>
+
+<!-- ==================== 收容失效条 ==================== -->
+<div class="breach-bar" id="breachBar">
+  <span>收容失效</span><b id="breachClock">00:00</b>
+  <button id="breachOff">恢复收容</button>
+</div>
+
+<!-- ==================== 顶栏 ==================== -->
+<header class="bar">
+  <div class="bar__logo">
+    <svg viewBox="0 0 40 40" aria-hidden="true">
+      <rect x="2" y="2" width="36" height="36" fill="none" stroke="#c9a75e" stroke-width="1.5"/>
+      <path d="M8 8 H16 V14 H12 V18 M32 8 H24 V14 H28 V18 M8 32 H16 V26 H12 V22 M32 32 H24 V26 H28 V22" fill="none" stroke="#7aa892" stroke-width="1.1"/>
+      <circle cx="20" cy="20" r="5" fill="none" stroke="#a8281e" stroke-width="1.5"/>
+    </svg>
+    存续院收容部
+  </div>
+  <div class="bar__id" id="copyId" title="点击复制项目编号">—</div>
+
+  <div class="bar__tools">
+    <div class="clear-pick" id="clearPick" title="切换阅读权限">
+      <button data-lv="1">L1</button>
+      <button data-lv="2">L2</button>
+      <button data-lv="3" class="is-on">L3</button>
+      <button data-lv="4">L4</button>
+      <button data-lv="5">L5</button>
+    </div>
+    <button class="btn" id="themeBtn">◑ 玄墨</button>
+    <button class="btn" id="printBtn">⎙ 打印</button>
+    <button class="btn btn--danger" id="breachBtn">⚠ 收容失效</button>
+  </div>
+</header>
+
+<!-- ==================== 主体 ==================== -->
+<button class="rail-fab" id="railFab" type="button" aria-controls="rail" aria-expanded="false">目录</button>
+<div class="rail-scrim" id="railScrim" hidden></div>
+
+<div class="stage">
+
+  <!-- 竖排目录：链接由运行时按实际装配结果生成 -->
+  <nav class="rail" id="rail" aria-label="档案目录">
+    <div class="rail__cap">Index</div>
+    <button class="rail__close" id="railClose" type="button" aria-label="关闭目录">✕</button>
+  </nav>
+
+  <!-- 纸张 -->
+  <main class="sheet" id="sheet" tabindex="-1">
+
+    <div class="watermark"><span>内部文件 不得外传</span></div>
+    <div class="sheet__frame"></div>
+
+    <svg class="sheet__corner sheet__corner--tl" viewBox="0 0 46 46" aria-hidden="true">
+      <path d="M1 45V1H45" fill="none" stroke="currentColor" stroke-width="1"/>
+      <path d="M6 45V6H45" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="2 3" opacity=".6"/>
+      <path d="M6 20H16V10H24 M40 6V16H30V24" fill="none" stroke="currentColor" stroke-width="1.2"/>
+      <circle cx="34" cy="34" r="3" fill="none" stroke="currentColor" stroke-width="1"/>
+    </svg>
+    <svg class="sheet__corner sheet__corner--tr" viewBox="0 0 46 46" aria-hidden="true">
+      <path d="M1 45V1H45" fill="none" stroke="currentColor" stroke-width="1"/>
+      <path d="M6 45V6H45" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="2 3" opacity=".6"/>
+      <path d="M6 20H16V10H24 M40 6V16H30V24" fill="none" stroke="currentColor" stroke-width="1.2"/>
+      <circle cx="34" cy="34" r="3" fill="none" stroke="currentColor" stroke-width="1"/>
+    </svg>
+    <svg class="sheet__corner sheet__corner--bl" viewBox="0 0 46 46" aria-hidden="true">
+      <path d="M1 45V1H45" fill="none" stroke="currentColor" stroke-width="1"/>
+      <path d="M6 45V6H45" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="2 3" opacity=".6"/>
+      <path d="M6 20H16V10H24 M40 6V16H30V24" fill="none" stroke="currentColor" stroke-width="1.2"/>
+      <circle cx="34" cy="34" r="3" fill="none" stroke="currentColor" stroke-width="1"/>
+    </svg>
+    <svg class="sheet__corner sheet__corner--br" viewBox="0 0 46 46" aria-hidden="true">
+      <path d="M1 45V1H45" fill="none" stroke="currentColor" stroke-width="1"/>
+      <path d="M6 45V6H45" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="2 3" opacity=".6"/>
+      <path d="M6 20H16V10H24 M40 6V16H30V24" fill="none" stroke="currentColor" stroke-width="1.2"/>
+      <circle cx="34" cy="34" r="3" fill="none" stroke="currentColor" stroke-width="1"/>
+    </svg>
+
+    <div class="seam-seal">骑缝章</div>
+
+    <!-- 抬头 -->
+    <div class="letterhead">
+      <img class="letterhead__emblem" src="assets/emblem.svg" alt="">
+      <div class="letterhead__center">
+        <div class="letterhead__org">存 续 院 收 容 部</div>
+        <div class="letterhead__dept">异 常 项 目 档 案</div>
+        <div class="letterhead__en">Continuance Institute · Containment Division</div>
+      </div>
+      <div class="letterhead__no">
+        FORM&nbsp;CX / A-01<br>
+        版本 3.3<br>
+        共 <span id="pageTotal">1</span> 页
+      </div>
+    </div>
+
+    <!-- 警示带 -->
+    <div class="ribbon">
+      <div class="ribbon__track" id="ribbonTrack">
+        <span>虚构内部文件</span><span>模因防护演出已启用</span><span>保密协议为剧情设定</span>
+        <span>虚构内部文件</span><span>模因防护演出已启用</span><span>保密协议为剧情设定</span>
+      </div>
+    </div>
+
+    <!-- 标题区 -->
+    <div class="title-block">
+      <div>
+        <div class="item-no">项目编号　<span id="itemNo">—</span></div>
+        <h1 class="item-name" id="itemName">—</h1>
+        <div class="item-alias" id="itemAlias">别名／俗称：—</div>
+        <div class="item-sum" id="itemSummary"></div>
+
+        <dl class="meta">
+          <div><dt>Object Class</dt><dd id="metaGrade">—</dd></div>
+          <div><dt>Type</dt><dd id="metaType">—</dd></div>
+          <div><dt>Clearance</dt><dd id="metaClearance">—</dd></div>
+          <div><dt>Site</dt><dd id="metaSite">—</dd></div>
+          <div><dt>Hume</dt><dd id="metaHume">—</dd></div>
+          <div><dt>Disrupt</dt><dd id="metaDisrupt">—</dd></div>
+          <div><dt>Filed</dt><dd id="metaFiled">—</dd></div>
+          <div><dt>Status</dt><dd id="metaStatus">—</dd></div>
+        </dl>
+      </div>
+
+      <div class="badge-col">
+        <div class="badge" id="badge" aria-label="项目等级">
+          <svg class="badge__ring" viewBox="0 0 190 190" aria-hidden="true">
+            <g class="spin" fill="none" stroke="currentColor" stroke-width="1">
+              <circle cx="95" cy="95" r="92" stroke-dasharray="2 6" opacity=".55"/>
+              <circle cx="95" cy="95" r="84"/>
+            </g>
+            <g class="spin-r" fill="none" stroke="currentColor" stroke-width="1" opacity=".7">
+              <circle cx="95" cy="95" r="74" stroke-dasharray="26 10"/>
+              <circle cx="95" cy="95" r="64" stroke-dasharray="6 5"/>
+            </g>
+            <path d="M95 8 L102 18 L95 28 L88 18 Z M95 182 L102 172 L95 162 L88 172 Z M8 95 L18 102 L28 95 L18 88 Z M182 95 L172 102 L162 95 L172 88 Z" fill="currentColor"/>
+          </svg>
+          <div class="badge__name" id="badgeName">—</div>
+          <div class="badge__en" id="badgeEn">CLASS</div>
+        </div>
+
+        <!-- 主印章 -->
+        <div class="stamp stamp--main" id="mainStamp">已收容<small>CONTAINED</small></div>
+      </div>
+    </div>
+
+    <!-- 正文：基础三节 + 已声明模块，全部由 apps 装配 -->
+    <div id="sections"></div>
+
+    <!-- 页脚 -->
+    <div class="doc-foot">
+      <div>
+        <div class="doc-foot__motto">为了世界的存续</div>
+        <div class="doc-foot__txt">
+          FORM CX / A-01 · REV 3.2 · 存续院档案科监制<br>
+          <span id="footFile">—</span> · 第 <span id="footPage">1</span> 页 共 <span id="footTotal">1</span> 页<br>
+          社区作者：冉霖 · 虚构档案与权限交互，仅在本页演出。
+        </div>
+      </div>
+      <div>
+        <div class="barcode" id="barcode"></div>
+        <div class="barcode-txt" id="barcodeTxt">—</div>
+      </div>
+    </div>
+  </main>
+
+  <!-- 右侧批注栏（只读说明，不含模板填写指引） -->
+  <aside class="margin">
+    <div class="margin__sticky">
+      <div class="note">
+        本页为只读归档。<br>
+        正文中的权限黑条须达到相应密级后方可展开。
+        <small>档案科 · 便签</small>
+      </div>
+      <div class="note note--blue" style="--r:-1.2deg">
+        等级徽章标示项目危险度与处置优先级，全篇配色随等级变化。
+        <small>排版组 · 便签</small>
+      </div>
+      <div class="rail-card">
+        <h6>阅读图例</h6>
+        <div><span class="lg lg-rd">██</span>权限黑条 · 点击展开</div>
+        <div><span class="lg lg-del"></span>已删除段落</div>
+        <div><span class="lg lg-sign"></span>签章位 · 点击盖章</div>
+      </div>
+      <div class="rail-card">
+        <h6>快捷键</h6>
+        <div><kbd>1</kbd>至<kbd>5</kbd> 切换权限</div>
+        <div><kbd>T</kbd> 纸墨切换</div>
+        <div><kbd>B</kbd> 收容失效</div>
+        <div><kbd>P</kbd> 打印</div>
+        <div style="margin-top:8px;opacity:.75">越权查看次数仅在本次阅读中计数。</div>
+      </div>
+      <div class="rail-card">
+        <h6>本页交互</h6>
+        <div>档案抬头 · 等级配色<br>权限黑条 · 应急卡片<br>标签页 · 影像增强<br>录像同步 · 封蜡信件<br>沙箱闸门 · 舆图标记<br>签批盖章 · 打印样式</div>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<!-- 灯箱 -->
+<div class="lightbox" id="lightbox" role="dialog" aria-modal="true" aria-label="影像预览">
+  <div class="lightbox__in">
+    <div id="lbBody"></div>
+    <div class="lightbox__meta"><span id="lbCap"></span><span id="lbMeta"></span></div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<noscript><div class="ns-warn">本档案需要启用 JavaScript 才能装配附录与交互。</div></noscript>
+
+<script src="scripts/registry.js"></script>
+<script src="scripts/app.js"></script>
+</body>
+</html>

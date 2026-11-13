@@ -1,0 +1,47 @@
+{
+  "identity": {
+    "code": "CX-P-0000",
+    "name": "未载入项目",
+    "aliases": [],
+    "typeCode": "P",
+    "typeName": "待建档",
+    "grade": "无",
+    "clearance": "L3",
+    "site": "Site-CX-00",
+    "hume": "—",
+    "disrupt": "—",
+    "filed": "2026-11-05",
+    "status": "待建档"
+  },
+  "summary": "本包当前尚未载入生成数据。以下为固定档案骨架，正文与附录将在生成流程写入目标文件后替换。",
+  "containment": {
+    "protocols": [
+      "在生成流程写入档案数据之前，本页仅展示固定骨架，不视为有效收容记录。",
+      "任何阅读、复制或引用本页内容的行为，都须以最终归档版本为准。",
+      "档案科应在完成建档后核对项目编号、等级与密级，再交由签批流程。"
+    ]
+  },
+  "description": {
+    "paras": [
+      "本页尚未载入项目描述。生成流程会将角色卡与战报事实写入目标文件，届时本节显示项目的实际描述。",
+      "在此之前的任何空白、占位或骨架内容，都不构成对异常项目的正式记录。"
+    ]
+  },
+  "monitoring": {
+    "radar": {
+      "axes": ["危险性", "扩散性", "智能", "隐蔽性", "可交流", "收容难度"],
+      "values": [0, 0, 0, 0, 0, 0]
+    },
+    "hume": { "base": 100, "readout": 100, "flux": 0, "anchor": "NOMINAL", "alert": 0 },
+    "readings": [
+      { "time": "—", "reading": "未载入", "operator": "—", "judge": "ok" },
+      { "time": "—", "reading": "未载入", "operator": "—", "judge": "ok" }
+    ]
+  },
+  "modules": ["sign"],
+  "moduleData": {
+    "sign": {
+      "note": "本页为骨架版本，签章仅在生成数据载入后生效。"
+    }
+  }
+}

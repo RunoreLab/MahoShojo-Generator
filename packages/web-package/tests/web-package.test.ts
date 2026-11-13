@@ -219,7 +219,7 @@ describe('canonical ZIP artifact and generic JSON Schema validation', () => {
   });
 
   it('exposes discoverable builtin presets only for pinned refs', () => {
-    expect(BUILTIN_WEB_PACKAGE_PRESETS.map((preset) => preset.packageRef.id)).toEqual(['mahoshojo.arena-news', 'creator.I_moly']);
+    expect(BUILTIN_WEB_PACKAGE_PRESETS.map((preset) => preset.packageRef.id)).toEqual(['mahoshojo.arena-news', 'creator.I_moly', 'continuance.cx-archive-package']);
     expect(findBuiltinWebPackagePreset(ref)?.packageRef).toEqual(ref);
     expect(findBuiltinWebPackagePreset({ ...ref, digest: `sha256:${'0'.repeat(64)}` })).toBeUndefined();
     expect(findBuiltinWebPackagePreset(null)).toBeUndefined();

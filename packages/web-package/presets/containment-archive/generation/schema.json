@@ -1,0 +1,286 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://continuance.local/schemas/cx-archive.json",
+  "title": "存续院收容档案数据（宽松骨架）",
+  "description": "本 schema 只负责“页面能不能渲染”的最低门槛：只锁顶层骨架和 identity 的编号/名称，其余字段尽量宽容。未知字段会被忽略而不是判失败；缺失字段由运行时 normalize() 补默认值。类型允许 string|number、单值|数组、对象|数组等多种形态。",
+  "type": "object",
+  "required": ["identity", "summary", "containment", "description", "modules"],
+  "properties": {
+    "identity": {
+      "description": "项目身份。只强制要求 code 与 name；其余字段缺失时运行时给默认值。允许额外字段。",
+      "type": "object",
+      "required": ["code", "name"],
+      "properties": {
+        "code": { "description": "项目编号。示例：CX-P-4107。允许字符串或数字。", "anyOf": [{ "type": "string" }, { "type": "number" }] },
+        "name": { "description": "项目正式名。示例：织命的蓝翠雀。", "type": "string" },
+        "aliases": { "description": "别名/俗称/行动代号。可写字符串或字符串数组。示例：[\"翠雀\",\"林昀\"]。", "anyOf": [{ "type": "string" }, { "type": "array", "items": { "anyOf": [{ "type": "string" }, { "type": "number" }] } }] },
+        "typeCode": { "description": "类型代码：P 人形 / M 模因 / I 物品 / S 空间 / B 异种。也接受小写或中文。示例：P。", "anyOf": [{ "type": "string" }, { "type": "number" }] },
+        "typeName": { "description": "类型中文名。示例：双相灵魂构筑体。", "type": "string" },
+        "grade": { "description": "山海八级：无/乘黄/夔/相柳/女娲/息壤/共工/建木。也接受“四级”“L4”“4”等写法。示例：相柳。", "anyOf": [{ "type": "string" }, { "type": "number" }] },
+        "clearance": { "description": "阅读密级 L1–L5。也接受“四级”“4”“L4”等写法。示例：L4。", "anyOf": [{ "type": "string" }, { "type": "number" }] },
+        "site": { "description": "收容站点。示例：Site-CX-09（方亭市协防分部）。", "anyOf": [{ "type": "string" }, { "type": "number" }] },
+        "hume": { "description": "休谟基线。示例：96.4 / ±0.8。", "anyOf": [{ "type": "string" }, { "type": "number" }] },
+        "disrupt": { "description": "现实扰动当量。示例：3.8 Sv。", "anyOf": [{ "type": "string" }, { "type": "number" }] },
+        "filed": { "description": "归档日期。示例：2026-03-18。允许别名 date/time。", "anyOf": [{ "type": "string" }, { "type": "number" }] },
+        "date": { "description": "filed 的别名，二者写一个即可。", "anyOf": [{ "type": "string" }, { "type": "number" }] },
+        "status": { "description": "当前状态。示例：协议观察中。", "type": "string" },
+        "writer": { "description": "撰写署名（统一写职位，不写人名）。示例：档案科 · 值班撰写员。", "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "summary": {
+      "description": "档案总述。可写字符串，也可写字符串数组（运行时会合并）。",
+      "anyOf": [{ "type": "string" }, { "type": "number" }, { "type": "array", "items": { "anyOf": [{ "type": "string" }, { "type": "number" }] } }],
+      "examples": ["项目编号 CX-P-4107，人形异常，现实稳定度 96.4，现处协议观察中。"]
+    },
+    "containment": {
+      "description": "收容措施。允许对象、字符串或字符串数组；只有 protocols 有内容时才会显示措施列表，其他子字段均为增强。",
+      "anyOf": [{ "$ref": "#/$defs/containment" }, { "type": "string" }, { "type": "array", "items": { "anyOf": [{ "type": "string" }, { "$ref": "#/$defs/containment" }] } }]
+    },
+    "description": {
+      "description": "项目描述。允许对象、字符串或字符串数组；直接写数组会被归一化成 paras。",
+      "anyOf": [{ "$ref": "#/$defs/description" }, { "type": "string" }, { "type": "array", "items": { "anyOf": [{ "type": "string" }, { "type": "number" }, { "$ref": "#/$defs/description" }] } }]
+    },
+    "monitoring": {
+      "description": "监测数据（可选）。允许对象，也允许直接写 readings 数组。",
+      "anyOf": [{ "$ref": "#/$defs/monitoring" }, { "type": "array", "items": { "anyOf": [{ "type": "object" }, { "type": "string" }] } }]
+    },
+    "modules": {
+      "description": "声明要装配的附录模块。推荐字符串数组（如 [\"log\",\"interview\"]）；也接受 [{id:\"log\"}] 对象数组或 {\"log\":true} 映射。未知 id 会被忽略而不是失败。可用模块：interview、atlas、log、timeline、photo、letter、sandbox、map、list、report、sign。",
+      "anyOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "anyOf": [{ "type": "string" }, { "type": "object", "properties": { "id": { "anyOf": [{ "type": "string" }, { "type": "number" }] }, "name": { "type": "string" }, "type": { "type": "string" }, "module": { "type": "string" } }, "additionalProperties": true }] } },
+        { "type": "object", "additionalProperties": true }
+      ],
+      "examples": [["log", "timeline", "interview", "photo", "report", "sign"]]
+    },
+    "moduleData": {
+      "description": "附录数据。可选：未声明或没有数据的模块会被运行时跳过。每个模块数据都允许对象、数组或字符串形态；模块数据层不做额外字段限制。",
+      "anyOf": [
+        { "type": "object", "properties": {
+          "interview": { "$ref": "#/$defs/interview" },
+          "log": { "$ref": "#/$defs/log" },
+          "timeline": { "$ref": "#/$defs/timeline" },
+          "photo": { "$ref": "#/$defs/photo" },
+          "letter": { "$ref": "#/$defs/letter" },
+          "sandbox": { "$ref": "#/$defs/sandbox" },
+          "map": { "$ref": "#/$defs/map" },
+          "list": { "$ref": "#/$defs/list" },
+          "report": { "$ref": "#/$defs/report" },
+          "atlas": { "$ref": "#/$defs/atlas" },
+          "sign": { "$ref": "#/$defs/sign" }
+        }, "additionalProperties": true },
+        { "type": "array", "items": { "type": "object", "properties": { "id": { "type": "string" }, "module": { "type": "string" }, "data": { "type": "object" } }, "additionalProperties": true } }
+      ]
+    },
+    "structure": {
+      "description": "可选编排。缺失时按默认顺序：收容措施 → 项目描述 → 监测数据 → modules 顺序 → 签批。允许数组、{sections:[...]} 或 {id:配置} 映射。元素可写字符串或对象；未知/未声明 id 会被忽略并记录。",
+      "anyOf": [
+        { "type": "array", "items": { "$ref": "#/$defs/structureItem" } },
+        { "type": "object", "additionalProperties": true },
+        { "type": "string" }
+      ],
+      "examples": [[{ "id": "containment" }, { "id": "log", "merge": ["timeline"], "title": "事故复盘" }, { "id": "sign" }]]
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "containment": {
+      "type": "object",
+      "description": "收容措施对象。protocols 可写字符串或字符串数组；未列出的聚合字段均为可选增强。允许额外字段。",
+      "properties": {
+        "notice": { "description": "收容要点，显示在金色警示框。", "anyOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }] },
+        "protocols": { "description": "收容措施条目。示例：[\"夜间由两名值守员执行走廊巡检。\"]。允许单条字符串或数组。", "anyOf": [{ "type": "string" }, { "type": "array", "items": { "anyOf": [{ "type": "string" }, { "type": "number" }, { "type": "object" }] } }] },
+        "specs": { "description": "收容间参数，如 [{label:\"温度\",value:\"21℃\",ratio:60}]。允许数组或 {名称:数值} 映射。", "anyOf": [{ "type": "array", "items": { "anyOf": [{ "type": "object" }, { "type": "string" }] } }, { "type": "object" }] },
+        "supplies": { "description": "常备物资，如 [{name:\"镇静剂\",qty:\"12 支\"}]。允许数组或 {名称:数量} 映射。", "anyOf": [{ "type": "array", "items": { "anyOf": [{ "type": "object" }, { "type": "string" }] } }, { "type": "object" }] },
+        "emergency": { "description": "应急协议卡片，如 [{level:\"一级\",title:\"现实偏移\",body:\"…\",steps:[\"…\"]}]。允许单对象或数组。", "anyOf": [{ "type": "object" }, { "type": "array", "items": { "anyOf": [{ "type": "object" }, { "type": "string" }] } }] },
+        "taboo": { "description": "禁忌事项，如 [{title:\"禁止直视\",text:\"…\"}]。允许单对象或数组。", "anyOf": [{ "type": "object" }, { "type": "array", "items": { "anyOf": [{ "type": "object" }, { "type": "string" }] } }] }
+      },
+      "additionalProperties": true
+    },
+    "description": {
+      "type": "object",
+      "description": "项目描述对象。paras 可写字符串或字符串数组；其余字段可选。允许额外字段。",
+      "properties": {
+        "paras": { "description": "描述段落。示例：[\"外观……\",\"机制……\",\"来历与代价……\"]。允许单段字符串或数组。", "anyOf": [{ "type": "string" }, { "type": "array", "items": { "anyOf": [{ "type": "string" }, { "type": "number" }] } }] },
+        "deleted": { "description": "已删除段落说明。示例：本段已按 L4 封存。", "anyOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }] },
+        "quote": { "description": "现场引语。示例：{text:\"她一直在数走廊的灯。\",source:\"值守员\"}。允许直接写字符串。", "anyOf": [{ "type": "string" }, { "type": "object", "properties": { "text": { "anyOf": [{ "type": "string" }, { "type": "number" }] }, "source": { "type": "string" } }, "additionalProperties": true }] },
+        "tabs": { "description": "标签页，如 [{label:\"外观\",body:\"…\"}]。允许数组或映射。", "anyOf": [{ "type": "array", "items": { "anyOf": [{ "type": "object" }, { "type": "string" }] } }, { "type": "object" }] },
+        "atlas": { "description": "旧写法：图志作为描述子节。如 {title:\"异种形态\",text:[\"…\"],beast:\"夔\"}。图注省略时按 beast 取内置句。若同时声明 atlas 模块，以模块数据为准，此子节不再渲染。", "anyOf": [{ "type": "object", "properties": { "title": { "type": "string" }, "text": { "anyOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }] }, "caption": { "type": "string" }, "beast": { "anyOf": [{ "type": "string" }, { "type": "number" }] } }, "additionalProperties": true }, { "type": "array", "items": { "type": "string" } }] }
+      },
+      "additionalProperties": true
+    },
+    "atlas": {
+      "type": "object",
+      "description": "山海图志模块数据。用院外采风的笔法把项目形态再描述一次：左侧正文、右侧神兽摹写。不是装饰，写不出形态就别声明 atlas。允许额外字段。",
+      "properties": {
+        "title": { "description": "图志标题。示例：山海图志 · 夜行部。省略时用模块默认标题。", "type": "string" },
+        "text": { "description": "图志正文，建议 2–4 段、每段 40–200 字。示例：[\"其形近人，提灯而不燃；行于无光之处，使人忘其所来之路。\"]。允许单段字符串或数组。", "anyOf": [{ "type": "string" }, { "type": "array", "items": { "anyOf": [{ "type": "string" }, { "type": "number" }] } }] },
+        "caption": { "description": "图注。示例：依接触记录与受害者口述复原。省略时按 beast 使用内置图注（每级不同，如“夔 · 独足雷兽……”）。", "type": "string" },
+        "beast": { "description": "神兽名，取山海八级之一：无、乘黄、夔、相柳、女娲、息壤、共工、建木；也接受 L4、四级、4 等写法。示例：夔。无法识别时回退到项目等级对应的兽形并记入 normalized。", "anyOf": [{ "type": "string" }, { "type": "number" }] },
+        "grade": { "description": "可选等级覆盖；beast 缺失时用它推导兽形。示例：夔 或 四级。", "anyOf": [{ "type": "string" }, { "type": "number" }] }
+      },
+      "required": [],
+      "additionalProperties": true
+    },
+    "monitoring": {
+      "type": "object",
+      "description": "监测数据对象。radar 固定 6 轴但会由运行时补齐/截断，不因长度不符而失败。",
+      "properties": {
+        "radar": { "description": "属性雷达，如 {axes:[\"危险性\",…6项],values:[3,2,4,3,2,3]}。也允许直接写 6 个数字的数组。", "anyOf": [{ "type": "object", "properties": { "axes": { "anyOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }] }, "values": { "anyOf": [{ "type": "string" }, { "type": "array", "items": { "anyOf": [{ "type": "number" }, { "type": "string" }] } }] }, "labels": { "type": "array", "items": { "type": "string" } } }, "additionalProperties": true }, { "type": "array", "items": { "anyOf": [{ "type": "number" }, { "type": "string" }] } }] },
+        "hume": { "description": "休谟场读数，如 {base:96.4,readout:96.1,flux:0.8,anchor:\"NOMINAL\",alert:2}。允许数字或字符串。", "anyOf": [{ "type": "object", "properties": { "base": { "anyOf": [{ "type": "number" }, { "type": "string" }] }, "readout": { "anyOf": [{ "type": "number" }, { "type": "string" }] }, "flux": { "anyOf": [{ "type": "number" }, { "type": "string" }] }, "anchor": { "type": "string" }, "alert": { "anyOf": [{ "type": "number" }, { "type": "string" }] } }, "additionalProperties": true }, { "type": "number" }, { "type": "string" }] },
+        "readings": { "description": "监测记录，如 [{time:\"03:12\",reading:\"96.1\",operator:\"LX-07\",judge:\"ok\"}]。允许数组或映射；judge 接受 ok/wt/ng 或 正常/观察/异常。", "anyOf": [{ "type": "array", "items": { "anyOf": [{ "type": "object", "properties": { "time": { "anyOf": [{ "type": "string" }, { "type": "number" }] }, "reading": { "anyOf": [{ "type": "string" }, { "type": "number" }] }, "operator": { "type": "string" }, "judge": { "anyOf": [{ "type": "string" }, { "type": "boolean" }] } }, "additionalProperties": true }, { "type": "string" }] } }, { "type": "object" }, { "type": "string" }] }
+      },
+      "additionalProperties": true
+    },
+    "structureItem": {
+      "description": "编排元素。最简只写 id；title/en/merge/note 均为可选。允许字符串或对象。",
+      "anyOf": [
+        { "type": "string" },
+        { "type": "object", "properties": {
+          "id": { "description": "章节 id：containment/description/monitoring/模块 id/note。", "anyOf": [{ "type": "string" }, { "type": "number" }] },
+          "module": { "description": "id 的别名。", "type": "string" },
+          "section": { "description": "id 的别名。", "type": "string" },
+          "title": { "description": "覆盖章节中文标题。", "type": "string" },
+          "name": { "description": "title 的别名。", "type": "string" },
+          "en": { "description": "覆盖章节英文副题。", "type": "string" },
+          "merge": { "description": "并入本节的模块/基础章节。允许字符串或数组。", "anyOf": [{ "type": "string" }, { "type": "array", "items": { "anyOf": [{ "type": "string" }, { "type": "object" }] } }] },
+          "note": { "description": "仅 id=note 时使用：过渡段正文。允许字符串或字符串数组。", "anyOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }] },
+          "text": { "description": "note 的别名。", "anyOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }] },
+          "content": { "description": "note 的别名。", "anyOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }] }
+        }, "additionalProperties": true }
+      ]
+    },
+    "interview": {
+      "description": "访谈记录。标准形态 {title,date,tag,subject,interviewer,preamble,lines[{q,a,note}],after}；也允许直接写 lines 数组或字符串。",
+      "anyOf": [
+        { "type": "object", "properties": {
+          "title": { "type": "string" }, "name": { "type": "string" }, "date": { "type": "string" }, "tag": { "type": "string" },
+          "subject": { "description": "受访者。允许别名 interviewee/person。", "type": "string" }, "interviewer": { "description": "采访者。允许别名 interviewerName/op。", "type": "string" },
+          "preamble": { "description": "前言。", "type": "string" }, "after": { "description": "结语。允许别名 conclusion/postscript。", "type": "string" },
+          "lines": { "description": "问答行，如 [{q:\"问\",a:\"答\",note:\"旁注\"}]。允许单对象或数组。", "anyOf": [{ "type": "array", "items": { "anyOf": [{ "type": "object" }, { "type": "string" }] } }, { "type": "object" }] },
+          "dialogue": { "description": "lines 的别名。", "anyOf": [{ "type": "array", "items": {} }, { "type": "object" }] },
+          "qa": { "description": "lines 的别名。", "anyOf": [{ "type": "array", "items": {} }, { "type": "object" }] }
+        }, "additionalProperties": true },
+        { "type": "array", "items": {} },
+        { "type": "string" }
+      ]
+    },
+    "log": {
+      "description": "监控录像。标准形态 {title,cam,site,date,entries[{t,v,cap}]}；也允许直接写 entries 数组或字符串。",
+      "anyOf": [
+        { "type": "object", "properties": {
+          "title": { "type": "string" }, "name": { "type": "string" }, "cam": { "type": "string" }, "site": { "type": "string" }, "location": { "type": "string" },
+          "date": { "type": "string" }, "tag": { "type": "string" }, "duration": { "anyOf": [{ "type": "number" }, { "type": "string" }] },
+          "entries": { "description": "转写帧，如 [{t:12,v:\"画面正常\",cap:\"第 12 秒\"}]。允许单对象或数组。", "anyOf": [{ "type": "array", "items": { "anyOf": [{ "type": "object" }, { "type": "string" }] } }, { "type": "object" }] },
+          "frames": { "description": "entries 的别名。", "anyOf": [{ "type": "array", "items": {} }, { "type": "object" }] },
+          "records": { "description": "entries 的别名。", "anyOf": [{ "type": "array", "items": {} }, { "type": "object" }] }
+        }, "additionalProperties": true },
+        { "type": "array", "items": {} },
+        { "type": "string" }
+      ]
+    },
+    "timeline": {
+      "description": "事件时间轴。标准形态 {events[{date,title,text,crit}]}；也允许直接写事件数组。",
+      "anyOf": [
+        { "type": "object", "properties": {
+          "events": { "description": "事件节点，如 [{date:\"2026-03-12\",title:\"首次偏移\",text:\"…\",crit:true}]。允许单对象或数组。", "anyOf": [{ "type": "array", "items": { "anyOf": [{ "type": "object" }, { "type": "string" }] } }, { "type": "object" }] },
+          "items": { "description": "events 的别名。", "anyOf": [{ "type": "array", "items": {} }, { "type": "object" }] },
+          "records": { "description": "events 的别名。", "anyOf": [{ "type": "array", "items": {} }, { "type": "object" }] }
+        }, "additionalProperties": true },
+        { "type": "array", "items": {} },
+        { "type": "string" }
+      ]
+    },
+    "photo": {
+      "description": "影像资料。标准形态 {note,items[{art,cap,no,note,rotate}]}；art 接受 corridor/object/document/exterior 或中文，未知值降级为 corridor。",
+      "anyOf": [
+        { "type": "object", "properties": {
+          "note": { "type": "string" },
+          "items": { "description": "影像条目，如 [{art:\"corridor\",cap:\"走廊东段\",no:\"P-01\",note:\"补光后可见丝线\"}]。允许单对象或数组。", "anyOf": [{ "type": "array", "items": { "anyOf": [{ "type": "object" }, { "type": "string" }] } }, { "type": "object" }] },
+          "photos": { "description": "items 的别名。", "anyOf": [{ "type": "array", "items": {} }, { "type": "object" }] },
+          "images": { "description": "items 的别名。", "anyOf": [{ "type": "array", "items": {} }, { "type": "object" }] }
+        }, "additionalProperties": true },
+        { "type": "array", "items": {} },
+        { "type": "string" }
+      ]
+    },
+    "letter": {
+      "description": "封存信件。标准形态 {label,body[],sign,date}；body 允许字符串或字符串数组。",
+      "anyOf": [
+        { "type": "object", "properties": {
+          "label": { "type": "string" }, "title": { "type": "string" },
+          "body": { "description": "信件正文，允许字符串或字符串数组。", "anyOf": [{ "type": "string" }, { "type": "array", "items": { "anyOf": [{ "type": "string" }, { "type": "number" }] } }, { "type": "object" }] },
+          "content": { "description": "body 的别名。", "anyOf": [{ "type": "string" }, { "type": "array", "items": {} }] },
+          "sign": { "description": "落款。允许别名 signature/from/author。", "type": "string" },
+          "date": { "description": "日期。", "type": "string" }
+        }, "additionalProperties": true },
+        { "type": "array", "items": {} },
+        { "type": "string" }
+      ]
+    },
+    "sandbox": {
+      "description": "沙箱模拟。标准形态 {note,body[],after}；after 是应对结论，长度不限。",
+      "anyOf": [
+        { "type": "object", "properties": {
+          "note": { "type": "string" },
+          "body": { "description": "污染文本，允许字符串或字符串数组。", "anyOf": [{ "type": "string" }, { "type": "array", "items": { "anyOf": [{ "type": "string" }, { "type": "number" }] } }, { "type": "object" }] },
+          "content": { "description": "body 的别名。", "anyOf": [{ "type": "string" }, { "type": "array", "items": {} }] },
+          "after": { "description": "应对结论。允许别名 conclusion/response/mitigation/result。", "anyOf": [{ "type": "string" }, { "type": "array", "items": { "type": "string" } }] }
+        }, "additionalProperties": true },
+        { "type": "array", "items": {} },
+        { "type": "string" }
+      ]
+    },
+    "map": {
+      "description": "地点舆图。标准形态 {region,scale,points[{x,y,name,coord,text}]}；允许直接写点位数组。",
+      "anyOf": [
+        { "type": "object", "properties": {
+          "region": { "type": "string" }, "scale": { "type": "string" },
+          "points": { "description": "标记点，如 [{x:120,y:80,name:\"东侧走廊\",coord:\"E-3\",text:\"丝线残留\"}]。允许单对象或数组。", "anyOf": [{ "type": "array", "items": { "anyOf": [{ "type": "object" }, { "type": "string" }] } }, { "type": "object" }] },
+          "markers": { "description": "points 的别名。", "anyOf": [{ "type": "array", "items": {} }, { "type": "object" }] },
+          "pins": { "description": "points 的别名。", "anyOf": [{ "type": "array", "items": {} }, { "type": "object" }] }
+        }, "additionalProperties": true },
+        { "type": "array", "items": {} },
+        { "type": "string" }
+      ]
+    },
+    "list": {
+      "description": "清单物证。标准形态 {note,items[{no,name,qty,status,note}]}；status 接受 ok/wt/ng/un 或 正常/观察/异常/未登记。",
+      "anyOf": [
+        { "type": "object", "properties": {
+          "note": { "type": "string" },
+          "items": { "description": "物证条目，如 [{no:\"E-01\",name:\"断线\",qty:\"1\",status:\"ok\",note:\"…\"}]。允许单对象或数组。", "anyOf": [{ "type": "array", "items": { "anyOf": [{ "type": "object" }, { "type": "string" }] } }, { "type": "object" }] },
+          "entries": { "description": "items 的别名。", "anyOf": [{ "type": "array", "items": {} }, { "type": "object" }] },
+          "inventory": { "description": "items 的别名。", "anyOf": [{ "type": "array", "items": {} }, { "type": "object" }] }
+        }, "additionalProperties": true },
+        { "type": "array", "items": {} },
+        { "type": "string" }
+      ]
+    },
+    "report": {
+      "description": "行动报告。标准形态 {body[]}；允许直接写字符串或字符串数组，长度不限。",
+      "anyOf": [
+        { "type": "object", "properties": {
+          "body": { "description": "报告正文，允许字符串或字符串数组。", "anyOf": [{ "type": "string" }, { "type": "array", "items": { "anyOf": [{ "type": "string" }, { "type": "number" }] } }] },
+          "content": { "description": "body 的别名。", "anyOf": [{ "type": "string" }, { "type": "array", "items": {} }] },
+          "text": { "description": "body 的别名。", "anyOf": [{ "type": "string" }, { "type": "array", "items": {} }] }
+        }, "additionalProperties": true },
+        { "type": "array", "items": {} },
+        { "type": "string" }
+      ]
+    },
+    "sign": {
+      "description": "签批。标准形态 {rows[{role,en,name,date,stamp,need}],note}；rows 缺失时运行时给三个默认职务签章位。",
+      "anyOf": [
+        { "type": "object", "properties": {
+          "rows": { "description": "签章行，如 [{role:\"档案科\",name:\"值班撰写员\",date:\"2026-03-20\",need:2}]。允许单对象或数组。", "anyOf": [{ "type": "array", "items": { "anyOf": [{ "type": "object" }, { "type": "string" }] } }, { "type": "object" }] },
+          "signatures": { "description": "rows 的别名。", "anyOf": [{ "type": "array", "items": {} }, { "type": "object" }] },
+          "note": { "type": "string" }
+        }, "additionalProperties": true },
+        { "type": "array", "items": {} },
+        { "type": "string" }
+      ]
+    }
+  }
+}

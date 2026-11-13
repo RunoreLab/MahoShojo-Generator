@@ -1,0 +1,41 @@
+{
+  "name": "存续院收容档案 · 包内资源与模块目录",
+  "contractVersion": 1,
+  "purpose": "AI 只生成 data/archive.json；版式、装配引擎、基础三节与全部附录模块由包本体提供。",
+  "output": {
+    "target": "data/archive.json",
+    "mediaType": "application/json",
+    "shape": "单个 JSON 对象；顶层必填只有 identity / summary / containment / description / modules，monitoring / moduleData / structure 可选（structure 用于重排、合并、改名与插入过渡段）。",
+    "metadata": "文件最后一行追加 <!-- MAHOSHOJO_ARENA_META {...} -->；宿主在校验前剥离。"
+  },
+  "runtime": [
+    { "path": "index.html", "kind": "entry", "description": "静态骨架：闸门、顶栏、目录、宣纸页面、抬头、页脚；正文由 app.js 装配。" },
+    { "path": "styles/archive.css", "kind": "stylesheet", "description": "宣纸/玄墨双主题、十二节版式、八级徽章、L1–L5 黑条、模块组件与打印规则。" },
+    { "path": "scripts/registry.js", "kind": "script", "description": "模块注册 API（CXModule.register / get / rich / paras）；不预加载任何模块。" },
+    { "path": "scripts/app.js", "kind": "script", "description": "读取目标数据、按 structure（缺省时按默认顺序）装配基础章节与附录、合并/改名/过渡段、自动重排编号与目录、全部通用交互。" },
+    { "path": "modules/registry.json", "kind": "registry", "description": "模块清单：id / label / en / clearance / script；primitives.note 为过渡段定义（纯文本，不加载脚本）。运行时只请求已声明且被 structure 装配的模块 script。" },
+    { "path": "assets/emblem.svg", "kind": "image", "description": "档案抬头徽记，88×88 矢量，不依赖外部字体与网络。" }
+  ],
+  "modules": [
+    { "id": "interview", "label": "访谈记录", "file": "modules/interview.js", "labelRule": "有问询、口供、采访素材时声明", "data": "subject / interviewer / preamble / lines[{q,a,note}] / after" },
+    { "id": "atlas", "label": "山海图志", "file": "modules/atlas.js", "labelRule": "需要以院外采风笔法重写形态时声明；写不出形态就不要选", "data": "title / text[] / caption / beast / grade；beast 取山海八级之一（八级各有独立线稿与默认图注），默认落在描述之后、监测之前" },
+    { "id": "log", "label": "监控录像", "file": "modules/log.js", "labelRule": "有监控、走廊、夜间记录时声明", "data": "cam / site / date / entries[{t,v,cap}]；t 为秒" },
+    { "id": "timeline", "label": "事件时间轴", "file": "modules/timeline.js", "labelRule": "有明确事故先后顺序时声明", "data": "events[{date,title,text, crit}]" },
+    { "id": "photo", "label": "影像资料", "file": "modules/photo.js", "labelRule": "有现场、遗物或文件照片时声明", "data": "items[{art,cap,no,note,rotate}]；art 为 corridor/object/document/exterior" },
+    { "id": "letter", "label": "封存信件", "file": "modules/letter.js", "labelRule": "有信件、纸条、遗书、封存物时声明", "data": "label / body[] / sign / date" },
+    { "id": "sandbox", "label": "沙箱模拟", "file": "modules/sandbox.js", "labelRule": "有模因污染或必须隔离的文本时声明", "data": "note / body[] / after；必须有应对方案" },
+    { "id": "map", "label": "地点舆图", "file": "modules/map.js", "labelRule": "有地点、路线、设施布局时声明", "data": "region / scale / points[{x,y,name,coord,text}]" },
+    { "id": "list", "label": "清单物证", "file": "modules/list.js", "labelRule": "有收缴、物证、库存清单时声明", "data": "items[{no,name,qty,status,note}]；status 为 ok/wt/ng/un" },
+    { "id": "report", "label": "行动报告", "file": "modules/report.js", "labelRule": "有战后处置、收尾、复盘时声明", "data": "body[]" },
+    { "id": "sign", "label": "签批", "file": "modules/sign.js", "labelRule": "档案需要正式归档生效时声明", "data": "rows[{role,name,date,stamp,need}] / note；默认三个职务签章位" }
+  ],
+  "switches": {
+    "declaration": "modules 数组即开关；structure 存在时，只有列进 structure（含 merge）的模块才装配，顺序以 structure 为准。",
+    "structure": "structure 元素可含 id / title / en / merge / note；title 覆盖中文标题，en 覆盖英文副题，merge 合并模块或基础章节，note 插入不编号的过渡段。",
+    "unknown": "未知、未声明、重复的 structure 项被忽略并在控制台记录，不产生 DOM，不阻断其余章节。",
+    "order": "章节编号与附录字母由运行时自动重排；atlas 缺省落在描述之后、监测之前；report 可随叙事位置移动，sign 固定最后（不可合并）。",
+    "noResidue": "未声明或未被 structure 装配的模块不加载脚本、不出现标题、不占位；空模块同样跳过。",
+    "density": "目标 5–8 个模块，素材够可继续加；少而空不合格，多而有据合格，但不允许用空模块凑数。"
+  },
+  "limitations": "单文档物化；不使用 iframe、Worker、eval、import map、多页面跳转。所有资源均为相对路径；页面只读取包内 data/archive.json。"
+}

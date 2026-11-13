@@ -136,6 +136,38 @@ describe('社区恋爱测评预设的受限运行', () => {
   });
 });
 
+describe('社区收容档案预设的受限运行', () => {
+  it('按 JSON 装配全部示例模块，主题与手机目录可用，文本不执行且无需外部请求', async () => {
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    const { html, data } = await communityPresetExample('continuance.cx-archive-package', data => {
+      data.identity.name = '<img src=x>';
+    });
+    const frame = await mount(html);
+    await page.locator('iframe').evaluate(node => { node.style.cssText = 'border:0;width:100vw;height:100vh'; });
+    await frame.waitForSelector('#sheet[data-mounted-modules]');
+    const state = await frame.evaluate(() => (window as any).__ARCHIVE_STATE__);
+    expect([...state.mounted].sort()).toEqual([...data.modules].sort());
+    expect(state.failed).toEqual([]);
+    expect(state.unmounted).toEqual([]);
+    expect(await frame.locator('#gateSkip').textContent()).toContain('本页演出');
+    await frame.locator('#gateSkip').click();
+    await frame.waitForSelector('#gate', { state: 'hidden' });
+    expect(await frame.locator('#sheet').textContent()).toContain('<img src=x>');
+    expect(await frame.locator('#sheet img[src="x"]').count()).toBe(0);
+    await frame.locator('#themeBtn').click();
+    expect(await frame.locator('body').getAttribute('data-theme')).toBe('ink');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await frame.locator('#railFab').click();
+    expect(await frame.locator('#railFab').getAttribute('aria-expanded')).toBe('true');
+    await frame.locator('#railClose').click();
+    expect(await frame.locator('#railFab').getAttribute('aria-expanded')).toBe('false');
+    expect(await frame.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    expect(requests.filter(url => !url.startsWith(origin) && !url.startsWith('data:') && !url.startsWith('blob:'))).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+});
+
 describe('本地 Web 包真实浏览器资源空间',()=>{
   it('runs JSON overlay, nested ESM/CSS and images in an opaque frame without host access',async()=>{
     const {instance}=await createGenericTestPackage();
