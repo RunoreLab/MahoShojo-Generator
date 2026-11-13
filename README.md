@@ -21,7 +21,7 @@
 
 📖 查看完整的版本更新历史，请参阅 [CHANGELOG.md](./CHANGELOG.md)
 
-> 当前版本：Web `v0.10.0`；Desktop `v0.1.1`（Windows x64）。桌面版与网页本地数据独立，安装与升级请阅读[下载指南](https://mahoshojo.colanns.me/download)。
+> 当前版本：Web `v0.10.0`；Desktop `v0.1.2`（Windows x64）。桌面版与网页本地数据独立，安装与升级请阅读[下载指南](https://mahoshojo.colanns.me/download)。
 
 ## ✨ 核心功能
 

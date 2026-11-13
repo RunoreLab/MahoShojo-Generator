@@ -12,6 +12,19 @@
 
 - 退休 `/pvp` 卡牌对决及其房间、聊天、表情包、个人战绩和管理端专属操作，移除对应导航与百科。`/battle`、`/arena`、Arena 多人和历史战报访问继续保留；不随代码升级删除历史数据。
 
+## [Desktop 0.1.2] - 2026-11-13
+
+- 新增主窗口缩放与双端阅读排版设置，调整数据卡详情和公开库筛选体验。
+- 共源 Arena 与魔法茶会叙事规则，并新增社区预设「恋爱测评」与「存续院收容档案」。真实模型验收边界见[发布说明](./docs/references/2026-11-13_191000_Desktop012发布说明.md)。
+- 系统模型目录加入四款 Step 模型；沿用 Windows x64 桌面发行范围。
+
+[Desktop 0.1.2 发布说明](./docs/references/2026-11-13_191000_Desktop012发布说明.md) · [GitHub Release](https://github.com/RunoreLab/MahoShojo-Generator/releases/tag/desktop-v0.1.2)
+
+## [Desktop 0.1.1] - 2026-10-31
+
+- 修复角色库分页、竞技场历史导入、旧情景卡兼容、模型选择抖动与 Direct 中断提示，并恢复在线房主编辑角色和情景。
+- 详情见[0.1.1 发布说明](./docs/references/2026-10-31_230000_Desktop011发布说明.md)及[GitHub Release](https://github.com/RunoreLab/MahoShojo-Generator/releases/tag/desktop-v0.1.1)。
+
 ## [Desktop 0.1.0] - 2026-10-27
 
 首个 Windows x64 桌面正式版，使用独立的 Desktop 版本序列；Web 版本保持 `0.10.0`。
