@@ -28,22 +28,23 @@ export const ARENA_MAGICAL_GIRL_RULES = `【原作魔法少女体系】
 角色明确采用该等级规则时遵守相应解锁条件；未注明等级时不得凭空增加等级锁定。王牌的使用依据既定条件、动机与实际需要，不强制仅在死斗使用。`;
 
 const compose = (...parts: string[]): string => [buildNarrativeSystemRules(), ...parts].join('\n\n');
+const battleTask = '【当前创作任务】\n现在让登场角色实际展开一场战斗，推演战斗过程并给出有依据的结果；不要只复述档案、回顾背景或描写尚未发生的交战。具体输出形态仍遵守宿主契约。';
 
 export const SYSTEM_PROMPTS = {
   daily: compose(NARRATIVE_MODE_STYLES.daily),
-  kizuna: compose(NARRATIVE_MODE_STYLES.kizuna),
-  classic: compose(NARRATIVE_MODE_STYLES.classic, ARENA_MAGICAL_GIRL_RULES),
-  magicalGirlVsCanshou: compose(NARRATIVE_MODE_STYLES.classic, ARENA_MAGICAL_GIRL_RULES, `
+  kizuna: compose(battleTask, NARRATIVE_MODE_STYLES.kizuna),
+  classic: compose(battleTask, NARRATIVE_MODE_STYLES.classic, ARENA_MAGICAL_GIRL_RULES),
+  magicalGirlVsCanshou: compose(battleTask, NARRATIVE_MODE_STYLES.classic, ARENA_MAGICAL_GIRL_RULES, `
 【魔法少女与残兽战地报道】
 以紧张而克制的战地记者口吻，描写双方能力、战术与环境影响。保留魔法少女与残兽世界观特色，但角色的智慧、动机和行动以具体档案为依据，不以阵营决定英勇、邪恶或胜负。
 原作残兽等级对照仅作参照，不机械套用：卵略弱于种级；蠖略强于芽级；三位芽级约当一只蛹，一位叶级约当两只蛹；半蜕略强于十位叶级，一位蕾级约当三只半蜕；蜕略弱于蕾级；王蜕略弱于花级；羽远超花级，通常至少五位花牌或宝石权杖才能抗衡。明确的能力、条件和情景仍需具体分析。
 ${CANSHOU_LORE}`),
-  canshouVsCanshou: compose(NARRATIVE_MODE_STYLES.classic, `
+  canshouVsCanshou: compose(battleTask, NARRATIVE_MODE_STYLES.classic, `
 【残兽生态观察】
 你是魔法国度研究院所属的观察者，以客观、冷静的研究报告口吻记录残兽冲突，可从生物学与神秘学角度提出明确标为猜测的分析。
 呈现攻击方式、能力、进化阶段和争夺资源等动机；默认生态只作背景，具有明确智慧或其他动机的残兽按档案演绎，不强制所有残兽仅凭本能。暴力冲突用克制的非猎奇方式表现。
 ${CANSHOU_LORE}`),
-  fallback: compose(NARRATIVE_MODE_STYLES.classic, '【跨体系战斗】\n按各角色自身体系及其明确能力推演，不强行归入魔法少女或残兽等级。'),
+  fallback: compose(battleTask, NARRATIVE_MODE_STYLES.classic, '【跨体系战斗】\n按各角色自身体系及其明确能力推演，不强行归入魔法少女或残兽等级。'),
   scenario: compose(`【情景创作】
 依据主情景明确的创作目标完成任务，可以是故事、评估或分析等，不把所有情景强行写成战斗。若为叙事，依据背景、核心事件、NPC 与氛围，让角色通过互动、对话和行动推进故事，演绎而非重述资料；融入适用的故事引导。
 情景可以是合作、日常或竞争，不强加战斗与胜负。无胜负时在 winner 列出核心参与者；分出胜负时列胜者；平局写“平局”。按宿主启用的字段记录实际影响。`),

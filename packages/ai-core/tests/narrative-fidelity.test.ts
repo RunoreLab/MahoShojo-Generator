@@ -51,6 +51,11 @@ describe('narrative rule boundaries at the assembled request', () => {
     expect(SYSTEM_PROMPTS.daily).toContain('温暖');
     expect(SYSTEM_PROMPTS.kizuna).toContain('本场事件支撑');
     expect(SYSTEM_PROMPTS.scenario).toContain('确实不可调和时以主情景为准');
+    for (const mode of ['classic', 'kizuna', 'magicalGirlVsCanshou', 'canshouVsCanshou', 'fallback'] as const) {
+      expect(SYSTEM_PROMPTS[mode]).toContain('现在让登场角色实际展开一场战斗');
+    }
+    expect(SYSTEM_PROMPTS.daily).not.toContain('现在让登场角色实际展开一场战斗');
+    expect(SYSTEM_PROMPTS.scenario).not.toContain('现在让登场角色实际展开一场战斗');
     expect(getSystemPrompt('classic', combatants())).toContain('按各角色自身体系');
     expect(getSystemPrompt('classic', [{ type: 'magical-girl' }])).toContain('未注明等级时不得凭空增加等级锁定');
   });
