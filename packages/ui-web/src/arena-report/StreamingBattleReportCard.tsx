@@ -616,7 +616,7 @@ export const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps>
 
                     {!embeddedHeader ? reportContent : null}
                     {/* Markdown 内容渲染区域 */}
-                    {!showingWeb && <div className="min-h-[200px]">
+                    {!showingWeb && <div className="app-reading app-reading-width min-h-[200px]">
                         <ReactMarkdown
                             remarkPlugins={[remarkGfm, remarkBattleTable, [remarkMath, { singleDollarTextMath: true }]]}
                             rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: 'ignore' }]]}
@@ -633,14 +633,14 @@ export const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps>
                     {userGuidance?.trim() && (
                         <div className="mt-6 border-l-4 border-purple-400 bg-black/20 p-3 rounded">
                             <div className="text-sm font-semibold mb-1">📖 故事引导</div>
-                            <p className="text-sm opacity-90 italic">“{userGuidance.trim()}”</p>
+                            <p className="app-reading app-reading-width text-sm opacity-90 italic">“{userGuidance.trim()}”</p>
                         </div>
                     )}
 
                     {Array.isArray(characterGuidances) && characterGuidances.length > 0 && (
                         <div className="mt-4 border-l-4 border-indigo-300 bg-black/20 p-3 rounded">
                             <div className="text-sm font-semibold mb-2">🎭 角色行动引导</div>
-                            <div className="space-y-2 text-sm">
+                            <div className="app-reading app-reading-width space-y-2 text-sm">
                                 {characterGuidances
                                     .map((item, index) => {
                                         const characterName = typeof item?.characterName === 'string' ? item.characterName.trim() : '';
@@ -661,7 +661,7 @@ export const StreamingBattleReportCard: React.FC<StreamingBattleReportCardProps>
                     {adjudicationResults && adjudicationResults.length > 0 && (
                         <div className="mt-4 border-l-4 border-green-400 bg-black/20 p-3 rounded">
                             <div className="text-sm font-semibold mb-2">🎲 随机判定记录</div>
-                            <div className="space-y-2 text-sm">
+                            <div className="app-reading app-reading-width space-y-2 text-sm">
                                 {adjudicationResults.map((result, index) => {
                                     const outcomeTone = resolveAdjudicationOutcomeTone(result.outcome);
                                     return (

@@ -1,7 +1,7 @@
 /**
  * 「外观与交互」分组内容（DESK-SET-007）。
  *
- * 三个字段全部是 ui-web 设备偏好存储（同 color-mode 先例）：本机
+ * 所有字段都是 ui-web 设备偏好存储（同 color-mode 先例）：本机
  * localStorage，不同步账号、离线可改、不触发账号查询。主题色与顶栏
  * 外观菜单读的是同一个 `useColorModePreference`，动效标记是 init 脚本
  * 与 `useMotionPreference` 共同维护的 `data-motion`——页面内与设置页
@@ -15,6 +15,7 @@ import {
 } from '../device-preferences/index';
 
 import { SettingsCard, SettingsFieldRow, SettingsOptionButtons, SettingsToggle } from './primitives';
+import { ReadingSettingsCard } from './ReadingSettingsCard';
 
 export const AppearanceSettingsSection = () => {
   const colorMode = useColorModePreference();
@@ -53,6 +54,7 @@ export const AppearanceSettingsSection = () => {
           />
         </div>
       </SettingsCard>
+      <ReadingSettingsCard />
       <SettingsCard
         title="交互"
       >

@@ -31,7 +31,7 @@ export const SHOWROOM_SECTIONS: readonly ShowroomSectionMeta[] = [
   {
     id: 'typography',
     title: '字体阶梯',
-    summary: '--app-font-sans/--app-font-mono 字体族与 --app-text-* 字号阶。',
+    summary: '--app-font-sans/--app-font-mono 字体族与 --app-text-* 字号阶，以及生产阅读设置、实时正文预览。',
   },
   {
     id: 'scales',
@@ -51,7 +51,7 @@ export const SHOWROOM_SECTIONS: readonly ShowroomSectionMeta[] = [
   {
     id: 'overlay',
     title: '弹层',
-    summary: '共源 BaseModal 原语：Escape 层级栈、焦点圈留与背景点按与生产一致；叙事历史选择器的空列表、JSON 导入入口与反馈。',
+    summary: '共源 BaseModal 原语：Escape 层级栈、焦点圈留与背景点按与生产一致；叙事历史选择器的空列表、JSON 导入入口与反馈；数据卡公开库的管理员推荐高级筛选。',
   },
   {
     id: 'result-surfaces',

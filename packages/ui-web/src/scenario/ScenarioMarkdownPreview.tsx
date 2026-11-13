@@ -36,7 +36,9 @@ function Preview({ content, variant = 'light', renderMarkdown }: ScenarioMarkdow
         {expanded ? '恢复原文预览' : '按换行预览'}
       </GenerationActionButton>
     </div>}
-    {renderMarkdown ? renderMarkdown(display) : <MarkdownBlock content={display} variant={variant} mode="article" />}
+    <div className="app-reading app-reading-width">
+      {renderMarkdown ? renderMarkdown(display) : <MarkdownBlock content={display} variant={variant} mode="article" />}
+    </div>
   </div>;
 }
 

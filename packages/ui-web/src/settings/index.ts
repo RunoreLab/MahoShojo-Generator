@@ -36,6 +36,7 @@ export {
 } from './page-fields';
 export { SETTINGS_FIELD_REGISTRY, type SettingsFieldRecord } from './registry';
 export { AppearanceSettingsSection } from './AppearanceSection';
+export { ReadingSettingsCard, ReadingPreferencesPreview } from './ReadingSettingsCard';
 export { PagePreferencesCard } from './PagePreferencesCard';
 export {
   SettingsCard,

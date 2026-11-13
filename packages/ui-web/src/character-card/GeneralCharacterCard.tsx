@@ -141,6 +141,7 @@ export function GeneralCharacterCard({
             content={general?.name || '未命名角色'}
             labelClassName={labelClassName}
             contentClassName="text-2xl font-bold text-white drop-shadow"
+            readingHeading="2"
             contentStyle={{ letterSpacing: '0.08em' }}
             Markdown={Markdown}
           />

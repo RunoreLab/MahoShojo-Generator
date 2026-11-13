@@ -201,6 +201,9 @@ export async function capturePngBlob(
   const adapter = options?.mediaAdapter ?? DENY_SNAPDOM_MEDIA;
   const useProxy = adapter.snapdomProxyUrl ?? '';
 
+  // 阅读字体切换后的排版稳定再截图，避免导出仍使用尚未就绪的字体度量。
+  await element.ownerDocument.fonts?.ready;
+
   const restoreImages = await inlineCaptureImages(element, adapter);
 
   try {

@@ -155,6 +155,25 @@ const scan = (): ScannedFile[] =>
   });
 
 const scanned = scan();
+
+describe('READ-002 阅读刻度', () => {
+  it('字号、行高和长文宽度刻度只由共享主题定义', () => {
+    const declarations = scanned.find((file) => file.rel === TOKEN_OWNER_FILE)!.decls;
+    const tokens = new Map(declarations.filter((decl) => decl.selector === ':root').map((decl) => [decl.prop, decl.value]));
+    for (const percent of [110, 125, 150, 175, 200]) {
+      expect(declarations.find((decl) => decl.selector === `:root[data-reading-size='${percent}']`
+        && decl.prop === '--app-reading-scale')?.value).toBe(String(percent / 100));
+    }
+    expect(tokens.get('--app-reading-scale')).toBe('1');
+    expect(tokens.get('--app-reading-text-xs')).toBe('0.75rem');
+    expect(tokens.get('--app-reading-text-sm')).toBe('0.875rem');
+    expect(tokens.get('--app-reading-text-base')).toBe('1rem');
+    expect(tokens.get('--app-reading-leading-comfortable')).toBe('1.75');
+    expect(tokens.get('--app-reading-leading-relaxed')).toBe('2');
+    expect(tokens.get('--app-reading-width-narrow')).toBe('40em');
+    expect(tokens.get('--app-font-serif')).toContain('"SimSun"');
+  });
+});
 const declaredProps = new Set<string>();
 for (const file of scanned) {
   for (const decl of file.decls) {

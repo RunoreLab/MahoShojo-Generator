@@ -46,7 +46,7 @@ export function CardDetailsBody({ data, renderMarkdown }: { data: string; render
   const render = (value: unknown, level = 0): ReactNode => {
     if (level > 16 || remaining-- <= 0) return <span className="text-amber-700">内容过深或过多，部分设定未展开；原始 JSON 保持完整</span>;
     if (typeof value === 'string') return value.trim() ? renderMarkdown(value) : <span className="text-gray-500">（空）</span>;
-    if (typeof value === 'number' || typeof value === 'boolean') return <span>{String(value)}</span>;
+    if (typeof value === 'number' || typeof value === 'boolean') return <span className="app-reading">{String(value)}</span>;
     if (value === null) return <span className="text-gray-500">无数据</span>;
     if (Array.isArray(value)) {
       const limit = Math.max(0, remaining);
@@ -93,7 +93,7 @@ export function BasicCardDetailsModal({ isOpen, onClose, card, source, renderMar
         {beforeOverview}
         <section className="space-y-2">
           <h3 className="font-medium text-gray-700">概览</h3>
-          <p className="whitespace-pre-wrap text-sm text-gray-600">{card.description?.trim() ? card.description : '暂无简介'}</p>
+          <p className="app-reading app-reading-width whitespace-pre-wrap text-sm text-gray-600">{card.description?.trim() ? card.description : '暂无简介'}</p>
           <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500"><span className="flex items-center gap-1"><Heart className="h-3 w-3" />{card.likeCount ?? 0}</span><span className="flex items-center gap-1"><Star className="h-3 w-3" />{card.favoriteCount ?? 0}</span><span className="flex items-center gap-1"><Download className="h-3 w-3" />{card.usageCount ?? 0}</span></div>
           <div className="flex flex-wrap items-center gap-4 text-[11px] text-gray-500"><span className="inline-flex items-center gap-1">作者：{card.author ?? '未知'}{card.authorBadges?.map((badge) => <Badge key={badge.id} badge={badge} size="sm" />)}</span><span title={card.createdAt}>创建：{formatDate(card.createdAt)}</span><span title={card.updatedAt}>更新：{formatDate(card.updatedAt)}</span></div>
           <p className="text-xs text-gray-500">来源：{describeCardDetailsSource(source)}</p>

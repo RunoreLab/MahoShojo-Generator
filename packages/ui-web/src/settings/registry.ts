@@ -53,6 +53,28 @@ export interface SettingsFieldRecord {
 
 export const SETTINGS_FIELD_REGISTRY: readonly SettingsFieldRecord[] = [
   {
+    id: 'appearance.desktopZoom',
+    group: 'appearance',
+    label: '桌面端整体缩放',
+    hosts: 'desktop',
+    scope: 'host-file',
+    owner: { kind: 'config-json', key: 'desktop.zoomPercent' },
+    defaultValue: '100',
+    status: 'wired',
+    notes: '仅主窗口；设置、Ctrl加减号/0与Ctrl滚轮消费同一配置，Native确认实际倍率。',
+  },
+  {
+    id: 'appearance.reading',
+    group: 'appearance',
+    label: '正文阅读设置',
+    hosts: 'shared',
+    scope: 'device',
+    owner: { kind: 'device-storage', storageKey: 'mahoshojo.reading-preferences.v1' },
+    defaultValue: '字号100%；字体、行距与宽度原样',
+    status: 'wired',
+    notes: '单一设备偏好状态；仅显式接入的正文生效，导出图片沿用当前阅读样式。',
+  },
+  {
     id: 'appearance.colorMode',
     group: 'appearance',
     label: '主题',

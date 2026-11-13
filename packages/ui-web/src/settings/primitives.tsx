@@ -52,7 +52,7 @@ export const SettingsFieldRow = ({
         <div className="mt-0.5 text-xs text-(--app-text-subtle)">{description}</div>
       ) : null}
     </div>
-    <div className="shrink-0">{control}</div>
+    <div className="min-w-0 max-w-full">{control}</div>
   </div>
 );
 
@@ -98,7 +98,7 @@ export const SettingsOptionButtons = <T extends string>({
   };
 
   return (
-    <div className="flex gap-1 rounded-lg border border-(--app-border) p-1" role="radiogroup" aria-label={ariaLabel}>
+    <div className="flex max-w-full flex-wrap gap-1 rounded-lg border border-(--app-border) p-1" role="radiogroup" aria-label={ariaLabel}>
       {options.map((option, index) => {
         const selected = option.value === value;
         return (

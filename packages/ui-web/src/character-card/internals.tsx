@@ -216,7 +216,7 @@ export function ArenaHistoryBlock({
         {isHistoryVisible ? '▼' : '▶'} 📜 历战记录
       </button>
       {isHistoryVisible && (
-        <div className="result-value mt-2 space-y-2 text-xs">
+        <div className="result-value app-reading app-reading-width mt-2 space-y-2 text-xs">
           {unsupportedCount > 0 && <p role="status">{unsupportedCount} 条历战记录格式暂不支持预览，原始数据仍保留。</p>}
           {entries.map((entry) => (
             <div

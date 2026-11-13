@@ -28,6 +28,8 @@ export interface InlineFieldProps {
   className?: string;
   labelClassName?: string;
   contentClassName?: string;
+  /** 阅读放大时保留正文内标题层级，不改变默认样式。 */
+  readingHeading?: '1' | '2' | '3' | '4' | '5' | '6';
   labelStyle?: CSSProperties;
   contentStyle?: CSSProperties;
   /** Markdown 渲染组件；缺省共享 `MarkdownBlock`。 */
@@ -42,13 +44,14 @@ export function InlineField({
   className,
   labelClassName,
   contentClassName,
+  readingHeading,
   labelStyle,
   contentStyle,
   Markdown = SharedMarkdownBlock,
 }: InlineFieldProps) {
   const normalized = String(content ?? '');
   const shouldRenderMarkdown = isMarkdownLike(normalized);
-  const wrapperClassName = ['leading-relaxed', className].filter(Boolean).join(' ');
+  const wrapperClassName = ['app-reading app-reading-width leading-relaxed', className].filter(Boolean).join(' ');
   const resolvedLabelClassName = ['font-semibold', labelClassName].filter(Boolean).join(' ');
   const resolvedContentClassName = ['whitespace-pre-wrap break-words', contentClassName].filter(Boolean).join(' ');
 
@@ -60,7 +63,7 @@ export function InlineField({
           <Markdown content={normalized} variant={variant} mode={markdownMode} />
         </div>
       ) : (
-        <span className={resolvedContentClassName} style={contentStyle}>{normalized}</span>
+        <span data-reading-heading={readingHeading} className={resolvedContentClassName} style={contentStyle}>{normalized}</span>
       )}
     </div>
   );

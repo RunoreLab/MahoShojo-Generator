@@ -473,7 +473,7 @@ export function MarkdownBlock({
   };
 
   return (
-    <div className={className}>
+    <div className={['app-reading app-reading-width', className].filter(Boolean).join(' ')}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, ...remarkPlugins, [remarkMath, { singleDollarTextMath: true }]]}
         rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: 'ignore' }], ...rehypePlugins]}

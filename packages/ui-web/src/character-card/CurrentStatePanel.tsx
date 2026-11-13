@@ -45,7 +45,7 @@ export function CurrentStatePanel({ state, variant = 'dark', className, Markdown
   return (
     <div className={clsx('result-item', className)}>
       <div className="result-label">🧭 当前状态</div>
-      <div className="result-value text-sm space-y-2">
+      <div className="result-value app-reading app-reading-width text-sm space-y-2">
         {hasSummary && (
           <Markdown content={view.summary} variant={variant} />
         )}

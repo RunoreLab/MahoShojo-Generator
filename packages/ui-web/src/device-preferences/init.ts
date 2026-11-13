@@ -27,6 +27,8 @@
  */
 export const MOTION_PREFERENCE_STORAGE_KEY = 'mahoshojo.motion-preference';
 
+export { getReadingPreferenceInitScript } from './reading-init';
+
 export const getMotionPreferenceInitScript = (): string => `(() => {
   var media;
   try {

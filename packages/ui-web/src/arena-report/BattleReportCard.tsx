@@ -490,7 +490,7 @@ ${adjudicationMarkdown}
         )}
 
         <div className="result-item">
-          <div className="result-value">
+          <div className="result-value app-reading app-reading-width">
             <ReactMarkdown
               remarkPlugins={[remarkGfm, remarkBattleTable, [remarkMath, { singleDollarTextMath: true }]]}
               rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: 'ignore' }]]}
@@ -504,14 +504,14 @@ ${adjudicationMarkdown}
         {analysisContent && (
           <div className="result-item" style={{ borderLeft: '4px solid #ff6b9d', background: 'rgba(0,0,0,0.2)' }}>
             <div className="result-label">🎤 记者点评</div>
-            <div className="result-value">
+            <div className="result-value app-reading app-reading-width">
               <p className="text-sm opacity-90 italic">{analysisContent}</p>
             </div>
           </div>
         )}
 
         <div className="result-item">
-          <div className="result-value">
+          <div className="result-value app-reading app-reading-width">
             <h3 className="font-semibold mt-2">胜利者</h3>
             <p className="text-sm opacity-90" style={{ marginBottom: '0.5rem' }}>{officialWinner || '—'}</p>
             <h3 className="font-semibold mt-2">最终结果</h3>
@@ -523,7 +523,7 @@ ${adjudicationMarkdown}
         {report.userGuidance && (
           <div className="result-item" style={{ borderLeft: '4px solid #a78bfa', background: 'rgba(0,0,0,0.2)' }}>
             <div className="result-label">📖 故事引导</div>
-            <div className="result-value">
+            <div className="result-value app-reading app-reading-width">
               <p className="text-sm opacity-90 italic">“{report.userGuidance}”</p>
             </div>
           </div>
@@ -532,7 +532,7 @@ ${adjudicationMarkdown}
         {Array.isArray(report.characterGuidances) && report.characterGuidances.length > 0 && (
           <div className="result-item" style={{ borderLeft: '4px solid #93c5fd', background: 'rgba(0,0,0,0.2)' }}>
             <div className="result-label">🎭 角色行动引导</div>
-            <div className="result-value space-y-1 text-sm">
+            <div className="result-value app-reading app-reading-width space-y-1 text-sm">
               {report.characterGuidances
                 .map((item, index) => {
                   const characterName = typeof item?.characterName === 'string' ? item.characterName.trim() : '';
@@ -554,7 +554,7 @@ ${adjudicationMarkdown}
         {report.adjudicationResults && report.adjudicationResults.length > 0 && (
             <div className="result-item" style={{ borderLeft: '4px solid #4ade80', background: 'rgba(0,0,0,0.2)' }}>
                 <div className="result-label">🎲 随机判定记录</div>
-                <div className="result-value space-y-2 text-sm">
+                <div className="result-value app-reading app-reading-width space-y-2 text-sm">
                     {report.adjudicationResults.map((result, index) => {
                       const outcomeTone = resolveAdjudicationOutcomeTone(result.outcome);
                       return (

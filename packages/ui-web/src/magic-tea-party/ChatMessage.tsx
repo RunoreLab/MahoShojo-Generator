@@ -410,7 +410,7 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
     return withHeader(<div className={`rounded-xl px-4 py-3 ${bubbleClass}`}>
       <p className="mb-2 text-xs text-gray-500">摘要生成记录，不作为角色发言或后续剧情历史。</p>
       {end < raw.length ? <p className="mb-2 text-xs text-gray-500">本页仅显示前段原文，可导出会话查看完整内容。</p> : null}
-      <div className="whitespace-pre-wrap leading-relaxed">{raw.slice(0, end)}</div>
+      <div className="app-reading app-reading-width whitespace-pre-wrap leading-relaxed">{raw.slice(0, end)}</div>
       {renderAssistantFooter(message, props)}
     </div>);
   }
@@ -420,7 +420,7 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
       <div className={`rounded-xl px-4 py-3 ${bubbleClass}`}>
         {oversized ? <p role="status" className="mb-2 text-xs text-gray-500">内容较长，当前使用原文预览；完整内容仍保留在记录中。</p> : null}
         {rawEnd < message.content.length ? <p className="mb-2 text-xs text-gray-500">本页仅显示前段原文，可导出会话查看完整内容。</p> : null}
-        <div className="whitespace-pre-wrap leading-relaxed">{message.content.slice(0, rawEnd)}</div>
+        <div data-reading-exclude className="whitespace-pre-wrap leading-relaxed">{message.content.slice(0, rawEnd)}</div>
         {props.renderAttachments?.(message, session)}
         <AiReasoningPanel reasoning={messageReasoning} status={reasoningStatus} compact />
         {renderAssistantFooter(message, props)}
@@ -446,7 +446,7 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
           if (seg.type === 'narration') {
             return (
               <Fragment key={`${message.id}-n-${idx}`}>
-                {renderMarkdown({ content: seg.text, variant: 'light', mode: 'compact', className: 'text-sm' })}
+                {renderMarkdown({ content: seg.text, variant: 'light', mode: 'compact', className: 'app-reading app-reading-width text-sm' })}
               </Fragment>
             );
           }
@@ -455,7 +455,7 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
             return (
               <div key={`${message.id}-d-${idx}`} className="rounded-lg bg-pink-50 px-3 py-2">
                 <div className="text-xs font-semibold text-pink-700">{segSpeakerName}</div>
-                {renderMarkdown({ content: seg.text, variant: 'light', mode: 'compact', className: 'text-sm' })}
+                {renderMarkdown({ content: seg.text, variant: 'light', mode: 'compact', className: 'app-reading app-reading-width text-sm' })}
               </div>
             );
           }
@@ -542,7 +542,7 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
   if (message.role === 'assistant' && preferMarkdown) {
     return withHeader(
       <div className={`rounded-xl px-4 py-3 ${bubbleClass}`}>
-        {renderMarkdown({ content: message.content || '', variant: 'light', mode: 'article' })}
+        {renderMarkdown({ content: message.content || '', variant: 'light', mode: 'article', className: 'app-reading app-reading-width' })}
         {props.renderAttachments?.(message, session)}
         <AiReasoningPanel reasoning={messageReasoning} status={reasoningStatus} compact />
         {renderAssistantFooter(message, props)}
@@ -563,7 +563,7 @@ export function MagicTeaPartyChatMessage(props: MagicTeaPartyChatMessageProps) {
 
   return withHeader(
     <div className={`rounded-xl px-4 py-3 ${bubbleClass}`}>
-      <div className="whitespace-pre-wrap leading-relaxed">{message.content}</div>
+      <div className="app-reading app-reading-width whitespace-pre-wrap leading-relaxed">{message.content}</div>
       {props.renderAttachments?.(message, session)}
       {message.role === 'assistant'
         ? (

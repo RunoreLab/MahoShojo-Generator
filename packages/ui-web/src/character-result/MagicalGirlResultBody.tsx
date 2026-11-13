@@ -159,7 +159,7 @@ function renderAbilityItem(
 
 export function MagicalGirlResultBody({ magicalGirl, renderMarkdown }: MagicalGirlResultBodyProps) {
   return (
-    <div className="ui-web-magical-girl-result-body">
+    <div className="ui-web-magical-girl-result-body app-reading app-reading-width">
       <div className="result-item">
         <div className="result-label">💝 魔法少女代号</div>
         <div className="result-value whitespace-pre-wrap break-words">{magicalGirl.codename}</div>

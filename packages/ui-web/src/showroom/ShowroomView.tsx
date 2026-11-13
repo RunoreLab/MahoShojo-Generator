@@ -25,10 +25,12 @@ import { BaseModal } from '../modal';
 import { PageJump } from '../pagination';
 import { NarrativeHistoryPicker } from '../narrative-history';
 import { ProductFooter } from '../shell';
+import { ReadingSettingsCard } from '../settings/ReadingSettingsCard';
 import { QuestionnaireNavigationActions } from '../questionnaire';
 import { ScenarioResultContent } from '../scenario';
 import { SHOWROOM_MAGICAL_GIRL } from './fixtures';
 import { LocalImagesSample } from './LocalImagesSample';
+import { CardLibrarySample } from './CardLibrarySample';
 import { SHOWROOM_SECTIONS, type ShowroomSectionId } from './sections';
 
 export interface ShowroomViewProps {
@@ -136,27 +138,30 @@ function SemanticColorsSection() {
 
 function TypographySection() {
   return (
-    <div className={`${PANEL_CLASS} flex flex-col gap-4`}>
-      <div>
-        <h3 className="mb-1 text-sm font-medium text-(--app-text-muted)">--app-font-sans</h3>
-        <p className="text-(--app-text)" style={{ fontFamily: 'var(--app-font-sans)' }}>
-          魔法少女生成器 — The quick brown fox jumps over the lazy dog 0123456789
-        </p>
-      </div>
-      <div>
-        <h3 className="mb-1 text-sm font-medium text-(--app-text-muted)">--app-font-mono</h3>
-        <p className="text-(--app-text)" style={{ fontFamily: 'var(--app-font-mono)' }}>
-          {`const codename = '样板间·澄星'; // 0123456789`}
-        </p>
-      </div>
-      <div className="flex flex-col gap-1 border-t border-(--app-border) pt-3">
-        {TEXT_TOKENS.map((token) => (
-          <p key={token} className="text-(--app-text)" style={{ fontSize: `var(${token})` }}>
-            <code className="mr-2 text-xs text-(--app-text-muted)">{token}</code>
-            魔法少女生成器 MahoShojo
+    <div className="flex flex-col gap-4">
+      <div className={`${PANEL_CLASS} flex flex-col gap-4`}>
+        <div>
+          <h3 className="mb-1 text-sm font-medium text-(--app-text-muted)">--app-font-sans</h3>
+          <p className="text-(--app-text)" style={{ fontFamily: 'var(--app-font-sans)' }}>
+            魔法少女生成器 — The quick brown fox jumps over the lazy dog 0123456789
           </p>
-        ))}
+        </div>
+        <div>
+          <h3 className="mb-1 text-sm font-medium text-(--app-text-muted)">--app-font-mono</h3>
+          <p className="text-(--app-text)" style={{ fontFamily: 'var(--app-font-mono)' }}>
+            {`const codename = '样板间·澄星'; // 0123456789`}
+          </p>
+        </div>
+        <div className="flex flex-col gap-1 border-t border-(--app-border) pt-3">
+          {TEXT_TOKENS.map((token) => (
+            <p key={token} className="text-(--app-text)" style={{ fontSize: `var(${token})` }}>
+              <code className="mr-2 text-xs text-(--app-text-muted)">{token}</code>
+              魔法少女生成器 MahoShojo
+            </p>
+          ))}
+        </div>
       </div>
+      <ReadingSettingsCard />
     </div>
   );
 }
@@ -366,6 +371,7 @@ function OverlaySection({ onOpen }: { onOpen: () => void }) {
       </button>
       <p className="text-sm text-(--app-text-muted)">共源 BaseModal：Escape 栈顶消费、焦点圈留、初始焦点在关闭按钮。</p>
       <button type="button" className={generationActionClassNames.secondary} onClick={() => setHistoryOpen(true)}>打开叙事历史导入样板</button>
+      <CardLibrarySample />
       <NarrativeHistoryPicker isOpen={historyOpen} onClose={() => setHistoryOpen(false)} entries={[]} lastUpdatedAt={null}
         sort="updated_desc" onSort={() => {}} formatDateTime={value => value} readStatus="ready"
         sourceHint="本机历史列表为空时，导入入口仍然可见。" onConfirm={() => setHistoryOpen(false)}

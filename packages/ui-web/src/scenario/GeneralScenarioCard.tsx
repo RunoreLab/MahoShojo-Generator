@@ -41,14 +41,16 @@ export function GeneralScenarioCard({
 
         <div className="result-item">
           <div className="result-label">情景名称</div>
-          <div className="result-value text-2xl font-bold text-white drop-shadow" style={{ letterSpacing: '0.08em' }}>
-            {scenario?.title || '未命名情景'}
+          <div className="app-reading">
+            <div data-reading-heading="2" className="result-value text-2xl font-bold text-white drop-shadow" style={{ letterSpacing: '0.08em' }}>
+              {scenario?.title || '未命名情景'}
+            </div>
           </div>
         </div>
 
         <div className="result-item">
           <div className="result-label">情景设定</div>
-          <div className="result-value text-sm">
+          <div className="result-value app-reading app-reading-width text-sm">
             <ScenarioMarkdownPreview key={JSON.stringify(scenario)} content={displayContent} variant="dark" renderMarkdown={renderMarkdown} />
             {isStreaming && (
               <span className="inline-block w-2 h-4 bg-white/70 animate-pulse align-middle ml-1" />

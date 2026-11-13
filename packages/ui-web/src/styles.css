@@ -38,6 +38,173 @@
  */
 @source "./**/*.{ts,tsx}";
 
+/* 阅读偏好只作用于显式正文边界；默认档不产生排版覆盖。
+ * 具名正文/标题选择器替代全局星号覆盖。嵌套正文使用绝对 rem 基数，不重复乘倍率。
+ * 操作区、源码、公式与固定卡面应在边界外；data-reading-exclude 是局部排除标记。 */
+:root {
+  --app-font-serif: "SimSun", "Songti SC", "Noto Serif CJK SC", "Noto Serif SC", serif;
+  --app-reading-scale: 1;
+  --app-reading-text-xs: 0.75rem;
+  --app-reading-text-sm: 0.875rem;
+  --app-reading-text-base: 1rem;
+  --app-reading-text-lg: 1.125rem;
+  --app-reading-text-xl: 1.25rem;
+  --app-reading-text-2xl: 1.5rem;
+  --app-reading-text-3xl: 1.875rem;
+  --app-reading-leading-scaled: 1.625;
+  --app-reading-leading-comfortable: 1.75;
+  --app-reading-leading-relaxed: 2;
+  --app-reading-width-narrow: 40em;
+  --app-reading-heading-1: 2em;
+  --app-reading-heading-2: 1.5em;
+  --app-reading-heading-3: 1.25em;
+  --app-reading-heading-4: 1.125em;
+  --app-reading-heading-5: 1.0625em;
+  --app-reading-heading-6: 1em;
+}
+
+:root[data-reading-size='110'] {
+  --app-reading-scale: 1.1;
+}
+
+:root[data-reading-size='125'] {
+  --app-reading-scale: 1.25;
+}
+
+:root[data-reading-size='150'] {
+  --app-reading-scale: 1.5;
+}
+
+:root[data-reading-size='175'] {
+  --app-reading-scale: 1.75;
+}
+
+:root[data-reading-size='200'] {
+  --app-reading-scale: 2;
+}
+
+:root:is([data-reading-size='110'], [data-reading-size='125'], [data-reading-size='150'], [data-reading-size='175'], [data-reading-size='200']) .app-reading:not(:where(pre, pre *, code, code *, kbd, kbd *, samp, samp *, .katex, .katex *, button, button *, input, textarea, select, [data-reading-exclude], [data-reading-exclude] *)) {
+  font-size: calc(var(--app-reading-text-base) * var(--app-reading-scale));
+  line-height: var(--app-reading-leading-scaled);
+}
+
+:root:is([data-reading-size='110'], [data-reading-size='125'], [data-reading-size='150'], [data-reading-size='175'], [data-reading-size='200']) :where(.app-reading :is(p, ul, ol, li, blockquote, dd, dt, td, th, div, span, a)):not(:where(pre, pre *, code, code *, kbd, kbd *, samp, samp *, .katex, .katex *, button, button *, input, textarea, select, [data-reading-exclude], [data-reading-exclude] *)) {
+  font-size: inherit;
+  line-height: inherit;
+}
+
+:root:is([data-reading-size='110'], [data-reading-size='125'], [data-reading-size='150'], [data-reading-size='175'], [data-reading-size='200']) :where(.app-reading :is(h1, [data-reading-heading="1"])):not(:where(pre, pre *, code, code *, kbd, kbd *, samp, samp *, .katex, .katex *, button, button *, input, textarea, select, [data-reading-exclude], [data-reading-exclude] *)) {
+  font-size: var(--app-reading-heading-1);
+  line-height: inherit;
+}
+
+:root:is([data-reading-size='110'], [data-reading-size='125'], [data-reading-size='150'], [data-reading-size='175'], [data-reading-size='200']) :where(.app-reading :is(h2, [data-reading-heading="2"])):not(:where(pre, pre *, code, code *, kbd, kbd *, samp, samp *, .katex, .katex *, button, button *, input, textarea, select, [data-reading-exclude], [data-reading-exclude] *)) {
+  font-size: var(--app-reading-heading-2);
+  line-height: inherit;
+}
+
+:root:is([data-reading-size='110'], [data-reading-size='125'], [data-reading-size='150'], [data-reading-size='175'], [data-reading-size='200']) :where(.app-reading :is(h3, [data-reading-heading="3"])):not(:where(pre, pre *, code, code *, kbd, kbd *, samp, samp *, .katex, .katex *, button, button *, input, textarea, select, [data-reading-exclude], [data-reading-exclude] *)) {
+  font-size: var(--app-reading-heading-3);
+  line-height: inherit;
+}
+
+:root:is([data-reading-size='110'], [data-reading-size='125'], [data-reading-size='150'], [data-reading-size='175'], [data-reading-size='200']) :where(.app-reading :is(h4, [data-reading-heading="4"])):not(:where(pre, pre *, code, code *, kbd, kbd *, samp, samp *, .katex, .katex *, button, button *, input, textarea, select, [data-reading-exclude], [data-reading-exclude] *)) {
+  font-size: var(--app-reading-heading-4);
+  line-height: inherit;
+}
+
+:root:is([data-reading-size='110'], [data-reading-size='125'], [data-reading-size='150'], [data-reading-size='175'], [data-reading-size='200']) :where(.app-reading :is(h5, [data-reading-heading="5"])):not(:where(pre, pre *, code, code *, kbd, kbd *, samp, samp *, .katex, .katex *, button, button *, input, textarea, select, [data-reading-exclude], [data-reading-exclude] *)) {
+  font-size: var(--app-reading-heading-5);
+  line-height: inherit;
+}
+
+:root:is([data-reading-size='110'], [data-reading-size='125'], [data-reading-size='150'], [data-reading-size='175'], [data-reading-size='200']) :where(.app-reading :is(h6, [data-reading-heading="6"])):not(:where(pre, pre *, code, code *, kbd, kbd *, samp, samp *, .katex, .katex *, button, button *, input, textarea, select, [data-reading-exclude], [data-reading-exclude] *)) {
+  font-size: var(--app-reading-heading-6);
+  line-height: inherit;
+}
+
+:root[data-reading-font='sans'] .app-reading:not(:where(pre, pre *, code, code *, kbd, kbd *, samp, samp *, .katex, .katex *, button, button *, input, textarea, select, [data-reading-exclude], [data-reading-exclude] *)) {
+  font-family: var(--app-font-sans);
+}
+:root[data-reading-font='sans'] :where(.app-reading :is(p, ul, ol, li, blockquote, dd, dt, td, th, div, span, a, h1, h2, h3, h4, h5, h6)):not(:where(pre, pre *, code, code *, kbd, kbd *, samp, samp *, .katex, .katex *, button, button *, input, textarea, select, [data-reading-exclude], [data-reading-exclude] *)) {
+  font-family: inherit;
+}
+
+:root[data-reading-font='serif'] .app-reading:not(:where(pre, pre *, code, code *, kbd, kbd *, samp, samp *, .katex, .katex *, button, button *, input, textarea, select, [data-reading-exclude], [data-reading-exclude] *)) {
+  font-family: var(--app-font-serif);
+}
+:root[data-reading-font='serif'] :where(.app-reading :is(p, ul, ol, li, blockquote, dd, dt, td, th, div, span, a, h1, h2, h3, h4, h5, h6)):not(:where(pre, pre *, code, code *, kbd, kbd *, samp, samp *, .katex, .katex *, button, button *, input, textarea, select, [data-reading-exclude], [data-reading-exclude] *)) {
+  font-family: inherit;
+}
+
+:root[data-reading-line-height='comfortable'] .app-reading:not(:where(pre, pre *, code, code *, kbd, kbd *, samp, samp *, .katex, .katex *, button, button *, input, textarea, select, [data-reading-exclude], [data-reading-exclude] *)) {
+  line-height: var(--app-reading-leading-comfortable);
+}
+:root[data-reading-line-height='comfortable'] :where(.app-reading :is(p, ul, ol, li, blockquote, dd, dt, td, th, div, span, a, h1, h2, h3, h4, h5, h6)):not(:where(pre, pre *, code, code *, kbd, kbd *, samp, samp *, .katex, .katex *, button, button *, input, textarea, select, [data-reading-exclude], [data-reading-exclude] *)) {
+  line-height: inherit;
+}
+
+:root[data-reading-line-height='relaxed'] .app-reading:not(:where(pre, pre *, code, code *, kbd, kbd *, samp, samp *, .katex, .katex *, button, button *, input, textarea, select, [data-reading-exclude], [data-reading-exclude] *)) {
+  line-height: var(--app-reading-leading-relaxed);
+}
+:root[data-reading-line-height='relaxed'] :where(.app-reading :is(p, ul, ol, li, blockquote, dd, dt, td, th, div, span, a, h1, h2, h3, h4, h5, h6)):not(:where(pre, pre *, code, code *, kbd, kbd *, samp, samp *, .katex, .katex *, button, button *, input, textarea, select, [data-reading-exclude], [data-reading-exclude] *)) {
+  line-height: inherit;
+}
+
+:root[data-reading-width='narrow'] .app-reading-width {
+  max-inline-size: var(--app-reading-width-narrow);
+  margin-inline: auto;
+  overflow-wrap: anywhere;
+}
+
+@media (forced-colors: active) {
+  .ui-web-reading-select {
+    color: CanvasText;
+    background-color: Canvas;
+    border-color: ButtonText;
+  }
+}
+
+
+
+/* 保留既有 Tailwind 字号阶，百分比相对该阶缩放，避免把小字正文当成 16px。 */
+:root:is([data-reading-size='110'], [data-reading-size='125'], [data-reading-size='150'], [data-reading-size='175'], [data-reading-size='200']) :is(.app-reading.text-xs, .app-reading .text-xs):not(:where(pre, pre *, code, code *, kbd, kbd *, samp, samp *, .katex, .katex *, button, button *, input, textarea, select, [data-reading-exclude], [data-reading-exclude] *)) {
+  font-size: calc(var(--app-reading-text-xs) * var(--app-reading-scale));
+}
+
+:root:is([data-reading-size='110'], [data-reading-size='125'], [data-reading-size='150'], [data-reading-size='175'], [data-reading-size='200']) :is(.app-reading.text-sm, .app-reading .text-sm, .app-reading .result-label):not(:where(pre, pre *, code, code *, kbd, kbd *, samp, samp *, .katex, .katex *, button, button *, input, textarea, select, [data-reading-exclude], [data-reading-exclude] *)) {
+  font-size: calc(var(--app-reading-text-sm) * var(--app-reading-scale));
+}
+
+:root:is([data-reading-size='110'], [data-reading-size='125'], [data-reading-size='150'], [data-reading-size='175'], [data-reading-size='200']) :is(.app-reading.text-base, .app-reading .text-base):not(:where(pre, pre *, code, code *, kbd, kbd *, samp, samp *, .katex, .katex *, button, button *, input, textarea, select, [data-reading-exclude], [data-reading-exclude] *)) {
+  font-size: calc(var(--app-reading-text-base) * var(--app-reading-scale));
+}
+
+:root:is([data-reading-size='110'], [data-reading-size='125'], [data-reading-size='150'], [data-reading-size='175'], [data-reading-size='200']) :is(.app-reading.text-lg, .app-reading .text-lg):not(:where(pre, pre *, code, code *, kbd, kbd *, samp, samp *, .katex, .katex *, button, button *, input, textarea, select, [data-reading-exclude], [data-reading-exclude] *)) {
+  font-size: calc(var(--app-reading-text-lg) * var(--app-reading-scale));
+}
+
+:root:is([data-reading-size='110'], [data-reading-size='125'], [data-reading-size='150'], [data-reading-size='175'], [data-reading-size='200']) :is(.app-reading.text-xl, .app-reading .text-xl):not(:where(pre, pre *, code, code *, kbd, kbd *, samp, samp *, .katex, .katex *, button, button *, input, textarea, select, [data-reading-exclude], [data-reading-exclude] *)) {
+  font-size: calc(var(--app-reading-text-xl) * var(--app-reading-scale));
+}
+
+:root:is([data-reading-size='110'], [data-reading-size='125'], [data-reading-size='150'], [data-reading-size='175'], [data-reading-size='200']) :is(.app-reading.text-2xl, .app-reading .text-2xl):not(:where(pre, pre *, code, code *, kbd, kbd *, samp, samp *, .katex, .katex *, button, button *, input, textarea, select, [data-reading-exclude], [data-reading-exclude] *)) {
+  font-size: calc(var(--app-reading-text-2xl) * var(--app-reading-scale));
+}
+
+:root:is([data-reading-size='110'], [data-reading-size='125'], [data-reading-size='150'], [data-reading-size='175'], [data-reading-size='200']) :is(.app-reading.text-3xl, .app-reading .text-3xl):not(:where(pre, pre *, code, code *, kbd, kbd *, samp, samp *, .katex, .katex *, button, button *, input, textarea, select, [data-reading-exclude], [data-reading-exclude] *)) {
+  font-size: calc(var(--app-reading-text-3xl) * var(--app-reading-scale));
+}
+
+:root:is([data-reading-size='110'], [data-reading-size='125'], [data-reading-size='150'], [data-reading-size='175'], [data-reading-size='200']) .app-reading .app-reading:not(:is(.text-xs, .text-sm, .text-base, .text-lg, .text-xl, .text-2xl, .text-3xl)):not(:where(pre, pre *, code, code *, kbd, kbd *, samp, samp *, .katex, .katex *, button, button *, input, textarea, select, [data-reading-exclude], [data-reading-exclude] *)) {
+  font-size: inherit;
+}
+
+/* 既有 result-value 的未分层 16px 会覆盖 text-sm；保持实际原始字号倍率。 */
+:root:is([data-reading-size='110'], [data-reading-size='125'], [data-reading-size='150'], [data-reading-size='175'], [data-reading-size='200']) :is(.app-reading.result-value, .app-reading .result-value):not(:where(pre, pre *, code, code *, kbd, kbd *, samp, samp *, .katex, .katex *, button, button *, input, textarea, select, [data-reading-exclude], [data-reading-exclude] *)) {
+  font-size: calc(var(--app-reading-text-base) * var(--app-reading-scale));
+}
+
 /* 同一产品的本机字体契约，不下载 Web Font。Arial 延续 Web 西文字体；显式
  * CJK 回退避免 Edge 用户设置与 WebView2 generic 字体映射选出不同中文字体。
  * mono 先保留拉丁代码等宽字体，CJK 无对应字形时再用无衬线回退；不承诺 CJK 等宽。

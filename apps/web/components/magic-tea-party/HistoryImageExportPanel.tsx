@@ -571,13 +571,13 @@ export function MagicTeaPartyHistoryImageExportPanel(props: Props) {
                         <div className={speakerClass}>{headerText}</div>
                         <div className={`rounded-xl px-4 py-3 ${bubbleClass} ${shouldRenderSegments ? 'space-y-2' : ''}`}>
                           {outputView === 'raw' && message.role === 'assistant' ? (
-                            <div className="whitespace-pre-wrap leading-relaxed">{message.content}</div>
+                            <div data-reading-exclude className="whitespace-pre-wrap leading-relaxed">{message.content}</div>
                           ) : shouldRenderSegments ? (
                             <>
                               {message.segments!.map((seg, idx) => {
                                 if (seg.type === 'narration') {
                                   return (
-                                    <p key={`${message.id}-n-${idx}`} className="whitespace-pre-wrap leading-relaxed">
+                                    <p key={`${message.id}-n-${idx}`} className="app-reading app-reading-width whitespace-pre-wrap leading-relaxed">
                                       {seg.text}
                                     </p>
                                   );
@@ -587,7 +587,7 @@ export function MagicTeaPartyHistoryImageExportPanel(props: Props) {
                                   return (
                                     <div key={`${message.id}-d-${idx}`} className="rounded-lg bg-pink-50 px-3 py-2">
                                       <div className="text-xs font-semibold text-pink-700">{segSpeakerName}</div>
-                                      <div className="whitespace-pre-wrap leading-relaxed text-gray-800">{seg.text}</div>
+                                      <div className="app-reading app-reading-width whitespace-pre-wrap leading-relaxed text-gray-800">{seg.text}</div>
                                     </div>
                                   );
                                 }
@@ -611,7 +611,7 @@ export function MagicTeaPartyHistoryImageExportPanel(props: Props) {
                           ) : preferMarkdown ? (
                             <MarkdownBlock content={message.content || ''} variant="light" mode="article" />
                           ) : (
-                            <div className="whitespace-pre-wrap leading-relaxed">{message.content}</div>
+                            <div className="app-reading app-reading-width whitespace-pre-wrap leading-relaxed">{message.content}</div>
                           )}
                         </div>
                       </div>

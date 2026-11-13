@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 
 import { AppProviders } from '@/app/providers';
 import { getColorModeInitScript } from '@mahoshojo/ui-web/color-mode-init';
-import { getMotionPreferenceInitScript } from '@mahoshojo/ui-web/device-preferences-init';
+import { getMotionPreferenceInitScript, getReadingPreferenceInitScript } from '@mahoshojo/ui-web/device-preferences-init';
 import '@/styles/globals.css';
 import '@/styles/blue-theme.css';
 import '@mahoshojo/ui-web/markdown.css';
@@ -31,9 +31,8 @@ export default function RootLayout({ children }: RootLayoutProps) {
       <head>
         <script
           dangerouslySetInnerHTML={{
-            // 首屏前标记共源设备偏好：亮暗（data-color-mode）与减少动效
-            //（data-motion）——两个 init 脚本都是无依赖 IIFE，可顺序拼接。
-            __html: getColorModeInitScript() + getMotionPreferenceInitScript(),
+            // 首屏前应用亮暗、动效与阅读偏好；共源纯脚本不依赖 React 水合。
+            __html: getColorModeInitScript() + getMotionPreferenceInitScript() + getReadingPreferenceInitScript(),
           }}
         />
       </head>

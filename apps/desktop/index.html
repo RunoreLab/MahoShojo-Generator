@@ -59,6 +59,31 @@
   } catch (e) {}
 })();
     </script>
+    <!-- 阅读偏好的共源首屏初始化；与 device-preferences-init 逐字一致。 -->
+    <script>
+(() => {
+  var key = "mahoshojo.reading-preferences.v1";
+  var sizes = [100,110,125,150,175,200];
+  var apply = function () {
+    var value = {};
+    try {
+      var parsed = JSON.parse(window.localStorage.getItem(key));
+      if (parsed && !Array.isArray(parsed) && parsed.version === 1) value = parsed;
+    } catch (e) {}
+    try {
+      var data = document.documentElement.dataset;
+      data.readingSize = String(sizes.indexOf(value.sizePercent) >= 0 ? value.sizePercent : 100);
+      data.readingFont = value.font === 'sans' || value.font === 'serif' ? value.font : 'default';
+      data.readingLineHeight = value.lineHeight === 'comfortable' || value.lineHeight === 'relaxed' ? value.lineHeight : 'default';
+      data.readingWidth = value.width === 'narrow' ? 'narrow' : 'default';
+    } catch (e) {}
+  };
+  apply();
+  window.addEventListener('storage', function (event) {
+    if (event.key === key || event.key === null) apply();
+  });
+})();
+    </script>
     <!--
       品牌首帧（D5.2）：WebView 解析完 HTML 到 React 首次 commit 之间 #root 是空的，
       先内联一份极轻的品牌画面盖住这段窗口——React createRoot 渲染时自然接管并

@@ -10,6 +10,26 @@ import { useEffect, useState } from 'react';
 
 import { MOTION_PREFERENCE_STORAGE_KEY } from './init';
 
+export {
+  DEFAULT_READING_PREFERENCES,
+  READING_PREFERENCE_STORAGE_KEY,
+  READING_SIZE_PERCENTAGES,
+  normalizeReadingPreferences,
+  parseReadingPreferencesText,
+  type ReadingPreferences,
+  type ReadingSizePercent,
+  type ReadingFont,
+  type ReadingLineHeight,
+  type ReadingWidth,
+} from './reading-init';
+export {
+  ReadingPreferenceStore,
+  applyReadingPreferencesToDocument,
+  getReadingPreferenceStore,
+  useReadingPreferences,
+  type ReadingPreferenceState,
+} from './reading';
+
 export type MotionPreference = 'system' | 'reduce';
 /** `data-motion` 的取值——解析后的生效状态，不是用户选择本身。 */
 export type ResolvedMotion = 'reduce' | 'no-preference';
