@@ -387,7 +387,7 @@ describe('Web Package hosted generation', () => {
 
   // 创作人格（"你是一位才华横溢的作家"）与数据文件生成互斥。宿主需要一条真正的
   // system role 来承载输出纪律，否则它会和创作原则在同一轮 user 消息里互相稀释。
-  it('gives package targets a real system role and leaves other contracts flat', async () => {
+  it('keeps real system rules separate for package targets and ordinary reports', async () => {
     const local = await createLocalProjectionPackage();
     const projection = buildWebPackagePromptProjection(local);
     const { prompt, systemPrompt, metadata } = await buildArenaGenerationPrompt({
@@ -399,10 +399,10 @@ describe('Web Package hosted generation', () => {
     expect(systemPrompt).toContain('MAHOSHOJO_ARENA_META');
     expect(systemPrompt).toContain('可被 JSON.parse 直接解析的 JSON 文档');
     // 日常模式的人格仍在 system role 里，但被明确限定为只决定"写什么内容"。
-    expect(systemPrompt).toContain('才华横溢的作家');
+    expect(systemPrompt).toContain('日常互动风格');
     expect(systemPrompt).toContain('不得用来改变目标文件的形态');
     // 创作人格只出现在 system role 里；重复一遍等于把"散文作者"重新放回 user 轮。
-    expect(prompt).not.toContain('才华横溢的作家');
+    expect(prompt).not.toContain('日常互动风格');
     // 形态契约仍然留在任务提示中，provider 忽略 system role 时也能看到。
     expect(prompt).toContain('[HOST WEB PACKAGE OUTPUT CONTRACT]');
     expect(prompt).toContain('可被 JSON.parse 直接解析');
@@ -410,7 +410,8 @@ describe('Web Package hosted generation', () => {
     const markdown = await buildArenaGenerationPrompt({
       actorKey: 'user:42', random: () => 0, payload: { ...payload, reportFormat: 'markdown', webPackageRef: undefined },
     });
-    expect(markdown.systemPrompt).toBeUndefined();
+    expect(markdown.systemPrompt).toContain('设定忠实性');
+    expect(markdown.prompt).not.toContain(markdown.systemPrompt);
   });
 
   it('forwards the system role to the stream provider as a real system message', async () => {

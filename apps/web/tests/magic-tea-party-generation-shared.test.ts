@@ -11,7 +11,6 @@ import * as webPrompts from '@/lib/magic-tea-party/prompts';
 import * as webPreview from '@/lib/magic-tea-party/stream-preview';
 import * as webInstruction from '@/lib/magic-tea-party/system-instruction';
 import * as webMappers from '@/lib/magic-tea-party/update-draft-mappers';
-import { SYSTEM_PROMPTS } from '@/lib/arena/constants';
 import { filterAndFormatHistory, formatCurrentStateForPrompt, formatUserAnswersForPrompt } from '@/lib/arena/logic';
 import { appRouteHandler as streamHandler } from '@/app/api/magic-tea-party/generate-stream/handler';
 import { appRouteHandler as choicesHandler } from '@/app/api/magic-tea-party/generate-choices/handler';
@@ -57,9 +56,10 @@ describe('魔法茶会 Web 兼容路径回用共享实现', () => {
     for (const name of Object.keys(legacy) as Array<keyof typeof legacy>) expect(legacy[name]).toBe(shared[name]);
   });
 
-  it('Arena 风格和非空角色格式化保持 Web 现有内容', () => {
-    for (const [id, key] of [['arena-classic', 'classic'], ['arena-kizuna', 'kizuna'], ['arena-daily', 'daily']] as const) {
-      expect(shared.getMagicTeaPartyPreset(id)?.systemPrompt).toBe(SYSTEM_PROMPTS[key]);
+  it('各预设只携带模式差异，非空角色格式化继续共源', () => {
+    for (const [id, marker] of [['arena-classic', '战术'], ['arena-kizuna', '羁绊'], ['arena-daily', '温暖']] as const) {
+      expect(shared.getMagicTeaPartyPreset(id)?.systemPrompt).toContain(marker);
+      expect(shared.getMagicTeaPartyPreset(id)?.systemPrompt).not.toContain('【内容边界】');
     }
     const currentState = { summary: '湿透的斗篷', fields: [] };
     const history = { entries: [{ id: 1, title: '旧桥重逢', participants: ['旅人'], winner: '不适用', impact: '开始信任', metadata: {} }] };
@@ -100,17 +100,20 @@ describe('魔法茶会 Web 兼容路径回用共享实现', () => {
     expect(returned).toBe(output);
     expect(transport.stream).toHaveBeenCalledOnce();
     const preset = shared.getMagicTeaPartyPreset(detailedSettings.presetId)!;
-    const expected = shared.buildMagicTeaPartyMainPrompt({
+    const expected = shared.buildMagicTeaPartyMainPromptMessages({
       session: { playerRoleId: null, settings: { ...detailedSettings, providerId: customProvider.providerId, modelId: customProvider.modelId } },
       roles: [detailedRole], scenario, auxScenarios,
       worldbookText: shared.buildWorldbookText(preset.worldbook), stylePrompt: preset.systemPrompt,
       messages: shared.applyMagicTeaPartyMessageLimits(longMessages, 8000).messages,
     });
-    expect(transport.stream.mock.calls[0][0]).toEqual({ prompt: expected, temperature: 0.75 });
-    expect(expected).toContain('已省略中段');
-    expect(expected).toContain('尾声');
-    for (const text of ['雨夜茶馆', '闭店前', '旧桥重逢', '湿透的斗篷', '【世界书】', 'assistant: 巡夜人递来热茶。']) expect(expected).toContain(text);
-    expect(transport.safety.mock.calls[0][0].text).toBe(expected);
+    expect(transport.stream.mock.calls[0][0]).toEqual({ ...expected, temperature: 0.75 });
+    expect(expected.prompt).toContain('已省略中段');
+    expect(expected.prompt).toContain('尾声');
+    for (const text of ['雨夜茶馆', '闭店前', '旧桥重逢', '湿透的斗篷', '【世界书】', 'assistant: 巡夜人递来热茶。']) expect(expected.prompt).toContain(text);
+    expect(transport.safety.mock.calls[0][0].text).toBe(`${expected.systemPrompt}\n\n${expected.prompt}`);
+    expect(expected.systemPrompt).not.toContain(scenario.card.content);
+    expect(expected.systemPrompt).not.toContain(detailedRole.card.content);
+    expect(expected.systemPrompt).not.toContain(messages[0].content);
     const parsed = webJsonl.parseMagicTeaPartyJsonl(returned);
     expect(parsed.segments[0]).toEqual({ type: 'narration', text: '灯火摇曳。' });
     expect(parsed.choices).toEqual([{ id: 'c1', text: '坐下' }, { id: 'c2', text: '离开' }]);
@@ -122,13 +125,13 @@ describe('魔法茶会 Web 兼容路径回用共享实现', () => {
   it('真实 generate-choices handler 继续消费共享阶段规则', async () => {
     const response = await post(choicesHandler, { sessionId: 'tea', messages, roles: [role], settings, customProvider });
     expect(response.status).toBe(200);
-    const expected = shared.buildMagicTeaPartyChoicesPrompt({
+    const expected = shared.buildMagicTeaPartyChoicesPromptMessages({
       session: { playerRoleId: null, settings: { ...settings, providerId: customProvider.providerId, modelId: customProvider.modelId } },
       roles: [role], messages, choiceCount: 4,
     });
-    expect(transport.stream.mock.calls[0][0]).toEqual({ prompt: expected, temperature: 0.5 });
-    expect(expected).toContain('【阶段规则：选项】');
-    expect(expected).toContain('旅人: 我推开门。');
+    expect(transport.stream.mock.calls[0][0]).toEqual({ ...expected, temperature: 0.5 });
+    expect(expected.systemPrompt).toContain('【阶段规则：选项】');
+    expect(expected.prompt).toContain('旅人: 我推开门。');
   });
 
   it.each(['summary', 'title'] as const)('真实 summarize handler 保留 %s 模式的共享 Prompt', async (mode) => {
@@ -137,7 +140,7 @@ describe('魔法茶会 Web 兼容路径回用共享实现', () => {
     expect(await response.json()).toEqual({ [mode]: '合成模型输出', ...(mode === 'summary' ? {
       summaryInput: { messageIds: ['u1', 'a1'], contentLengths: [5, 8] },
     } : {}) });
-    expect(transport.stream.mock.calls[0][0]).toEqual({ prompt: shared.buildMagicTeaPartySummarizePrompt({ messages, mode, language: 'zh-CN', userDisplayName: '旅人' }), temperature: mode === 'title' ? 0.2 : 0.3 });
+    expect(transport.stream.mock.calls[0][0]).toEqual({ ...shared.buildMagicTeaPartySummarizePromptMessages({ messages, mode, language: 'zh-CN', userDisplayName: '旅人' }), temperature: mode === 'title' ? 0.2 : 0.3 });
   });
 
   it.each([8192, 32768, 128_000])('真实 summary handler 在 %s 档保留两层裁剪后的消息顺序和边界', async (contextWindowTokens) => {
@@ -206,12 +209,17 @@ describe('魔法茶会 Web 兼容路径回用共享实现', () => {
     expect(await response.json()).not.toHaveProperty('summary');
   });
 
-  it('真实 generate-updates handler 向结构化模型端口传递共享 builder 引用', async () => {
+  it('真实 generate-updates handler 启用分层消息并保留共享输出与写入权限', async () => {
     const response = await post(updatesHandler, { sessionId: 'tea', messages, roles: [role], settings: { ...settings, writeCurrentState: true }, customProvider });
     expect(response.status).toBe(200);
     const [input, options] = transport.structured.mock.calls[0];
-    expect(options.promptBuilder).toBe(shared.buildMagicTeaPartyUpdatePrompt);
-    expect(transport.safety.mock.calls[0][0].text).toBe(options.promptBuilder(input));
+    const expected = shared.buildMagicTeaPartyUpdatePromptMessages(input);
+    expect(options.promptMessageMode).toBe('system-user');
+    expect(options.systemPrompt).toBe(expected.systemPrompt);
+    expect(options.promptBuilder(input)).toBe(expected.prompt);
+    expect(expected.systemPrompt).not.toContain('守望街区的人。');
+    expect(expected.systemPrompt).not.toContain('我推开门。');
+    expect(transport.safety.mock.calls[0][0].text).toBe(shared.buildMagicTeaPartyUpdatePrompt(input));
     expect(options.promptBuilder(input)).toContain('巡夜人');
     expect(options.promptBuilder(input)).toContain('旅人: 我推开门。');
     expect(await response.json()).toMatchObject({ drafts: [{ roleId: 'r1', characterName: '巡夜人', currentStateSummary: '已换上干衣' }] });

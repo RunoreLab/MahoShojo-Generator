@@ -10,6 +10,7 @@ import type {
 } from '@mahoshojo/domain/magic-tea-party/types';
 import { inferDataCardTemplate as inferTemplate } from '@mahoshojo/domain/data-cards';
 import { filterAndFormatHistory, formatCurrentStateForPrompt, formatUserAnswersForPrompt } from '../arena-generation/prompt';
+import { buildNarrativeSystemRules, NARRATIVE_CONTENT_POLICY, NARRATIVE_AUTHORITY_RULES, NARRATIVE_INSTRUCTION_RULES, NARRATIVE_RECORDING_RULES } from '../narrative-rules';
 
 // 取消卡片内容截断上限；如需恢复可参考以下阈值：
 // const MAX_FIELD_CHARS = 2_000;
@@ -200,7 +201,10 @@ export const projectMagicTeaPartyDialogueHistory = (
 const formatDialogueHistory = (messages: readonly MagicTeaPartyHistoryMessage[], userDisplayName: string): string =>
   projectMagicTeaPartyDialogueHistory(messages, userDisplayName).text;
 
-export const buildMagicTeaPartyMainPrompt = (params: {
+export type MagicTeaPartyPromptMessages = { systemPrompt: string; prompt: string };
+
+/** Host-authored rules stay separate from cards, worldbooks and conversation data. */
+const buildMagicTeaPartyMainPromptParts = (params: {
   session: Pick<MagicTeaPartySession, 'playerRoleId' | 'summary' | 'settings' | 'protocolShadow'>;
   roles: MagicTeaPartyRole[];
   scenario?: MagicTeaPartyScenario;
@@ -209,7 +213,7 @@ export const buildMagicTeaPartyMainPrompt = (params: {
   messages: MagicTeaPartyMessage[];
   requestChoices?: boolean;
   stylePrompt?: string;
-}): string => {
+}, stage: 'narrative' | 'choices' = 'narrative'): MagicTeaPartyPromptMessages => {
   const language = params.session.settings.language ?? 'zh-CN';
   const outputFormat = params.session.settings.outputFormat ?? 'jsonl';
   const userDisplayName = params.session.settings.userDisplayName?.trim() || '旅人';
@@ -221,8 +225,8 @@ export const buildMagicTeaPartyMainPrompt = (params: {
   const writeCurrentState = Boolean(params.session.settings.writeCurrentState);
   const outputPlan = {
     choices: outputFormat === 'jsonl' ? baseOutputPlan.choices : 'off',
-    summary: outputFormat === 'jsonl' && enableSummary ? baseOutputPlan.summary : 'off',
-    updates: outputFormat === 'jsonl' && (writeArenaHistory || writeCurrentState) ? baseOutputPlan.updates : 'off',
+    summary: stage === 'narrative' && outputFormat === 'jsonl' && enableSummary ? baseOutputPlan.summary : 'off',
+    updates: stage === 'narrative' && outputFormat === 'jsonl' && (writeArenaHistory || writeCurrentState) ? baseOutputPlan.updates : 'off',
   } as const;
   const effectiveChoicesPlan = enableChoicesSetting ? outputPlan.choices : 'off';
   const enableChoices = effectiveChoicesPlan !== 'off';
@@ -246,27 +250,25 @@ export const buildMagicTeaPartyMainPrompt = (params: {
   };
 
   const systemLines: string[] = [];
-  systemLines.push('你是一位才华横溢的剧作家和故事叙述者，精通于在既定框架下演绎精彩的故事。你的任务是基于【世界书】【情景设定】【角色档案】生成连贯、可持续的互动剧情。');
+  systemLines.push(stage === 'choices'
+    ? '你是互动故事的选项助手。基于【世界书】【情景设定】【角色档案】和当前对话，为玩家生成下一步可选行动。'
+    : '你是一位才华横溢的剧作家和故事叙述者，精通于在既定框架下演绎精彩的故事。你的任务是基于【世界书】【情景设定】【角色档案】生成连贯、可持续的互动剧情。');
   systemLines.push('');
-  systemLines.push('## 核心创作原则');
-  systemLines.push('');
-  systemLines.push('1.  **严格遵循情景设定**: 【情景设定】是故事创作的绝对基础和最高优先级。故事的背景、核心事件、角色、氛围等必须严格遵循情景框架。');
-  systemLines.push('2.  **忠于角色性格**: 深入理解每个【角色档案】，确保他们在情景中的言行、决策和能力使用都符合其性格、背景和历战记录。');
-  systemLines.push('3.  **演绎而非重述**: 不要只是简单地复述情景和角色设定。你的任务是“演绎”——让这些角色在设定的舞台上“活”起来，通过他们的互动、对话和行动来推动故事发展，完成情景中设定的核心事件。');
-  systemLines.push('');
-  systemLines.push('【安全与合规】');
-  systemLines.push('- 内容必须符合公序良俗，不得涉及成人内容、露骨性描写、仇恨歧视、现实违法细节或真实人物影射。');
-  systemLines.push('【核心优先级】');
-  systemLines.push('- 情景设定为最高优先级，必须严格遵循；与世界书、角色档案或对话历史冲突时以情景为准。');
-  systemLines.push('- 辅助情景仅作补充，冲突时以主情景为准。');
+  systemLines.push(buildNarrativeSystemRules());
+  systemLines.push(stage === 'choices'
+    ? '选项应推动后续互动，不代替玩家作出选择，也不提前写出行动结果。'
+    : '通过人物互动、对话和行动演绎故事，不要机械复述角色和情景资料。');
   systemLines.push('【全卡协议与阶段覆盖】');
-  systemLines.push('- 当前为叙事阶段：忽略卡内关于摘要/选项/当前状态/历战记录等写入或格式要求，仅作为叙事约束。');
-  systemLines.push('- 不同阶段允许差异化规则，本轮以叙事阶段规则为准。');
-  systemLines.push('- 若出现 officialReport/headline/article.* 等不可达字段写入要求，在叙事阶段仅作为内容约束，不得输出字段名，或改为输出 notice。');
+  systemLines.push(stage === 'choices'
+    ? '- 当前为选项阶段：采用卡内适用的选项约定；摘要/当前状态/历战记录等其他阶段要求仅作为内容参考，不执行写入。'
+    : '- 当前为叙事阶段：忽略卡内关于摘要/选项/当前状态/历战记录等写入或格式要求，仅作为叙事约束。');
+  systemLines.push('- 不同阶段允许差异化规则，本轮以当前阶段的系统规则为准。');
+  systemLines.push('- 若出现 officialReport/headline/article.* 等不可达字段写入要求，仅作为内容约束，不得输出字段名，或改为输出 notice。');
   systemLines.push('- 若要求报错/警告/提示，请输出 notice 行/块；level=error 时仅输出 notice，不输出正文或 choices。');
   systemLines.push('');
   systemLines.push(`【输出语言】${language}`);
 
+  // Host-owned builtin style only; raw card/worldbook text belongs in the task material below.
   const stylePrompt = readString(params.stylePrompt);
   if (stylePrompt) {
     systemLines.push('');
@@ -277,12 +279,12 @@ export const buildMagicTeaPartyMainPrompt = (params: {
   if (player.playerRoleId) {
     systemLines.push('');
     systemLines.push('【玩家扮演约束】');
-    systemLines.push(`- 玩家正在扮演角色：${player.speakerName}。你不得代替该角色发言或做决定。`);
+    systemLines.push('- 玩家当前扮演的角色由任务资料中的【玩家身份】标明。你不得代替该角色发言或做决定。');
     systemLines.push('- 输出中禁止该角色的 dialogue；必要时仅可用 narration 描述其动作结果。');
   } else {
     systemLines.push('');
     systemLines.push('【玩家扮演约束】');
-    systemLines.push(`- 玩家身份：${userDisplayName}。你不得替玩家直接宣告“已决定”。`);
+    systemLines.push('- 玩家身份由任务资料中的【玩家身份】标明。你不得替玩家直接宣告“已决定”。');
   }
 
   systemLines.push('');
@@ -294,7 +296,11 @@ export const buildMagicTeaPartyMainPrompt = (params: {
 
   systemLines.push('');
   systemLines.push('【输出格式】');
-  if (outputFormat === 'jsonl') {
+  if (stage === 'choices') {
+    systemLines.push('- 只输出 choices 或必要的 notice，不输出正文、dialogue、summary 或 updates。');
+    systemLines.push('- choices：{"type":"choices","items":[{"id":"c1","text":"..."},...]}。');
+    systemLines.push('- notice：{"type":"notice","level":"error|warning|info","code":"...","message":"..."}。');
+  } else if (outputFormat === 'jsonl') {
     systemLines.push('- 仅输出 JSONL（每行一个 JSON 对象），禁止输出代码块/围栏/解释。');
     systemLines.push('- type 仅允许 narration/dialogue/choices/summary/updates/notice。');
     systemLines.push('- narration：{"type":"narration","text":"..."}（必须使用 text，禁止使用 content）。');
@@ -312,7 +318,7 @@ export const buildMagicTeaPartyMainPrompt = (params: {
     systemLines.push('- 若需要 notice，请输出独立 mtp_notice 块；level=error 时仅输出 notice。');
   }
 
-  if (enableChoices && outputFormat === 'jsonl') {
+  if (enableChoices && outputFormat === 'jsonl' && stage === 'narrative') {
     systemLines.push('');
     systemLines.push('【选项】');
     if (effectiveChoicesPlan === 'on') {
@@ -328,6 +334,10 @@ export const buildMagicTeaPartyMainPrompt = (params: {
     systemLines.push('【摘要】');
     systemLines.push('- summary 必须在正文与 choices 之后输出。');
     systemLines.push('- text 是完整摘要；sections 可按“世界状态/角色关系/关键事件/未决事项/禁忌”拆分，信息不足部分可写“无”。');
+  }
+
+  if (outputFormat === 'jsonl' && (outputPlan.summary !== 'off' || outputPlan.updates !== 'off')) {
+    systemLines.push(NARRATIVE_RECORDING_RULES);
   }
 
   if (outputFormat === 'jsonl' && outputPlan.updates !== 'off') {
@@ -346,7 +356,10 @@ export const buildMagicTeaPartyMainPrompt = (params: {
   }
 
   const parts: string[] = [];
-  parts.push(systemLines.join('\n').trim());
+  parts.push(`【玩家身份】\n${JSON.stringify({
+    roleId: player.playerRoleId,
+    label: player.playerRoleId ? `玩家正在扮演角色：${player.speakerName}` : `玩家身份：${userDisplayName}`,
+  }, null, 2)}`);
 
   const worldbookText = readString(params.worldbookText);
   if (worldbookText) parts.push(worldbookText);
@@ -390,11 +403,21 @@ export const buildMagicTeaPartyMainPrompt = (params: {
   }
 
   parts.push(formatDialogueHistory(params.messages, userDisplayName));
-  parts.push('请基于以上信息继续剧情。');
-  return parts.join('\n\n').trim();
+  parts.push(stage === 'choices' ? '请基于以上资料生成下一步玩家可选行动。' : '请基于以上信息继续剧情。');
+  return { systemPrompt: systemLines.join('\n').trim(), prompt: parts.join('\n\n').trim() };
 };
 
-export const buildMagicTeaPartyChoicesPrompt = (params: {
+export const buildMagicTeaPartyMainPromptMessages = (
+  params: Parameters<typeof buildMagicTeaPartyMainPromptParts>[0],
+): MagicTeaPartyPromptMessages => buildMagicTeaPartyMainPromptParts(params);
+
+/** Compatibility text view, also used to budget the complete request. */
+export const buildMagicTeaPartyMainPrompt = (params: Parameters<typeof buildMagicTeaPartyMainPromptMessages>[0]): string => {
+  const messages = buildMagicTeaPartyMainPromptMessages(params);
+  return `${messages.systemPrompt}\n\n${messages.prompt}`;
+};
+
+export const buildMagicTeaPartyChoicesPromptMessages = (params: {
   session: Pick<MagicTeaPartySession, 'playerRoleId' | 'summary' | 'settings' | 'protocolShadow'>;
   roles: MagicTeaPartyRole[];
   scenario?: MagicTeaPartyScenario;
@@ -403,8 +426,9 @@ export const buildMagicTeaPartyChoicesPrompt = (params: {
   messages: MagicTeaPartyMessage[];
   stylePrompt?: string;
   choiceCount?: number;
+  /** Legacy call compatibility only; a choices task never generates record updates. */
   updates?: 'on' | 'off';
-}): string => {
+}): MagicTeaPartyPromptMessages => {
   const choiceCount = Math.min(16, Math.max(2, params.choiceCount ?? params.session.settings.choiceCount ?? 3));
 
   const patchedSession: Pick<MagicTeaPartySession, 'playerRoleId' | 'summary' | 'settings' | 'protocolShadow'> = {
@@ -414,11 +438,11 @@ export const buildMagicTeaPartyChoicesPrompt = (params: {
       outputFormat: 'jsonl',
       enableChoices: true,
       choiceCount,
-      outputPlan: { choices: 'on', summary: 'off', updates: params.updates ?? 'on' },
+      outputPlan: { choices: 'on', summary: 'off', updates: 'off' },
     },
   };
 
-  const base = buildMagicTeaPartyMainPrompt({
+  const base = buildMagicTeaPartyMainPromptParts({
     session: patchedSession,
     roles: params.roles,
     scenario: params.scenario,
@@ -427,27 +451,32 @@ export const buildMagicTeaPartyChoicesPrompt = (params: {
     messages: params.messages,
     requestChoices: true,
     stylePrompt: params.stylePrompt,
-  });
+  }, 'choices');
 
-  return [
-    base,
+  const systemPrompt = [
+    base.systemPrompt,
     '',
     '【阶段规则：选项】',
     '- 你现在仅处理“选项生成”，必须遵守角色/情景卡内关于选项数量、标识或格式的要求（如有）。',
     '- 若卡内要求硬错误/特定提示，必须输出 notice。',
     '【选项原则】',
     '- 选项必须源于当前情景与对话上下文。',
+    '- 每条选项建议 12~30 字，不引入无依据的新设定或新角色。',
     '- 选项之间要有明确差异且各自可执行，避免只是措辞变化或结果近似。',
     '- 保持角色性格、能力边界与世界观一致，确保后续可合理演绎。',
     '【任务】你将仅生成“下一步玩家可选行动”的 choices；如需报错/提示则输出 notice。',
     `【输出要求】仅输出 1 行 JSON：{"type":"choices","items":[{"id":"c1","text":"..."},...]}，items 默认 ${choiceCount} 条；若有要求也可调整至 2~16 并保留标识。`,
     '【输出限制】禁止输出代码块、解释、标题或多余换行。',
-  ]
-    .join('\n')
-    .trim();
+  ].join('\n').trim();
+  return { systemPrompt, prompt: base.prompt };
 };
 
-export const buildMagicTeaPartyUpdatePrompt = (params: {
+export const buildMagicTeaPartyChoicesPrompt = (params: Parameters<typeof buildMagicTeaPartyChoicesPromptMessages>[0]): string => {
+  const messages = buildMagicTeaPartyChoicesPromptMessages(params);
+  return `${messages.systemPrompt}\n\n${messages.prompt}`;
+};
+
+export const buildMagicTeaPartyUpdatePromptMessages = (params: {
   roles: MagicTeaPartyRole[];
   scenario?: MagicTeaPartyScenario;
   auxScenarios?: MagicTeaPartyScenario[];
@@ -458,7 +487,7 @@ export const buildMagicTeaPartyUpdatePrompt = (params: {
   userDisplayName?: string;
   writeArenaHistory: boolean;
   writeCurrentState: boolean;
-}): string => {
+}): MagicTeaPartyPromptMessages => {
   const language = params.language ?? 'zh-CN';
   const userDisplayName = readString(params.userDisplayName) || '{{user}}';
   const writeArenaHistory = params.writeArenaHistory;
@@ -473,14 +502,17 @@ export const buildMagicTeaPartyUpdatePrompt = (params: {
   lines.push('');
   lines.push('## 核心记录原则');
   lines.push('');
-  lines.push('1.  **只记录已发生的事实**: 所有内容必须来自对话记录与情景设定，不得补写或推断未发生事件。');
+  lines.push(NARRATIVE_CONTENT_POLICY);
+  lines.push(NARRATIVE_RECORDING_RULES);
+  lines.push(NARRATIVE_INSTRUCTION_RULES);
+  lines.push('1.  **只记录已发生的事实**: 情景描述的是本场规则，不能据此补写尚未发生的事件。');
   lines.push('2.  **记录变化而非复述**: 重点描述角色经历带来的影响、成长或状态变化，避免重复已知设定。');
   lines.push('3.  **具体可落库**: 使用清晰、可执行、可写入的表述，避免空泛或文学化。');
   lines.push(`【输出语言】${language}`);
   lines.push('【阶段说明】记录更新阶段（仅输出 JSON 草案）。');
   lines.push('【核心优先级】');
   lines.push('- 遵守角色/情景卡内关于写入格式、字段规则的要求。');
-  lines.push('- 情景设定为最高优先级；辅助情景仅作补充，冲突时以主情景为准。');
+  lines.push(NARRATIVE_AUTHORITY_RULES);
   lines.push('【全卡协议】');
   lines.push('- 本阶段允许采用与叙事阶段不同的规则集（例如格式/风格/用词），以阶段系统提示词为最高优先级。');
   lines.push('- 若被要求写入 officialReport/headline/article.* 等不可达字段，请将内容映射为 impact/currentStateSummary，不得输出字段名。');
@@ -517,6 +549,7 @@ export const buildMagicTeaPartyUpdatePrompt = (params: {
     )
   );
 
+  const parts: string[] = [];
   const roleLines = params.roles.map((role) => {
     const snapshot = formatCurrentStateForPrompt((role.card as any)?.current_state);
     const snapshotText = snapshot ? `\n  当前状态快照：\n  ${snapshot.replace(/\n/g, '\n  ')}` : '';
@@ -524,24 +557,24 @@ export const buildMagicTeaPartyUpdatePrompt = (params: {
   });
 
   if (roleLines.length > 0) {
-    lines.push('');
-    lines.push('【角色列表】');
-    lines.push(roleLines.join('\n'));
+    parts.push('');
+    parts.push('【角色列表】');
+    parts.push(roleLines.join('\n'));
   }
 
   if (params.scenario) {
-    lines.push('');
-    lines.push(buildScenarioText(params.scenario, { includeProtocolAppendix: true }));
+    parts.push('');
+    parts.push(buildScenarioText(params.scenario, { includeProtocolAppendix: true }));
   }
   if (Array.isArray(params.auxScenarios) && params.auxScenarios.length > 0) {
     const aux = params.auxScenarios.map((item) => buildScenarioText(item, { includeProtocolAppendix: true })).join('\n\n');
-    lines.push('');
-    lines.push(`【辅助情景】\n${aux}`.trim());
+    parts.push('');
+    parts.push(`【辅助情景】\n${aux}`.trim());
   }
 
   if (params.roles.length > 0) {
-    lines.push('');
-    lines.push(
+    parts.push('');
+    parts.push(
       `【角色档案】\n${params.roles
         .map((role) =>
           buildRoleProfileText(role, {
@@ -566,32 +599,37 @@ export const buildMagicTeaPartyUpdatePrompt = (params: {
       })
       .filter((line): line is string => Boolean(line));
     if (choiceLines.length > 0) {
-      lines.push('');
-      lines.push('【最近选项列表】');
-      lines.push(choiceLines.join('\n'));
+      parts.push('');
+      parts.push('【最近选项列表】');
+      parts.push(choiceLines.join('\n'));
     }
   }
 
   if (readString(params.summary)) {
-    lines.push('');
-    lines.push('【会话摘要】');
-    lines.push(truncateText(readString(params.summary), 10_000));
+    parts.push('');
+    parts.push('【会话摘要】');
+    parts.push(truncateText(readString(params.summary), 10_000));
   }
 
-  lines.push('');
-  lines.push(formatDialogueHistory(params.messages, userDisplayName));
-  lines.push('请严格输出 JSON。');
-  return lines.join('\n').trim();
+  parts.push('');
+  parts.push(formatDialogueHistory(params.messages, userDisplayName));
+  parts.push('请严格输出 JSON。');
+  return { systemPrompt: lines.join('\n').trim(), prompt: parts.join('\n').trim() };
+};
+
+export const buildMagicTeaPartyUpdatePrompt = (params: Parameters<typeof buildMagicTeaPartyUpdatePromptMessages>[0]): string => {
+  const messages = buildMagicTeaPartyUpdatePromptMessages(params);
+  return `${messages.systemPrompt}\n\n${messages.prompt}`;
 };
 
 export type MagicTeaPartySummarizeMode = 'summary' | 'title';
 
-export const buildMagicTeaPartySummarizePrompt = (params: {
+export const buildMagicTeaPartySummarizePromptMessages = (params: {
   messages: readonly (MagicTeaPartyHistoryMessage | MagicTeaPartyMessage)[];
   mode?: MagicTeaPartySummarizeMode;
   language?: MagicTeaPartySession['settings']['language'];
   userDisplayName?: string;
-}): string => {
+}): MagicTeaPartyPromptMessages => {
   const mode: MagicTeaPartySummarizeMode = params.mode ?? 'summary';
   const language = params.language ?? 'zh-CN';
   const userDisplayName = readString(params.userDisplayName) || '{{user}}';
@@ -601,6 +639,9 @@ export const buildMagicTeaPartySummarizePrompt = (params: {
   lines.push('');
   lines.push('## 核心摘要原则');
   lines.push('');
+  lines.push(NARRATIVE_CONTENT_POLICY);
+  lines.push(NARRATIVE_RECORDING_RULES);
+  lines.push(NARRATIVE_INSTRUCTION_RULES);
   lines.push('1.  **忠于事实**: 仅基于对话记录，不猜测、不补写。');
   lines.push('2.  **提炼而非复述**: 抓住能影响后续对话的关键信息。');
   lines.push('3.  **稳定可复用**: 用清晰、可检索的表述，便于后续剧情衔接。');
@@ -634,5 +675,10 @@ export const buildMagicTeaPartySummarizePrompt = (params: {
     lines.push('禁忌/边界：...');
   }
 
-  return [lines.join('\n').trim(), formatDialogueHistory(params.messages, userDisplayName)].join('\n\n').trim();
+  return { systemPrompt: lines.join('\n').trim(), prompt: formatDialogueHistory(params.messages, userDisplayName) };
+};
+
+export const buildMagicTeaPartySummarizePrompt = (params: Parameters<typeof buildMagicTeaPartySummarizePromptMessages>[0]): string => {
+  const messages = buildMagicTeaPartySummarizePromptMessages(params);
+  return `${messages.systemPrompt}\n\n${messages.prompt}`;
 };

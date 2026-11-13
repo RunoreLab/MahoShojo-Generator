@@ -13,7 +13,7 @@ import {
   MAGIC_TEA_PARTY_MAX_TOTAL_CHARS,
   resolveMagicTeaPartyMessageCharLimit,
 } from '@/lib/magic-tea-party/message-limits';
-import { buildMagicTeaPartyMainPrompt, buildWorldbookText } from '@/lib/magic-tea-party/prompts';
+import { buildMagicTeaPartyMainPromptMessages, buildWorldbookText } from '@/lib/magic-tea-party/prompts';
 import { getMagicTeaPartyPreset } from '@/lib/magic-tea-party/presets';
 import type {
   MagicTeaPartyOutputPlan,
@@ -289,7 +289,7 @@ async function handler(req: NextRequest): Promise<Response> {
     const stylePrompt = preset ? preset.systemPrompt : '';
 
     const normalizedProtocolShadow = normalizeProtocolShadow(protocolShadow ?? undefined);
-    const prompt = buildMagicTeaPartyMainPrompt({
+    const { systemPrompt, prompt } = buildMagicTeaPartyMainPromptMessages({
       session: {
         playerRoleId,
         summary: summary ?? undefined,
@@ -325,7 +325,8 @@ async function handler(req: NextRequest): Promise<Response> {
       stylePrompt,
     });
 
-    const safetyText = prompt.length > MAX_SAFETY_TEXT_CHARS ? prompt.slice(0, MAX_SAFETY_TEXT_CHARS) : prompt;
+    const safetyPrompt = `${systemPrompt}\n\n${prompt}`;
+    const safetyText = safetyPrompt.length > MAX_SAFETY_TEXT_CHARS ? safetyPrompt.slice(0, MAX_SAFETY_TEXT_CHARS) : safetyPrompt;
     const safetyResponse = await enforceTextSafety({
       text: safetyText,
       log,
@@ -347,6 +348,7 @@ async function handler(req: NextRequest): Promise<Response> {
     const streamResult = await generateWithStreamAI(
       {
         prompt,
+        systemPrompt,
         temperature: typeof settings.temperature === 'number' ? settings.temperature : 0.75,
       },
       {

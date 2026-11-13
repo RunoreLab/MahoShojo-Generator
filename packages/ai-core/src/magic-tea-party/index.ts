@@ -69,12 +69,17 @@ export {
   buildRoleProfileText,
   buildScenarioText,
   buildMagicTeaPartyMainPrompt,
+  buildMagicTeaPartyMainPromptMessages,
   buildMagicTeaPartyChoicesPrompt,
+  buildMagicTeaPartyChoicesPromptMessages,
   buildMagicTeaPartyUpdatePrompt,
+  buildMagicTeaPartyUpdatePromptMessages,
   buildMagicTeaPartySummarizePrompt,
+  buildMagicTeaPartySummarizePromptMessages,
 } from './prompts';
 export type {
   MagicTeaPartySummarizeMode,
+  MagicTeaPartyPromptMessages,
 } from './prompts';
 
 export {

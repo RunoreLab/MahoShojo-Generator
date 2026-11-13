@@ -255,7 +255,9 @@ export const executeArenaDirect = async (
     requestId: task.requestId, contractVersion: 1, mode: task.mode, requestKind: 'arena', arenaInputJson,
     modelId: task.modelId,
     messages: [
-      ...(prompt.systemPrompt ? [{ role: 'system', content: prompt.systemPrompt }] : !streaming && !web ? [{ role: 'system', content: buildStructuredJsonInstructionFromZodSchema(schema) }] : []),
+      { role: 'system', content: [prompt.systemPrompt,
+        ...(!streaming && !web ? [buildStructuredJsonInstructionFromZodSchema(schema)] : []),
+      ].filter(Boolean).join('\n\n') },
       { role: 'user', content: prompt.prompt },
     ],
     ...(task.temperature === undefined ? {} : { temperature: task.temperature }),

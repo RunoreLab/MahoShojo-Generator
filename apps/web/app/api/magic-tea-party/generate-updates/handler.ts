@@ -12,7 +12,7 @@ import {
   MAGIC_TEA_PARTY_MAX_TOTAL_CHARS,
   resolveMagicTeaPartyMessageCharLimit,
 } from '@/lib/magic-tea-party/message-limits';
-import { buildMagicTeaPartyUpdatePrompt } from '@/lib/magic-tea-party/prompts';
+import { buildMagicTeaPartyUpdatePrompt, buildMagicTeaPartyUpdatePromptMessages } from '@/lib/magic-tea-party/prompts';
 import type { MagicTeaPartyMessage, MagicTeaPartyRole, MagicTeaPartyScenario, MagicTeaPartyUpdateDraft } from '@/lib/magic-tea-party/types';
 import { generateWithAI, LoadBalanceStrategy } from '@/lib/ai';
 import { buildChannelContextFromResolved } from '@/lib/ai/availability';
@@ -265,9 +265,10 @@ async function handler(req: NextRequest): Promise<Response> {
     if (safetyResponse) return safetyResponse;
 
     const result = await generateWithAI(promptInput, {
-      systemPrompt: '你是魔法茶会的角色更新助手。',
+      systemPrompt: buildMagicTeaPartyUpdatePromptMessages(promptInput).systemPrompt,
+      promptMessageMode: 'system-user',
       temperature: 0.2,
-      promptBuilder: buildMagicTeaPartyUpdatePrompt,
+      promptBuilder: (input) => buildMagicTeaPartyUpdatePromptMessages(input).prompt,
       schema: UpdateResponseSchema as any,
       taskName: '魔法茶会角色更新',
     }, {

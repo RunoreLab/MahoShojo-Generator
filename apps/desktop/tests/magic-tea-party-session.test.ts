@@ -270,9 +270,9 @@ describe('text Tea owner save and generation identity', () => {
     expect(begin).toMatchObject({ request: { action: 'begin-generation', expectedRevision: 1,
       session: { playerRoleId: null }, userMessage: { meta: { speakerName } } } });
     expect(h.record?.session.playerRoleId).toBeNull();
-    const stream = h.invoke.mock.calls.find(([command]) => command === 'stream_direct_ai')![1]!.request as { messages: Array<{ content: string }> };
-    expect(stream.messages[0]!.content).toContain(`玩家身份：${speakerName}`);
-    expect(stream.messages[0]!.content).not.toContain('玩家正在扮演角色');
+    const stream = h.invoke.mock.calls.find(([command]) => command === 'stream_direct_ai')![1]!.request as { messages: Array<{ role: string; content: string }> };
+    expect(stream.messages.find(message => message.role === 'user')!.content).toContain(`玩家身份：${speakerName}`);
+    expect(stream.messages.map(message => message.content).join('\n')).not.toContain('玩家正在扮演角色');
   });
   it.each([false, true])('keeps player and role changes atomic across a failed update (unknown=%s)', async unknown => {
     const role = { id: 'player', name: '原玩家', source: 'local' as const, card: { name: '原玩家' } };
@@ -564,7 +564,7 @@ describe('manual summary through the existing Tea owner', () => {
     return h;
   };
   const prompts = (h: ReturnType<typeof harness>) => h.invoke.mock.calls.filter(([command]) => command === 'stream_direct_ai' || command === 'stream_target_ai')
-    .map(([, args]) => (args?.request as { messages: Array<{ content: string }> }).messages[0]!.content);
+    .map(([, args]) => (args?.request as { messages: Array<{ content: string }> }).messages.map(message => message.content).join('\n\n'));
   it('saves one non-empty summary atomically, keeps drafts, and uses the saved summary for chat/continue/choices', async () => {
     const h = await prepare(); h.owner.setInput('尚未发送的草稿'); h.owner.stageSummary('先保存的手改摘要');
     const raw = '  新摘要：月光花已经种下😀  '; h.output(raw);

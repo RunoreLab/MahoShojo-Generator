@@ -1,5 +1,6 @@
 import {
   appendMagicTeaPartySystemInstruction, buildMagicTeaPartyHistory, buildMagicTeaPartyMainPrompt, buildMagicTeaPartyChoicesPrompt,
+  buildMagicTeaPartyMainPromptMessages, buildMagicTeaPartyChoicesPromptMessages,
   buildWorldbookText, clipMagicTeaPartyMessageContent,
   estimateMagicTeaPartyTokens, getMagicTeaPartyPreset, projectMagicTeaPartyChoices,
   resolveMagicTeaPartyMessageCharLimit, resolveMagicTeaPartyTokenBudget, selectMagicTeaPartyHistoryPositions,
@@ -125,11 +126,14 @@ export async function prepareTeaDirectRequest(port: TeaNativePort, record: TeaRe
   if (history.length > 200) throw new Error('本次请求超过 200 条上下文，请调低上下文条数后重试；原设置已保留');
   if (history.reduce((sum, item) => sum + item.content.length, 0) > 800_000) throw new Error('本次裁剪后的上下文超过 800000 字符，请减少上下文后重试');
   assertTeaCurrent(current);
-  const prompt = buildPrompt(history.map(message => ({ ...message, sessionId: record.session.id, createdAt: 0 })));
+  const promptInput = { ...base, messages: history.map(message => ({ ...message, sessionId: record.session.id, createdAt: 0 })) };
+  const prompt = kind === 'choices'
+    ? buildMagicTeaPartyChoicesPromptMessages({ ...promptInput, updates: 'off' })
+    : buildMagicTeaPartyMainPromptMessages(promptInput);
   // Existing isolated code units are rejected, never normalized or replaced.
-  if (!isTeaScalarText(prompt)) throw new Error('请求含不完整的 Unicode 字符，请修正来源后重试；原正文已保留');
+  if (!isTeaScalarText(prompt.systemPrompt) || !isTeaScalarText(prompt.prompt)) throw new Error('请求含不完整的 Unicode 字符，请修正来源后重试；原正文已保留');
   return AiExecutionRequestSchema.parse({ requestId, contractVersion: 1, mode: target.mode, modelId: target.modelId,
-    messages: [{ role: 'user', content: prompt }], temperature: target.generationOverrides?.temperature ?? settings.temperature ?? 0.7,
+    messages: [{ role: 'system', content: prompt.systemPrompt }, { role: 'user', content: prompt.prompt }], temperature: target.generationOverrides?.temperature ?? settings.temperature ?? 0.7,
     ...(target.generationOverrides?.maxOutputTokens === undefined ? {} : { maxOutputTokens: target.generationOverrides.maxOutputTokens }), responseFormat: 'text' });
 }
 

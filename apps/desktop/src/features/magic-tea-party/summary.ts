@@ -1,5 +1,5 @@
 import {
-  buildMagicTeaPartyHistory, clipMagicTeaPartyMessageContent, estimateMagicTeaPartyTokens, projectMagicTeaPartySummaryInput,
+  buildMagicTeaPartyHistory, buildMagicTeaPartySummarizePromptMessages, clipMagicTeaPartyMessageContent, estimateMagicTeaPartyTokens, projectMagicTeaPartySummaryInput,
   resolveMagicTeaPartyMessageCharLimit, resolveMagicTeaPartyTokenBudget, selectMagicTeaPartyHistoryPositions,
   createMagicTeaPartyAutoSummaryScan, appendMagicTeaPartyAutoSummaryMessage, planMagicTeaPartyAutoSummary,
   resolveMagicTeaPartyAutoSummaryBudget, projectMagicTeaPartyAutoSummaryInput,
@@ -82,9 +82,12 @@ async function prepareSummary(port: TeaNativePort, record: TeaRecord, target: Re
   // The equivalent Web request submits the context-clipped projection, not the whole local archive.
   if (projection.requestMessages.reduce((sum, item) => sum + item.content.length, 0) > 800_000) throw new Error('本次裁剪后的上下文超过 800000 字符，请减少上下文后重试');
   assertTeaCurrent(current);
-  if (!isTeaScalarText(projection.prompt)) throw new Error('请求含不完整的 Unicode 字符，请修正来源后重试；原正文已保留');
+  const promptMessages = buildMagicTeaPartySummarizePromptMessages({
+    messages: projection.requestMessages, language: settings.language, userDisplayName: settings.userDisplayName,
+  });
+  if (!isTeaScalarText(promptMessages.systemPrompt) || !isTeaScalarText(promptMessages.prompt)) throw new Error('请求含不完整的 Unicode 字符，请修正来源后重试；原正文已保留');
   const request = AiExecutionRequestSchema.parse({ requestId, contractVersion: 1, mode: target.mode, modelId: target.modelId,
-    messages: [{ role: 'user', content: projection.prompt }], temperature: target.generationOverrides?.temperature ?? 0.3,
+    messages: [{ role: 'system', content: promptMessages.systemPrompt }, { role: 'user', content: promptMessages.prompt }], temperature: target.generationOverrides?.temperature ?? 0.3,
     ...(autoBudget ? { maxOutputTokens: autoBudget.maxOutputTokens }
       : target.generationOverrides?.maxOutputTokens === undefined ? {} : { maxOutputTokens: target.generationOverrides.maxOutputTokens }), responseFormat: 'text' });
   return { request, summaryMeta: { fromMessageId, toMessageId, coverage: projection.coverage },

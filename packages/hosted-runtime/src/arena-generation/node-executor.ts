@@ -16,7 +16,6 @@ import {
   isStrictRankedArenaRequest,
   resolveArenaGenerationOutputContract,
 } from './prompt';
-import { getSystemPrompt } from './compatibility-prompt';
 import { buildArenaStructuredReportSchema } from './structured-report';
 import { normalizeNodeArenaMaterials } from './materials';
 import { resolveArenaCombatantNativeAuthority } from './native-authority';
@@ -750,11 +749,7 @@ export const createNodeArenaGenerationExecutor = (
       const config: RawGenerationConfig = {
         prompt,
         temperature: 0.9,
-        // structured-report splits the prompt itself below; every other path
-        // forwards the system role the prompt builder already produced.
-        ...(systemPrompt && resolveArenaGenerationOutputContract(payload) !== 'structured-report'
-          ? { systemPrompt }
-          : {}),
+        ...(systemPrompt ? { systemPrompt } : {}),
         ...(customProvider ? {
           generationSettingsContext: {
             providerId: customProvider.providerId,
@@ -788,11 +783,6 @@ export const createNodeArenaGenerationExecutor = (
       if (resolveArenaGenerationOutputContract(payload) === 'structured-report') {
         const mode = readString(payload.mode) || 'classic';
         const combatants = Array.isArray(payload.combatants) ? payload.combatants : [];
-        const systemPrompt = getSystemPrompt(mode, combatants);
-        const combinedPrefix = `${systemPrompt}\n\n`;
-        const taskPrompt = prompt.startsWith(combinedPrefix)
-          ? prompt.slice(combinedPrefix.length)
-          : prompt;
         const schema = buildArenaStructuredReportSchema({
           enableImpacts: payload.writeArenaHistory === true || payload.writeCurrentState === true,
           enableImpactText: payload.writeArenaHistory === true,
@@ -803,9 +793,11 @@ export const createNodeArenaGenerationExecutor = (
           Record<string, unknown>,
           typeof structuredInput
         > = {
-          systemPrompt,
+          systemPrompt: systemPrompt ?? '',
+          // Older prepared snapshots may still contain a single combined prompt.
+          promptMessageMode: systemPrompt ? 'system-user' : 'legacy-user',
           temperature: 0.9,
-          promptBuilder: () => taskPrompt,
+          promptBuilder: () => prompt,
           schema,
           taskName: `生成${mode}模式故事`,
           ...(customProvider ? {

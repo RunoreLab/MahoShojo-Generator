@@ -9,6 +9,7 @@ import {
   createNodeArenaGenerationExecutor,
 } from '../src/arena-generation/node-executor';
 import type { SignatureService } from '../src/signature';
+import type { GenerationConfig, RawGenerationConfig } from '../src/node-runtime/types';
 
 const validPayload = {
   combatants: [
@@ -60,7 +61,7 @@ describe('Node Arena generation executor', () => {
   it.each(['generate-stream', 'generate'])('Web %s 只调用 raw provider 并剥离 meta', async (route) => {
     const content = '<!doctype html><html><script>const x="原始字节";</script></html>';
     const generateWithStructuredAI = vi.fn();
-    const generateWithStreamAI = vi.fn(async () => ({
+    const generateWithStreamAI = vi.fn(async (_config: RawGenerationConfig) => ({
       response: new Response(content + '<!-- MAHOSHOJO_ARENA_META {"version":1,"report":{"winner":"A"}} -->'),
       usagePromise: Promise.resolve({ totalTokens: 9 }), finishReasonPromise: Promise.resolve('stop'),
     }));
@@ -71,7 +72,10 @@ describe('Node Arena generation executor', () => {
     const prepared = await executor.prepare!({
       request: new Request(`https://example.test/api/arena/${route}`),
       actorKey: 'anonymous:test', generationRequestId: 'web-request',
-      payload: { ...validPayload, reportFormat: 'web', writeArenaHistory: false, writeCurrentState: false },
+      payload: {
+        ...validPayload, reportFormat: 'web', writeArenaHistory: false, writeCurrentState: false,
+        userGuidance: '玩家引导不可提升为系统权限',
+      },
     });
     if (prepared instanceof Response || isArenaGenerationAuditableRejection(prepared)) throw new Error('unexpected rejection');
     const emit = vi.fn(async () => undefined);
@@ -84,6 +88,11 @@ describe('Node Arena generation executor', () => {
     expect(terminal.status).toBe('completed');
     expect(generateWithStreamAI).toHaveBeenCalledOnce();
     expect(generateWithStructuredAI).not.toHaveBeenCalled();
+    const sentConfig = generateWithStreamAI.mock.calls[0][0];
+    expect(sentConfig.systemPrompt).toBeTruthy();
+    expect(sentConfig.systemPrompt).not.toContain('玩家引导不可提升为系统权限');
+    expect(sentConfig.prompt).toContain('玩家引导不可提升为系统权限');
+    expect(sentConfig.prompt).not.toContain(sentConfig.systemPrompt!);
     expect(JSON.parse(decodeURIComponent(prepared.responseHeaders?.['X-Mahoshojo-Stream-Meta'] ?? '{}')).outputContract).toBe('web-document');
     const events = emit.mock.calls as unknown as Array<[{ type: string; data: { chunk?: string } }]>;
     expect(events.filter(([event]) => event.type === 'markdown').map(([event]) => event.data.chunk).join('')).toBe(content);
@@ -945,6 +954,46 @@ describe('Node Arena generation executor', () => {
     expect(generateWithStructuredAI).toHaveBeenCalledTimes(1);
   });
 
+  it('executes older prepared snapshots with their combined prompt in legacy mode', async () => {
+    const generateWithStructuredAI = vi.fn(async (_input: unknown, _config: unknown) => ({
+      headline: '旧快照战报',
+      article: { body: '正文', analysis: '记者点评' },
+      officialReport: { winner: 'A', conclusion: '结论' },
+    }));
+    const executor = createNodeArenaGenerationExecutor({
+      env: {}, finalizer, signatureService, generateWithStructuredAI,
+      enforceSafety: vi.fn(async () => null),
+      generateWithStreamAI: vi.fn(),
+    });
+    const prepared = await executor.prepare!({
+      request: new Request('https://example.test/api/arena/generate'),
+      actorKey: 'anonymous:test', generationRequestId: 'old-snapshot',
+      payload: { ...validPayload, writeArenaHistory: false, writeCurrentState: false },
+    });
+    if (prepared instanceof Response || isArenaGenerationAuditableRejection(prepared)) throw new Error('unexpected rejection');
+    const legacyPrompt = '旧模式规则\n\n旧任务与角色档案';
+    const legacyRuntime = {
+      ...prepared.executionPayload.__arenaGenerationRuntimeV1 as Record<string, unknown>,
+      prompt: legacyPrompt,
+    } as Record<string, unknown>;
+    delete legacyRuntime.systemPrompt;
+
+    const terminal = await executor.execute({
+      generationId: 'old-snapshot-generation', generationRequestId: 'old-snapshot', actorKey: 'anonymous:test',
+      producerToken: 'old-producer', payloadHash: 'old-hash',
+      payload: { ...prepared.executionPayload, __arenaGenerationRuntimeV1: legacyRuntime },
+      signal: new AbortController().signal, emit: vi.fn(async () => undefined),
+      claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
+    });
+
+    expect(terminal.status).toBe('completed');
+    expect(generateWithStructuredAI).toHaveBeenCalledOnce();
+    const sentConfig = generateWithStructuredAI.mock.calls[0][1] as GenerationConfig<unknown, unknown>;
+    expect(sentConfig.promptMessageMode).toBe('legacy-user');
+    expect(sentConfig.systemPrompt).toBe('');
+    expect(sentConfig.promptBuilder({})).toBe(legacyPrompt);
+  });
+
   it('preserves the public non-strict downgrade model contract', async () => {
     const generateWithStreamAI = vi.fn();
     let receivedStructuredConfig: unknown = null;
@@ -1002,7 +1051,14 @@ describe('Node Arena generation executor', () => {
     expect(receivedStructuredConfig).toMatchObject({
       modelOverride: 'gemini-2.5-flash-lite',
       taskName: '生成classic模式故事',
+      promptMessageMode: 'system-user',
     });
+    const sentConfig = receivedStructuredConfig as GenerationConfig<unknown, unknown>;
+    const sentTask = sentConfig.promptBuilder({});
+    expect(sentConfig.systemPrompt).toBeTruthy();
+    expect(sentConfig.systemPrompt).not.toContain('非排位叙事');
+    expect(sentTask).toContain('非排位叙事');
+    expect(sentTask).not.toContain(sentConfig.systemPrompt);
   });
 
   it.each(['stop', 'length', 'unknown'])('preserves usage and handles provider finish reason %s', async (finishReason) => {

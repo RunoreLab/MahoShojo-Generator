@@ -145,7 +145,8 @@ describe('Arena generation prompt', () => {
     expect(result.metadata.expectsMeta).toBe(false);
     expect(result.prompt).toContain('故事正文(article.body)');
     expect(result.prompt).toContain('impacts 数组');
-    expect(result.prompt).not.toContain('【输出格式】');
+    expect(result.prompt).toContain('严格按宿主 JSON Schema');
+    expect(result.prompt).not.toContain('请在文末 Arena control trailer');
     expect(result.prompt).not.toContain('## 胜利者');
     expect(result.metadata.userGuidance).toHaveLength(200);
     expect(result.metadata.characterGuidances).toEqual([{

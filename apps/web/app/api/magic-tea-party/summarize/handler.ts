@@ -14,7 +14,7 @@ import {
   MAGIC_TEA_PARTY_MAX_TOTAL_CHARS,
   resolveMagicTeaPartyMessageCharLimit,
 } from '@/lib/magic-tea-party/message-limits';
-import { buildMagicTeaPartySummarizePrompt, type MagicTeaPartySummarizeMode } from '@/lib/magic-tea-party/prompts';
+import { buildMagicTeaPartySummarizePromptMessages, type MagicTeaPartySummarizeMode } from '@/lib/magic-tea-party/prompts';
 import { generateWithStreamAI, LoadBalanceStrategy, type GenerateWithAIOptions } from '@/lib/stream/raw-ai';
 import { buildChannelContextFromResolved } from '@/lib/ai/availability';
 import { recordUserActivityFromRequest } from '@/lib/user-activity/record';
@@ -143,14 +143,15 @@ async function handler(req: NextRequest): Promise<Response> {
       userDisplayName,
       sourceMessageCount: messages.length,
     }) : null;
-    const prompt = summaryProjection?.prompt ?? buildMagicTeaPartySummarizePrompt({
-      messages: limitedMessages.messages,
+    const { systemPrompt, prompt } = buildMagicTeaPartySummarizePromptMessages({
+      messages: summaryProjection?.requestMessages ?? limitedMessages.messages,
       mode: mode as MagicTeaPartySummarizeMode,
       language,
       userDisplayName,
     });
 
-    const safetyText = prompt.length > MAX_SAFETY_TEXT_CHARS ? prompt.slice(0, MAX_SAFETY_TEXT_CHARS) : prompt;
+    const safetyPrompt = summaryProjection?.prompt ?? `${systemPrompt}\n\n${prompt}`;
+    const safetyText = safetyPrompt.length > MAX_SAFETY_TEXT_CHARS ? safetyPrompt.slice(0, MAX_SAFETY_TEXT_CHARS) : safetyPrompt;
     const safetyResponse = await enforceTextSafety({
       text: safetyText,
       log,
@@ -171,6 +172,7 @@ async function handler(req: NextRequest): Promise<Response> {
     const streamResult = await generateWithStreamAI(
       {
         prompt,
+        systemPrompt,
         temperature: mode === 'title' ? 0.2 : 0.3,
       },
       providerOptions

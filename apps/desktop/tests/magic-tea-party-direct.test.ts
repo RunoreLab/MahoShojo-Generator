@@ -2,7 +2,7 @@ import { withFixtureStreamReceipt } from './helpers/stream-receipt-fixture';
 import { describe, expect, it, vi } from 'vitest';
 import * as teaCore from '@mahoshojo/ai-core/magic-tea-party';
 import type { AiStreamEvent } from '@mahoshojo/ai-core/stream-events';
-import { applyMagicTeaPartyMessageLimits, buildMagicTeaPartyChoicesPrompt, buildMagicTeaPartyHistory, buildMagicTeaPartyMainPrompt, estimateMagicTeaPartyTokens, projectMagicTeaPartyChoices, resolveMagicTeaPartyMessageCharLimit, resolveMagicTeaPartyTokenBudget, trimMagicTeaPartyHistory, projectMagicTeaPartySummaryInput } from '@mahoshojo/ai-core/magic-tea-party';
+import { applyMagicTeaPartyMessageLimits, buildMagicTeaPartyChoicesPrompt, buildMagicTeaPartyChoicesPromptMessages, buildMagicTeaPartyHistory, buildMagicTeaPartyMainPrompt, buildMagicTeaPartyMainPromptMessages, buildMagicTeaPartySummarizePromptMessages, estimateMagicTeaPartyTokens, projectMagicTeaPartyChoices, resolveMagicTeaPartyMessageCharLimit, resolveMagicTeaPartyTokenBudget, trimMagicTeaPartyHistory, projectMagicTeaPartySummaryInput } from '@mahoshojo/ai-core/magic-tea-party';
 import type { TeaMessageDocument, TeaReadRequest, TeaReadResponse } from '@mahoshojo/contracts/desktop-magic-tea-party';
 import type { ResolvedDesktopAiTarget } from '../src/features/ai-config/desktop-ai-config';
 import { desktopTeaSettings, executeTeaDirect, prepareTeaDirectRequest, teaSessionView, teaTerminalMessage, type TeaRecord } from '../src/features/magic-tea-party/direct';
@@ -45,12 +45,15 @@ describe('Desktop Tea actual shared prompt and Direct bridge', () => {
       maxMessages: budget.maxContextMessages, tokenBudget: Math.max(0, budget.historyBudgetTokens - estimateMagicTeaPartyTokens(buildMagicTeaPartyChoicesPrompt(base), 'openai')),
       providerId: 'openai', userDisplayName: '旅人', minKeep: 2 });
     const limited = applyMagicTeaPartyMessageLimits(selected, resolveMagicTeaPartyMessageCharLimit(budget.contextWindowTokens));
-    const expected = buildMagicTeaPartyChoicesPrompt({ ...base, messages: limited.messages.map(message => ({ ...message, sessionId: value.session.id, createdAt: 0 })) });
-    expect(request.messages).toEqual([{ role: 'user', content: expected }]); expect(request.messages[0]!.content).not.toContain('不能发送的草稿');
+    const expected = buildMagicTeaPartyChoicesPromptMessages({ ...base, messages: limited.messages.map(message => ({ ...message, sessionId: value.session.id, createdAt: 0 })) });
+    expect(request.messages).toEqual([{ role: 'system', content: expected.systemPrompt }, { role: 'user', content: expected.prompt }]); expect(request.messages.map(message => message.content).join('\n')).not.toContain('不能发送的草稿');
     expect(JSON.stringify(value)).toBe(before); expect(port.read).toHaveBeenCalledTimes(4);
     for (const [call] of port.read.mock.calls) expect(call.request).toMatchObject({ expectedRevision: value.revision, instance: value.instance });
     const emptyRequest = await prepareTeaDirectRequest(paged([]), value, target, null, 'empty', () => true, 'choices');
-    expect(emptyRequest.messages[0]!.content).toBe(buildMagicTeaPartyChoicesPrompt(base));
+    expect(emptyRequest.messages).toEqual([
+      { role: 'system', content: buildMagicTeaPartyChoicesPromptMessages(base).systemPrompt },
+      { role: 'user', content: buildMagicTeaPartyChoicesPromptMessages(base).prompt },
+    ]);
   });
   it.each(['provider', 'stopped', 'failed'] as const)('uses the same terminal choices projection for %s completion and preserves unsupported side-channel raw bytes', completion => {
     const rawText = '{"type":"choices","items":[{"id":"c1","text":"喝茶"}]}\n{"type":"summary","text":"不应用摘要"}\n{"type":"updates","items":[]}';
@@ -70,11 +73,14 @@ describe('Desktop Tea actual shared prompt and Direct bridge', () => {
     const selected = trimMagicTeaPartyHistory(history, { maxMessages: budget.maxContextMessages,
       tokenBudget: Math.max(0, budget.historyBudgetTokens - estimateMagicTeaPartyTokens(buildMagicTeaPartyMainPrompt(base), 'openai')), providerId: 'openai', userDisplayName: '旅人', minKeep: 2 });
     const limited = applyMagicTeaPartyMessageLimits(selected, resolveMagicTeaPartyMessageCharLimit(budget.contextWindowTokens));
-    const expected = buildMagicTeaPartyMainPrompt({ ...base, messages: limited.messages.map(message => ({ ...message, sessionId: 'tea', createdAt: 0 })) });
-    expect(request.messages).toEqual([{ role: 'user', content: expected }]);
+    const expected = buildMagicTeaPartyMainPromptMessages({ ...base, messages: limited.messages.map(message => ({ ...message, sessionId: 'tea', createdAt: 0 })) });
+    expect(request.messages).toEqual([{ role: 'system', content: expected.systemPrompt }, { role: 'user', content: expected.prompt }]);
     expect(port.read).toHaveBeenCalledTimes(4);
     for (const [call] of port.read.mock.calls) expect(call.request).toMatchObject({ instance: value.instance, expectedRevision: 1 });
-    expect(/[\uD800-\uDFFF]/u.test(expected)).toBe(false);
+    expect(/[\uD800-\uDFFF]/u.test(expected.systemPrompt + expected.prompt)).toBe(false);
+    expect(expected.systemPrompt).not.toContain('row-');
+    expect(expected.systemPrompt).not.toContain('继续喝茶');
+    expect(expected.prompt).toContain('继续喝茶');
     expect(value.session.settings.maxContextMessages).toBe(3);
   });
   it('abandons all partial history on second-pass revision failure before any model invocation', async () => {
@@ -87,7 +93,7 @@ describe('Desktop Tea actual shared prompt and Direct bridge', () => {
     const value = record(); value.session.settings.maxContextMessages = 1;
     const huge = [{ ordinal: 1, message: { ...rows[0]!.message, content: '中'.repeat(900000) } }];
     const request = await prepareTeaDirectRequest(paged(huge), value, target, null, 'request', () => true);
-    expect(request.messages[0]!.content.length).toBeLessThan(20000);
+    expect(request.messages.map(message => message.content).join('\n').length).toBeLessThan(20000);
     value.session.settings.maxContextMessages = 10001;
     await expect(prepareTeaDirectRequest(paged(), value, target, null, 'request', () => true)).rejects.toThrow('10000');
     expect(value.session.settings.maxContextMessages).toBe(10001);
@@ -133,12 +139,15 @@ describe('Desktop manual summary input and terminal seam', () => {
     const settings = teaSessionView(value.session).settings; const budget = resolveMagicTeaPartyTokenBudget(settings, 'openai');
     const selected = trimMagicTeaPartyHistory(history, { maxMessages: budget.maxContextMessages, tokenBudget: budget.historyBudgetTokens, providerId: 'openai', userDisplayName: '旅人', minKeep: 2 });
     const expected = projectMagicTeaPartySummaryInput({ messages: selected, contextWindowTokens: budget.contextWindowTokens, language: settings.language, userDisplayName: '旅人', sourceMessageCount: history.length });
-    expect(prepared.request.messages).toEqual([{ role: 'user', content: expected.prompt }]);
+    const promptMessages = buildMagicTeaPartySummarizePromptMessages({ messages: expected.requestMessages, language: settings.language, userDisplayName: '旅人' });
+    expect(prepared.request.messages).toEqual([{ role: 'system', content: promptMessages.systemPrompt }, { role: 'user', content: promptMessages.prompt }]);
+    expect(`${promptMessages.systemPrompt}\n\n${promptMessages.prompt}`).toBe(expected.prompt);
+    expect(promptMessages.systemPrompt).not.toContain('原始剧情');
     expect(prepared.summaryMeta).toEqual({ fromMessageId: 'history-0', toMessageId: 'history-204', coverage: expected.coverage });
     expect(expected.coverage.selectedMessageIds).not.toContain('history-201');
     expect(expected.coverage.clippedMessageIds).toContain('history-204');
     expect(expected.coverage.omittedMessageCount).toBeGreaterThan(0);
-    expect(prepared.request.messages[0]!.content).not.toMatch(/NOT_SENT/);
+    expect(prepared.request.messages.map(message => message.content).join('\n')).not.toMatch(/NOT_SENT/);
     expect(JSON.stringify([value, input])).toBe(before); expect(port.mutate).not.toHaveBeenCalled();
   });
   it('context-clips each retained second-pass row before the summary projector owns the selected array', async () => {
@@ -156,7 +165,7 @@ describe('Desktop manual summary input and terminal seam', () => {
     const value = record(); value.session.settings.maxContextMessages = 1;
     const big = [{ ordinal: 1, message: { ...rows[0]!.message, content: '中'.repeat(900000) } }];
     const result = await prepareTeaSummaryRequest(paged(big), value, target, 'big', () => true);
-    expect(result.request.messages[0]!.content.length).toBeLessThan(20000);
+    expect(result.request.messages.map(message => message.content).join('\n').length).toBeLessThan(20000);
     await expect(prepareTeaSummaryRequest(paged([]), value, target, 'empty', () => true)).rejects.toThrow('还没有');
     await expect(prepareTeaSummaryRequest(paged(), value, target, 'stale', () => false)).rejects.toThrow('已失效');
   });
@@ -192,7 +201,11 @@ describe('Desktop bounded automatic summary preparation', () => {
     const selected = trimMagicTeaPartyHistory(history, { maxMessages: budget.maxMessages, tokenBudget: budget.historyBudgetTokens, providerId: 'openai', userDisplayName: '旅人', minKeep: 2 });
     const expected = teaCore.projectMagicTeaPartyAutoSummaryInput({ messages: selected, seedContent: budget.seedContent, contextWindowTokens: budget.contextWindowTokens,
       language: session.settings.language, userDisplayName: '旅人', sourceMessageCount: history.length });
-    expect(result!.request.messages).toEqual([{ role: 'user', content: expected.prompt }]);
+    const promptMessages = buildMagicTeaPartySummarizePromptMessages({ messages: expected.requestMessages, language: session.settings.language, userDisplayName: '旅人' });
+    expect(result!.request.messages).toEqual([{ role: 'system', content: promptMessages.systemPrompt }, { role: 'user', content: promptMessages.prompt }]);
+    expect(`${promptMessages.systemPrompt}\n\n${promptMessages.prompt}`).toBe(expected.prompt);
+    expect(promptMessages.systemPrompt).not.toContain('旧摘要');
+    expect(promptMessages.prompt).toContain('旧摘要');
     expect(result!.summaryMeta).toEqual({ fromMessageId: 'm1', toMessageId: 'm4', coverage: expected.coverage });
     expect(result!.autoSummaryThroughMessageId).toBe('m4'); expect(result!.request.maxOutputTokens).toBe(1200);
     expect(port.read).toHaveBeenCalledTimes(4);

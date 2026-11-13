@@ -9,8 +9,12 @@ import {
   buildMagicTeaPartyHistory,
   buildMagicTeaPartyJsonlPreview,
   buildMagicTeaPartyMainPrompt,
+  buildMagicTeaPartyMainPromptMessages,
+  buildMagicTeaPartyChoicesPromptMessages,
   buildMagicTeaPartySummarizePrompt,
+  buildMagicTeaPartySummarizePromptMessages,
   buildMagicTeaPartyUpdatePrompt,
+  buildMagicTeaPartyUpdatePromptMessages,
   buildRoleProfileText,
   buildWorldbookText,
   clipMagicTeaPartyMessageContent,
@@ -133,6 +137,66 @@ describe('魔法茶会共享预算与历史', () => {
 });
 
 describe('魔法茶会真实 Prompt 组合', () => {
+  it('将卡片、世界书和历史保留在资料消息，稳定规则只出现一次', () => {
+    const input = promptInput();
+    const messages = buildMagicTeaPartyMainPromptMessages(input);
+    expect(messages.systemPrompt).toContain('【设定忠实性与公正推演】');
+    expect(messages.systemPrompt).toContain('确实不可调和时以主情景为准');
+    expect(messages.systemPrompt).toContain('不得代替该角色发言或做决定');
+    for (const text of ['守望街区的人', '灯火不会熄灭', '我推开门。', '旧桥重逢', '两人在旧桥相识', '巡夜人']) {
+      expect(messages.prompt).toContain(text);
+      expect(messages.systemPrompt).not.toContain(text);
+    }
+    expect(messages.systemPrompt.split('【内容边界】')).toHaveLength(2);
+    expect(buildMagicTeaPartyMainPrompt(input)).toBe(`${messages.systemPrompt}\n\n${messages.prompt}`);
+    const choices = buildMagicTeaPartyChoicesPromptMessages(input);
+    expect(choices.systemPrompt).toContain('当前为选项阶段');
+    expect(choices.systemPrompt).not.toContain('当前为叙事阶段');
+    expect(choices.systemPrompt).toContain('- summary：off');
+    expect(choices.systemPrompt).toContain('- updates：off');
+    expect(choices.systemPrompt).not.toContain('【更新草案】');
+    expect(choices.systemPrompt).toContain('仅生成“下一步玩家可选行动”');
+    expect(choices.prompt).not.toContain('请基于以上信息继续剧情。');
+    expect(choices.prompt).toContain('我推开门。');
+  });
+
+  it('摘要和更新只记录已发生的变化，合并输出也保留相同事实边界', () => {
+    const input = promptInput();
+    const prompts = [
+      buildMagicTeaPartyUpdatePrompt({ ...input, writeArenaHistory: true, writeCurrentState: true }),
+      buildMagicTeaPartySummarizePrompt({ messages: input.messages }),
+      buildMagicTeaPartyMainPrompt({ ...input, session: { ...input.session, settings: {
+        ...input.session.settings, outputPlan: { choices: 'on', summary: 'on', updates: 'on' },
+        enableSummary: true, writeArenaHistory: true, writeCurrentState: true,
+      } } }),
+    ];
+    for (const prompt of prompts) {
+      expect(prompt).toContain('【事实记录边界】');
+      expect(prompt).toContain('不把猜测或修辞当成事实');
+      expect(prompt).toContain('弱点、代价或永久能力');
+      expect(prompt).toContain('不能用情景中尚未实现的要求替代事件证据');
+    }
+  });
+
+  it('摘要与更新的资料不进入system，旧字符串视图与分层消息保持一致', () => {
+    const input = promptInput();
+    const updateInput = { ...input, summary: input.session.summary, writeArenaHistory: true, writeCurrentState: true };
+    const update = buildMagicTeaPartyUpdatePromptMessages(updateInput);
+    const summaryInput = { messages: input.messages, userDisplayName: '旅人' };
+    const summary = buildMagicTeaPartySummarizePromptMessages(summaryInput);
+    expect(buildMagicTeaPartyUpdatePrompt(updateInput)).toBe(`${update.systemPrompt}\n\n${update.prompt}`);
+    expect(buildMagicTeaPartySummarizePrompt(summaryInput)).toBe(`${summary.systemPrompt}\n\n${summary.prompt}`);
+    for (const split of [update, summary]) {
+      expect(split.systemPrompt).toContain('【事实记录边界】');
+      expect(split.systemPrompt).not.toContain('我推开门。');
+      expect(split.prompt).toContain('我推开门。');
+    }
+    for (const text of ['守望街区的人', '湿透的斗篷', '雨夜茶馆', '两人在旧桥相识']) {
+      expect(update.systemPrompt).not.toContain(text);
+      expect(update.prompt).toContain(text);
+    }
+  });
+
   it('组合非空角色、问卷、历战、状态、影子草案、情景、世界书及历史', () => {
     const prompt = buildMagicTeaPartyMainPrompt(promptInput());
     for (const text of ['雨夜茶馆', '闭店前', '灯火不会熄灭', '留意细小的动作', '守望街区的人', 'Q: 为何守望？', 'A: 为了朋友。', '旧桥重逢', '开始信任旅人', '湿透的斗篷', '持灯 (boolean): 是', '已换上干衣', '约定同行', '两人在旧桥相识', '旅人: 我推开门。', 'assistant: 巡夜人递来热茶。', '玩家正在扮演角色：巡夜人', '一共 4 条']) {
@@ -146,7 +210,7 @@ describe('魔法茶会真实 Prompt 组合', () => {
   it('预设保留 Arena 风格、世界书和默认情景', () => {
     const preset = getMagicTeaPartyPreset(' arena-daily ');
     expect(preset?.defaultSettings).toEqual({ outputFormat: 'jsonl', enableChoices: true, choiceCount: 4 });
-    expect(preset?.systemPrompt).toContain('角色互动');
+    expect(preset?.systemPrompt).toContain('温暖');
     expect(preset?.defaultScenario.content.length).toBeGreaterThan(0);
     expect(buildWorldbookText(preset?.worldbook)).toContain('【世界书】');
     expect(getMagicTeaPartyPreset('unknown')).toBeNull();

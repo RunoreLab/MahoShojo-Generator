@@ -64,6 +64,8 @@ export type AiTelemetry = {
 
 export interface GenerationConfig<T, I = string> {
   systemPrompt: string;
+  /** Opt-in role separation; omitted preserves legacy consumers' single user turn. */
+  promptMessageMode?: 'legacy-user' | 'system-user';
   temperature?: number;
   promptBuilder(_input: I): string;
   schema: z.ZodSchema<T>;

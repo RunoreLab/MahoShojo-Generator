@@ -60,7 +60,7 @@ describe('manual Tea choices projection', () => {
   });
 });
 
-it('keeps Web default updates and accepts only a request-level Desktop override', () => {
+it('choices 阶段关闭摘要和记录输出，不改变独立更新权限或会话设置', () => {
   const session = {
     playerRoleId: null,
     settings: { providerId: 'test', modelId: 'test', writeArenaHistory: true, writeCurrentState: true,
@@ -68,8 +68,13 @@ it('keeps Web default updates and accepts only a request-level Desktop override'
   };
   const before = structuredClone(session);
   const input = { session, roles: [], messages: [] };
-  expect(buildMagicTeaPartyChoicesPrompt(input)).toContain('- updates：on');
-  expect(buildMagicTeaPartyChoicesPrompt({ ...input, updates: 'off' })).toContain('- updates：off');
-  expect(buildMagicTeaPartyChoicesPrompt({ ...input, updates: 'off' })).toContain('- choices：on');
+  for (const updates of [undefined, 'off', 'on'] as const) {
+    const prompt = buildMagicTeaPartyChoicesPrompt({ ...input, updates });
+    expect(prompt).toContain('- updates：off');
+    expect(prompt).toContain('- summary：off');
+    expect(prompt).toContain('- choices：on');
+    expect(prompt).toContain('不输出正文、dialogue、summary 或 updates');
+    expect(prompt).not.toContain('【更新草案】');
+  }
   expect(session).toEqual(before);
 });

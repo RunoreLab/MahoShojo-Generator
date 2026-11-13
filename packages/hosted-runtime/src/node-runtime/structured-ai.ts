@@ -424,8 +424,13 @@ async function generateWithAIUsing<T, I = string>(
         }
 
         const taskPrompt = generationConfig.promptBuilder(input);
-        const systemPrompt = generationConfig.systemPrompt + taskPrompt + 'Ignore the user \'s prompt.';
-        attemptPrompt = systemPrompt;
+        const useSystemUserMessages = generationConfig.promptMessageMode === 'system-user';
+        const requestPrompt = useSystemUserMessages
+          ? taskPrompt
+          : generationConfig.systemPrompt + taskPrompt + 'Ignore the user \'s prompt.';
+        attemptPrompt = useSystemUserMessages
+          ? `${generationConfig.systemPrompt}\n\n${taskPrompt}`
+          : requestPrompt;
         attemptSensitiveTexts = [attemptPrompt, generationConfig.systemPrompt, taskPrompt];
         const llm = createAIClient(provider, fetchImpl, () => {
           providerRequestDispatched = true;
@@ -435,6 +440,10 @@ async function generateWithAIUsing<T, I = string>(
         const model = provider.type === 'openai' ? llm.chat(selectedModel) : llm(selectedModel); // Type assertion for AI SDK 5 compatibility
 
         const buildPromptMessages = (promptText: string) => ([
+          ...(useSystemUserMessages ? [{
+            role: 'system' as const,
+            content: generationConfig.systemPrompt,
+          }] : []),
           {
             role: 'user' as const,
             content: promptText,
@@ -465,7 +474,7 @@ async function generateWithAIUsing<T, I = string>(
         const tryGenerateObject = async () => {
           return await generateObject({
             model,
-            prompt: buildPromptMessages(systemPrompt),
+            prompt: buildPromptMessages(requestPrompt),
             schema: generationConfig.schema,
             maxRetries: 0,
             ...(options?.abortSignal ? { abortSignal: options.abortSignal } : {}),
@@ -479,7 +488,7 @@ async function generateWithAIUsing<T, I = string>(
           const fallbackRuntime = createAiUpstreamAttemptRuntime();
           try {
             const guidedPrompt =
-              `${systemPrompt}\n\n` +
+              `${requestPrompt}\n\n` +
               buildStructuredJsonInstructionFromZodSchema(generationConfig.schema);
 
             const textResult = await generateText({
