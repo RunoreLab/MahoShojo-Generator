@@ -1,0 +1,19 @@
+{
+  "format": "mahoshojo-web-package",
+  "formatVersion": 1,
+  "id": "creator.I_moly",
+  "version": "1.0.4",
+  "name": "恋爱测评",
+  "entry": "index.html",
+  "generation": {
+    "target": "data/report.json",
+    "mode": "replace",
+    "mediaType": "application/json",
+    "instructions": "ai/instructions.md",
+    "schema": "schemas/report.schema.json",
+    "example": "generation/example.json"
+  },
+  "capabilities": [
+    "scripts"
+  ]
+}

@@ -1,0 +1,426 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "reportVersion",
+    "character",
+    "profile",
+    "needs",
+    "dimensions",
+    "verdict",
+    "strategy",
+    "story",
+    "cg"
+  ],
+  "properties": {
+    "reportVersion": {
+      "type": "integer",
+      "enum": [
+        1
+      ]
+    },
+    "character": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "oneLine"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 24
+        },
+        "title": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 20
+        },
+        "oneLine": {
+          "type": "string",
+          "minLength": 6,
+          "maxLength": 40
+        }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sketch",
+        "chain"
+      ],
+      "properties": {
+        "sketch": {
+          "type": "string",
+          "minLength": 60,
+          "maxLength": 180
+        },
+        "chain": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "title",
+              "text"
+            ],
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 12
+              },
+              "text": {
+                "type": "string",
+                "minLength": 20,
+                "maxLength": 90
+              }
+            }
+          }
+        }
+      }
+    },
+    "needs": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "label",
+          "kind",
+          "category",
+          "desc",
+          "weight",
+          "hint",
+          "links"
+        ],
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 12
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "最想要",
+              "最缺乏"
+            ]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "现实",
+              "精神"
+            ]
+          },
+          "desc": {
+            "type": "string",
+            "minLength": 40,
+            "maxLength": 150
+          },
+          "weight": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3
+          },
+          "hint": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 40
+          },
+          "links": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "attr",
+                "weight",
+                "ideal",
+                "strict"
+              ],
+              "properties": {
+                "attr": {
+                  "type": "string",
+                  "enum": [
+                    "财富",
+                    "颜值",
+                    "共情力",
+                    "行动力",
+                    "外放度",
+                    "感性度"
+                  ]
+                },
+                "weight": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 3
+                },
+                "ideal": {
+                  "type": "array",
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "items": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100
+                  }
+                },
+                "strict": {
+                  "type": "string",
+                  "enum": [
+                    "宽",
+                    "中",
+                    "严"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "dimensions": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "analysis",
+          "basis",
+          "score"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "approach",
+              "defense",
+              "communication",
+              "complexity",
+              "volatility",
+              "rigidity"
+            ]
+          },
+          "analysis": {
+            "type": "string",
+            "minLength": 40,
+            "maxLength": 200
+          },
+          "basis": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 70
+          },
+          "score": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          }
+        }
+      },
+      "allOf": [
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "id": {
+                "const": "approach"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "id": {
+                "const": "defense"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "id": {
+                "const": "communication"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "id": {
+                "const": "complexity"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "id": {
+                "const": "volatility"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "id"
+            ],
+            "properties": {
+              "id": {
+                "const": "rigidity"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ]
+    },
+    "verdict": {
+      "type": "string",
+      "minLength": 10,
+      "maxLength": 80
+    },
+    "strategy": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "category",
+          "title",
+          "text"
+        ],
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": [
+              "切入",
+              "推进",
+              "心动",
+              "避雷"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 14
+          },
+          "text": {
+            "type": "string",
+            "minLength": 40,
+            "maxLength": 170
+          }
+        }
+      },
+      "contains": {
+        "type": "object",
+        "required": [
+          "category"
+        ],
+        "properties": {
+          "category": {
+            "const": "避雷"
+          }
+        }
+      },
+      "minContains": 1
+    },
+    "story": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "paragraphs"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 24
+        },
+        "paragraphs": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 5,
+          "items": {
+            "type": "string",
+            "minLength": 60,
+            "maxLength": 500
+          }
+        }
+      }
+    },
+    "cg": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "caption",
+        "prompt"
+      ],
+      "properties": {
+        "caption": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 50
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 60,
+          "maxLength": 300
+        }
+      }
+    }
+  }
+}

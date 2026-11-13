@@ -1,0 +1,941 @@
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>恋爱测评 · 攻略难度报告</title>
+    <!-- 恋爱攻略测评所 · 引擎 v1.0 · 段 1/5（头部与样式）——全文件共 5 段，按顺序拼接 -->
+    <style>
+        /* ── 01 变量与基础 ── */
+        :root{--bg:#f5f3f6;--card:#fff;--ink:#3b3946;--ink2:#767083;--line:#e8e3ec;--line2:#d8d1e0;
+        --pink:#c2699e;--violet:#8a6cbe;--grad:linear-gradient(135deg,#c2699e,#8a6cbe);--ok:#4f9a7d;--warn:#b9506e;--rad:14px}
+        *{box-sizing:border-box}
+        html{-webkit-text-size-adjust:100%}
+        body{margin:0;background-color:var(--bg);background-image:radial-gradient(rgba(138,108,190,.055) 1px,transparent 1px);background-size:22px 22px;
+        color:var(--ink);font:15px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+        h1,h2,h3,h4,p{margin:0}
+        button{font:inherit;color:inherit}
+        img{max-width:100%}
+        ::selection{background:rgba(194,105,158,.22)}
+        :focus-visible{outline:2px solid var(--violet);outline-offset:2px;border-radius:4px}
+        .wrap{max-width:780px;margin:-26px auto 0;padding:0 14px 30px}
+        .small{font-size:12.5px}
+        .muted{color:var(--ink2)}
+        .note{font-size:12px;color:var(--ink2);margin-top:10px;line-height:1.7}
+        /* ── 02 页头横幅 ── */
+        .hero{position:relative;min-height:196px;overflow:hidden;background:linear-gradient(120deg,#ece4f0,#e2e6f4 55%,#f0e7ef);border-bottom:1px solid var(--line)}
+        .hero img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+        .hero-content{position:relative;max-width:750px;margin:0 auto;padding:24px 18px 42px}
+        .hero-content b{display:block;font-size:22px;letter-spacing:.08em}
+        .hero-content p{margin:6px 0;font-size:13px}
+        .hero.hasimg .hero-content{background:rgba(255,255,255,.85)}
+        .hero-load{margin-top:4px;padding:5px 10px;border:1px solid var(--line2);border-radius:6px;background:#fff;cursor:pointer}
+        .hero-status{font-size:12px;min-height:1.5em}
+        .report-error{max-width:750px;margin:20px auto;padding:18px;border:1px solid var(--warn);border-radius:var(--rad);background:var(--card)}
+        /* ── 03 报告头 ── */
+        .masthead{position:relative;background:var(--card);border:1px solid var(--line);border-radius:var(--rad);padding:16px 18px 15px;box-shadow:0 10px 28px rgba(74,59,101,.07)}
+        .mast-top{display:flex;justify-content:space-between;gap:10px;font-size:11.5px;letter-spacing:.08em;color:var(--ink2)}
+        .mast-top .org{color:var(--violet);font-weight:600}
+        .masthead h1{font-size:22px;letter-spacing:.06em;margin-top:9px}
+        .subject{margin-top:8px}
+        .subject b{font-size:19px}
+        .subject em{font-style:normal;font-size:12.5px;color:var(--ink2);border:1px solid var(--line2);border-radius:6px;padding:1px 8px;margin-left:8px;vertical-align:2px}
+        .subline{margin-top:5px}
+        .badge-row{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+        .hdr-score{font-size:26px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+        .hdr-score small{font-size:12px;font-weight:400;color:var(--ink2);margin-left:3px}
+        .verdict{margin-top:11px;font-size:13.5px;border-left:3px solid var(--pink);padding-left:10px;line-height:1.8}
+        /* ── 04 板块壳 ── */
+        .sec{background:var(--card);border:1px solid var(--line);border-radius:var(--rad);padding:16px 18px 18px;margin-top:14px}
+        .sec-h{display:flex;align-items:baseline;gap:9px;padding-bottom:10px;border-bottom:1px solid var(--line);margin-bottom:12px;flex-wrap:wrap}
+        .sec-no{font-size:12px;font-weight:700;color:var(--violet);letter-spacing:.05em}
+        .sec-t{font-size:16.5px;letter-spacing:.03em}
+        .sec-en{margin-left:auto;font-size:10.5px;letter-spacing:.14em;color:var(--ink2);opacity:.8;font-weight:600}
+        .divider-label{text-align:center;font-size:11.5px;color:var(--ink2);letter-spacing:.08em;margin:14px 0 4px}
+        /* ── 05 标签与通用件 ── */
+        .chips{display:flex;flex-wrap:wrap;gap:6px}
+        .chip{font-size:11.5px;padding:2px 9px;border-radius:999px;border:1px solid var(--line2);color:var(--ink2);background:#faf9fb}
+        .chip.k-kind{background:rgba(194,105,158,.09);border-color:rgba(194,105,158,.35);color:#a34f85}
+        .chip.k-re{background:rgba(201,162,74,.12);border-color:rgba(201,162,74,.45);color:#8f6f28}
+        .chip.k-sp{background:rgba(138,108,190,.1);border-color:rgba(138,108,190,.4);color:#6f55a5}
+        /* ── 06 速写与推导链 ── */
+        .sketch{font-size:14px;line-height:1.9;margin-bottom:14px}
+        .chain{padding-left:15px;border-left:2px solid var(--line2)}
+        .node{position:relative;padding:0 0 14px 12px}
+        .node:last-child{padding-bottom:0}
+        .node::before{content:"";position:absolute;left:-21px;top:6px;width:9px;height:9px;border-radius:50%;background:#fff;border:2.5px solid var(--violet)}
+        .node b{display:block;font-size:14px}
+        .node p{font-size:13px;color:var(--ink2);margin-top:2px}
+        /* ── 07 需求卡 ── */
+        .nc{border:1px solid var(--line);border-radius:11px;padding:12px 13px;margin-top:10px;background:#fdfcfe}
+        .nc-h{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+        .nc-h b{font-size:14.5px}
+        .nc-d{font-size:13px;color:#4a4757;margin-top:7px;line-height:1.8}
+        .nc-hint{font-size:12px;color:var(--ink2);margin-top:7px}
+        /* ── 08 滑条与坐标 ── */
+        .srow{display:grid;grid-template-columns:4.4em 1fr 2.6em;align-items:center;gap:10px;padding:9px 0;border-top:1px dashed var(--line)}
+        .srow:first-child{border-top:0}
+        .srow label{font-size:13.5px}
+        .sval{font-size:13px;color:var(--ink2);text-align:right;font-variant-numeric:tabular-nums}
+        input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:30px;background:transparent;margin:0}
+        input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:#e9e4ee}
+        input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:#fff;border:2.5px solid var(--pink);box-shadow:0 1px 5px rgba(59,57,70,.22);margin-top:-8px;cursor:pointer}
+        input[type=range]::-moz-range-track{height:6px;border-radius:3px;background:#e9e4ee}
+        input[type=range]::-moz-range-thumb{width:19px;height:19px;border-radius:50%;background:#fff;border:2.5px solid var(--pink);box-shadow:0 1px 5px rgba(59,57,70,.22);cursor:pointer}
+        input[type=range]:focus-visible{outline:none}
+        input[type=range]:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 4px rgba(138,108,190,.28)}
+        .plane-block{margin-top:14px}
+        .plane{position:relative;width:min(100%,330px);aspect-ratio:1;margin:0 auto;border:1px solid var(--line2);border-radius:12px;background-color:#fcfbfd;
+        background-image:linear-gradient(rgba(138,108,190,.09) 1px,transparent 1px),linear-gradient(90deg,rgba(138,108,190,.09) 1px,transparent 1px);background-size:20% 20%;touch-action:none}
+        .plane::before{content:"";position:absolute;left:0;right:0;top:50%;height:1px;background:rgba(138,108,190,.22)}
+        .plane::after{content:"";position:absolute;top:0;bottom:0;left:50%;width:1px;background:rgba(138,108,190,.22)}
+        .ax{position:absolute;font-size:10.5px;color:var(--ink2);letter-spacing:.12em;z-index:1}
+        .ax-t{top:6px;left:50%;transform:translateX(-50%)}
+        .ax-b{bottom:6px;left:50%;transform:translateX(-50%)}
+        .ax-l{left:8px;top:50%;transform:translateY(-50%)}
+        .ax-r{right:8px;top:50%;transform:translateY(-50%)}
+        .dot{position:absolute;width:24px;height:24px;border-radius:50%;background:var(--grad);border:2.5px solid #fff;box-shadow:0 2px 8px rgba(59,57,70,.3);margin:-12px 0 0 -12px;z-index:2;cursor:grab}
+        .dot:active{cursor:grabbing}
+        .plane-sliders{margin-top:12px}
+        /* ── 09 匹配条与实时条 ── */
+        .match-list{margin-top:13px;border-top:1px solid var(--line);padding-top:5px}
+        .mrow{padding:8px 0}
+        .mrow-h{display:flex;justify-content:space-between;gap:8px;align-items:baseline;font-size:13px}
+        .mrow-h .pv{font-variant-numeric:tabular-nums;color:var(--ink2);font-size:12.5px}
+        .bar{height:8px;border-radius:4px;background:#eee9f0;overflow:hidden;margin-top:6px}
+        .bar i{display:block;height:100%;width:0;border-radius:4px;background:var(--grad);transition:width .28s ease}
+        .live-strip{margin-top:14px;padding:12px 14px;border-radius:11px;background:linear-gradient(135deg,rgba(194,105,158,.08),rgba(138,108,190,.1));border:1px solid rgba(138,108,190,.25);display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;font-size:13.5px}
+        .live-strip b{font-size:24px;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+        /* ── 10 维度卡 ── */
+        .dim{padding:14px 0;border-top:1px dashed var(--line)}
+        .dim:first-child{border-top:0;padding-top:4px}
+        .dim.dyn{border-left:3px solid rgba(138,108,190,.35);padding-left:10px}
+        .dim-h{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+        .dim-h b{font-size:15px}
+        .live-tag{font-size:10px;padding:1.5px 7px;border-radius:999px;background:rgba(138,108,190,.12);color:#6f55a5;letter-spacing:.08em}
+        .dim-score{margin-left:auto;text-align:right;line-height:1.25}
+        .dim-score b{font-size:22px;font-variant-numeric:tabular-nums}
+        .dim-score .band{display:block;font-size:11px;color:var(--ink2)}
+        .dim-a{font-size:13.5px;margin-top:8px;line-height:1.8}
+        .dim-b{font-size:12.5px;color:var(--ink2);margin-top:8px;padding-left:9px;border-left:3px solid var(--line2)}
+        .dim-needs{font-size:12px;color:var(--ink2);margin-top:8px}
+        .dim-needs span{white-space:nowrap;margin-right:10px}
+        details.rub{margin-top:9px}
+        details.rub summary{font-size:12px;color:var(--violet);cursor:pointer;letter-spacing:.05em;list-style:none}
+        details.rub summary::-webkit-details-marker{display:none}
+        details.rub summary::before{content:"▸ "}
+        details.rub[open] summary::before{content:"▾ "}
+        .rub-table{width:100%;border-collapse:collapse;margin-top:6px;font-size:12px}
+        .rub-table td{padding:5px 6px;border-top:1px dashed var(--line);vertical-align:top;line-height:1.65}
+        .rub-table td:first-child{width:5.6em;color:var(--ink2);font-variant-numeric:tabular-nums}
+        .rub-table td:first-child b{color:var(--ink);font-size:12px}
+        .rub-table tr.hl td{background:rgba(194,105,158,.07)}
+        /* ── 11 汇总 ── */
+        .sum-top{display:grid;grid-template-columns:1fr;gap:6px}
+        .radar-wrap{display:flex;justify-content:center}
+        .radar{width:min(100%,360px)}
+        .radar .grid{fill:none;stroke:var(--line2);stroke-width:1}
+        .radar .axis{stroke:var(--line2);stroke-width:1}
+        .radar .poly{fill:rgba(194,105,158,.22);stroke:var(--pink);stroke-width:2;stroke-linejoin:round}
+        .radar .vtx{fill:#fff;stroke:var(--pink);stroke-width:1.5}
+        .radar .lab{font-size:10.5px;fill:var(--ink2)}
+        .sum-side{text-align:center}
+        .sum-big{font-size:56px;font-weight:800;line-height:1.05;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+        .sum-cap{font-size:12px;color:var(--ink2);letter-spacing:.12em}
+        .tier{display:inline-flex;align-items:center;gap:6px;padding:4px 14px;border-radius:999px;background:#c9c3d2;color:#fff;font-size:13px;font-weight:600;letter-spacing:.06em;margin-top:10px}
+        .cmp{margin-top:12px;font-size:13px;color:var(--ink2);display:flex;justify-content:center;align-items:baseline;gap:8px;font-variant-numeric:tabular-nums;flex-wrap:wrap}
+        .cmp b{color:var(--ink)}
+        .cmp .delta{font-size:12px;padding:1px 8px;border-radius:999px;background:rgba(79,154,125,.13);color:var(--ok)}
+        .cmp .delta.up{background:rgba(185,80,110,.13);color:var(--warn)}
+        .tier-text{margin-top:14px;font-size:13.5px;background:#faf8fb;border:1px dashed var(--line2);border-radius:11px;padding:12px 14px;line-height:1.85}
+        .verdict2{margin-top:12px;font-size:13px;color:var(--ink2);text-align:center}
+        /* ── 12 攻略要点 ── */
+        .stg-group{margin-top:14px}
+        .stg-group:first-child{margin-top:2px}
+        .stg-tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.1em;padding:2px 9px;border-radius:6px}
+        .tag-approach{background:rgba(138,108,190,.12);color:#6f55a5}
+        .tag-progress{background:rgba(91,143,191,.15);color:#3f6f9c}
+        .tag-heart{background:rgba(194,105,158,.13);color:#a34f85}
+        .tag-avoid{background:rgba(185,80,110,.13);color:#a34562}
+        .stg{padding:9px 0 2px}
+        .stg b{font-size:13.5px}
+        .stg p{font-size:13px;color:#4a4757;margin-top:3px;line-height:1.8}
+        .stg-group.warn{background:rgba(185,80,110,.05);border:1px solid rgba(185,80,110,.22);border-radius:11px;padding:10px 13px}
+        /* ── 13 后日谈 ── */
+        .story{background:#fbfafc;border:1px solid var(--line);border-radius:12px;padding:16px;margin-top:4px}
+        .story h3{font-size:15px;letter-spacing:.04em;text-align:center;margin-bottom:10px}
+        .story p{font-size:14px;line-height:1.95;margin-top:10px;color:#454252}
+        .story p:first-of-type{margin-top:0}
+        /* ── 14 CG 提示词 ── */
+        .cg-box{border:1px solid var(--line);border-radius:11px;padding:12px 13px;margin-top:10px;background:#fdfcfe}
+        .cg-h{display:flex;align-items:center;justify-content:space-between;gap:8px}
+        .cg-h h4{font-size:13px;letter-spacing:.03em}
+        .prompt{font-size:13px;line-height:1.85;margin-top:8px;white-space:pre-wrap;word-break:break-word;color:#464254}
+        .btn-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+        .btn{display:inline-flex;align-items:center;gap:5px;padding:7px 14px;border-radius:9px;border:1px solid var(--line2);background:#fff;font-size:12.5px;cursor:pointer;transition:transform .12s,background .15s}
+        .btn:hover{background:#faf7fb}
+        .btn:active{transform:scale(.98)}
+        .btn.primary{background:var(--grad);border-color:transparent;color:#fff;font-weight:600}
+        .btn.ok{background:var(--ok);border-color:var(--ok);color:#fff}
+        .btn[disabled]{opacity:.55;cursor:default}
+        /* ── 15 页脚 ── */
+        .foot{margin-top:18px;padding-top:14px;border-top:1px solid var(--line);text-align:center;font-size:11.5px;color:var(--ink2);line-height:1.9}
+        /* ── 16 桌面适配与减弱动效 ── */
+        @media (min-width:700px){
+        .wrap{padding:0 20px 40px}
+        .sec{padding:18px 22px 20px}
+        .masthead{padding:20px 22px 17px}
+        .sum-top{grid-template-columns:auto 1fr;align-items:center;gap:26px}
+        .sum-side{text-align:left}
+        .cmp{justify-content:flex-start}
+        }
+        @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+    </style>
+</head>
+
+<body>
+    <!-- 恋爱攻略测评所 · 引擎 v1.0 · 段 2/5：页面结构 -->
+    <div class="hero" id="hero">
+        <img id="heroImg" alt="I_moly 的作者插图" draggable="false" decoding="async" referrerpolicy="no-referrer" hidden>
+        <div class="hero-content"><b>恋爱攻略测评所</b><p>角色关系与日常相处 · 社区作者 I_moly</p>
+            <button type="button" id="loadHeroBtn" class="hero-load">加载作者插图（外部资源）</button>
+            <p id="heroStatus" class="hero-status" role="status" aria-live="polite">插图按需从外部图片站加载。</p>
+        </div>
+    </div>
+    <div id="reportError" class="report-error" role="alert" hidden></div>
+    <main class="wrap" id="reportContent" hidden>
+        <!-- 报告头 -->
+        <header class="masthead">
+            <div class="mast-top"><span class="org">恋爱攻略测评所</span><span id="rpCode">No. GD-0000</span></div>
+            <h1>攻略难度报告</h1>
+            <p class="subject"><b id="chName">角色名</b><em id="chTitle" hidden>称号</em></p>
+            <p class="subline muted small" id="chOneLine">（等待渲染）</p>
+            <div class="badge-row"><span class="tier" id="hdrTier">——</span><span class="hdr-score"><span id="hdrScoreNum">--</span><small>/100 综合难度</small></span></div>
+            <p class="verdict" id="verdict">（等待渲染）</p>
+        </header>
+        <noscript>
+            <p class="note">本页需要启用 JavaScript 才能渲染报告内容。</p>
+        </noscript>
+        <!-- 01 档案速写 -->
+        <section class="sec" id="sec-profile">
+            <div class="sec-h"><span class="sec-no">01</span>
+                <h2 class="sec-t">档案速写</h2><span class="sec-en">PROFILE</span>
+            </div>
+            <p class="sketch" id="sketch">（等待渲染）</p>
+            <p class="muted small">推导链 · 经历 → 心理 → 需求</p>
+            <div class="chain" id="chain"></div>
+            <p class="note">※ 评估前提：默认剥离角色的特殊能力影响；仅当设定明确其会在日常场景使用、且影响互动时，才纳入分析并注明依据。</p>
+        </section>
+        <!-- 02 需求图谱 -->
+        <section class="sec" id="sec-needs">
+            <div class="sec-h"><span class="sec-no">02</span>
+                <h2 class="sec-t">需求图谱</h2><span class="sec-en">NEEDS</span>
+            </div>
+            <p class="muted small">从经历与性格推导出的「最想要」与「最缺乏」——它们决定了角色会被什么样的人吸引，也是匹配算法的底稿。</p>
+            <div id="needsList"></div>
+        </section>
+        <!-- 03 你的属性 -->
+        <section class="sec" id="sec-self">
+            <div class="sec-h"><span class="sec-no">03</span>
+                <h2 class="sec-t">你的属性</h2><span class="sec-en">INPUT</span>
+            </div>
+            <p class="muted small">设置你（攻略者）的属性数值；下方的匹配读数与全页评分会随调整实时更新。</p>
+            <div class="srow"><label for="sl-wealth">财富</label><input type="range" id="sl-wealth" min="0" max="100" step="1" value="50"><span class="sval" id="sv-wealth">50</span></div>
+            <div class="srow"><label for="sl-looks">颜值</label><input type="range" id="sl-looks" min="0" max="100" step="1" value="50"><span class="sval" id="sv-looks">50</span></div>
+            <div class="srow"><label for="sl-empathy">共情力</label><input type="range" id="sl-empathy" min="0" max="100" step="1" value="50"><span class="sval" id="sv-empathy">50</span></div>
+            <div class="srow"><label for="sl-action">行动力</label><input type="range" id="sl-action" min="0" max="100" step="1" value="50"><span class="sval" id="sv-action">50</span></div>
+            <div class="plane-block">
+                <div class="plane" id="plane">
+                    <span class="ax ax-t">感性</span><span class="ax ax-b">理性</span><span class="ax ax-l">内敛</span><span class="ax ax-r">外放</span>
+                    <div class="dot" id="dot" style="left:50%;top:50%"></div>
+                </div>
+                <p class="note">拖动圆点或使用下方滑条，均可调整性格坐标（两者同步）。</p>
+                <div class="plane-sliders">
+                    <div class="srow"><label for="sl-extro">外放度</label><input type="range" id="sl-extro" min="0" max="100" step="1" value="50"><span class="sval" id="sv-extro">50</span></div>
+                    <div class="srow"><label for="sl-sens">感性度</label><input type="range" id="sl-sens" min="0" max="100" step="1" value="50"><span class="sval" id="sv-sens">50</span></div>
+                </div>
+            </div>
+            <div class="divider-label">需求匹配读数</div>
+            <div class="match-list" id="matchList"></div>
+            <div class="live-strip">当前综合难度 <b id="liveScore">--</b><span class="tier" id="liveTier" style="margin-top:0">——</span></div>
+            <div class="btn-row"><button class="btn" type="button" id="btnReset">重置为默认</button></div>
+        </section>
+        <!-- 04 多维判定 -->
+        <section class="sec" id="sec-dims">
+            <div class="sec-h"><span class="sec-no">04</span>
+                <h2 class="sec-t">多维判定</h2><span class="sec-en">ASSESSMENT</span>
+            </div>
+            <p class="muted small">前六维为「角色侧」评分（先分析、后给分）；后两维为「匹配侧」，随你的属性实时变化。</p>
+            <div id="dimsStatic"></div>
+            <div class="divider-label">匹配维度 · 实时</div>
+            <div id="dimsLive"></div>
+        </section>
+        <!-- 05 分数汇总 -->
+        <section class="sec" id="sec-sum">
+            <div class="sec-h"><span class="sec-no">05</span>
+                <h2 class="sec-t">分数汇总</h2><span class="sec-en">SUMMARY</span>
+            </div>
+            <div class="sum-top">
+                <div class="radar-wrap"><svg class="radar" id="radar" viewBox="0 0 340 340" role="img" aria-label="八维难度雷达图"></svg></div>
+                <div class="sum-side">
+                    <div class="sum-big" id="sumScore">--</div>
+                    <div class="sum-cap">综合难度 / 100</div>
+                    <span class="tier" id="sumTier">——</span>
+                    <div class="cmp">基础难度 <b id="cmpBase">--</b> → 你的难度 <b id="cmpNow">--</b><span class="delta" id="cmpDelta"></span></div>
+                </div>
+            </div>
+            <p class="tier-text" id="tierText"></p>
+            <p class="verdict2" id="verdict2"></p>
+        </section>
+        <!-- 06 攻略要点 -->
+        <section class="sec" id="sec-strategy">
+            <div class="sec-h"><span class="sec-no">06</span>
+                <h2 class="sec-t">攻略要点</h2><span class="sec-en">STRATEGY</span>
+            </div>
+            <div id="strategyList"></div>
+        </section>
+        <!-- 07 后日谈 -->
+        <section class="sec" id="sec-story">
+            <div class="sec-h"><span class="sec-no">07</span>
+                <h2 class="sec-t">后日谈</h2><span class="sec-en">AFTER STORY</span>
+            </div>
+            <article class="story">
+                <h3 id="storyTitle"></h3>
+                <div id="storyBody"></div>
+            </article>
+            <p class="note">※ 假设后日谈：关系与互动以角色意愿及既有设定为前提，不代表真实或长期关系变化。</p>
+        </section>
+        <!-- 08 CG 提示词 -->
+        <section class="sec" id="sec-cg">
+            <div class="sec-h"><span class="sec-no">08</span>
+                <h2 class="sec-t">CG 提示词</h2><span class="sec-en">CG PROMPT</span>
+            </div>
+            <p class="muted small" id="cgCaption">（等待渲染）</p>
+            <div class="cg-box">
+                <div class="cg-h">
+                    <h4>主提示词</h4><button class="btn" type="button" data-copy="cgMain">复制</button>
+                </div>
+                <div class="prompt" id="cgMain">（等待渲染）</div>
+            </div>
+            <div class="cg-box">
+                <div class="cg-h">
+                    <h4>降噪附加词 · GPT Image</h4><button class="btn" type="button" data-copy="cgDenoise">复制</button>
+                </div>
+                <div class="prompt" id="cgDenoise">线条粗细均匀流畅。不出现细碎密集的小色块与繁复纹理效果，色块颜色明确，线条清晰。整体画面保持干净整洁，避免噪点、杂色与颗粒感。</div>
+            </div>
+            <div class="cg-box">
+                <div class="cg-h">
+                    <h4>画风附加词 · Nano Banana</h4><button class="btn" type="button" data-copy="cgStyle">复制</button>
+                </div>
+                <!-- CG-STYLE v1.0：阶段 4 实测定稿（NB 组 N3） -->
+                <div class="prompt" id="cgStyle">日系剧场版动画作画质感：细腻的赛璐璐上色与柔和光影，线条纤细收束、干净利落；色彩清透、饱和度克制，色相变化丰富自然；面部与发丝细节精致，衣褶与材质层次分明，整体如动画官方视觉图；非 3D 渲染、非写实摄影，避免粗重描边与高饱和荧光色；角色形象与参考图片1/2/3保持一致。</div>
+            </div>
+            <div class="btn-row">
+                <button class="btn primary" type="button" id="btnGpt">复制 · GPT Image 版全文</button>
+                <button class="btn primary" type="button" id="btnNb">复制 · Nano Banana 版全文</button>
+            </div>
+            <p class="note">用法：上传角色外观三视图，作为「参考图片1/2/3」使用；主提示词以「参考图片1/2/3中的角色」指代外观，无需再写外貌。按所用模型搭配附加词：GPT Image 配「降噪附加词」，Nano Banana 配「画风附加词」。若模型仅支持一张参考图，优先使用图 1。若「复制」按钮无响应，请长按上方文本手动全选复制。</p>
+        </section>
+        <footer class="foot">
+            <p>本报告为虚构模拟评估，仅供娱乐参考，不构成任何专业建议；一切设定以角色原始素材为准。</p>
+            <p>恋爱攻略测评所 · 攻略难度报告 · 引擎 v1.0</p>
+        </footer>
+    </main>
+    <!-- ▼ 段 3/5：脚本区（追加于本行之后） ▼ -->
+    <script>
+        // ============================================================
+        // 恋爱攻略测评所 · 引擎 v1.0 · 段 3/5：常量表 / 评分标准 / 演示数据
+        // 后续段（4/5、5/5）按顺序追加于脚本区末尾；全部拼完后生效
+        // ============================================================
+        // ── 基础工具 ──
+        function byId(id){return document.getElementById(id)}
+        function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+        // ── 属性槽位映射（中文属性名 → 滑条 id） ──
+        const ATTR_SL = {'财富':'sl-wealth','颜值':'sl-looks','共情力':'sl-empathy','行动力':'sl-action','外放度':'sl-extro','感性度':'sl-sens'};
+        // ── 评分参数（试验位：阶段 6 校准，单次调整 ≤±15%） ──
+        const SC = {
+          mixStatic:0.6, mixDyn:0.4,
+          falloff:{'宽':50,'中':35,'严':20},
+          emptyDim:25,
+          clampLo:5, clampHi:95,
+          wStatic:{approach:1.0, defense:1.2, communication:1.0, complexity:1.0, volatility:0.8, rigidity:0.9},
+          wDyn:{'现实':1.0, '精神':1.0}
+        };
+        // ── 五档评级（由低到高） ──
+        const TIERS = [
+          {lo:0, hi:19, name:'直球可得', color:'#58a884', text:'几乎没有壁垒，真诚的靠近通常都会被温柔接住。提醒：容易，不代表理所当然。'},
+          {lo:20, hi:39, name:'温和推进', color:'#5b8fbf', text:'整体友好，偶有小门槛。保持自己的节奏与稳定的在场感，剩下的交给时间。'},
+          {lo:40, hi:59, name:'标准难度', color:'#c9a24a', text:'需要一些理解与耐心。找对切入方式、读懂对方的节奏，难度会明显低于想象。'},
+          {lo:60, hi:79, name:'高难挑战', color:'#c97b4a', text:'心防清晰可见，常规打法容易碰壁。需要长期一致的投入，以及不打扰的坚持。'},
+          {lo:80, hi:100, name:'地狱级', color:'#b9506e', text:'极难，几近传说。对方不会为普通的靠近腾出位置；除非踩中极少的契机，否则大概率无功而返——请量力而行。'}
+        ];
+        // ── 静态六维定义 ──
+        const DIMS = [
+          {id:'approach', name:'初识门槛'},
+          {id:'defense', name:'心防等级'},
+          {id:'communication', name:'沟通成本'},
+          {id:'complexity', name:'需求复杂度'},
+          {id:'volatility', name:'情绪波动'},
+          {id:'rigidity', name:'原则刚性'}
+        ];
+        // ── 动态两维定义 ──
+        const DYN = [
+          {cat:'现实', name:'现实条件匹配', note:'衡量你的现实条件（财富、颜值等）与角色「现实」取向需求的契合度；越契合，该维难度越低。'},
+          {cat:'精神', name:'精神契合度', note:'衡量你的共情力、行动力与性格坐标，与角色「精神」层面需求的契合度；越契合，该维难度越低。'}
+        ];
+        // ── 六维评分标准（5 档；与指令层双处同步，改动须两处一致） ──
+        const RUBRIC = {
+          approach:[
+            ['0–19','透明玻璃','谁都能和她搭上话；几乎不设第一印象门槛，社交动线开放。'],
+            ['20–39','半开门','日常场合可自然接触；愿意回应，但需要一点正当理由才会继续。'],
+            ['40–59','需要理由','认识她不排斥，但要借共同场景；出了她的动线就难有第二次碰面。'],
+            ['60–79','小圈子','社交半径很小且固定；陌生人的接近会被礼貌挡在门外。'],
+            ['80–100','孤岛','几乎不与外界产生新接触；没有身份或机缘，连说上话都难。']
+          ],
+          defense:[
+            ['0–19','不设防','信任建立很快，几乎凭直觉交付真心。'],
+            ['20–39','矮篱笆','防备很浅，几件小事、几次守约就能翻过去。'],
+            ['40–59','标准城墙','信任需要时间和一致的行为记录；不拒绝靠近，也不轻易放行。'],
+            ['60–79','高墙','稳定的距离感，自我披露极少；需要长期观察窗口才会松动。'],
+            ['80–100','堡垒','戒备近乎本能，任何靠近都被先当作风险处理。']
+          ],
+          communication:[
+            ['0–19','直球频道','想什么说什么，情绪不藏；几乎零解读成本。'],
+            ['20–39','好懂','基本坦诚，偶有省略也会很快补上。'],
+            ['40–59','要读空气','事实直说、情绪不说；关键处需要主动问、认真听。'],
+            ['60–79','迷宫','口是心非是常态；说出口的话要打折再翻译。'],
+            ['80–100','加密通信','极少主动表达真实立场；误解几乎是日常成本。']
+          ],
+          complexity:[
+            ['0–19','简单直接','需求少且直白；吃饱睡好有人陪就很好。'],
+            ['20–39','常规清单','需求清楚、条件常规；按常识相处即可。'],
+            ['40–59','讲究但不刁','项目不多但各有条件；粗心大意会漏题。'],
+            ['60–79','精细化需求','条目少、条件精、容错窗口窄；蛮力只会触发防御。'],
+            ['80–100','高难问卷','条件多且相互牵制；不同时满足多个矛盾项就会扣分。']
+          ],
+          volatility:[
+            ['0–19','恒温','情绪平稳，几乎不受外部事件牵动。'],
+            ['20–39','微风','偶有小情绪，来得快去得也快。'],
+            ['40–59','阵雨','平时平稳，偶尔有需要独自消化的低气压期。'],
+            ['60–79','雷阵雨','起伏明显；需要踩准时机、避开雷区。'],
+            ['80–100','风暴带','喜怒高度不可预测；同样的行为今天可行、明天触雷。']
+          ],
+          rigidity:[
+            ['0–19','水一样','几乎无固定底线，一切可商量。'],
+            ['20–39','有弹性','有偏好但讲得通；说得清楚就能协商。'],
+            ['40–59','软规则','底线清晰而且不多；触犯会扣分，但可当面挽回。'],
+            ['60–79','铁律若干','条目不多、执行严格；犯规后很难当面补救。'],
+            ['80–100','不可碰','底线密集且零容忍；触犯一次即清理出局。']
+          ]
+        };
+        // ── 分类样式映射 ──
+        const STG_TAG = {'切入':'tag-approach','推进':'tag-progress','心动':'tag-heart','避雷':'tag-avoid'};
+        const CAT_CLS = {'现实':'k-re','精神':'k-sp'};
+        // ── 演示数据（本地预览与站点兜底；正式数据来自 data/report.json） ──
+        // 演示数据与 AI 示例共源：generation/example.json。
+        /* ▼ 段 4/5：渲染与工具（追加于本行之后） ▼ */
+        // ============================================================
+        // 段 4/5：渲染与工具 —— 页面装配 / 数据装载 / 复制系统
+        // ============================================================
+        // ── 运行时状态与引用 ──
+        let RPT = null;
+        let IS_DEMO = false;
+        const MATCH_REFS = [];
+        const DYN_REFS = [];
+        const NL = String.fromCharCode(10);
+        // ── 微型 DOM 构建器 ──
+        function el(tag, cls, text){const n=document.createElement(tag);if(cls)n.className=cls;if(text!=null)n.textContent=text;return n}
+        // ── 报告编号（角色名哈希 + 日期） ──
+        function serial(name){
+          let h = 0;
+          for(let i=0;i<name.length;i++) h = (h*31 + name.charCodeAt(i)) % 9000;
+          const d = new Date();
+          return 'No. GD-' + (1000+h) + ' · ' + (d.getMonth()+1) + '/' + d.getDate();
+        }
+        // ── 档位工具 ──
+        function bandIdx(s){s = Number(s)||0; return s<20?0 : s<40?1 : s<60?2 : s<80?3 : 4}
+        function bandName(id,s){const r = RUBRIC[id]; return (r && r[bandIdx(s)]) ? r[bandIdx(s)][1] : ''}
+        function rubricBlock(id, score){
+          const det = el('details','rub');
+          det.appendChild(el('summary',null,'评分标准（5 档）'));
+          const tb = el('table','rub-table');
+          const body = document.createElement('tbody');
+          const rows = RUBRIC[id] || [];
+          const hl = bandIdx(score);
+          for(let i=0;i<rows.length;i++){
+            const tr = document.createElement('tr');
+            if(i===hl) tr.className = 'hl';
+            const c1 = document.createElement('td');
+            c1.appendChild(el('b',null,rows[i][0]));
+            c1.appendChild(document.createElement('br'));
+            c1.appendChild(document.createTextNode(rows[i][1]));
+            const c2 = el('td',null,rows[i][2]);
+            tr.appendChild(c1); tr.appendChild(c2);
+            body.appendChild(tr);
+          }
+          tb.appendChild(body); det.appendChild(tb);
+          return det;
+        }
+        // ── 报告头 ──
+        function renderHeader(d,isDemo){
+          byId('rpCode').textContent = serial(d.character.name) + (isDemo ? ' · 演示数据' : '');
+          byId('chName').textContent = d.character.name;
+          const t = byId('chTitle');
+          if(d.character.title){t.textContent = d.character.title; t.hidden = false}
+          else{t.hidden = true}
+          byId('chOneLine').textContent = d.character.oneLine;
+          byId('verdict').textContent = d.verdict;
+          byId('verdict2').textContent = '总评：' + d.verdict;
+        }
+        // ── 01 档案速写 ──
+        function renderProfile(d){
+          byId('sketch').textContent = d.profile.sketch;
+          const box = byId('chain'); box.textContent = '';
+          d.profile.chain.forEach(function(n){
+            const item = el('div','node');
+            item.appendChild(el('b',null,n.title));
+            item.appendChild(el('p',null,n.text));
+            box.appendChild(item);
+          });
+        }
+        // ── 02 需求图谱 ──
+        function renderNeeds(d){
+          const box = byId('needsList'); box.textContent = '';
+          d.needs.forEach(function(n){
+            const card = el('div','nc');
+            const h = el('div','nc-h');
+            h.appendChild(el('b',null,n.label));
+            h.appendChild(el('span','chip k-kind',n.kind));
+            h.appendChild(el('span','chip ' + (CAT_CLS[n.category]||''),n.category));
+            card.appendChild(h);
+            card.appendChild(el('p','nc-d',n.desc));
+            card.appendChild(el('p','nc-hint','攻略提示：' + n.hint));
+            box.appendChild(card);
+          });
+        }
+        // ── 03 匹配读数（留引用，供实时刷新） ──
+        function renderMatchList(d){
+          const box = byId('matchList'); box.textContent = ''; MATCH_REFS.length = 0;
+          d.needs.forEach(function(n){
+            const row = el('div','mrow');
+            const h = el('div','mrow-h');
+            h.appendChild(el('span',null,n.label));
+            const pv = el('span','pv','--%');
+            h.appendChild(pv);
+            const bar = el('div','bar');
+            const fill = el('i');
+            bar.appendChild(fill);
+            row.appendChild(h); row.appendChild(bar);
+            box.appendChild(row);
+            MATCH_REFS.push({pv:pv, fill:fill});
+          });
+        }
+        // ── 04 静态六维卡（先分析 → 依据 → 标准 → 分数） ──
+        function renderDims(d){
+          const box = byId('dimsStatic'); box.textContent = '';
+          const map = {};
+          d.dimensions.forEach(function(x){map[x.id] = x});
+          DIMS.forEach(function(dim){
+            const x = map[dim.id];
+            const card = el('div','dim');
+            const h = el('div','dim-h');
+            h.appendChild(el('b',null,dim.name));
+            card.appendChild(h);
+            card.appendChild(el('p','dim-a',x.analysis));
+            if(x.basis) card.appendChild(el('p','dim-b','命中依据：' + x.basis));
+            card.appendChild(rubricBlock(dim.id, x.score));
+            const sc = el('div','dim-score');
+            sc.appendChild(document.createTextNode('评分 '));
+            sc.appendChild(el('b',null,String(Math.round(x.score))));
+            sc.appendChild(el('span','band',bandName(dim.id, x.score)));
+            card.appendChild(sc);
+            box.appendChild(card);
+          });
+        }
+        // ── 04 动态两维卡（留引用，供实时刷新） ──
+        function renderDyn(d){
+          const box = byId('dimsLive'); box.textContent = ''; DYN_REFS.length = 0;
+          DYN.forEach(function(dim){
+            const card = el('div','dim dyn');
+            const h = el('div','dim-h');
+            h.appendChild(el('b',null,dim.name));
+            h.appendChild(el('span','live-tag','实时'));
+            card.appendChild(h);
+            card.appendChild(el('p','dim-a',dim.note));
+            const nl = el('p','dim-needs','构成：--');
+            card.appendChild(nl);
+            const sc = el('div','dim-score');
+            sc.appendChild(document.createTextNode('评分 '));
+            const b = el('b',null,'--');
+            sc.appendChild(b);
+            const band = el('span','band','匹配度 --%');
+            sc.appendChild(band);
+            card.appendChild(sc);
+            box.appendChild(card);
+            DYN_REFS.push({score:b, band:band, needs:nl});
+          });
+        }
+        // ── 06 攻略要点（按类分组；避雷组高亮） ──
+        function renderStrategy(d){
+          const box = byId('strategyList'); box.textContent = '';
+          const order = ['切入','推进','心动','避雷'];
+          order.forEach(function(cat){
+            const items = d.strategy.filter(function(s){return s.category === cat});
+            if(!items.length) return;
+            const g = el('div', cat==='避雷' ? 'stg-group warn' : 'stg-group');
+            g.appendChild(el('span','stg-tag ' + (STG_TAG[cat]||''), cat));
+            items.forEach(function(s){
+              const it = el('div','stg');
+              it.appendChild(el('b',null,s.title));
+              it.appendChild(el('p',null,s.text));
+              g.appendChild(it);
+            });
+            box.appendChild(g);
+          });
+        }
+        // ── 07 后日谈 ──
+        function renderStory(d){
+          byId('storyTitle').textContent = d.story.title;
+          const body = byId('storyBody'); body.textContent = '';
+          d.story.paragraphs.forEach(function(p){body.appendChild(el('p',null,p))});
+        }
+        // ── 08 CG 提示词 ──
+        function renderCG(d){
+          byId('cgCaption').textContent = '「' + d.cg.caption + '」';
+          byId('cgMain').textContent = d.cg.prompt;
+        }
+        // ── 复制系统（三级降级：剪贴板 API → execCommand → 长按提示） ──
+        function copyText(text, btn){
+          function done(ok){
+            if(!btn) return;
+            const old = btn.getAttribute('data-old') || btn.textContent;
+            btn.setAttribute('data-old', old);
+            btn.textContent = ok ? '已复制 ✓' : '请长按文本复制';
+            if(ok) btn.classList.add('ok');
+            setTimeout(function(){btn.textContent = old; btn.classList.remove('ok')}, 1600);
+          }
+          function manual(){
+            let ok = false;
+            try{
+              const ta = document.createElement('textarea');
+              ta.value = text;
+              ta.setAttribute('readonly','');
+              ta.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+              document.body.appendChild(ta);
+              ta.focus(); ta.select(); ta.setSelectionRange(0, text.length);
+              ok = document.execCommand('copy');
+              document.body.removeChild(ta);
+            }catch(e){ok = false}
+            done(ok);
+          }
+          try{
+            if(navigator.clipboard && navigator.clipboard.writeText){
+              navigator.clipboard.writeText(text).then(function(){done(true)}, manual);
+            }else{manual()}
+          }catch(e){manual()}
+        }
+        function bindCopy(){
+          Array.prototype.forEach.call(document.querySelectorAll('[data-copy]'), function(btn){
+            btn.addEventListener('click', function(){
+              const src = byId(btn.getAttribute('data-copy'));
+              if(src) copyText(src.textContent.trim(), btn);
+            });
+          });
+          byId('btnGpt').addEventListener('click', function(){
+            copyText(byId('cgMain').textContent.trim() + NL + NL + byId('cgDenoise').textContent.trim(), this);
+          });
+          byId('btnNb').addEventListener('click', function(){
+            copyText(byId('cgMain').textContent.trim() + NL + NL + byId('cgStyle').textContent.trim(), this);
+          });
+        }
+        // 外部图片只在点击后由浏览器直连，失败时保留本地页眉。
+        function bindHero(){
+          const button = byId('loadHeroBtn'), img = byId('heroImg'), status = byId('heroStatus');
+          button.addEventListener('click', function(){
+            button.disabled = true;
+            status.textContent = '正在加载作者插图…';
+            img.src = 'https://cdn-us.imgs.moe/2026/01/18/a57e659a352b70a447b288e5dcdce1f2.jpg';
+          });
+          img.addEventListener('load', function(){
+            img.hidden = false; byId('hero').classList.add('hasimg');
+            status.textContent = '作者插图已加载。'; button.hidden = true;
+          });
+          img.addEventListener('error', function(){
+            img.hidden = true; byId('hero').classList.remove('hasimg');
+            status.textContent = '插图加载失败，仍可阅读完整报告。'; button.disabled = false;
+          });
+        }
+        function validateReport(data){
+          if(!data || typeof data !== 'object' || !data.character || typeof data.character.name !== 'string' ||
+             !data.profile || !Array.isArray(data.profile.chain) || !Array.isArray(data.needs) ||
+             !Array.isArray(data.dimensions) || !Array.isArray(data.strategy) ||
+             !data.story || !Array.isArray(data.story.paragraphs) || !data.cg || typeof data.cg.prompt !== 'string'){
+            throw new Error('报告结构不完整，请重新生成。');
+          }
+          const wanted = DIMS.map(function(d){return d.id});
+          const actual = data.dimensions.map(function(d){return d && d.id});
+          if(actual.length !== wanted.length || new Set(actual).size !== wanted.length ||
+             wanted.some(function(id){return !actual.includes(id)}) ||
+             data.dimensions.some(function(d){return !Number.isFinite(d.score) || d.score < 0 || d.score > 100})){
+            throw new Error('六个评分维度必须各出现一次，且分数在 0–100 之间。');
+          }
+          if(!data.strategy.some(function(s){return s && s.category === '避雷'})){
+            throw new Error('报告缺少避雷建议，请重新生成。');
+          }
+        }
+        function showReportError(error){
+          RPT = null; byId('reportContent').hidden = true;
+          const notice = byId('reportError'); notice.hidden = false;
+          notice.textContent = '报告无法显示：' + (error && error.message || '数据读取失败，请重新生成或检查 Web 包。');
+        }
+        // ── 数据装载（由段 5/5 启动；recompute 也定义在段 5/5） ──
+        function boot(data,isDemo){
+          validateReport(data);
+          RPT = data; IS_DEMO = !!isDemo;
+          renderHeader(data, isDemo);
+          renderProfile(data);
+          renderNeeds(data);
+          renderMatchList(data);
+          renderDims(data);
+          renderDyn(data);
+          renderStrategy(data);
+          renderStory(data);
+          renderCG(data);
+          recompute();
+          byId('reportError').hidden = true;
+          byId('reportContent').hidden = false;
+        }
+        /* ▼ 段 5/5：评分与交互（追加于本行之后） ▼ */
+        // ============================================================
+        // 段 5/5：评分与交互 —— 动态算法 / 实时刷新 / 雷达图 / 启动收尾
+        // ============================================================
+        // ── 输入读取与界面同步 ──
+        function readInputs(){
+          const v = {};
+          Object.keys(ATTR_SL).forEach(function(k){ v[k] = Number(byId(ATTR_SL[k]).value) });
+          return v;
+        }
+        function syncVal(k){ byId(ATTR_SL[k].replace('sl-','sv-')).textContent = byId(ATTR_SL[k]).value }
+        function syncDotFromSliders(){
+          const dot = byId('dot');
+          dot.style.left = Number(byId('sl-extro').value) + '%';
+          dot.style.top = (100 - Number(byId('sl-sens').value)) + '%';
+        }
+        function setPlane(x, y){
+          byId('sl-extro').value = String(Math.round(x));
+          byId('sl-sens').value = String(Math.round(y));
+          syncVal('外放度'); syncVal('感性度');
+          syncDotFromSliders();
+        }
+        function refreshInputsUI(){
+          Object.keys(ATTR_SL).forEach(function(k){ syncVal(k) });
+          syncDotFromSliders();
+        }
+        // ── 匹配与汇总计算 ──
+        function matchOne(v, ideal, strict){
+          const lo = Math.min(ideal[0], ideal[1]);
+          const hi = Math.max(ideal[0], ideal[1]);
+          if(v >= lo && v <= hi) return 100;
+          const d = v < lo ? (lo - v) : (v - hi);
+          const f = SC.falloff[strict] || SC.falloff['中'];
+          return Math.max(0, 100 * (1 - d / f));
+        }
+        function tierOf(v){
+          for(let i=0;i<TIERS.length;i++){ if(v >= TIERS[i].lo && v <= TIERS[i].hi) return TIERS[i] }
+          return TIERS[TIERS.length-1];
+        }
+        function setTier(node, tier){
+          node.textContent = tier.name;
+          node.style.background = tier.color;
+        }
+        function needParts(i, matches){
+          const cat = DYN[i].cat;
+          const parts = [];
+          RPT.needs.forEach(function(n, j){
+            if(n.category === cat) parts.push(n.label + ' ' + Math.round(matches[j] || 0) + '%');
+          });
+          return parts.length ? parts.join(' · ') : '——';
+        }
+        function calcAll(inp){
+          const needMatches = RPT.needs.map(function(n){
+            let sw = 0, s = 0;
+            (n.links || []).forEach(function(l){
+              const v = inp[l.attr];
+              if(v == null) return;
+              const w = clamp(Number(l.weight) || 1, 1, 3);
+              sw += w; s += w * matchOne(v, l.ideal || [0,100], l.strict);
+            });
+            return sw > 0 ? (s / sw) : 50;
+          });
+          const dyn = DYN.map(function(dd){
+            let sw = 0, s = 0;
+            RPT.needs.forEach(function(n, i){
+              if(n.category !== dd.cat) return;
+              const w = clamp(Number(n.weight) || 1, 1, 3);
+              sw += w; s += w * needMatches[i];
+            });
+            const m = sw > 0 ? (s / sw) : 100;
+            return {match:m, diff:(sw > 0 ? (100 - m) : SC.emptyDim), empty:(sw === 0)};
+          });
+          const smap = {};
+          RPT.dimensions.forEach(function(x){ smap[x.id] = clamp(Number(x.score) || 0, 0, 100) });
+          let sw2 = 0, s2 = 0;
+          DIMS.forEach(function(dim){
+            const w = SC.wStatic[dim.id] || 1;
+            sw2 += w; s2 += w * smap[dim.id];
+          });
+          const base = sw2 > 0 ? (s2 / sw2) : 50;
+          let dw = 0, ds = 0;
+          dyn.forEach(function(dd, i){
+            const w = SC.wDyn[DYN[i].cat] || 1;
+            dw += w; ds += w * dd.diff;
+          });
+          const dynPart = dw > 0 ? (ds / dw) : SC.emptyDim;
+          const total = clamp(SC.mixStatic * base + SC.mixDyn * dynPart, SC.clampLo, SC.clampHi);
+          return {needMatches:needMatches, dyn:dyn, base:base, dynPart:dynPart, total:total};
+        }
+        // ── 雷达图（8 轴：六静态 + 两动态） ──
+        function drawRadar(r){
+          const svg = byId('radar');
+          if(!svg || !RPT) return;
+          while(svg.firstChild) svg.removeChild(svg.firstChild);
+          const NS = 'http://www.w3.org/2000/svg';
+          const cx = 170, cy = 170, R = 112, LR = 134;
+          const labs = ['初识','心防','沟通','需求','波动','刚性','现实','精神'];
+          const smap = {};
+          RPT.dimensions.forEach(function(x){ smap[x.id] = clamp(Number(x.score) || 0, 0, 100) });
+          const vals = [];
+          DIMS.forEach(function(dim){ vals.push(smap[dim.id] || 0) });
+          r.dyn.forEach(function(dd){ vals.push(clamp(dd.diff, 0, 100)) });
+          function pt(i, rad){
+            const a = (-90 + i * 45) * Math.PI / 180;
+            return [cx + rad * Math.cos(a), cy + rad * Math.sin(a)];
+          }
+          function mkPoly(rad, cls){
+            const ps = [];
+            for(let i=0;i<8;i++){ const p = pt(i, rad); ps.push(p[0].toFixed(1) + ',' + p[1].toFixed(1)) }
+            const g = document.createElementNS(NS,'polygon');
+            g.setAttribute('points', ps.join(' '));
+            if(cls) g.setAttribute('class', cls);
+            svg.appendChild(g);
+          }
+          [0.25,0.5,0.75,1].forEach(function(k){ mkPoly(R*k, 'grid') });
+          for(let i=0;i<8;i++){
+            const p = pt(i, R);
+            const ln = document.createElementNS(NS,'line');
+            ln.setAttribute('x1',cx); ln.setAttribute('y1',cy);
+            ln.setAttribute('x2',p[0].toFixed(1)); ln.setAttribute('y2',p[1].toFixed(1));
+            ln.setAttribute('class','axis'); svg.appendChild(ln);
+          }
+          mkPoly2(vals);
+          function mkPoly2(vs){
+            const ps = [];
+            for(let i=0;i<8;i++){ const p = pt(i, R * vs[i] / 100); ps.push(p[0].toFixed(1) + ',' + p[1].toFixed(1)) }
+            const g = document.createElementNS(NS,'polygon');
+            g.setAttribute('points', ps.join(' '));
+            g.setAttribute('class','poly'); svg.appendChild(g);
+            for(let i=0;i<8;i++){
+              const p = pt(i, R * vs[i] / 100);
+              const c = document.createElementNS(NS,'circle');
+              c.setAttribute('cx',p[0].toFixed(1)); c.setAttribute('cy',p[1].toFixed(1)); c.setAttribute('r','3');
+              c.setAttribute('class','vtx'); svg.appendChild(c);
+            }
+          }
+          for(let i=0;i<8;i++){
+            const p = pt(i, LR);
+            const t = document.createElementNS(NS,'text');
+            t.setAttribute('x',p[0].toFixed(1)); t.setAttribute('y',p[1].toFixed(1));
+            t.setAttribute('text-anchor','middle');
+            t.setAttribute('dy', i===0 ? '-2' : (i===4 ? '8' : '4'));
+            t.setAttribute('class','lab'); t.textContent = labs[i];
+            svg.appendChild(t);
+          }
+        }
+        // ── 实时刷新（滑条/圆点一动，全页联动） ──
+        function recompute(){
+          if(!RPT) return;
+          const r = calcAll(readInputs());
+          const total = Math.round(r.total);
+          const base = Math.round(r.base);
+          const tier = tierOf(total);
+          setTier(byId('hdrTier'), tier);
+          byId('hdrScoreNum').textContent = String(total);
+          byId('liveScore').textContent = String(total);
+          setTier(byId('liveTier'), tier);
+          for(let i=0;i<MATCH_REFS.length;i++){
+            const p = Math.round(r.needMatches[i] || 0);
+            MATCH_REFS[i].pv.textContent = p + '%';
+            MATCH_REFS[i].fill.style.width = p + '%';
+          }
+          for(let i=0;i<DYN_REFS.length;i++){
+            const dd = r.dyn[i] || {match:100, diff:SC.emptyDim, empty:true};
+            DYN_REFS[i].score.textContent = String(Math.round(dd.diff));
+            DYN_REFS[i].band.textContent = dd.empty ? '无硬性门槛' : ('匹配度 ' + Math.round(dd.match) + '%');
+            DYN_REFS[i].needs.textContent = '构成：' + (dd.empty ? '——' : needParts(i, r.needMatches));
+          }
+          byId('sumScore').textContent = String(total);
+          setTier(byId('sumTier'), tier);
+          byId('cmpBase').textContent = String(base);
+          byId('cmpNow').textContent = String(total);
+          const delta = total - base;
+          const dEl = byId('cmpDelta');
+          dEl.textContent = delta === 0 ? '持平' : (delta < 0 ? '▼ ' + Math.abs(delta) : '▲ ' + delta);
+          if(delta > 0){dEl.classList.add('up')}else{dEl.classList.remove('up')}
+          byId('tierText').textContent = tier.text;
+          drawRadar(r);
+        }
+        // ── 交互绑定 ──
+        function bindInputs(){
+          Object.keys(ATTR_SL).forEach(function(k){
+            byId(ATTR_SL[k]).addEventListener('input', function(){
+              syncVal(k);
+              if(k === '外放度' || k === '感性度') syncDotFromSliders();
+              recompute();
+            });
+          });
+          const plane = byId('plane');
+          let dragging = false;
+          function pos(ev){
+            const rect = plane.getBoundingClientRect();
+            return [clamp((ev.clientX - rect.left) / rect.width * 100, 0, 100),
+                    clamp(100 - (ev.clientY - rect.top) / rect.height * 100, 0, 100)];
+          }
+          plane.addEventListener('pointerdown', function(ev){
+            dragging = true; ev.preventDefault();
+            if(plane.setPointerCapture){ try{ plane.setPointerCapture(ev.pointerId) }catch(e){} }
+            const p = pos(ev); setPlane(p[0], p[1]); recompute();
+          });
+          plane.addEventListener('pointermove', function(ev){
+            if(!dragging) return;
+            if(ev.buttons === 0){ dragging = false; return }
+            ev.preventDefault();
+            const p = pos(ev); setPlane(p[0], p[1]); recompute();
+          });
+          plane.addEventListener('pointerup', function(){ dragging = false });
+          plane.addEventListener('pointercancel', function(){ dragging = false });
+          byId('btnReset').addEventListener('click', function(){
+            Object.keys(ATTR_SL).forEach(function(k){ byId(ATTR_SL[k]).value = 50 });
+            refreshInputsUI();
+            recompute();
+          });
+        }
+        // 只有目标文件尚未生成（404）时加载共源示例；损坏的报告明确报错。
+        async function start(){
+          bindInputs(); bindCopy(); bindHero(); refreshInputsUI();
+          try{
+            const response = await fetch('data/report.json');
+            const isDemo = response.status === 404;
+            const source = isDemo ? await fetch('generation/example.json') : response;
+            if(!source.ok) throw new Error(isDemo ? '演示数据读取失败。' : '报告数据读取失败。');
+            let data;
+            try{data = await source.json()}catch(e){throw new Error('报告不是有效的 JSON，请重新生成。')}
+            boot(data, isDemo);
+          }catch(error){showReportError(error)}
+        }
+        start();
+    </script>
+</body>
+
+</html>

@@ -9,5 +9,16 @@
     "title": "竞技场新闻",
     "description": "提供新闻样式、素材和互动组件，由 AI 自由创作完整新闻站；可阅读报道、发表评论和体验模拟广告。",
     "downloadUrl": "web-package:builtin/mahoshojo.arena-news@1.0.0"
+  },
+  {
+    "directory": "romance-report",
+    "packageRef": {
+      "id": "creator.I_moly",
+      "version": "1.0.4",
+      "digest": "sha256:25d5df1eb88229526c2ed80dad0876bada5c8440f247f656f68276029e45b647"
+    },
+    "title": "恋爱测评",
+    "description": "I_moly 创作：分析角色的相处需求与六维难度，体验动态匹配评分、尊重角色意愿的假设后日谈与绘图提示词。",
+    "downloadUrl": "web-package:builtin/creator.I_moly@1.0.4"
   }
 ]

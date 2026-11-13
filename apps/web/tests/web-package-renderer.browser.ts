@@ -4,7 +4,7 @@ import { chromium, firefox, webkit, type Browser, type BrowserContext, type Page
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createGenericTestPackage } from '@mahoshojo/web-package/testing/fixtures';
 import { renderWebPackageInstance } from '@mahoshojo/web-package/browser';
-import { createWebPackageInstance, packWebPackageZip, unpackWebPackageZip, BUILTIN_ARENA_NEWS_PACKAGE_REF, createWebPackageOverlay, resolveWebPackage } from '@mahoshojo/web-package';
+import { createWebPackageInstance, packWebPackageZip, unpackWebPackageZip, BUILTIN_ARENA_NEWS_PACKAGE_REF, BUILTIN_WEB_PACKAGE_PRESETS, createWebPackageOverlay, resolveWebPackage } from '@mahoshojo/web-package';
 import { WEB_PACKAGE_RUNNER_HEADERS, WEB_PACKAGE_RUNNER_HTML, WEB_PACKAGE_RUNNER_PATH } from '@/lib/web-package/runner';
 import { buildContentSecurityPolicy } from '@/lib/security/browser-headers';
 
@@ -81,6 +81,60 @@ async function mount(html:string,trusted=false) {
   if(!frame)throw new Error('No package iframe');
   return frame;
 }
+
+async function communityPresetExample(id: string, transform?: (_data: any) => void) {
+  const preset = BUILTIN_WEB_PACKAGE_PRESETS.find(item => item.packageRef.id === id);
+  if (!preset) throw new Error(`缺少社区预设：${id}`);
+  const base = await resolveWebPackage(preset.packageRef);
+  const data = JSON.parse(new TextDecoder().decode(base.readFile(base.manifest.generation.example!)));
+  transform?.(data);
+  const overlay = await createWebPackageOverlay(base.ref, JSON.stringify(data));
+  const instance = await createWebPackageInstance(base, overlay);
+  return { data, html: (await renderWebPackageInstance(instance)).html };
+}
+
+describe('社区恋爱测评预设的受限运行', () => {
+  it('数据按文本展示，滑杆可重置，手机宽度可读，插图仅在点击后直连外站', async () => {
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.route('https://cdn-us.imgs.moe/**', route => route.fulfill({
+      status: 200, contentType: 'image/svg+xml',
+      body: '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12"><rect width="12" height="12" fill="pink"/></svg>',
+    }));
+    const { data, html } = await communityPresetExample('creator.I_moly', data => { data.character.name = '<img src=x>'; });
+    const frame = await mount(html);
+    await page.locator('iframe').evaluate(node => { node.style.cssText = 'border:0;width:100vw;height:100vh'; });
+    await frame.waitForFunction(() => document.querySelector('#chName')?.textContent === '<img src=x>');
+    expect(await frame.locator('#chName').textContent()).toBe(data.character.name);
+    expect(await frame.locator('#chName img').count()).toBe(0);
+    expect(requests.filter(url => url.startsWith('https://cdn-us.imgs.moe/'))).toEqual([]);
+    const original = await frame.locator('#liveScore').textContent();
+    await frame.locator('#sl-empathy').fill('95');
+    expect(await frame.locator('#liveScore').textContent()).not.toBe(original);
+    await frame.locator('#btnReset').click();
+    expect(await frame.locator('#sl-empathy').inputValue()).toBe('50');
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(await frame.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+    await frame.locator('#loadHeroBtn').click();
+    await frame.waitForFunction(() => (document.querySelector('#heroImg') as HTMLImageElement)?.naturalWidth === 12);
+    expect(requests.filter(url => url.startsWith('https://cdn-us.imgs.moe/'))).toHaveLength(1);
+    expect(await frame.locator('#heroImg').getAttribute('referrerpolicy')).toBe('no-referrer');
+    expect(received.filter(path => path !== '/' && !path.startsWith(WEB_PACKAGE_RUNNER_PATH + '?') && path !== '/favicon.ico')).toEqual([]);
+    expect(errors).toEqual([]);
+  });
+
+  it('外站不可用时保留本地报告与轻量页眉', async () => {
+    await page.route('https://cdn-us.imgs.moe/**', route => route.abort());
+    const { html, data } = await communityPresetExample('creator.I_moly');
+    const frame = await mount(html);
+    await frame.waitForFunction(name => document.querySelector('#chName')?.textContent === name, data.character.name);
+    await frame.locator('#loadHeroBtn').click();
+    await frame.waitForFunction(() => /失败|未能|不可用/u.test(document.querySelector('#heroStatus')?.textContent ?? ''));
+    expect(await frame.locator('#chName').textContent()).toBe(data.character.name);
+    expect(await frame.locator('#hero').isVisible()).toBe(true);
+    expect(await frame.locator('#liveScore').textContent()).not.toBe('--');
+  });
+});
 
 describe('本地 Web 包真实浏览器资源空间',()=>{
   it('runs JSON overlay, nested ESM/CSS and images in an opaque frame without host access',async()=>{
