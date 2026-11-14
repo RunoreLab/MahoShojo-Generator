@@ -22,6 +22,23 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); container.remove(); });
 
 describe('Web / Desktop 真实管理模态框共源控制', () => {
+  it.each([
+    { label: 'camelCase 数组', tags: { tagIds: [' a ', 'b', 'a', '', 1] }, expected: ['a', 'b'] },
+    { label: 'snake_case 数组', tags: { tag_ids: ['a', 'b'] }, expected: ['a', 'b'] },
+    { label: '详情接口 CSV', tags: { tag_ids: ' a, b,a, ' }, expected: ['a', 'b'] },
+    { label: '无标签', tags: { tag_ids: null }, expected: [] },
+    { label: '缺失标签', tags: {}, expected: [] },
+    { label: '异常标签对象', tags: { tagIds: { length: 1 } }, expected: [] },
+    { label: '异常 camelCase 回退', tags: { tagIds: 1, tag_ids: 'a,b' }, expected: ['a', 'b'] },
+  ])('详情插槽接收归一化标签：$label', async ({ tags, expected }) => {
+    const details = vi.fn(() => null);
+    host.DetailsModal = details;
+    host.loadFullCard = vi.fn(async () => ({ ...row, ...tags }));
+    await render(); await click(button('详情'));
+    expect(details).toHaveBeenLastCalledWith(expect.objectContaining({
+      isOpen: true, card: expect.objectContaining({ tagIds: expected }),
+    }), undefined);
+  });
   it('按宿主能力隐藏治理与详情，同时保留已有分享、下载、编辑和替换', async () => {
     const load = vi.fn(); const replace = vi.fn();
     await render({ onLoadCard: load, onReplaceCard: replace });

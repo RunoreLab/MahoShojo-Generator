@@ -10,6 +10,7 @@ import { inferDataCardTemplate as inferTemplate } from '@mahoshojo/domain/data-c
 import { useCardLibrarySummaryPage } from '../card-library/use-card-library-summary-page';
 import { normalizePublicVisibilityValue } from '../card-library/read-mappers';
 import { getDataCardStatus } from '../card-library/status';
+import { getCardTagIds } from '../card-library/tags';
 import type { DataCardsModalHost } from './host';
 import { BASE_MODAL_BODY_LAYOUT_CLASS_NAME, useBaseModalAccessibility } from '../modal/BaseModal';
 import { ChevronDown, Filter } from 'lucide-react';
@@ -874,7 +875,7 @@ function DataCardsModalScope({
             author: '我',
             createdAt: selectedCard.created_at,
             updatedAt: selectedCard.updated_at,
-            tagIds: selectedCard.tagIds ?? selectedCard.tag_ids
+            tagIds: getCardTagIds(selectedCard)
           }}
           pendingNotice={selectedCard.pending_data ? '线上版本仍为旧版，新版审核通过后生效' : undefined}
         />

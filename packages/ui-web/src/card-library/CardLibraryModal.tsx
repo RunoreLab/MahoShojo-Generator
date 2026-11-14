@@ -33,6 +33,7 @@ import { ModalTabs, modalTabIds, type ModalTabItem } from '../modal/ModalTabs';
 import { buttonClassName } from './Button';
 import { DataCardEmptyState } from './DataCardEmptyState';
 import { getDataCardStatus } from './status';
+import { getCardTagIds } from './tags';
 import type { BadgeDefinition } from './badge-types';
 import type {
   CardLibraryCachedListQuery,
@@ -102,35 +103,6 @@ const normalizeCardTypeForLibrary = (card: unknown): DataCardType => {
  * 与「传输类失败回落缓存」区分开：它直接终止选择流程，不回落、不重试。
  */
 class CachedCardUnavailableError extends Error {}
-
-const normalizeTagIds = (value: unknown): string[] => {
-  const rawList: string[] = [];
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      if (typeof item === 'string') rawList.push(item);
-    }
-  } else if (typeof value === 'string') {
-    rawList.push(...value.split(','));
-  }
-
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const item of rawList) {
-    const trimmed = item.trim();
-    if (!trimmed || seen.has(trimmed)) continue;
-    seen.add(trimmed);
-    out.push(trimmed);
-  }
-  return out;
-};
-
-const getCardTagIds = (card: any): string[] => {
-  if (!card) return [];
-  if (Array.isArray(card.tagIds)) return normalizeTagIds(card.tagIds);
-  if (Array.isArray(card.tag_ids)) return normalizeTagIds(card.tag_ids);
-  if (typeof card.tag_ids === 'string') return normalizeTagIds(card.tag_ids);
-  return [];
-};
 
 const resolveQuestionnaireNativeAllowed = (card: any): boolean => {
   if (!card || card.type !== 'questionnaire') return false;
@@ -2749,7 +2721,7 @@ export function CardLibraryModal({
             authorBadges: selectedCardSource.kind === 'owned' ? currentUserEquippedBadges : (authorBadgesById[selectedCard.user_id] ?? []),
             createdAt: selectedCard.created_at ?? selectedCard.createdAt,
             updatedAt: selectedCard.updated_at ?? selectedCard.updatedAt,
-            tagIds: selectedCard.tagIds ?? selectedCard.tag_ids
+            tagIds: getCardTagIds(selectedCard)
           }}
         />
 	  )}

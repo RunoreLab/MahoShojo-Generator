@@ -1367,6 +1367,24 @@ test('browse-only own public cards never select, load body, or report usage on r
 
 const detailsButton = () => [...document.querySelectorAll<HTMLButtonElement>('button')].find((node) => node.textContent?.trim() === '详情')!;
 const actualDetails: NonNullable<CardLibraryHost['slots']['CardDetailsModal']> = (props) => <BasicCardDetailsModal {...props} renderMarkdown={(content) => <p>{content}</p>} />;
+test.each([
+  { tag_ids: ' a,b,a, ', expected: ['a', 'b'] },
+  { tag_ids: ['a', 'b'], expected: ['a', 'b'] },
+  { tag_ids: null, expected: [] },
+])('我的卡库按需读取的标签在详情插槽前归一化：$tag_ids', async ({ tag_ids, expected }) => {
+  const full = { ...publicCard('owned-tags'), user_id: 7, data: '{"name":"标签正文"}', tag_ids };
+  const summary = DataCardSummarySchema.parse({ ...full, tag_ids: ['stale-summary'] });
+  const { host } = createHost([], { auth: { status: 'authenticated', userId: 7, userBadges: [] }, online: {
+    fetchSummaryPage: vi.fn(async () => ({ success: true as const, cards: [summary], total: 1, nextOffset: null })),
+    loadFullCard: vi.fn(async () => full),
+  } });
+  const receivedTags: unknown[] = [];
+  host.slots.CardDetailsModal = ({ card }) => { receivedTags.push(card.tagIds); return null; };
+  await render({ host, isOpen: true, onClose: vi.fn(), selectedType: 'character', initialTab: 'my', visibleTabs: ['my'] });
+  await settle(); await click(detailsButton());
+  expect(receivedTags.at(-1)).toEqual(expected);
+});
+
 test('真实卡库→共源详情保留本地作者日期，零线上正文/metadata，Escape只关子层', async () => {
   const item = record('local-uuid');
   const { host, online } = createHost([item]); host.slots.CardDetailsModal = actualDetails;

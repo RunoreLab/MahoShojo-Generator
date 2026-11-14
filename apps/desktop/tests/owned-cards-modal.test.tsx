@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DesktopCardDetailsModal } from '../src/features/card-details/card-details-modal';
 import { DesktopOwnedCardsModal } from '../src/features/cloud-save/owned-cards-modal';
+import type { DesktopCardLibraryRequest } from '@mahoshojo/contracts/desktop-cloud';
 const mocks = vi.hoisted(() => ({ accountId: 7, epoch: 1, details: false, store: {} as { getCredentialEpoch: () => number; getSnapshot: () => any }, fetch: vi.fn(), load: vi.fn(), capacity: vi.fn(), createPort: vi.fn(), download: vi.fn() }));
 vi.mock('../src/features/external-links/external-links-provider', () => ({ useExternalLinks: () => ({ openContent: vi.fn() }) }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
@@ -48,6 +49,36 @@ it('真实我的卡详情直接消费已加载私有正文，不额外 HTTP，�
     expect(document.body.textContent).toContain('来源：我的云端数据卡正文'); expect(document.body.textContent).toContain('正文');
     expect(mocks.load).toHaveBeenCalledOnce(); expect(fetch).not.toHaveBeenCalled(); expect(button('下载 JSON')).toBeDefined();
     mocks.epoch += 1; await render(); expect(button('下载 JSON')).toBeUndefined();
+  } finally { vi.unstubAllGlobals(); }
+});
+
+it('我的角色从真实在线端口读取 CSV 标签后可打开桌面详情', async () => {
+  const { createDesktopCardLibraryOnlinePort } = await vi.importActual<typeof import('../src/platform/card-library-host')>('../src/platform/card-library-host');
+  const summary = { ...card, created_at: null, updated_at: null, is_recommended: 0, username: 'tester', nativeAllowed: false, has_pending_update: false, tag_ids: ['old-summary-tag'], favorited_at: null };
+  const invoke = vi.fn(async (_command: string, args?: Record<string, unknown>) => {
+    const request = args?.request as DesktopCardLibraryRequest;
+    expect(request).toMatchObject({ routeId: 'data-cards.query', expectedUserId: 7 });
+    if (request.query?.view === 'summary') {
+      return { status: 200, body: { success: true, cards: [summary], total: 1, nextOffset: null } };
+    }
+    expect(request.query).toEqual({ id: card.id });
+    // 与当前自有详情 API 一致：tag_ids 是聚合字符串，没有 tagIds 字段。
+    return { status: 200, body: { success: true, card: { ...card, data: '{"name":"标签角色正文"}', tag_ids: 'ability:physical,style:comedy' } } };
+  });
+  const online = createDesktopCardLibraryOnlinePort(invoke, 7);
+  mocks.details = true;
+  mocks.fetch.mockImplementation(online.fetchSummaryPage);
+  mocks.load.mockImplementation(online.loadFullCard);
+  const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
+  try {
+    await render(); await act(async () => button('详情').click());
+    expect(document.querySelectorAll('[role=dialog]')).toHaveLength(2);
+    expect(document.body.textContent).toContain('标签角色正文');
+    expect(document.body.textContent).toContain('ability:physical、style:comedy');
+    expect(document.body.textContent).not.toContain('old-summary-tag');
+    expect(button('下载 JSON')).toBeDefined();
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(fetch).not.toHaveBeenCalled();
   } finally { vi.unstubAllGlobals(); }
 });
 
