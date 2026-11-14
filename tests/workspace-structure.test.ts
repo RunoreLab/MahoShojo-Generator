@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parse } from 'comment-json';
+import { parse as parseYaml } from 'yaml';
 
 const rootDirectory = process.cwd();
 
@@ -11,7 +12,11 @@ describe('phase 1 workspace structure', () => {
     expect(workspaceManifest).toContain('  - apps/*');
     expect(workspaceManifest).toContain('  - packages/*');
     expect(workspaceManifest).toContain('allowBuilds:');
-    expect(workspaceManifest).toContain('peerDependencyRules:');
+    const installPolicy = parseYaml(workspaceManifest) as {
+      peerDependencyRules?: { allowedVersions?: { next?: string } };
+    };
+    // A supported Next/OpenNext pair should satisfy the upstream peer range.
+    expect(installPolicy.peerDependencyRules?.allowedVersions?.next).toBeUndefined();
   });
 
   it('exposes only workspace orchestration scripts from the root package', () => {
