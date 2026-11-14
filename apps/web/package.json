@@ -47,7 +47,7 @@
     "@zumer/snapdom": "^1.9.7",
     "ai": "^6.0.331",
     "aws4fetch": "^1.0.20",
-    "better-auth": "~1.6.30",
+    "better-auth": "~1.7.22",
     "clsx": "^2.1.1",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
