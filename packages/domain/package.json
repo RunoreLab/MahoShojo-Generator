@@ -298,7 +298,7 @@
   },
   "dependencies": {
     "@mahoshojo/contracts": "workspace:*",
-    "zod": "^4.1.13",
+    "zod": "^4.6.7",
     "fflate": "^0.8.2",
     "@noble/hashes": "2.3.0",
     "pinyin-pro": "^3.27.0"
