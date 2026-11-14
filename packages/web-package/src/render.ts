@@ -1,6 +1,11 @@
+/// <reference path="./css-tree-entrypoints.d.ts" />
+
 import { parse as parseHtml, serialize, type DefaultTreeAdapterMap } from 'parse5';
 import { parse as parseJavaScript } from 'acorn';
-import { parse as parseCss, walk as walkCss, generate as generateCss } from 'css-tree';
+// Use the public entry points that do not initialize the lexer via Node-only JSON loading.
+import parseCss from 'css-tree/parser';
+import walkCss from 'css-tree/walker';
+import generateCss from 'css-tree/generator';
 import type { WebPackageInstance } from './index';
 import { WebPackagePathSchema } from '@mahoshojo/contracts/web-package';
 import { WEB_PACKAGE_BOOTSTRAP } from './materialization/bootstrap';
