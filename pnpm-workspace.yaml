@@ -6,8 +6,8 @@ overrides:
   brace-expansion@1: 1.1.18
   # GHSA-rgw5-rvv9-x895: follow-up fix for the 2.x line.
   brace-expansion@2: 2.1.4
-  # GHSA-rgw5-rvv9-x895: follow-up fix for the 5.x line.
-  brace-expansion@5: 5.0.9
+  # GHSA-q2hr-2g5m-vwhr: keep 5.x consumers on the patched line.
+  brace-expansion@5: 5.0.12
   # GHSA-m7jm-9gc2-mpf2: keep transitive AWS clients on the patched 4.x line.
   fast-xml-parser@4: 4.5.5
   # Patch-level transitive fixes within the parents' supported major lines.
@@ -15,9 +15,13 @@ overrides:
   '@babel/core@7': 7.29.7
   # GHSA-2464-fhr4-w9xw: keep Next image optimization on the patched sharp line.
   'next@16.4.6>sharp': 0.35.5
-  body-parser@2: 2.3.0
+  # Keep Express tooling on same-major patches for GHSA-27r3-jxmh-p828 and GHSA-jqcg-44mw-7w3h.
+  body-parser@2: 2.4.0
+  proxy-addr@2: 2.0.8
   path-to-regexp@8: 8.4.0
   postcss@8: 8.5.23
+  # GHSA-68fv-2mgg-jv7q: Next and CSS tooling already allow 1.x.
+  source-map-js@1: 1.2.2
   vite@8: 8.1.6
   # GHSA-xjj6-f33q-929c / GHSA-2m5v-pch6-74hx: preserve each parent major.
   'miniflare@5.20261006.1-alpha>undici': 7.30.1

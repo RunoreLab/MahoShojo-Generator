@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@mahoshojo/ai-core": "workspace:*",
-    "hono": "^4.13.11",
+    "hono": "^4.13.18",
     "jose": "^6.2.10",
     "@mahoshojo/contracts": "workspace:*",
     "@mahoshojo/hosted-runtime": "workspace:*",
