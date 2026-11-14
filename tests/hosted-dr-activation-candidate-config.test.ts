@@ -8,6 +8,8 @@ type WranglerEnvironment = {
     binding?: string;
     directory?: string;
     run_worker_first?: boolean;
+    html_handling?: string;
+    not_found_handling?: string;
   };
   name?: string;
   main?: string;
@@ -52,6 +54,8 @@ describe('Hosted DR activation candidate Wrangler config', () => {
       binding: 'ASSETS',
       directory: '.open-next/assets',
       run_worker_first: true,
+      html_handling: 'none',
+      not_found_handling: 'none',
     });
     expect(candidate?.vars).toEqual({
       HONO_CORS_ORIGINS: 'https://mahoshojo.colanns.me',

@@ -205,7 +205,9 @@
       "assets": {
         "directory": ".open-next/assets",
         "binding": "ASSETS",
-        "run_worker_first": true
+        "run_worker_first": true,
+        "html_handling": "none",
+        "not_found_handling": "none"
       },
       "vars": {
         "HONO_CORS_ORIGINS": "https://mahoshojo.colanns.me",

@@ -14,7 +14,7 @@ overrides:
   # GHSA-4x5r-pxfx-6jf8: remain on Babel 7 while taking the arbitrary file read fix.
   '@babel/core@7': 7.29.7
   # GHSA-2464-fhr4-w9xw: keep Next image optimization on the patched sharp line.
-  'next@16.4.1>sharp': 0.35.5
+  'next@16.4.6>sharp': 0.35.5
   body-parser@2: 2.3.0
   path-to-regexp@8: 8.4.0
   postcss@8: 8.5.23
@@ -29,6 +29,3 @@ allowBuilds:
   sharp: true
   unrs-resolver: true
   workerd: true
-peerDependencyRules:
-  allowedVersions:
-    next: 16.4.1
