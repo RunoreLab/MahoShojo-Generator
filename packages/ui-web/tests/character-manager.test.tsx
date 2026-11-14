@@ -89,16 +89,31 @@ describe('CharacterManagerPageHeader', () => {
 describe('CharacterManagerAccountPanel', () => {
   it('登录分支渲染欢迎行、宿主动作与「我的数据卡」槽位计数', () => {
     const onOpen = vi.fn();
+    const onLogout = vi.fn();
     render(
       <CharacterManagerAccountPanel
         status="authenticated"
         userDisplay={<span>测试用户</span>}
-        actions={<button>退出登录</button>}
+        actions={(
+          <>
+            <a href="/badge-manager">徽章管理</a>
+            <a href="/redeem">兑换</a>
+            <button onClick={onLogout}>退出登录</button>
+          </>
+        )}
         myDataCards={{ onOpen, usedSlots: 2, capacity: 10 }}
       />,
     );
     expect(container.textContent).toContain('欢迎回来，');
     expect(container.textContent).toContain('测试用户');
+    const actions = container.querySelectorAll('a[href], button');
+    expect([...actions].slice(0, 3).map((action) => [action.textContent, action.getAttribute('href')])).toEqual([
+      ['徽章管理', '/badge-manager'],
+      ['兑换', '/redeem'],
+      ['退出登录', null],
+    ]);
+    act(() => { actions[2]!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    expect(onLogout).toHaveBeenCalledOnce();
     const cta = [...container.querySelectorAll('button')].find((item) => item.textContent?.includes('我的数据卡'))!;
     expect(cta.textContent).toContain('(2/10 槽)');
     act(() => { cta.dispatchEvent(new MouseEvent('click', { bubbles: true })); });

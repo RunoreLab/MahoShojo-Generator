@@ -1622,26 +1622,26 @@ export const CharacterManagerPage: React.FC = () => {
                                     </>
                                 )}
                                 actions={(
-                                    <div>
+                                    <>
                                         <Link
                                             href="/badge-manager"
-                                            className="mr-2 px-3 py-1.5 text-xs bg-pink-200 text-gray-700 rounded-lg hover:bg-pink-300 transition-colors"
+                                            className="whitespace-nowrap px-3 py-1.5 text-xs bg-pink-200 text-gray-700 rounded-lg hover:bg-pink-300 transition-colors"
                                         >
                                             徽章管理
                                         </Link>
                                         <Link
                                             href="/redeem"
-                                            className="mr-2 px-3 py-1.5 text-xs bg-pink-200 text-gray-700 rounded-lg hover:bg-pink-300 transition-colors"
+                                            className="whitespace-nowrap px-3 py-1.5 text-xs bg-pink-200 text-gray-700 rounded-lg hover:bg-pink-300 transition-colors"
                                         >
                                             兑换
                                         </Link>
                                         <button
                                             onClick={handleLogout}
-                                            className="px-3 py-1.5 text-xs bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                                            className="whitespace-nowrap px-3 py-1.5 text-xs bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
                                         >
                                             退出登录
                                         </button>
-                                    </div>
+                                    </>
                                 )}
                                 userDisplay={(
                                     <UserWithTitle

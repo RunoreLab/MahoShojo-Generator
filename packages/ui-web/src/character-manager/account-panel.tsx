@@ -28,7 +28,7 @@ export interface CharacterManagerAccountPanelProps {
   readonly status: CharacterManagerAccountStatus;
   readonly loadingText?: ReactNode;
   readonly title?: ReactNode;
-  /** 「用户中心」右侧的链接/按钮区（Web：徽章管理/兑换/退出登录）。 */
+  /** 「用户中心」的操作项，由面板负责排列和换行。 */
   readonly actions?: ReactNode;
   /** 已登录分支顶部的提示条（Web：账号迁移提醒）。 */
   readonly banner?: ReactNode;
@@ -82,11 +82,11 @@ export function CharacterManagerAccountPanel({
       ) : status === 'authenticated' ? (
         <div className="space-y-4">
           {banner}
-          <div className="flex items-center justify-between">
-            <div className="font-semibold text-pink-800 leading-[28px]">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-left">
+            <div className="shrink-0 whitespace-nowrap font-semibold text-pink-800 leading-[28px]">
               {title}
             </div>
-            {actions ? <div>{actions}</div> : null}
+            {actions ? <div className="flex max-w-full flex-wrap gap-2">{actions}</div> : null}
           </div>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
