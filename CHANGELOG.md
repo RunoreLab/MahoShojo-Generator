@@ -12,6 +12,14 @@
 
 - 退休 `/pvp` 卡牌对决及其房间、聊天、表情包、个人战绩和管理端专属操作，移除对应导航与百科。`/battle`、`/arena`、Arena 多人和历史战报访问继续保留；不随代码升级删除历史数据。
 
+## [Desktop 0.1.3] - 2026-11-17
+
+- 修复桌面“我的角色”详情的标签格式崩溃，以及档案馆用户中心窄屏错位。
+- 保持 Web/Desktop 的 Unicode 字符串校验兼容，更新共享依赖、Web 框架、认证与构建链；没有新增数据库 schema 迁移。
+- 线上 Arena 严格排位要求至少一名自有参战角色，适用于 Web 与 Desktop 服务器执行，历史战报保留原有策略兼容。
+
+[Desktop 0.1.3 发布说明](./docs/references/2026-11-17_085000_Desktop013发布说明.md) · [GitHub Release](https://github.com/RunoreLab/MahoShojo-Generator/releases/tag/desktop-v0.1.3)
+
 ## [Desktop 0.1.2] - 2026-11-13
 
 - 新增主窗口缩放与双端阅读排版设置，调整数据卡详情和公开库筛选体验。
