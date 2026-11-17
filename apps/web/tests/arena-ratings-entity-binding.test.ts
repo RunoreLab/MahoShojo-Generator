@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { readFile } from 'node:fs/promises';
 import { createNodeArenaGenerationExecutor, createNodeArenaGenerationFinalizationPorts,
-  digestArenaRatingJson } from '@mahoshojo/hosted-runtime/arena-generation';
+  bindArenaRatingEntities, digestArenaRatingJson } from '@mahoshojo/hosted-runtime/arena-generation';
+import type { BattleReportGenerationCombatantRow } from '@/lib/database/battle-report-generation-combatants';
 import {
   setArenaRatingsRepoBundleForTests, settleArenaRatingsForGeneration,
   type ArenaRatingSnapshot, type ArenaEligibilitySnapshot, type ArenaEntity,
@@ -26,13 +28,13 @@ const fixture = async () => {
     entityType: 'data_card', entityId: row.id, updatedAt: row.updatedAt,
     contentDigest: await digestArenaRatingJson(JSON.parse(row.data)), authorizedUserId: 42,
   }))) };
-  const extra: Record<string, unknown> = { arenaStrictPolicy: '1+3:v1', readNarrativeHistory: false,
+  const extra: Record<string, unknown> = { arenaStrictPolicy: '1+3:v2', readNarrativeHistory: false,
     arenaFreeRankingEnabled: true, ratingEntityBinding: binding };
   const snapshot: ArenaEligibilitySnapshot = { status: 'completed', mode: 'classic', userId: 42,
     ipAnonymized: '192.0.2.0', language: 'zh-CN', selectedLevel: null, hasScenario: 0,
     hasUserGuidance: 0, userGuidancePreview: null, hasAdjudicationEvents: 0,
     readArenaHistory: 0, readCurrentState: 0, combatantCount: 2, winner: 'A', extraJson: null };
-  const combatants = rows.map((row, index) => ({ generation_id: 'binding-test', sort_index: index,
+  const combatants: BattleReportGenerationCombatantRow[] = rows.map((row, index) => ({ generation_id: 'binding-test', sort_index: index,
     name: index === 0 ? 'A' : 'B', type: 'general-character', template_id: null,
     is_native: 0, is_preset: 0, team_id: null, character_guidance: null,
     data_card_id: row.id, data_card_updated_at: version, size_chars: null, size_bytes: null, created_at: version }));
@@ -111,8 +113,9 @@ describe('Strict and Free share server entity binding', () => {
     } finally { errorLog.mockRestore(); }
   });
 
-  it('carries a signed body/ID mismatch through real prepare, terminal manifest and fallback settlement', async () => {
+  it.each(['body-mismatch', 'no-owned-combatant'])('enforces %s through real prepare, terminal manifest and fallback settlement', async (cause) => {
     const f = await fixture();
+    if (cause === 'no-owned-combatant') f.rows.forEach((row) => { row.userId = 99; });
     const sourceStatement = { bind: (..._params: unknown[]) => sourceStatement,
       all: async () => ({ success: true, meta: {}, results: f.rows.map((row) => ({ ...row, updated_at: row.updatedAt })) }),
       run: async () => ({ success: true, meta: {}, results: [] }) };
@@ -129,10 +132,11 @@ describe('Strict and Free share server entity binding', () => {
     }), actorKey: 'user:42', generationRequestId: 'binding-test', payload: {
       mode: 'classic', language: 'zh-CN', readArenaHistory: false, readCurrentState: false, readNarrativeHistory: false,
       arenaFreeRankingEnabled: true, combatants: f.rows.map((row, index) => ({ type: 'general-character',
-        isPreset: false, sourceDataCardId: row.id, data: index === 0
+        isPreset: false, sourceDataCardId: row.id, data: index === 0 && cause === 'body-mismatch'
           ? { templateId: '通用角色', name: 'IMPOSTOR', content: '完全不同角色', signature: 'valid' }
           : { ...JSON.parse(row.data), signature: 'valid' } })),
       __arenaServerContextV1: { ratingEntityBinding: f.binding },
+      arenaStrictPolicy: '1+3:v1', // Client downgrade attempts cannot choose the persisted policy.
     } });
     if (prepared instanceof Response || !('executionPayload' in prepared)) throw new Error('Expected generation preparation');
     const writes: unknown[][] = [];
@@ -141,16 +145,77 @@ describe('Strict and Free share server entity binding', () => {
       all: async () => ({ success: true, meta: {}, results: [] }) };
     const ports = createNodeArenaGenerationFinalizationPorts({ getD1Client: () => ({ prepare: () => statement }) });
     await ports.claimTerminal({ generationId: 'binding-test', generationRequestId: 'binding-test', actorKey: 'user:42',
-      payloadHash: 'synthetic-hash', payload: prepared.executionPayload, metadata: { streamMeta: { report: { winner: 'IMPOSTOR' } } },
+      payloadHash: 'synthetic-hash', payload: prepared.executionPayload, metadata: { streamMeta: { report: { winner: cause === 'body-mismatch' ? 'IMPOSTOR' : 'A' } } },
       markdown: 'synthetic result', telemetry: {}, status: 'completed', errorCode: null, resultRef: null });
     const encoded = writes.flat().find((value) => typeof value === 'string' && value.includes('generationOwnerHash'));
     Object.keys(f.extra).forEach((key) => delete f.extra[key]); Object.assign(f.extra, JSON.parse(encoded as string));
-    f.snapshot.winner = 'IMPOSTOR'; f.combatants.splice(0); // Exercise the actual persisted fallback roster.
+    expect(f.extra.arenaStrictPolicy).toBe('1+3:v2');
+    f.snapshot.winner = cause === 'body-mismatch' ? 'IMPOSTOR' : 'A'; f.combatants.splice(0); // Exercise the actual persisted fallback roster.
     await settleArenaRatingsForGeneration('binding-test');
-    for (const queue of ['strict', 'free']) expect(f.events.get(`binding-test:${queue}`)).toMatchObject({
-      status: 'skipped', skip_reason: 'entity-body-mismatch',
-    });
-    expect(f.repo.applyArenaRatingsUpdateIfBothMatch).not.toHaveBeenCalled();
+    expect(f.events.get('binding-test:strict')).toMatchObject({ status: 'skipped',
+      skip_reason: cause === 'body-mismatch' ? 'entity-body-mismatch' : 'strict-no-owned-combatant' });
+    expect(f.events.get('binding-test:free')?.status).toBe(cause === 'body-mismatch' ? 'skipped' : 'applied');
+    if (cause === 'body-mismatch') expect(f.repo.applyArenaRatingsUpdateIfBothMatch).not.toHaveBeenCalled();
+  });
+
+  it.each([[42, 99], [99, 42], [42, 42], [99, 100]])('checks current database owners %s/%s, preserving Free', async (aOwner, bOwner) => {
+    const f = await fixture();
+    const owners = [aOwner, bOwner];
+    f.rows.forEach((row, index) => { row.userId = owners[index]; });
+    await settleArenaRatingsForGeneration('binding-test');
+    const owned = owners.includes(42);
+    expect(f.events.get('binding-test:strict')).toMatchObject(owned ? { status: 'applied' }
+      : { status: 'skipped', skip_reason: 'strict-no-owned-combatant' });
+    expect(f.events.get('binding-test:free')?.status).toBe('applied');
+    const strictCall = vi.mocked(f.repo.applyArenaRatingsUpdateIfBothMatch).mock.calls.find((call) => call[1] === 'strict');
+    expect(strictCall?.[7]).toBe(owned ? 42 : undefined);
+    expect(vi.mocked(f.repo.applyArenaRatingsUpdateIfBothMatch).mock.calls.find((call) => call[1] === 'free')?.[7]).toBeUndefined();
+    await settleArenaRatingsForGeneration('binding-test');
+    expect(f.ensure('free', 'card-a').games).toBe(1);
+    expect(f.ensure('strict', 'card-a').games).toBe(owned ? 1 : 0);
+  });
+
+  it.each(['owned-and-preset', 'other-and-preset', 'two-presets'])('settles %s using real preset authority', async (combination) => {
+    const f = await fixture();
+    const presets = await Promise.all(['C01_egg.json', 'C02_pupa.json'].map(async (filename) => ({
+      type: 'canshou', isPreset: true, filename,
+      data: JSON.parse(await readFile(new URL(`../../../content/presets/${filename}`, import.meta.url), 'utf8')),
+    })));
+    const binding = await bindArenaRatingEntities({ payload: { combatants: presets }, request: new Request('https://fixture.invalid') });
+    if (binding.status !== 'bound') throw new Error('Expected real preset binding');
+    for (const index of combination === 'two-presets' ? [0, 1] : [1]) {
+      Object.assign(f.combatants[index], { is_preset: 1, template_id: presets[index].filename, data_card_id: null });
+      Object.assign(f.binding.entities[index], binding.entities[index]);
+    }
+    if (combination === 'other-and-preset') f.rows[0].userId = 99;
+    await settleArenaRatingsForGeneration('binding-test');
+    expect(f.events.get('binding-test:strict')).toMatchObject(combination === 'owned-and-preset' ? { status: 'applied' }
+      : { status: 'skipped', skip_reason: 'strict-no-owned-combatant' });
+    expect(f.events.get('binding-test:free')?.status).toBe('applied');
+  });
+
+  it.each(['1+3:v1', 'ticket'])('preserves persisted %s history without a self-owned combatant', async (policy) => {
+    const f = await fixture(); f.rows.forEach((row) => { row.userId = 99; });
+    if (policy === 'ticket') { delete f.extra.arenaStrictPolicy; f.extra.rankedMatchOk = true; }
+    else f.extra.arenaStrictPolicy = policy;
+    await settleArenaRatingsForGeneration('binding-test');
+    expect(f.events.get('binding-test:strict')?.status).toBe('applied');
+    expect(vi.mocked(f.repo.applyArenaRatingsUpdateIfBothMatch).mock.calls[0]?.[7]).toBeUndefined();
+  });
+
+  it.each([false, true])('reconciles pending v2 after ownership loss only if ratings were already applied: %s', async (wasApplied) => {
+    const f = await fixture(); f.extra.arenaFreeRankingEnabled = false;
+    f.rows.forEach((row) => { row.userId = 99; });
+    const id = 'binding-test:strict'; f.events.set(id, blankEvent(id, 'pending'));
+    await f.repo.updateArenaRatingEventComputedFields({}, id, { aBefore: before, bBefore: before,
+      aAfter: afterA, bAfter: afterB, deltaA: 20, deltaB: -20, detailsJson: {} });
+    if (wasApplied) { Object.assign(f.ensure('strict', 'card-a'), afterA); Object.assign(f.ensure('strict', 'card-b'), afterB); }
+    await settleArenaRatingsForGeneration('binding-test');
+    expect(f.events.get(id)).toMatchObject(wasApplied ? { status: 'applied' }
+      : { status: 'skipped', skip_reason: 'strict-no-owned-combatant' });
+    expect(f.ensure('strict', 'card-a').games).toBe(wasApplied ? 1 : 0);
+    if (wasApplied) expect(vi.mocked(f.repo.applyArenaRatingsUpdateIfBothMatch).mock.calls[0]?.[5]).toBeNull();
+    else expect(f.repo.applyArenaRatingsUpdateIfBothMatch).not.toHaveBeenCalled();
   });
 
   it.each(['entity-body-mismatch', 'entity-reference-unavailable', 'missing'] as const)('does not apply either queue for %s', async (reason) => {

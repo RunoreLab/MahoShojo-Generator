@@ -229,12 +229,12 @@ describe('arena-ratings: 严格排位资格判定', () => {
     expect(isStrictEligible(baseSnapshot, baseCombatants)).toBe(true);
   });
 
-  test('满足：arenaStrictPolicy=1+3:v1 时不要求 rankedMatchOk', () => {
+  test.each(['1+3:v1', '1+3:v2'])('满足：arenaStrictPolicy=%s 时不要求 rankedMatchOk', (policy) => {
     expect(
       isStrictEligible(
         {
           ...baseSnapshot,
-          extraJson: JSON.stringify({ readNarrativeHistory: false, narrativeHistoryReadCount: 0, arenaStrictPolicy: '1+3:v1' }),
+          extraJson: JSON.stringify({ readNarrativeHistory: false, narrativeHistoryReadCount: 0, arenaStrictPolicy: policy }),
         },
         baseCombatants,
       ),

@@ -19,7 +19,7 @@ const computed = { aBefore: initial, bBefore: initial,
 const entities = [{ entityType: 'data_card' as const, entityId: 'a' }, { entityType: 'data_card' as const, entityId: 'b' }] as const;
 
 describe('rating source guards execute atomically in SQLite', () => {
-  it.each(['none', 'mixed-entity-types', 'legacy-no-delta', 'body-same-timestamp', 'version', 'private', 'unapproved', 'deleted', 'reconcile-before', 'reconcile-after', 'shared-after-applied', 'shared-after-pending', 'shared-after-reversed', 'unrelated-after', 'free-owner', 'free-owner-changed', 'skip-first', 'apply-first', 'skipped-after', 'applied-conflict', 'skipped-conflict', 'computed-mismatch-after'] as const)('both or neither rating updates: %s', async (change) => {
+  it.each(['none', 'mixed-entity-types', 'legacy-no-delta', 'body-same-timestamp', 'version', 'private', 'unapproved', 'deleted', 'reconcile-before', 'reconcile-after', 'shared-after-applied', 'shared-after-pending', 'shared-after-reversed', 'unrelated-after', 'free-owner', 'free-owner-changed', 'skip-first', 'apply-first', 'skipped-after', 'applied-conflict', 'skipped-conflict', 'computed-mismatch-after', 'owned-a', 'owned-b', 'owned-both', 'lost-owned', 'preset-does-not-own'] as const)('both or neither rating updates: %s', async (change) => {
     const sqlite = new DatabaseSync(':memory:');
     try {
       sqlite.exec(`
@@ -37,11 +37,18 @@ INSERT INTO data_cards VALUES('a','character','{"name":"A"}','v1',42,1,'approved
 INSERT INTO arena_ratings(entity_type,entity_id,queue,rating,games,wins,losses,draws) VALUES('data_card','a','strict',1000,0,0,0,0),('data_card','b','strict',1000,0,0,0,0);
       `);
       const queue = change.startsWith('free-owner') ? 'free' : 'strict';
+      const ownershipCase = ['owned-a', 'owned-b', 'owned-both', 'lost-owned', 'preset-does-not-own'].includes(change);
+      if (change === 'preset-does-not-own') sqlite.exec("UPDATE arena_ratings SET entity_type='preset' WHERE entity_id='a'; UPDATE arena_rating_events SET a_entity_type='preset' WHERE id='event'");
+      if (change === 'owned-a') sqlite.exec("UPDATE data_cards SET user_id=42 WHERE id='a'; UPDATE data_cards SET user_id=99 WHERE id='b'");
+      if (change === 'owned-b') sqlite.exec("UPDATE data_cards SET user_id=99 WHERE id='a'; UPDATE data_cards SET user_id=42 WHERE id='b'");
+      if (change === 'owned-both') sqlite.exec("UPDATE data_cards SET user_id=42 WHERE id IN ('a','b')");
+      if (change === 'lost-owned') sqlite.exec("UPDATE data_cards SET user_id=42 WHERE id IN ('a','b')");
+      if (change === 'preset-does-not-own') sqlite.exec("UPDATE data_cards SET user_id=99 WHERE id='b'");
       if (queue === 'free') sqlite.exec("UPDATE arena_ratings SET queue='free'; UPDATE arena_rating_events SET queue='free'; UPDATE data_cards SET is_public=0");
       if (change === 'legacy-no-delta') sqlite.exec('ALTER TABLE arena_ratings DROP COLUMN last_delta');
       // A preset can share a string ID with a card; CASE must compare both fields.
-      const pair: Parameters<typeof applyArenaRatingsUpdateIfBothMatch>[2] = change === 'mixed-entity-types'
-        ? [entities[0], { entityType: 'preset', entityId: 'a' }]
+      const pair: Parameters<typeof applyArenaRatingsUpdateIfBothMatch>[2] = change === 'mixed-entity-types' || change === 'preset-does-not-own'
+        ? change === 'preset-does-not-own' ? [{ entityType: 'preset', entityId: 'a' }, entities[1]] : [entities[0], { entityType: 'preset', entityId: 'a' }]
         : [...entities];
       if (change === 'mixed-entity-types') {
         sqlite.exec("UPDATE arena_ratings SET entity_type='preset', entity_id='a' WHERE entity_id='b'; UPDATE arena_rating_events SET b_entity_type='preset', b_entity_id='a'");
@@ -72,9 +79,10 @@ INSERT INTO arena_ratings(entity_type,entity_id,queue,rating,games,wins,losses,d
             beforeUpdate = false;
             const edits: Record<string, string> = {
               'body-same-timestamp': "data = '{\"name\":\"replacement\"}'", version: "updated_at = 'v2'",
-              private: 'is_public = 0', 'free-owner-changed': 'user_id = 99', unapproved: "review_status = 'pending'", deleted: "deleted_at = 'now'",
+              private: 'is_public = 0', 'free-owner-changed': 'user_id = 99', 'lost-owned': 'user_id = 99', unapproved: "review_status = 'pending'", deleted: "deleted_at = 'now'",
             };
-            if (edits[change]) sqlite.exec(`UPDATE data_cards SET ${edits[change]} WHERE id='b'`);
+            if (change === 'lost-owned') sqlite.exec('UPDATE data_cards SET user_id = 99 WHERE id IN (\'a\', \'b\')');
+            else if (edits[change]) sqlite.exec(`UPDATE data_cards SET ${edits[change]} WHERE id='b'`);
           }
         }
         const statement = sqlite.prepare(sql);
@@ -93,12 +101,12 @@ INSERT INTO arena_ratings(entity_type,entity_id,queue,rating,games,wins,losses,d
         return;
       }
       const result = await applyArenaRatingsUpdateIfBothMatch(
-        db as unknown as Parameters<typeof applyArenaRatingsUpdateIfBothMatch>[0], queue, pair, computed, 'now', change.startsWith('reconcile-') ? null : guards, 'event',
+        db as unknown as Parameters<typeof applyArenaRatingsUpdateIfBothMatch>[0], queue, pair, computed, 'now', change.startsWith('reconcile-') ? null : guards, 'event', ownershipCase ? 42 : undefined,
       );
-      const newlyApplied = ['none', 'mixed-entity-types', 'legacy-no-delta', 'free-owner', 'apply-first'].includes(change);
+      const newlyApplied = ['none', 'mixed-entity-types', 'legacy-no-delta', 'free-owner', 'apply-first', 'owned-a', 'owned-b', 'owned-both'].includes(change);
       expect(result).toBe(change === 'skip-first' || change === 'skipped-after' || change === 'skipped-conflict' ? 'event-skipped' : newlyApplied ? 'applied' : change === 'reconcile-after' || change === 'unrelated-after' || change === 'applied-conflict' ? 'already-applied' : 'identity-conflict');
       expect(updates).toHaveLength(change === 'reconcile-after' || change === 'unrelated-after' || change === 'skipped-after' || change.endsWith('-conflict') ? 0 : change === 'legacy-no-delta' ? 2 : 1);
-      if (updates.length && !change.startsWith('reconcile-')) expect((updates[0].match(/EXISTS/g) ?? []).length).toBe(1 + guards.length);
+      if (updates.length && !change.startsWith('reconcile-')) expect((updates[0].match(/EXISTS/g) ?? []).length).toBe(1 + guards.length + Number(ownershipCase));
       const rows = sqlite.prepare("SELECT * FROM arena_ratings WHERE queue=? AND entity_id<>'outside' ORDER BY entity_id,entity_type").all(queue);
       expect(rows.map((row) => [row.rating, row.games, row.wins, row.losses, row.draws])).toEqual(change.endsWith('-conflict') ? [[1500, 5, 0, 0, 0], [1500, 5, 0, 0, 0]] : newlyApplied || change === 'reconcile-after' || change === 'unrelated-after' || change === 'skipped-after' ? [[1020, 1, 1, 0, 0], [980, 1, 0, 1, 0]] : [[1000, 0, 0, 0, 0], [1000, 0, 0, 0, 0]]);
       expect(sqlite.prepare("SELECT rating,games FROM arena_ratings WHERE entity_id='outside' OR queue='other' ORDER BY queue").all())

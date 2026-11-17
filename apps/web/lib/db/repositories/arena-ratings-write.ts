@@ -670,8 +670,15 @@ export const applyArenaRatingsUpdateIfBothMatch = async (
   appliedAtIso: string,
   identityGuards?: readonly { id: string; data: string; updatedAt: string; authorizedUserId: number | null }[] | null,
   eventId?: string,
+  requiredOwnedUserId?: number,
 ): Promise<'applied' | 'already-applied' | 'conflict' | 'identity-conflict' | 'event-skipped'> => {
   const [aEntity, bEntity] = entities.map(normalizeEntity) as [ArenaRatingsEntity, ArenaRatingsEntity];
+  const requiredOwnedCardIds = [aEntity, bEntity]
+    .filter((entity) => entity.entityType === 'data_card')
+    .map((entity) => entity.entityId);
+  if (requiredOwnedUserId !== undefined && (queue !== 'strict' || requiredOwnedCardIds.length === 0)) {
+    return 'identity-conflict';
+  }
   // The UPDATE's WHERE restricts rows to this exact pair. Repeating B's identity
   // in every CASE pushes strict settlement beyond D1's 100-binding limit.
   const buildEntityCase = (aValue: unknown, bValue: unknown): SQL =>
@@ -917,6 +924,10 @@ export const applyArenaRatingsUpdateIfBothMatch = async (
                 OR ${queue} = 'free' AND (user_id = ${guard.authorizedUserId}
                   OR is_public = 1 AND review_status = 'approved'))
           )`) ?? []),
+          ...(requiredOwnedUserId !== undefined ? [sql`EXISTS (
+              SELECT 1 FROM data_cards WHERE user_id = ${requiredOwnedUserId}
+                AND id IN (${sql.join(requiredOwnedCardIds.map((id) => sql`${id}`), sql`, `)})
+            )`] : []),
           or(
             and(eq(arenaRatings.entityType, aEntity.entityType), eq(arenaRatings.entityId, aEntity.entityId)),
             and(eq(arenaRatings.entityType, bEntity.entityType), eq(arenaRatings.entityId, bEntity.entityId)),
@@ -978,6 +989,12 @@ export const applyArenaRatingsUpdateIfBothMatch = async (
         )),
       ));
       if (matching.length !== identityGuards.length) return 'identity-conflict';
+    }
+    if (requiredOwnedUserId !== undefined) {
+      const owned = await db.select({ id: dataCards.id }).from(dataCards).where(and(
+        eq(dataCards.userId, requiredOwnedUserId), inArray(dataCards.id, requiredOwnedCardIds),
+      )).limit(1);
+      if (!owned.length) return 'identity-conflict';
     }
     return resolveConflict();
   };

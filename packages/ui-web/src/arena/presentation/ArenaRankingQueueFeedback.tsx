@@ -59,6 +59,7 @@ const formatSkipReason = (reason: string | null): string => {
     'strict-not-character': '仅“角色”数据卡可参与严格排位计分',
     'strict-not-public': '严格排位仅允许公开角色卡',
     'strict-not-approved': '严格排位仅允许已审核通过的公开角色卡',
+    'strict-no-owned-combatant': '严格排位要求两名参战者中至少一名为当前账号的线上角色卡',
     'strict-out-of-range': '对手分差过大（不计严格排位）',
     'dedup-ip-pair': '短时间同 IP 重复对局（自由去重）',
     'ratings-missing': '排位记录缺失',

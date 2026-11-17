@@ -84,11 +84,11 @@ const parseArenaEntityFromCombatant = (value: unknown): ArenaEntity | null => {
   return { entityType: 'data_card', entityId: dataCardId };
 };
 
-const validateStrictPublicDataCards = async (db: AppDrizzleDb, entities: ArenaEntity[]): Promise<
-  { ok: true } | { ok: false; reason: 'strict-not-public' | 'strict-not-approved' | 'strict-not-character' | 'strict-card-missing' }
+const validateStrictPublicDataCards = async (db: AppDrizzleDb, entities: ArenaEntity[], ownerUserId: number | null): Promise<
+  { ok: true } | { ok: false; reason: 'strict-not-public' | 'strict-not-approved' | 'strict-not-character' | 'strict-card-missing' | 'strict-no-owned-combatant' }
 > => {
   const ids = entities.filter((e) => e.entityType === 'data_card').map((e) => e.entityId).filter(Boolean);
-  if (ids.length <= 0) return { ok: true };
+  if (ids.length <= 0) return { ok: false, reason: 'strict-no-owned-combatant' };
   try {
     const rows = await getDataCardMetaCardsByIds(db, ids);
     const byId = new Map<string, (typeof rows)[number]>();
@@ -104,6 +104,10 @@ const validateStrictPublicDataCards = async (db: AppDrizzleDb, entities: ArenaEn
       if (row.type !== 'character') return { ok: false, reason: 'strict-not-character' };
       if (!row.isPublic) return { ok: false, reason: 'strict-not-public' };
       if (row.reviewStatus !== 'approved') return { ok: false, reason: 'strict-not-approved' };
+    }
+
+    if (ownerUserId == null || !ids.some((id) => byId.get(id)?.userId === ownerUserId)) {
+      return { ok: false, reason: 'strict-no-owned-combatant' };
     }
 
     return { ok: true };
@@ -245,7 +249,7 @@ async function handler(req: NextRequest) {
         reasons.push('strict-check-failed');
       } else {
         const [a, b] = entities as [ArenaEntity, ArenaEntity];
-        const strictCardOk = await validateStrictPublicDataCards(db, [a, b]);
+        const strictCardOk = await validateStrictPublicDataCards(db, [a, b], user?.id ?? null);
         if (!strictCardOk.ok) {
           reasons.push(strictCardOk.reason);
         } else {

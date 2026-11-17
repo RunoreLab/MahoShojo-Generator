@@ -33,6 +33,12 @@ it.each(['strict', 'free'] as const)('explains server entity-binding failures fo
 });
 
 describe('shared Arena ranking queue feedback', () => {
+  it('explains a rejected Strict ownership check in the report', () => {
+    const element = render(result({ eventStatus: 'skipped', skipReason: 'strict-no-owned-combatant' }));
+    expect(element.querySelector('[title]')?.getAttribute('title'))
+      .toBe('严格排位要求两名参战者中至少一名为当前账号的线上角色卡');
+    expect(element.textContent).not.toContain('strict-no-owned-combatant');
+  });
   it.each([true, false])('uses the recorded event outcome before eligibility=%s', eligible => {
     const common = { eligible, ineligibleReasons: ['need-login'] };
     for (const [eventStatus, expected] of [['applied', '已计分'], ['pending', '结算中'], ['skipped', '未计分'], ['failed', '结算失败']] as const) {

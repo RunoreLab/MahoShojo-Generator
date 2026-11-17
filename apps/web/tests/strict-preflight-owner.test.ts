@@ -15,7 +15,7 @@ import handler from '../app/api/arena/strict-preflight/handler';
 const request = (body: unknown) => handler(new Request('https://fixture.invalid/api/arena/strict-preflight', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }) as never);
 beforeEach(() => {
   vi.clearAllMocks(); mocks.user = { id: 42 }; mocks.db.mockReturnValue({}); mocks.season.mockResolvedValue(null);
-  mocks.cards.mockResolvedValue(['card-a', 'card-b'].map(id => ({ id, type: 'character', isPublic: true, reviewStatus: 'approved' })));
+  mocks.cards.mockResolvedValue(['card-a', 'card-b'].map(id => ({ id, userId: 42, type: 'character', isPublic: true, reviewStatus: 'approved' })));
   mocks.daily.mockResolvedValue({ used: 0, exceeded: false, sinceIso: null });
   mocks.pair.mockResolvedValue({ usedToday: 0, limit: 3, exceeded: false, recentDeduped: false, recentAppliedAtIso: null, nextEligibleAtIso: null });
 });
@@ -47,6 +47,64 @@ describe('Strict preflight bounded Desktop owner/version handshake', () => {
     }
     expect((await request({ ...fixture.request.body, expectedUserId: 42, customProvider: { providerId: 'system', modelId: 'default', apiKey: 'rejected-canary' } })).status).toBe(400);
     expect(mocks.daily).not.toHaveBeenCalled(); expect(mocks.pair).not.toHaveBeenCalled();
+  });
+});
+
+describe('strict preflight requires an owned participant', () => {
+  const ownedRule = async (combatants: unknown[], owners: number[], guarded = false) => {
+    mocks.cards.mockResolvedValue(combatants.flatMap((combatant, index) => {
+      const card = combatant as { isPreset: boolean; sourceDataCardId: string | null };
+      return card.isPreset ? [] : [{ id: card.sourceDataCardId!, userId: owners[index], type: 'character', isPublic: true, reviewStatus: 'approved' }];
+    }));
+    const body = { ...fixture.request.body, combatants };
+    const response = await request(guarded ? { ...body, expectedUserId: 42 } : body);
+    return response.json();
+  };
+  const card = (id: string, isPreset = false) => ({ isPreset, filename: isPreset ? id : null,
+    sourceDataCardId: isPreset ? null : id, characterGuidance: null });
+
+  it.each([
+    ['owned A', [card('a'), card('b')], [42, 99], true],
+    ['owned B', [card('a'), card('b')], [99, 42], true],
+    ['both owned', [card('a'), card('b')], [42, 42], true],
+    ['two other owners', [card('a'), card('b')], [99, 77], false],
+    ['other owner and preset', [card('a'), card('official', true)], [99, 0], false],
+    ['two presets', [card('official-a', true), card('official-b', true)], [0, 0], false],
+  ])('applies ownership rule for %s in legacy and guarded requests', async (_label, combatants, owners, expected) => {
+    for (const guarded of [false, true]) {
+      const result = await ownedRule(combatants, owners, guarded);
+      expect(result.willCount).toBe(expected);
+      if (expected) expect(result.reasons).not.toContain('strict-no-owned-combatant');
+      else expect(result.reasons).toContain('strict-no-owned-combatant');
+    }
+  });
+
+  it('ignores an unrelated owned card and client ownership claims', async () => {
+    mocks.cards.mockResolvedValue(['a', 'b', 'unrelated'].map(id => ({
+      id, userId: id === 'unrelated' ? 42 : 99, type: 'character', isPublic: true, reviewStatus: 'approved',
+    })));
+    const body = { ...fixture.request.body, combatants: [card('a'), card('b')] };
+    for (const input of [
+      { ...body, expectedUserId: 42 },
+      { ...body, combatants: body.combatants.map(c => ({ ...c, isMine: true, userId: 42, author: '42' })) },
+    ]) {
+      expect(await (await request(input)).json()).toMatchObject({ willCount: false, reasons: ['strict-no-owned-combatant'] });
+    }
+  });
+
+  it('rejects private, unapproved, or unverifiable cards', async () => {
+    mocks.cards.mockResolvedValue([
+      { id: 'card-a', userId: 42, type: 'character', isPublic: false, reviewStatus: 'approved' },
+      { id: 'card-b', userId: 99, type: 'character', isPublic: true, reviewStatus: 'approved' },
+    ]);
+    expect(await (await request(fixture.request.body)).json()).toMatchObject({ reasons: expect.arrayContaining(['strict-not-public']) });
+    mocks.cards.mockResolvedValue([
+      { id: 'card-a', userId: 42, type: 'character', isPublic: true, reviewStatus: 'pending' },
+      { id: 'card-b', userId: 99, type: 'character', isPublic: true, reviewStatus: 'approved' },
+    ]);
+    expect(await (await request(fixture.request.body)).json()).toMatchObject({ reasons: expect.arrayContaining(['strict-not-approved']) });
+    mocks.cards.mockRejectedValue(new Error('database unavailable'));
+    expect(await (await request(fixture.request.body)).json()).toMatchObject({ reasons: expect.arrayContaining(['strict-card-missing']) });
   });
 });
 

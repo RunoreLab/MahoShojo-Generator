@@ -7,6 +7,11 @@ import { isStrictRankedModelBlacklisted } from './arena-ranked-model-policy';
 
 export type SeasonBattleMode = 'classic' | 'kizuna' | 'daily' | 'scenario';
 
+/** Server-persisted policy; historical v1 keeps its original ownership rules. */
+export const ARENA_STRICT_POLICY = '1+3:v2';
+export const isSelfSelectedStrictPolicy = (value: string | null | undefined): boolean =>
+  value === '1+3:v1' || value === ARENA_STRICT_POLICY;
+
 export type SeasonStrictRules = {
   mode: SeasonBattleMode;
   storyGuidance: string;
@@ -286,6 +291,7 @@ export const formatStrictReason = (code: string): string => {
     'strict-not-character': '仅“角色”数据卡可参与严格排位计分',
     'strict-not-public': '严格排位仅允许公开角色卡',
     'strict-not-approved': '严格排位仅允许已审核通过的公开角色卡',
+    'strict-no-owned-combatant': '严格排位要求两名参战者中至少一名为当前账号的线上角色卡',
     'strict-out-of-range': '对手分差过大（不计严格排位）',
     'dedup-user-pair': '同一对手组合仍处于计分冷却期（严格去重）',
     'pair-daily-limit': '同一对手组合今日计分已达上限（严格去重）',

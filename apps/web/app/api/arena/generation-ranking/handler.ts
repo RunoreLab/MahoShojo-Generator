@@ -1,4 +1,5 @@
 import { getRequestUrl } from '@/lib/request-url';
+import { isSelfSelectedStrictPolicy } from '@mahoshojo/domain/arena-strict-setup';
 import type { NextRequest } from 'next/server';
 
 import { applyQueenTier, computeArenaBaseTier } from '@/lib/arena/tier';
@@ -83,7 +84,7 @@ const buildStrictIneligibleReasons = (snapshot: ArenaEligibilitySnapshot, combat
   const strictPolicy = typeof parsedExtraJson?.arenaStrictPolicy === 'string'
     ? parsedExtraJson.arenaStrictPolicy.trim()
     : '';
-  const isNewStrictPolicy = strictPolicy === '1+3:v1';
+  const isNewStrictPolicy = isSelfSelectedStrictPolicy(strictPolicy);
 
   const rankedMatchOkRaw = parsedExtraJson?.rankedMatchOk;
   const rankedMatchOk = typeof rankedMatchOkRaw === 'boolean'

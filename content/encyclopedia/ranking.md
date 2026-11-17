@@ -1,7 +1,7 @@
 # 排位与排行榜
 
 > 作者：[末伏之夜](https://github.com/notuhao)  
-> 更新时间：2026-09-03
+> 更新时间：2026-11-17
 
 排位分是一个「近似强度/稳定性」的统计指标：它来自 LLM 叙事裁判，不追求电竞级公平。
 
@@ -150,6 +150,7 @@ strict 的核心是“可比性”：它会对生成设置做更严格的约束�
 当前 strict 常见不计分原因包括：
 
 - 未登录（`need-login`）
+- 双方均非当前账号的线上角色卡（`strict-no-owned-combatant`）；新规则下，两名参战者中至少一名须为当前账号的线上角色卡，放在任意一方均可，可以用自有卡挑战他人公开卡或官方预设
 - 赛季规则不满足（`mode-not-season` / `season-user-guidance-xxx` / `season-scenario-xxx`）
 - 开启了不允许的读写/上下文功能（`read-arena-history` / `read-current-state` / `read-narrative-history` / `has-adjudication-events` / `has-character-guidance`）
 - 对手/数据卡不满足 strict 条件（`strict-not-public` / `strict-not-approved` / `strict-not-character` / `strict-card-missing`）

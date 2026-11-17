@@ -1,4 +1,5 @@
 import type { BattleReportGenerationCombatantRow } from './battle-report-generation-combatants';
+import { ARENA_STRICT_POLICY, isSelfSelectedStrictPolicy } from '@mahoshojo/domain/arena-strict-setup';
 import { PRESET_LIST } from '@/lib/presets';
 import { isStrictRankedModelBlacklisted } from '@/lib/arena/ranked-model-policy';
 import type { ArenaTier } from '@/lib/arena/tier';
@@ -241,6 +242,7 @@ type ArenaRatingsRepoBundle = {
     appliedAtIso: string,
     identityGuards?: readonly ArenaRatingIdentityGuard[] | null,
     eventId?: string,
+    requiredOwnedUserId?: number,
   ) => Promise<'applied' | 'already-applied' | 'conflict' | 'identity-conflict' | 'event-skipped'>;
 };
 
@@ -891,7 +893,7 @@ export const isStrictEligible = (snapshot: ArenaEligibilitySnapshot, combatants:
   // - 旧版：必须存在 rankedMatchOk=true
   // - 新版：通过 arenaStrictPolicy 标记启用（避免历史战报被“回溯计分”）
   const strictPolicy = readExtraJsonString(snapshot.extraJson, 'arenaStrictPolicy');
-  if (strictPolicy !== '1+3:v1') {
+  if (!isSelfSelectedStrictPolicy(strictPolicy)) {
     // 严格排位（旧版）：必须由“排位匹配”签发票据并在生成时验证通过。
     // 缺失/无效都按“宁可漏算”处理为不具备资格（用于禁止 strict 自由挑对手）。
     if (readExtraJsonBoolean(snapshot.extraJson, 'rankedMatchOk') !== true) return false;
@@ -1014,6 +1016,10 @@ const validateRatingEntityBinding = async (
       return { ok: false, skipReason: 'entity-version-changed' };
     }
     guards.push({ id: entity.entityId, data: row.data, updatedAt: row.updatedAt, authorizedUserId: entity.authorizedUserId });
+  }
+  if (queue === 'strict' && readExtraJsonString(snapshot.extraJson, 'arenaStrictPolicy') === ARENA_STRICT_POLICY
+    && !ids.some((id) => snapshot.userId != null && byId.get(id)?.userId === snapshot.userId)) {
+    return { ok: false, skipReason: 'strict-no-owned-combatant' };
   }
   return { ok: true, guards };
 };
@@ -1149,7 +1155,8 @@ export async function settleArenaRatingsForGeneration(
     const [aEntity, bEntity] = entities as [ArenaEntity, ArenaEntity];
 
     const pairKey = buildPairKey(aEntity, bEntity);
-    const isNewStrictPolicy = readExtraJsonString(snapshot.extraJson, 'arenaStrictPolicy') === '1+3:v1';
+    const strictPolicy = readExtraJsonString(snapshot.extraJson, 'arenaStrictPolicy');
+    const isNewStrictPolicy = isSelfSelectedStrictPolicy(strictPolicy);
 
     let strictEligible = isStrictEligible(eligibilitySnapshot, combatants);
     const freeEligible = isFreeEligible(eligibilitySnapshot);
@@ -1536,6 +1543,7 @@ export async function settleArenaRatingsForGeneration(
         new Date().toISOString(),
         identity?.ok ? identity.guards : null,
         eventId,
+        queue === 'strict' && strictPolicy === ARENA_STRICT_POLICY ? snapshot.userId ?? undefined : undefined,
       );
       if (applied === 'event-skipped') continue;
       if (applied === 'identity-conflict') {

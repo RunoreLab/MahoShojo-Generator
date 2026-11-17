@@ -1,4 +1,5 @@
 import { hasArenaWebPackageMeta, hasArenaWebPackageReport } from '@mahoshojo/ai-core/arena-generation';
+import { ARENA_STRICT_POLICY } from '@mahoshojo/domain/arena-strict-setup';
 import type {
   ArenaGenerationRejectedTerminalRecorder,
   ArenaGenerationNoProviderCancellationRecorder,
@@ -528,7 +529,7 @@ const buildExtraJson = async (
   };
   const candidate = {
     ...authority,
-    arenaStrictPolicy: seasonAuthorityAvailable ? '1+3:v1' : null,
+    arenaStrictPolicy: seasonAuthorityAvailable ? ARENA_STRICT_POLICY : null,
     seasonId: seasonAuthorityAvailable ? boundedString(season?.seasonId, 128) : null,
     seasonMode: seasonAuthorityAvailable && boundedString(season?.mode, 64) !== 'classic'
       ? boundedString(season?.mode, 64)

@@ -106,6 +106,7 @@ const formatStrictEventStatus = (status: QueueResult['eventStatus'], skipReason:
       'strict-not-character': '仅“角色”数据卡可参与严格排位（跳过计分）',
       'strict-not-public': '严格排位仅允许公开角色卡（跳过计分）',
       'strict-not-approved': '严格排位仅允许已审核通过的公开角色卡（跳过计分）',
+      'strict-no-owned-combatant': '严格排位要求两名参战者中至少一名为当前账号的线上角色卡（跳过计分）',
       'strict-out-of-range': '对手分差过大（跳过计分）',
       'ratings-missing': '排位记录缺失（结算失败）',
       'rating-conflict': '并发冲突（结算失败）',
