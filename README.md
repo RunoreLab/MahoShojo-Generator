@@ -75,7 +75,7 @@
 
 ## 🚀 技术栈
 
-* **框架**: Next.js 15（App Router 页面与 Route Handlers）, React 19
+* **框架**: Next.js 16（App Router 页面与 Route Handlers）, React 19
 * **主服务 API**: Hono（Node.js）+ Redis（Arena 多人房间与可恢复生成运行时）
 * **语言**: TypeScript
 * **包管理器**: pnpm 11.28.6
