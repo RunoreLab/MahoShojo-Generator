@@ -1538,4 +1538,38 @@ describe('resumable Arena generation client', () => {
     expect(fetcher.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
     expect(fetcher.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(true);
   });
+
+  it('exposes parsed server finalizing/terminal proof to onCancelResponse without altering C0 state transitions', async () => {
+    const abort = new AbortController();
+    const cancelProofs: Array<{ generationRequestId: string; status: number; serverStatus: string | null; providerStopped: boolean }> = [];
+    const fetcher = vi.fn(async (url: string): Promise<Response> => (
+      url.includes('/cancel')
+        ? Response.json({
+          code: 'GENERATION_FINALIZATION_IN_PROGRESS',
+          generationId: 'generation-finalizing-1',
+          status: 'finalizing',
+          cancelled: false,
+        }, { status: 409 })
+        : response(new ReadableStream())
+    ));
+    const opened = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic' },
+      headers: {},
+      fetcher,
+      storage: new MemoryStorage(),
+      generationRequestId: 'request-cancel-finalizing',
+      signal: abort.signal,
+      onCancelResponse: (info) => cancelProofs.push(info),
+    });
+
+    abort.abort(STREAM_ABORT_REASON_USER);
+    await opened.text();
+    await vi.waitFor(() => expect(cancelProofs).toEqual([{
+      generationRequestId: 'request-cancel-finalizing',
+      status: 409,
+      serverStatus: 'finalizing',
+      providerStopped: true,
+    }]));
+  });
 });

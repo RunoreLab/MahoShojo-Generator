@@ -4281,4 +4281,84 @@ describe('Arena generation lifecycle service', () => {
     expect(replay).toContain('id: 9-1000000000000000000000000000000\nevent: snapshot');
     expect(replay).toContain('id: 9-1000000000000000000000000000001\nevent: done');
   });
+
+  test('marks pre-reserve 5xx responses as not dispatched while omitting header on reserve failure', async () => {
+    const store = new MemoryReplayStore();
+    const service = createService(store, {
+      prepare: vi.fn(async () => new Response(JSON.stringify({
+        code: 'ARENA_SEASON_AUTHORITY_UNAVAILABLE',
+        error: 'Arena season authority unavailable',
+      }), { status: 503, headers: { 'Content-Type': 'application/json' } })),
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    });
+    const preDispatchResponse = await service.create(createRequest('request-pre-dispatch-503'));
+    expect(preDispatchResponse.status).toBe(503);
+    expect(preDispatchResponse.headers.get('X-Mahoshojo-Generation-Dispatched')).toBe('false');
+
+    const unavailableStore = new MemoryReplayStore();
+    unavailableStore.reserveUnavailable = true;
+    const reserveFailService = createService(unavailableStore, {
+      execute: vi.fn(async () => ({ status: 'completed' as const })),
+    });
+    const reserveFailResponse = await reserveFailService.create(createRequest('request-reserve-fail-503'));
+    expect(reserveFailResponse.status).toBe(503);
+    expect(reserveFailResponse.headers.get('X-Mahoshojo-Generation-Dispatched')).toBeNull();
+  });
+
+  test('pre-cancel tombstone returns 202 before POST arrives and prevents late Provider execution', async () => {
+    const { createMemoryGenerationReplayStore } = await import('../src/arena-generation/memory-replay-store');
+    const store = createMemoryGenerationReplayStore();
+    const execute = vi.fn(async () => ({ status: 'completed' as const }));
+    const service = createArenaGenerationService({
+      store,
+      executor: { execute },
+      resolveActor: async () => ({ actorKey: 'user:42' }),
+      deriveGenerationId: async () => 'generation-tombstone-1',
+      now: () => new Date('2026-08-25T04:00:00.000Z'),
+      hashPayload: async (payload) => `hash:${JSON.stringify(payload)}`,
+      replayPollMs: 1,
+    });
+
+    const firstCancel = await service.cancelRequest(new Request('https://example.test/api/arena/generate-stream', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ generationRequestId: 'request-tombstone-1', reason: 'user' }),
+    }));
+    expect(firstCancel.status).toBe(202);
+    await expect(firstCancel.json()).resolves.toMatchObject({
+      generationId: 'generation-tombstone-1',
+      status: 'cancelling',
+      cancelled: true,
+    });
+
+    const secondCancel = await service.cancelRequest(new Request('https://example.test/api/arena/generate-stream', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ generationRequestId: 'request-tombstone-1', reason: 'user' }),
+    }));
+    expect(secondCancel.status).toBe(200);
+    await expect(secondCancel.json()).resolves.toMatchObject({
+      generationId: 'generation-tombstone-1',
+      status: 'cancelled',
+      cancelled: true,
+    });
+
+    const lateCreate = await service.create(createRequest('request-tombstone-1'));
+    expect(lateCreate.status).toBe(200);
+    const body = await lateCreate.text();
+    expect(body).toContain('"status":"cancelled"');
+    expect(body).toContain('"code":"USER_CANCELLED"');
+    expect(execute).not.toHaveBeenCalled();
+
+    const lookup = await service.lookup(
+      new Request('https://example.test/api/arena/generation-requests/request-tombstone-1'),
+      { generationRequestId: 'request-tombstone-1' },
+    );
+    expect(lookup.status).toBe(200);
+    await expect(lookup.json()).resolves.toMatchObject({
+      generationId: 'generation-tombstone-1',
+      status: 'cancelled',
+      resumable: false,
+    });
+  });
 });

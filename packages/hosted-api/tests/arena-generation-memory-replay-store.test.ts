@@ -331,4 +331,41 @@ describe('memory generation replay store', () => {
       preparationVersion: 'arena-runtime-v1',
     });
   });
+
+  it('writes a pre-cancel tombstone for unknown non-room requests and fences later reservations', async () => {
+    const store = createMemoryGenerationReplayStore();
+
+    await expect(store.requestCancel({
+      generationId: 'generation-precancel',
+      actorKey: 'user:1',
+      reason: 'user',
+      now: '2026-08-25T00:00:00.000Z',
+      preCancelRequestId: 'request-precancel',
+    })).resolves.toEqual({ kind: 'accepted', cancelReason: 'user' });
+
+    await expect(store.reserve({
+      actorKey: 'user:1',
+      generationRequestId: 'request-precancel',
+      generationId: 'generation-precancel',
+      payloadHash: 'payload-first',
+      producerToken,
+      now: '2026-08-25T00:00:01.000Z',
+      leaseExpiresAt: '2026-08-25T00:01:01.000Z',
+    })).resolves.toEqual({
+      kind: 'reused',
+      generationId: 'generation-precancel',
+      preparationSeed: null,
+      preparationVersion: null,
+    });
+
+    await expect(store.reserve({
+      actorKey: 'user:1',
+      generationRequestId: 'request-precancel',
+      generationId: 'generation-precancel',
+      payloadHash: 'payload-second',
+      producerToken,
+      now: '2026-08-25T00:00:02.000Z',
+      leaseExpiresAt: '2026-08-25T00:01:02.000Z',
+    })).resolves.toEqual({ kind: 'conflict' });
+  });
 });

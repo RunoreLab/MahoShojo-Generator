@@ -989,3 +989,51 @@ it('normalizes JSON null mode before returning a successful lease-reaper claim',
   const script = evaluate.mock.calls.find(([text]) => text.includes('GEN_CLAIM_LEASE_EXPIRY_V1'))![0];
   expect(script).toContain("if mode == nil or mode == cjson.null then mode = '' end");
 });
+
+it('requestCancel 支持非房间预取消墓碑原子写入，且 RESERVATION_SCRIPT 支持首次消费接管', async () => {
+  const client = {
+    eval: vi.fn<RedisGenerationClient['eval']>(async () => 'accepted:user'),
+    get: vi.fn<RedisGenerationClient['get']>(async () => null),
+    xRead: vi.fn<RedisGenerationClient['xRead']>(async () => null),
+  };
+  const store = createRedisGenerationReplayStore({ getClient: () => client });
+
+  await expect(store.requestCancel({
+    generationId: reserveInput.generationId,
+    actorKey: reserveInput.actorKey,
+    reason: 'user',
+    now: reserveInput.now,
+    preCancelRequestId: reserveInput.generationRequestId,
+  })).resolves.toEqual({ kind: 'accepted', cancelReason: 'user' });
+
+  expect(client.eval).toHaveBeenCalledTimes(1);
+  const [cancelScript, cancelOptions] = client.eval.mock.calls[0]!;
+  expect(cancelScript).toContain('GEN_CANCEL_V1');
+  expect(cancelScript).toContain("redis.call('XADD', KEYS[2]");
+  expect(cancelOptions.keys[0]).toBe('mahoshojo:gen:v1:generation-1234:state');
+  expect(cancelOptions.keys[1]).toBe('mahoshojo:gen:v1:generation-1234:events');
+  expect(cancelOptions.keys[2]).toMatch(/^mahoshojo:gen:v1:req:user:[a-f0-9]{32}:request-1234$/u);
+  expect(cancelOptions.arguments).toHaveLength(11);
+  expect(JSON.parse(cancelOptions.arguments[7]!)).toMatchObject({
+    generationId: reserveInput.generationId,
+    preCancelled: true,
+    payloadHash: '__PRE_CANCELLED__',
+  });
+  expect(JSON.parse(cancelOptions.arguments[8]!)).toMatchObject({
+    status: 'cancelled',
+    terminal: { status: 'cancelled', code: 'USER_CANCELLED' },
+  });
+  expect(JSON.parse(cancelOptions.arguments[9]!)).toEqual({
+    ok: false,
+    status: 'cancelled',
+    code: 'USER_CANCELLED',
+  });
+
+  client.eval.mockResolvedValueOnce(['reused', reserveInput.generationId, '', '']);
+  await expect(store.reserve(reserveInput)).resolves.toMatchObject({
+    kind: 'reused',
+    generationId: reserveInput.generationId,
+  });
+  const [reserveScript] = client.eval.mock.calls[1]!;
+  expect(reserveScript).toContain("reservation.preCancelled == true and reservation.payloadHash == '__PRE_CANCELLED__'");
+});

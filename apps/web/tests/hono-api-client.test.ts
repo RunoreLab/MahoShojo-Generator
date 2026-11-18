@@ -528,6 +528,31 @@ describe('Hono API 客户端', () => {
     expect(source).toContain('generationIntent.subscribeRoutePinSelected(onRoutePinSelected)');
   });
 
+  test('带 X-Mahoshojo-Generation-Dispatched: false 的 5xx 响应直接返回确定性 response-error', async () => {
+    honoApiConfig.enabled = true;
+    honoApiConfig.origin = hostedDrManifest.controlPlane.primaryOrigin;
+    honoApiConfig.routingMode = 'client-preflight';
+    const observe = vi.fn();
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json({
+      code: 'ARENA_SEASON_AUTHORITY_UNAVAILABLE',
+      error: 'Arena season authority unavailable',
+    }, {
+      status: 503,
+      headers: { 'X-Mahoshojo-Generation-Dispatched': 'false' },
+    }));
+    const intent = createGenerationApiIntent({ fetcher: fetchMock, observe });
+
+    const response = await intent.dispatch('/api/arena/generate-stream', { method: 'POST' });
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      code: 'ARENA_SEASON_AUTHORITY_UNAVAILABLE',
+    });
+    expect(observe).toHaveBeenLastCalledWith(expect.objectContaining({
+      phase: 'dispatch-terminal',
+      terminalClass: 'response-error',
+    }));
+  });
+
   test('退出 Hono 的 non-idempotent POST 未知 5xx 同样投影 ambiguous', async () => {
     honoApiConfig.enabled = true;
     honoApiConfig.routingMode = 'client-preflight';

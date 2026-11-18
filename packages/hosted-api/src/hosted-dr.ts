@@ -25,6 +25,7 @@ export type HostedDrSelectionInput = {
 
 export const HOSTED_DR_CONTRACT_VERSION = 'g25e1-v1' as const;
 export const HOSTED_DR_READINESS_SQL = 'SELECT 1 AS ok' as const;
+export const ARENA_GENERATION_DISPATCHED_HEADER = 'X-Mahoshojo-Generation-Dispatched' as const;
 export const HOSTED_API_CORS_ORIGINS_ENVIRONMENT = 'HONO_CORS_ORIGINS' as const;
 export const HOSTED_API_CORS_ALLOW_HEADERS = [
   'Content-Type',
@@ -42,6 +43,7 @@ export const HOSTED_API_CORS_EXPOSE_HEADERS = [
   'X-RateLimit-Limit',
   'X-RateLimit-Remaining',
   'Retry-After',
+  ARENA_GENERATION_DISPATCHED_HEADER,
   'X-Mahoshojo-Generation-Actor-Token',
   'X-Mahoshojo-Generation-Id',
   'X-Mahoshojo-Generation-Request-Id',

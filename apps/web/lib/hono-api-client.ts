@@ -1,4 +1,5 @@
 import { isGenerationApiRoutePin, type GenerationApiRoutePin } from '@mahoshojo/hosted-api/arena-generation/client';
+import { ARENA_GENERATION_DISPATCHED_HEADER } from '@mahoshojo/hosted-api/hosted-dr';
 import { authStorage } from '@/lib/auth';
 import { INFRASTRUCTURE_ERROR_MESSAGES } from '@/lib/client/apiError';
 import { honoApiConfig } from '@/config/hono-api';
@@ -455,7 +456,11 @@ export const createGenerationApiIntent = ({
         throw ambiguousOutcomeError(decision);
       }
 
-      if (ambiguousServerOutcome && response.status >= 500) {
+      const explicitNotDispatched = response.headers
+        .get(ARENA_GENERATION_DISPATCHED_HEADER)
+        ?.trim()
+        .toLowerCase() === 'false';
+      if (ambiguousServerOutcome && response.status >= 500 && !explicitNotDispatched) {
         if (decision) {
           emitHostedDrClientTelemetry(
             observe,
@@ -476,7 +481,7 @@ export const createGenerationApiIntent = ({
         decision,
         observe,
         settle,
-        ambiguousServerOutcome,
+        ambiguousServerOutcome && !explicitNotDispatched,
       );
     },
   });

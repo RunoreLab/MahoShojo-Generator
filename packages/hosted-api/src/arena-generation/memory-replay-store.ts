@@ -10,6 +10,8 @@ import type {
   GenerationStreamEvent,
 } from './service';
 
+const PRE_CANCELLED_PAYLOAD_HASH = '__PRE_CANCELLED__';
+
 export type MemoryGenerationReplayStoreOptions = {
   maxEvents?: number;
   maxGenerations?: number;
@@ -116,6 +118,22 @@ export const createMemoryGenerationReplayStore = (
       const requestKey = `${input.actorKey}\u0000${input.generationRequestId}`;
       const previous = requests.get(requestKey);
       if (previous) {
+        if (previous.payloadHash === PRE_CANCELLED_PAYLOAD_HASH) {
+          previous.payloadHash = input.payloadHash;
+          const existingState = states.get(previous.generationId);
+          if (existingState) {
+            writeState({
+              ...existingState,
+              payloadHash: input.payloadHash,
+            });
+          }
+          return {
+            kind: 'reused',
+            generationId: previous.generationId,
+            preparationSeed: previous.preparationSeed,
+            preparationVersion: previous.preparationVersion,
+          };
+        }
         return previous.payloadHash === input.payloadHash
           ? {
             kind: 'reused',
@@ -446,7 +464,50 @@ export const createMemoryGenerationReplayStore = (
     async requestCancel(input) {
       prune();
       const state = states.get(input.generationId);
-      if (!state) return { kind: 'not-found' };
+      if (!state) {
+        if (input.preCancelRequestId && !input.roomAdmission) {
+          const requestKey = `${input.actorKey}\u0000${input.preCancelRequestId}`;
+          const existingRequest = requests.get(requestKey);
+          if (existingRequest && existingRequest.generationId !== input.generationId) {
+            return { kind: 'forbidden' };
+          }
+          const cancelCode = generationCancelCode(input.reason);
+          const terminalEvent: GenerationStreamEvent = {
+            id: '1-0',
+            type: 'done',
+            data: { ok: false, status: 'cancelled', code: cancelCode },
+          };
+          sequences.set(input.generationId, 1);
+          events.set(input.generationId, [terminalEvent]);
+          requests.set(requestKey, {
+            payloadHash: PRE_CANCELLED_PAYLOAD_HASH,
+            generationId: input.generationId,
+            preparationSeed: null,
+            preparationVersion: null,
+          });
+          writeState({
+            actorKey: input.actorKey,
+            generationId: input.generationId,
+            generationRequestId: input.preCancelRequestId,
+            payloadHash: PRE_CANCELLED_PAYLOAD_HASH,
+            mode: null,
+            producerToken: `pre-cancel:${input.generationId}`,
+            status: 'cancelled',
+            lastEventId: terminalEvent.id,
+            updatedAt: input.now,
+            leaseExpiresAt: null,
+            snapshot: null,
+            terminal: { status: 'cancelled', code: cancelCode },
+            intendedTerminal: null,
+            cancelRequested: true,
+            cancelReason: input.reason,
+            preparationSeed: null,
+            preparationVersion: null,
+          });
+          return { kind: 'accepted', cancelReason: input.reason };
+        }
+        return { kind: 'not-found' };
+      }
       if (state.actorKey !== input.actorKey) return { kind: 'forbidden' };
       if (input.roomAdmission && (!sameRoomGenerationAdmission(state.roomAdmission, input.roomAdmission)
         || (input.producerTokenDigest !== null && state.producerTokenDigest !== input.producerTokenDigest))) return { kind: 'forbidden' };

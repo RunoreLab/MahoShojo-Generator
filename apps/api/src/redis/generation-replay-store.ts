@@ -28,6 +28,7 @@ const MAX_READ_EVENTS = 256;
 const MIN_BLOCKING_READ_MS = 1;
 const MAX_BLOCKING_READ_MS = 1_000;
 const KEY_PREFIX = 'mahoshojo:gen:v1';
+const PRE_CANCELLED_PAYLOAD_HASH = '__PRE_CANCELLED__';
 
 const normalizeBlockingReadMs = (blockMs: number): number => {
   if (!Number.isFinite(blockMs)) {
@@ -139,6 +140,20 @@ const RESERVATION_SCRIPT = `
 local existing = redis.call('GET', KEYS[1])
 if existing then
   local reservation = cjson.decode(existing)
+  if reservation.preCancelled == true and reservation.payloadHash == '__PRE_CANCELLED__' then
+    reservation.payloadHash = ARGV[1]
+    reservation.preCancelled = nil
+    local reqTtl = redis.call('PTTL', KEYS[1])
+    redis.call('SET', KEYS[1], cjson.encode(reservation), 'PX', reqTtl > 0 and reqTtl or ARGV[3])
+    local rawState = redis.call('GET', KEYS[2])
+    if rawState then
+      local state = cjson.decode(rawState)
+      state.payloadHash = ARGV[1]
+      local stateTtl = redis.call('PTTL', KEYS[2])
+      redis.call('SET', KEYS[2], cjson.encode(state), 'PX', stateTtl > 0 and stateTtl or ARGV[3])
+    end
+    return { 'reused', reservation.generationId, '', '' }
+  end
   if reservation.payloadHash == ARGV[1] then
     local seed = reservation.preparationSeed
     local version = reservation.preparationVersion
@@ -486,7 +501,23 @@ const CANCEL_SCRIPT = `${STATE_HELPERS}
 ${ROOM_ADMISSION_HELPERS}
 -- GEN_CANCEL_V1
 local raw = redis.call('GET', KEYS[1])
-if not raw then return 'not-found' end
+if not raw then
+  if ARGV[7] and ARGV[7] ~= '' and not (ARGV[5] and ARGV[5] ~= '') then
+    local existingReq = redis.call('GET', KEYS[3])
+    if existingReq then
+      local parsedReq = cjson.decode(existingReq)
+      if parsedReq.generationId ~= ARGV[11] then return 'forbidden' end
+    end
+    local terminalEventId = redis.call('XADD', KEYS[2], '*', 'type', 'done', 'data', ARGV[10])
+    redis.call('PEXPIRE', KEYS[2], ARGV[7])
+    local state = cjson.decode(ARGV[9])
+    state.lastEventId = terminalEventId
+    redis.call('SET', KEYS[3], ARGV[8], 'PX', ARGV[7])
+    redis.call('SET', KEYS[1], cjson.encode(state), 'PX', ARGV[7])
+    return 'accepted:' .. ARGV[2]
+  end
+  return 'not-found'
+end
 local state = cjson.decode(raw)
 validateState(state)
 if state.actorHash ~= ARGV[1] then return 'forbidden' end
@@ -1305,16 +1336,77 @@ export const createRedisGenerationReplayStore = (
       if (!isGenerationCancelReason(input.reason)) {
         throw new Error('REDIS_GENERATION_CANCEL_REASON_INVALID');
       }
-      const raw = await mutate(input.generationId, CANCEL_SCRIPT, {
-        arguments: [
-          hashKeyPart(input.actorKey),
-          input.reason,
-          input.now,
-          String(activeTtlMs),
-          input.roomAdmission ? JSON.stringify(input.roomAdmission) : '',
-          input.producerTokenDigest ?? '',
-        ],
-      });
+      const actorHash = hashKeyPart(input.actorKey);
+      let raw: unknown;
+      if (input.preCancelRequestId && !input.roomAdmission) {
+        const identityKey = requestKey(input.actorKey, input.preCancelRequestId);
+        const cancelCode = generationCancelCode(input.reason);
+        const preCancelState: StoredGenerationState = {
+          ...(options.enableSnapshotSidecar ? { storageVersion: 2 as const, snapshotMeta: null } : {}),
+          actorHash,
+          reservationKey: identityKey,
+          generationId: input.generationId,
+          generationRequestId: input.preCancelRequestId,
+          payloadHash: PRE_CANCELLED_PAYLOAD_HASH,
+          mode: null,
+          producerToken: `pre-cancel:${input.generationId}`,
+          status: 'cancelled',
+          lastEventId: null,
+          updatedAt: input.now,
+          leaseExpiresAt: null,
+          snapshot: null,
+          terminal: { status: 'cancelled', code: cancelCode },
+          intendedTerminal: null,
+          cancelRequested: true,
+          cancelReason: input.reason,
+          preparationSeed: null,
+          preparationVersion: null,
+        };
+        try {
+          raw = await options.getClient().eval(CANCEL_SCRIPT, {
+            keys: [
+              stateKey(input.generationId),
+              eventsKey(input.generationId),
+              identityKey,
+              snapshotKey(input.generationId),
+            ],
+            arguments: [
+              actorHash,
+              input.reason,
+              input.now,
+              String(activeTtlMs),
+              '',
+              '',
+              String(terminalTtlMs),
+              JSON.stringify({
+                generationId: input.generationId,
+                payloadHash: PRE_CANCELLED_PAYLOAD_HASH,
+                preparationSeed: null,
+                preparationVersion: null,
+                preCancelled: true,
+              }),
+              JSON.stringify(preCancelState),
+              JSON.stringify({ ok: false, status: 'cancelled', code: cancelCode }),
+              input.generationId,
+            ],
+          });
+          rememberIdentity(input.generationId, identityKey);
+        } catch (error) {
+          identities.delete(input.generationId);
+          throw error;
+        }
+      } else {
+        raw = await mutate(input.generationId, CANCEL_SCRIPT, {
+          arguments: [
+            actorHash,
+            input.reason,
+            input.now,
+            String(activeTtlMs),
+            input.roomAdmission ? JSON.stringify(input.roomAdmission) : '',
+            input.producerTokenDigest ?? '',
+          ],
+        });
+      }
       if (input.roomAdmission && typeof raw === 'string') {
         const match = /^accepted:(user|content_policy):(reserved|running)$/u.exec(raw);
         if (match) return { kind: 'accepted', cancelReason: match[1] as 'user' | 'content_policy', previousStatus: match[2] as 'reserved' | 'running' };

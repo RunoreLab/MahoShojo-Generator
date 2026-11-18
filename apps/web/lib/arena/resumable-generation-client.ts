@@ -60,6 +60,12 @@ export type OpenArenaGenerationStreamOptions = {
   isInitialCreateOutcomeAmbiguous?(_error: unknown): boolean;
   getInitialRoutePin?(): GenerationApiRoutePin | null;
   onStateChange?(_state: ArenaGenerationConnectionState): void;
+  onCancelResponse?(_info: Readonly<{
+    generationRequestId: string;
+    status: number;
+    serverStatus: string | null;
+    providerStopped: boolean;
+  }>): void;
   onRequestIdentity?(_requestId: string): void;
   /** The original upstream response, before C0 synthesizes identity headers. */
   observeResponse?(_response: Response): void;
@@ -236,6 +242,36 @@ export const captureArenaGenerationActorToken = (
   storage: StoragePort | null = defaultActorStorage(),
 ): void => captureActorToken(storage, response);
 
+const PROVIDER_STOPPED_SERVER_STATUSES = new Set([
+  'cancelling',
+  'cancelled',
+  'finalizing',
+  'completed',
+  'failed',
+  'producer_lost',
+]);
+
+const settleAbandonedUnconfirmedCancel = (
+  storage: StoragePort | null,
+  abandonedRequestId: string | undefined,
+): void => {
+  if (!storage || !abandonedRequestId) return;
+  const enumerable = storage as StoragePort & Partial<Pick<Storage, 'length' | 'key'>>;
+  if (typeof enumerable.length !== 'number' || typeof enumerable.key !== 'function') return;
+  try {
+    for (let index = 0; index < enumerable.length; index += 1) {
+      const key = enumerable.key(index);
+      if (!key || !key.startsWith(ARENA_GENERATION_CLIENT_STATE_KEY)) continue;
+      const parsed = readPersistedArenaGeneration(storage, key);
+      if (parsed?.generationRequestId === abandonedRequestId && parsed.state === 'cancel_unconfirmed') {
+        storage.setItem(key, JSON.stringify({ ...parsed, state: 'cancelled' }));
+      }
+    }
+  } catch {
+    // Best-effort cleanup only; live stream state remains authoritative.
+  }
+};
+
 export const openArenaGenerationStream = async (
   options: OpenArenaGenerationStreamOptions,
 ): Promise<Response> => {
@@ -260,6 +296,7 @@ export const openArenaGenerationStream = async (
     options.onStateChange?.('cancel_unconfirmed');
     throw Object.assign(new Error('ARENA_GENERATION_CANCEL_UNCONFIRMED'), { name: 'AbortError' });
   }
+  settleAbandonedUnconfirmedCancel(storage, options.abandonCancelledRequestId);
   let initialHeaders: Headers;
   let createBody: string;
   let claimedState = false;
@@ -304,12 +341,36 @@ export const openArenaGenerationStream = async (
         { method: 'GET', headers: withActorToken({ Accept: 'text/event-stream' }, actorStorage), signal }, routePin,
       ),
       // Existing Web policy: cancel is an independent primary-only intent, not a pinned safe-read.
-      cancel: ({ generationId, generationRequestId, reason, signal }) => options.fetcher(
-        generationId ? `/api/arena/generations/${encodeURIComponent(generationId)}/cancel` : options.endpoint,
-        { method: generationId ? 'POST' : 'DELETE',
-          headers: withActorToken({ 'Content-Type': 'application/json' }, actorStorage),
-          body: JSON.stringify(generationId ? { reason } : { generationRequestId, reason }), signal },
-      ),
+      cancel: async ({ generationId, generationRequestId, reason, signal }) => {
+        const response = await options.fetcher(
+          generationId ? `/api/arena/generations/${encodeURIComponent(generationId)}/cancel` : options.endpoint,
+          { method: generationId ? 'POST' : 'DELETE',
+            headers: withActorToken({ 'Content-Type': 'application/json' }, actorStorage),
+            body: JSON.stringify(generationId ? { reason } : { generationRequestId, reason }), signal },
+        );
+        if (options.onCancelResponse) {
+          let payload: { status?: unknown; cancelled?: unknown } | null = null;
+          try {
+            const parsed = await response.clone().json() as unknown;
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              payload = parsed as { status?: unknown; cancelled?: unknown };
+            }
+          } catch {
+            payload = null;
+          }
+          const serverStatus = typeof payload?.status === 'string' ? payload.status : null;
+          const providerStopped = response.status === 202
+            || payload?.cancelled === true
+            || (serverStatus !== null && PROVIDER_STOPPED_SERVER_STATUSES.has(serverStatus));
+          options.onCancelResponse(Object.freeze({
+            generationRequestId,
+            status: response.status,
+            serverStatus,
+            providerStopped,
+          }));
+        }
+        return response;
+      },
     },
   });
 };

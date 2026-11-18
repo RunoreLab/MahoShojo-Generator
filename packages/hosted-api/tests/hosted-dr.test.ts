@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ARENA_ROOM_ERROR_TAXONOMY_HEADER } from '@mahoshojo/contracts/arena-room';
 import {
+  ARENA_GENERATION_DISPATCHED_HEADER,
   createHostedApiCorsPreflightResponse,
   createHostedDrReadinessService,
   hasValidHostedApiProductionCorsOrigins,
   HOSTED_API_CORS_ALLOW_HEADERS,
   HOSTED_API_CORS_ALLOW_METHODS,
+  HOSTED_API_CORS_EXPOSE_HEADERS,
   parseHostedApiDeploymentTarget,
   resolveHostedApiCorsOrigin,
   selectHostedDrRuntime,
@@ -91,6 +93,8 @@ describe('Hosted API cross-runtime CORS contract', () => {
 
     expect(response.headers.get('access-control-allow-origin')).toBe('https://app.example.test');
     expect(response.headers.get('access-control-expose-headers')).toContain('X-Request-Id');
+    expect(response.headers.get('access-control-expose-headers')).toContain(ARENA_GENERATION_DISPATCHED_HEADER);
+    expect(HOSTED_API_CORS_EXPOSE_HEADERS).toContain(ARENA_GENERATION_DISPATCHED_HEADER);
     expect(response.headers.get('vary')).toContain('Origin');
   });
 });

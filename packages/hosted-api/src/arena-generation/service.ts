@@ -29,6 +29,7 @@ import { ARENA_RESOURCE_BUDGET } from './resource-budget';
 import { extractArenaMultiplayerParticipation, type ArenaMultiplayerParticipation } from '@mahoshojo/contracts/arena-room';
 import { WebPackageArtifactSchema, type WebPackageArtifact } from '@mahoshojo/contracts/web-package';
 import { ARENA_STORY_PROTOCOL_VERSION, ArenaStoryIdentitySchema, type ArenaStoryIdentity } from '@mahoshojo/contracts/arena-story';
+import { ARENA_GENERATION_DISPATCHED_HEADER } from '../hosted-dr';
 
 export const MAX_ARENA_CREATE_BODY_BYTES = ARENA_RESOURCE_BUDGET.hardBodyBytes;
 export const MAX_ARENA_CANCEL_BODY_BYTES = ARENA_RESOURCE_BUDGET.cancelBodyBytes;
@@ -305,6 +306,7 @@ export interface GenerationReplayStore {
     actorKey: string;
     reason: GenerationCancelReason;
     now: string;
+    preCancelRequestId?: string;
     roomAdmission?: RoomGenerationAdmission;
     producerTokenDigest?: string | null;
   }): Promise<
@@ -729,6 +731,16 @@ const jsonResponse = (payload: unknown, status: number): Response => new Respons
     },
   },
 );
+
+const withNotDispatchedHeader = (response: Response): Response => {
+  const headers = new Headers(response.headers);
+  headers.set(ARENA_GENERATION_DISPATCHED_HEADER, 'false');
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+};
 
 type RejectedResponseSnapshot = Readonly<{
   body: ArrayBuffer;
@@ -3088,40 +3100,40 @@ export const createArenaGenerationService = (
       command: ArenaGenerationCreateCommand,
     ): Promise<ArenaGenerationSubscription | Response> {
       if (request.method !== 'POST') {
-        return jsonResponse({ code: 'METHOD_NOT_ALLOWED', error: 'Method not allowed' }, 405);
+        return withNotDispatchedHeader(jsonResponse({ code: 'METHOD_NOT_ALLOWED', error: 'Method not allowed' }, 405));
       }
       const generationRequestId = typeof command?.generationRequestId === 'string'
         ? command.generationRequestId.trim()
         : '';
       if (!isGenerationRequestId(generationRequestId)) {
-        return jsonResponse({
+        return withNotDispatchedHeader(jsonResponse({
           code: 'INVALID_GENERATION_REQUEST_ID',
           error: 'generationRequestId 无效',
-        }, 400);
+        }, 400));
       }
       if (
         !command.payload
         || typeof command.payload !== 'object'
         || Array.isArray(command.payload)
       ) {
-        return jsonResponse({ code: 'INVALID_REQUEST', error: '请求体必须是对象' }, 400);
+        return withNotDispatchedHeader(jsonResponse({ code: 'INVALID_REQUEST', error: '请求体必须是对象' }, 400));
       }
       if (
         !Number.isSafeInteger(command.bodyBytes)
         || command.bodyBytes < 0
         || command.bodyBytes > MAX_ARENA_CREATE_BODY_BYTES
       ) {
-        return jsonResponse({
+        return withNotDispatchedHeader(jsonResponse({
           code: 'ARENA_REQUEST_TOO_LARGE',
           error: '请求体超过允许的大小',
-        }, 413);
+        }, 413));
       }
       const payload = { ...command.payload };
       delete payload.generationRequestId;
       const identity = command.trustedStoryIdentity === undefined
         ? null : ArenaStoryIdentitySchema.safeParse(command.trustedStoryIdentity);
       if (identity && !identity.success) {
-        return jsonResponse({ code: 'INVALID_STORY_IDENTITY', error: '故事请求身份无效' }, 400);
+        return withNotDispatchedHeader(jsonResponse({ code: 'INVALID_STORY_IDENTITY', error: '故事请求身份无效' }, 400));
       }
       parsedCreateCommands.set(request, {
         generationRequestId,
@@ -3142,12 +3154,12 @@ export const createArenaGenerationService = (
       request: Request,
     ): Promise<ArenaGenerationSubscription | Response> {
       if (request.method !== 'POST') {
-        return jsonResponse({ code: 'METHOD_NOT_ALLOWED', error: 'Method not allowed' }, 405);
+        return withNotDispatchedHeader(jsonResponse({ code: 'METHOD_NOT_ALLOWED', error: 'Method not allowed' }, 405));
       }
       let actor = await dependencies.resolveActor(request);
-      if (!actor) return jsonResponse({ code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
+      if (!actor) return withNotDispatchedHeader(jsonResponse({ code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401));
       const parsed = parsedCreateCommands.get(request) ?? await parseCreatePayload(request);
-      if (parsed instanceof Response) return parsed;
+      if (parsed instanceof Response) return withNotDispatchedHeader(parsed);
       if (dependencies.resolveCreateActor) {
         actor = await dependencies.resolveCreateActor({
           request,
@@ -3155,17 +3167,17 @@ export const createArenaGenerationService = (
           generationRequestId: parsed.generationRequestId,
           payload: parsed.payload,
         });
-        if (!actor) return jsonResponse({ code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401);
+        if (!actor) return withNotDispatchedHeader(jsonResponse({ code: 'UNAUTHORIZED', error: 'Unauthorized' }, 401));
       }
 
       const roomContext = readRoomStartContext(parsed.trustedRoomContext);
       if (actor.actorKey.startsWith('pvp-room:')) {
         if (!roomContext || actor.actorKey !== `pvp-room:${roomContext.admission.roomId}`
           || parsed.generationRequestId !== roomContext.admission.generationRequestId) {
-          return jsonResponse({ code: 'ARENA_ROOM_START_CONTEXT_REQUIRED', error: 'Trusted Room start context required' }, 403);
+          return withNotDispatchedHeader(jsonResponse({ code: 'ARENA_ROOM_START_CONTEXT_REQUIRED', error: 'Trusted Room start context required' }, 403));
         }
       } else if (roomContext) {
-        return jsonResponse({ code: 'ARENA_ROOM_START_CONTEXT_INVALID', error: 'Room actor mismatch' }, 403);
+        return withNotDispatchedHeader(jsonResponse({ code: 'ARENA_ROOM_START_CONTEXT_INVALID', error: 'Room actor mismatch' }, 403));
       }
 
       let semanticPayload: Record<string, unknown>;
@@ -3178,7 +3190,7 @@ export const createArenaGenerationService = (
           generationRequestId: parsed.generationRequestId,
           payload: parsed.payload,
         });
-        if (preflighted instanceof Response) return preflighted;
+        if (preflighted instanceof Response) return withNotDispatchedHeader(preflighted);
         if (isArenaGenerationAuditableRejection(preflighted)) {
           return recordAuditableRejection({
             ...(roomContext ? { roomContext } : {}),
@@ -3201,7 +3213,7 @@ export const createArenaGenerationService = (
           executionPayload: parsed.payload,
           semanticPayload: parsed.payload,
         };
-        if (legacyPrepared instanceof Response) return legacyPrepared;
+        if (legacyPrepared instanceof Response) return withNotDispatchedHeader(legacyPrepared);
         if (isArenaGenerationAuditableRejection(legacyPrepared)) {
           return recordAuditableRejection({
             ...(roomContext ? { roomContext } : {}),
@@ -3240,7 +3252,7 @@ export const createArenaGenerationService = (
       if (roomContext && (roomContext.admission.generationId !== generationId
         || (roomContext.admission.generationPayloadDigest !== null
           && roomContext.admission.generationPayloadDigest !== `sha256:${legacyPayloadHash}`))) {
-        return jsonResponse({ code: 'GENERATION_REQUEST_CONFLICT', error: 'Room generation identity mismatch' }, 409);
+        return withNotDispatchedHeader(jsonResponse({ code: 'GENERATION_REQUEST_CONFLICT', error: 'Room generation identity mismatch' }, 409));
       }
       const producerTokenDigest = roomContext ? await hashRoomProducerToken(producerToken) : undefined;
       const preparationSeed = splitMaterialization
@@ -3388,14 +3400,15 @@ export const createArenaGenerationService = (
         try {
           durable = await inspectOwnedFinalization(generationId, actor.actorKey);
         } catch {
-          await dependencies.store.releaseReservation({
+          const releaseResult = await dependencies.store.releaseReservation({
             generationId,
             producerToken,
           }).catch(() => ({ released: false }));
-          return jsonResponse({
+          const errorResponse = jsonResponse({
             code: 'GENERATION_TERMINAL_LOOKUP_UNAVAILABLE',
             error: '无法确认 generation terminal state',
           }, 503);
+          return releaseResult.released ? withNotDispatchedHeader(errorResponse) : errorResponse;
         }
         if (durable.kind === 'pending') {
           await dependencies.store.releaseReservation({
@@ -3477,14 +3490,15 @@ export const createArenaGenerationService = (
           || !isArenaPreparationVersion(reservedVersion)
         ) {
           if (reservation.kind === 'created') {
-            await dependencies.store.releaseReservation({
+            const releaseResult = await dependencies.store.releaseReservation({
               generationId: reservation.generationId,
               producerToken,
             }).catch(() => ({ released: false }));
-            return jsonResponse({
+            const errorResponse = jsonResponse({
               code: 'GENERATION_PREPARATION_UNAVAILABLE',
               error: 'Generation preparation state unavailable',
             }, 503);
+            return releaseResult.released ? withNotDispatchedHeader(errorResponse) : errorResponse;
           }
           prepared = {
             executionPayload: materializationPayload!,
@@ -3514,11 +3528,11 @@ export const createArenaGenerationService = (
             }
             if (materialized instanceof Response) {
               if (reservation.kind === 'created') {
-                await dependencies.store.releaseReservation({
+                const releaseResult = await dependencies.store.releaseReservation({
                   generationId: reservation.generationId,
                   producerToken,
                 }).catch(() => ({ released: false }));
-                return materialized;
+                return releaseResult.released ? withNotDispatchedHeader(materialized) : materialized;
               }
               prepared = { executionPayload: materializationPayload! };
             } else {
@@ -3526,14 +3540,15 @@ export const createArenaGenerationService = (
             }
           } catch {
             if (reservation.kind === 'created') {
-              await dependencies.store.releaseReservation({
+              const releaseResult = await dependencies.store.releaseReservation({
                 generationId: reservation.generationId,
                 producerToken,
               }).catch(() => ({ released: false }));
-              return jsonResponse({
+              const errorResponse = jsonResponse({
                 code: 'GENERATION_MATERIALIZATION_FAILED',
                 error: 'Generation materialization failed',
               }, 500);
+              return releaseResult.released ? withNotDispatchedHeader(errorResponse) : errorResponse;
             }
             prepared = { executionPayload: materializationPayload! };
           }
@@ -3642,6 +3657,7 @@ export const createArenaGenerationService = (
           actorKey: actor.actorKey,
           reason: cancelReason,
           now: dependencies.now().toISOString(),
+          ...(!actor.actorKey.startsWith('pvp-room:') ? { preCancelRequestId: generationRequestId } : {}),
         });
       } catch {
         const durable = await inspectOwnedFinalization(generationId, actor.actorKey)
