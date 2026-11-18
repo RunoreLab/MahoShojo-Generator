@@ -15,25 +15,70 @@ for (let i = 2; i < process.argv.length; i += 2) {
 const out = resolve(root, args.get('out') ?? '.tmp/narrative-eval/candidate-prompts.json');
 const compiled = resolve(root, '.tmp/narrative-eval', `core-${process.pid}.mjs`);
 await mkdir(dirname(compiled), { recursive: true });
-await build({ stdin: { contents: "export { assembleArenaGenerationPrompt, createArenaStreamProjector } from '@mahoshojo/ai-core/arena-generation';", resolveDir: resolve(root, 'packages/ai-core'), loader: 'ts' },
+await build({
+  stdin: {
+    contents: [
+      "export { assembleArenaGenerationPrompt, createArenaStreamProjector, buildArenaStructuredReportSchema, parseArenaStructuredReportJson } from '@mahoshojo/ai-core/arena-generation';",
+      "export { buildStructuredJsonInstructionFromZodSchema } from '@mahoshojo/ai-core/structured-json';",
+    ].join('\n'),
+    resolveDir: resolve(root, 'packages/ai-core'),
+    loader: 'ts',
+  },
   bundle: true, platform: 'node', format: 'esm', outfile: compiled, logLevel: 'silent',
   plugins: args.get('source-ref') ? [{ name: 'frozen-arena-source', setup(builder) {
     const revision = execFileSync('git', ['rev-parse', '--verify', '--end-of-options', `${args.get('source-ref')}^{commit}`], { cwd: root, encoding: 'utf8' }).trim();
-    builder.onLoad({ filter: /arena-generation[/\\](prompt|prompt-assembly|structured-report)\.ts$/ }, ({ path }) => ({
-      contents: execFileSync('git', ['show', `${revision}:packages/ai-core/src/arena-generation/${path.split(/[/\\]/u).at(-1)}`], { cwd: root, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 }), loader: 'ts', resolveDir: dirname(path),
-    }));
+    const loadFromRevision = (repoRelativePath, diskPath) => {
+      try {
+        execFileSync('git', ['cat-file', '-e', `${revision}:${repoRelativePath}`], { cwd: root, stdio: 'ignore' });
+      } catch {
+        return null;
+      }
+      return {
+        contents: execFileSync('git', ['show', `${revision}:${repoRelativePath}`], { cwd: root, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 }),
+        loader: 'ts',
+        resolveDir: dirname(diskPath),
+      };
+    };
+    builder.onLoad({ filter: /packages[/\\]ai-core[/\\]src[/\\](?:narrative-rules|arena-generation[/\\](?:prompt|prompt-assembly|structured-report|mode-rules))\.ts$/ }, ({ path }) => {
+      const normalized = path.replace(/\\/gu, '/');
+      const marker = 'packages/ai-core/src/';
+      const idx = normalized.indexOf(marker);
+      if (idx < 0) return null;
+      return loadFromRevision(normalized.slice(idx), path);
+    });
   } }] : [],
 });
 const core = await import(pathToFileURL(compiled).href);
 const samples = JSON.parse(await readFile(resolve(root, args.get('samples') ?? 'packages/ai-core/fixtures/narrative-fidelity-cases.json'), 'utf8'));
+const toCombatant = (entry, fallbackType) => {
+  if (entry && typeof entry === 'object' && 'type' in entry && 'data' in entry) return entry;
+  return { type: fallbackType ?? 'general-character', data: { templateId: '通用角色', ...entry } };
+};
 const cases = samples.map(sample => {
+  const outputContract = sample.outputContract ?? 'stream-markdown';
   const payload = sample.payload ?? { mode: sample.mode, language: 'zh-CN',
-    combatants: sample.characters.map(data => ({ type: 'general-character', data: { templateId: '通用角色', ...data } })),
+    combatants: sample.characters.map(item => toCombatant(item, sample.characterType)),
     scenario: sample.scenario ? { templateId: '通用情景', ...sample.scenario } : null,
-    userGuidance: sample.guidance ?? '', readArenaHistory: false, readCurrentState: false,
-    writeArenaHistory: true, writeCurrentState: true, storyLength: 'short' };
-  return { id: sample.id, checks: sample.checks ?? [], payload, ...core.assembleArenaGenerationPrompt({ payload,
-    outputContract: 'stream-markdown', adjudicationResults: null, reporterInfo: { name: '验收记者', publication: '本地验收' } }) };
+    userGuidance: sample.guidance ?? '',
+    readArenaHistory: sample.readArenaHistory ?? false,
+    readCurrentState: sample.readCurrentState ?? false,
+    readNarrativeHistory: sample.readNarrativeHistory ?? false,
+    ...(Array.isArray(sample.narrativeHistory) ? { narrativeHistory: sample.narrativeHistory } : {}),
+    writeArenaHistory: sample.writeArenaHistory ?? true,
+    writeCurrentState: sample.writeCurrentState ?? true,
+    storyLength: sample.storyLength ?? 'short' };
+  const assembled = core.assembleArenaGenerationPrompt({ payload,
+    outputContract, adjudicationResults: sample.adjudicationResults ?? null, reporterInfo: { name: '验收记者', publication: '本地验收' } });
+  const schemaOptions = outputContract === 'structured-report' ? {
+    enableImpacts: payload.writeArenaHistory !== false || payload.writeCurrentState !== false,
+    enableImpactText: payload.writeArenaHistory !== false,
+    enableCurrentState: payload.writeCurrentState !== false,
+    mode: payload.mode,
+  } : null;
+  const systemPrompt = schemaOptions
+    ? [assembled.systemPrompt, core.buildStructuredJsonInstructionFromZodSchema(core.buildArenaStructuredReportSchema(schemaOptions))].filter(Boolean).join('\n\n')
+    : assembled.systemPrompt;
+  return { id: sample.id, checks: sample.checks ?? [], outputContract, schemaOptions, payload, ...assembled, systemPrompt };
 });
 const snapshot = { capturedAt: new Date().toISOString(), sourceRef: args.get('source-ref') ?? 'working-tree', cases };
 await mkdir(dirname(out), { recursive: true });
@@ -79,14 +124,27 @@ for (const model of args.get('models').split(',')) {
         const value = await response.json();
         const choice = value.choices?.[0];
         const text = choice?.message?.content ?? '';
-        const projector = core.createArenaStreamProjector({ expectsMeta: true, strictTrailer: true });
-        if (typeof text === 'string') projector.push(text);
-        projector.finish();
-        const metaEvent = projector.result().metaEvent;
-        record = { id: sample.id, model, variant, repeat, promptDigest: digest, at: new Date().toISOString(),
+        const outputContract = sample.outputContract ?? 'stream-markdown';
+        let metaEvent = null;
+        let structuredStrictValid;
+        let structuredFenceStrippedValid;
+        if (outputContract === 'structured-report') {
+          const schemaOptions = entry.schemaOptions ?? { enableImpacts: true, enableImpactText: true, enableCurrentState: true, mode: entry.payload?.mode };
+          const raw = typeof text === 'string' ? text.trim() : '';
+          structuredStrictValid = Boolean(raw && core.parseArenaStructuredReportJson(raw, schemaOptions));
+          const unfenced = raw.replace(/^\s*```(?:json)?\s*\n?/iu, '').replace(/\n?\s*```\s*$/iu, '').trim();
+          structuredFenceStrippedValid = Boolean(unfenced && core.parseArenaStructuredReportJson(unfenced, schemaOptions));
+        } else {
+          const projector = core.createArenaStreamProjector({ expectsMeta: true, strictTrailer: true });
+          if (typeof text === 'string') projector.push(text);
+          projector.finish();
+          metaEvent = projector.result().metaEvent;
+        }
+        record = { id: sample.id, model, variant, repeat, outputContract, promptDigest: digest, at: new Date().toISOString(),
           ok: response.ok && Boolean(text) && choice?.finish_reason === 'stop', status: response.status,
           finishReason: choice?.finish_reason, durationMs: Date.now() - started, usage: value.usage,
           output: text, metaEvent,
+          ...(outputContract === 'structured-report' ? { structuredStrictValid, structuredFenceStrippedValid } : {}),
           errorCode: value.error?.code ?? value.error?.type, retryAfter: response.headers.get('retry-after'),
           errorMessage: typeof value.error?.message === 'string' ? value.error.message.slice(0, 300) : undefined };
         if ([401, 402, 403, 429].includes(response.status)) stop = true;
