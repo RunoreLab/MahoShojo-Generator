@@ -592,7 +592,12 @@ export const createStreamPromptBuilder = (
         finalPrompt += `\n\n【当前状态同步】请在宿主输出契约的 impacts 数组中为每位角色填写 currentStateSummary 字段，精确描述事件结束后的即时状态（如身体状况、关系、心情或想法）。如果当前状态已有既定格式，请遵循该格式。如果当前状态中存在物品列表，请确保物品名称和数量准确反映事后情况。`;
     }
 
-    if (outputContract === 'structured-report') return `${finalPrompt}\n\n【输出格式】严格按宿主 JSON Schema 输出一个 JSON 对象，不输出 Markdown 正文、代码围栏或 Arena control trailer。`;
+    if (outputContract === 'structured-report') {
+        const structuredGuide = mode === 'daily'
+            ? '\n字段语义：headline 使用自然温和的生活化标题；article.body 为日常故事正文，article.analysis 为约100-150字的温和生活侧写与关系观察（不渲染战斗悬念）；officialReport.winner 在日常无明确比拼胜负时直接列出所有核心参与角色的名字（顿号分隔，切勿为填此栏强行安排战斗），officialReport.conclusion 简短收束日常余韵；impacts（若启用）如实记录日常经历与即时状态，characterName 精确使用各【登场角色】标题中的名称。'
+            : '\n字段语义：无胜负故事在 officialReport.winner 列出所有核心参与角色的名字（顿号分隔），对抗平局写“平局”，分出胜负写胜者；impacts（若启用）中的 characterName 精确使用各【登场角色】标题中的名称。';
+        return `${finalPrompt}\n\n【输出格式】严格按宿主 JSON Schema 输出一个 JSON 对象，不输出 Markdown 正文、代码围栏或 Arena control trailer。${structuredGuide}`;
+    }
 
     // 支持输出 Markdown 和 Web/HTML 或 Package target 格式
     const isWebContract = outputContract === 'web-document' || outputContract === 'web-package-target';

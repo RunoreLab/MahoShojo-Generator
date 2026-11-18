@@ -615,4 +615,30 @@ describe('arena prompt builder', () => {
     expect(prompt).toContain('日常模式重在生活互动，默认不分胜负');
     expect(prompt).toContain('日常模式下若无明确比拼胜负，report.winner 请列出核心参与角色');
   });
+
+  it('日常模式 structured-report 提示词附带非战斗字段语义与 officialReport.winner 无胜负指引', () => {
+    const prompt = createPromptBuilder(
+      { magicalGirl: ['Q1'], default: ['Q1'] },
+      null,
+      null,
+      false,
+      'zh-CN',
+      'daily',
+      null,
+      null,
+      undefined,
+      undefined,
+      false,
+      0,
+      false,
+      true,
+      null,
+      undefined,
+      undefined,
+    )({ combatants: 创建测试角色() });
+
+    expect(prompt).toContain('严格按宿主 JSON Schema');
+    expect(prompt).toContain('officialReport.winner 在日常无明确比拼胜负时直接列出所有核心参与角色的名字');
+    expect(prompt).toContain('headline 使用自然温和的生活化标题');
+  });
 });
