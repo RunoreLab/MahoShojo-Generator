@@ -83,9 +83,11 @@ import {
 import {
   arenaGenerationConnectionNotice,
   captureArenaGenerationActorToken,
+  clearPersistedArenaGenerationSlot,
   isArenaGenerationRecoveryState,
   mergeArenaGenerationSnapshotMarkdown,
   openArenaGenerationStream,
+  settlePersistedArenaGenerationCancel,
   type ArenaGenerationConnectionState,
   withArenaGenerationActorToken,
 } from '@/lib/arena/resumable-generation-client';
@@ -123,6 +125,44 @@ export type ArenaRoomGenerationPreflightPrompt = Readonly<{
   pendingProposalCount: number;
   busy: boolean;
 }>;
+
+export type ArenaUnconfirmedCancelPrompt = Readonly<{
+  state: 'cancelling' | 'cancel_unconfirmed';
+  requestId: string | null;
+}>;
+
+const resolveArenaRecoveryErrorMessage = (
+  error: unknown,
+): { message: string; shouldClearSlot: boolean } | null => {
+  if (!(error instanceof Error)) return null;
+  if (error.message === 'ARENA_GENERATION_STATE_UNKNOWN') {
+    return {
+      message: '⚠️ 未能确认上一场战报是否已在服务器启动（可能因网络中断未送达或记录已过期），已重置本地恢复状态，请重新点击生成。',
+      shouldClearSlot: true,
+    };
+  }
+  if (error.message === 'ARENA_RESUME_ATTEMPTS_EXHAUSTED') {
+    return {
+      message: '⚠️ 战报流重连次数已耗尽，请检查网络后重新生成。',
+      shouldClearSlot: false,
+    };
+  }
+  if (error.message === 'ARENA_RESUME_HTTP_404') {
+    return {
+      message: '⚠️ 上一场待恢复的战报在服务器已不存在或已过期，已清理本地恢复记录，请重新生成。',
+      shouldClearSlot: true,
+    };
+  }
+  const resumeHttpMatch = /^ARENA_RESUME_HTTP_(\d{3})$/u.exec(error.message);
+  if (resumeHttpMatch) {
+    const status = Number(resumeHttpMatch[1]);
+    return {
+      message: `⚠️ 恢复上一场战报失败（HTTP ${resumeHttpMatch[1]}），请稍后重试或重新生成。`,
+      shouldClearSlot: status >= 400 && status < 500,
+    };
+  }
+  return null;
+};
 
 let sharedGenerationAbortController: AbortController | null = null;
 let sharedGenerationStop: (() => void) | null = null;
@@ -341,6 +381,9 @@ export const useBattleEngine = () => {
   const isRedoingUpdates = useBattleSelector((state) => state.isRedoingUpdates);
   const { handleResolveRandomPlaceholders } = useBattleActions();
   const arenaRoomRuntime = useArenaRoomContext();
+  const [unconfirmedCancelPrompt, setUnconfirmedCancelPrompt] = useState<ArenaUnconfirmedCancelPrompt | null>(null);
+  const dismissUnconfirmedCancelPrompt = useCallback(() => setUnconfirmedCancelPrompt(null), []);
+  const confirmedProviderStoppedRequestIdsRef = useRef<Set<string>>(new Set());
   const [arenaRoomGenerationPreflight, setArenaRoomGenerationPreflight] = useState<ArenaRoomGenerationPreflightPrompt | null>(null);
   const pendingArenaRoomGenerationPreflight = useRef<{
     resolve: (choice: ArenaRoomGenerationPreflightChoice) => void;
@@ -420,13 +463,19 @@ export const useBattleEngine = () => {
 
   const handleGenerate = useCallback(async (abandonCancelledRequestId?: string) => {
     let lastArenaConnectionState: ArenaGenerationConnectionState | null = null;
+    let arenaStreamEndpoint: string | null = null;
+    let arenaStreamRequestBody: Record<string, unknown> | null = null;
     const roomAction = arenaRoomRuntime
       ? resolveArenaRoomGenerationAction(arenaRoomRuntime.state)
       : { inRoom: false, canStart: true, canRetry: false, reason: null } as const;
     const liveState = useBattleStore.getState();
     if (!roomAction.inRoom && (liveState.arenaGenerationConnectionState === 'cancelling'
       || liveState.arenaGenerationConnectionState === 'cancel_unconfirmed')) {
-      setError(arenaGenerationConnectionNotice(liveState.arenaGenerationConnectionState));
+      setUnconfirmedCancelPrompt({
+        state: liveState.arenaGenerationConnectionState,
+        requestId: liveState.arenaGenerationCancellationRequestId,
+      });
+      setError(null);
       return;
     }
     if (roomAction.inRoom && roomAction.canRetry && arenaRoomRuntime) {
@@ -544,7 +593,10 @@ export const useBattleEngine = () => {
         if (!isLatestRequest() || requestAbortController.signal.aborted) return;
         const state = resumableClientStarted && !generationTerminalObserved && isRequestIdentityCurrent()
           ? 'cancelling' : null;
-        setArenaGenerationConnectionState(state);
+        useBattleStore.setState({
+          arenaGenerationConnectionState: state,
+          arenaGenerationCancellationRequestId: state ? activeGenerationRequestId : null,
+        });
         setError(!isRequestIdentityCurrent() ? null : state ? null : generationTerminalObserved
           ? '已停止本地处理，服务器生成已结束。' : '已停止生成准备，尚未发送生成请求。');
         setIsGenerating(false);
@@ -563,6 +615,7 @@ export const useBattleEngine = () => {
     useNarrativeDraftsStore.getState().setScope(narrativeDraftOwner.scope);
     const autoRetainNarrativeDraft = useNarrativeDraftsStore.getState().autoRetain;
     useNarrativeDraftsStore.getState().clearCandidate();
+    setUnconfirmedCancelPrompt(null);
     setArenaGenerationConnectionState(null);
     setIsStreaming(false);
     setResultWebPackage(null);
@@ -664,7 +717,6 @@ export const useBattleEngine = () => {
         }
       }
       const requestBody = roomAction.inRoom ? null : {
-        generationRequestId,
         ...businessInputSnapshot,
         ...(webPackagePromptProjection ? { webPackagePromptProjection } : {}),
         customProvider: customProviderPayload ?? undefined,
@@ -1040,11 +1092,14 @@ export const useBattleEngine = () => {
                 dispatcher: ReturnType<typeof createPinnedGenerationApiSafeReadDispatcher>;
               } | null = null;
               resumableClientStarted = true;
+              arenaStreamEndpoint = endpoint;
+              arenaStreamRequestBody = requestBody;
               const response = await openArenaGenerationStream({
                   endpoint,
                   body: requestBody,
                   generationRequestId,
                   abandonCancelledRequestId,
+                  cancelConfirmationTimeoutMs: 10_000,
                   headers: requestHeaders,
                   signal: abortController.signal,
                   fetcher: (input, init, routePin, onRoutePinSelected) => {
@@ -1086,6 +1141,11 @@ export const useBattleEngine = () => {
                     isGenerationApiClientErrorCode(error, 'AMBIGUOUS_OPERATION_OUTCOME')
                   ),
                   getInitialRoutePin: () => generationIntent?.getRoutePin() ?? null,
+                  onCancelResponse: (info) => {
+                    if (info.providerStopped) {
+                      confirmedProviderStoppedRequestIdsRef.current.add(info.generationRequestId);
+                    }
+                  },
                   onRequestIdentity: (requestId) => {
                     activeGenerationRequestId = requestId;
                     draftEvidence.onRequestIdentity(requestId);
@@ -1101,10 +1161,29 @@ export const useBattleEngine = () => {
                       if (!isLatestRequest()) return;
                       if (!isRequestIdentityCurrent()) {
                         setArenaGenerationConnectionState(null);
+                        setUnconfirmedCancelPrompt(null);
                         return;
                       }
-                      useBattleStore.setState({ arenaGenerationConnectionState: state,
-                        arenaGenerationCancellationRequestId: state === 'cancelled' ? null : activeGenerationRequestId });
+                      const effectiveState = state === 'cancel_unconfirmed'
+                        && confirmedProviderStoppedRequestIdsRef.current.has(activeGenerationRequestId)
+                        ? 'cancelled'
+                        : state;
+                      lastArenaConnectionState = effectiveState;
+                      if (effectiveState === 'cancelled') {
+                        generationTerminalObserved = true;
+                        if (state === 'cancel_unconfirmed') {
+                          settlePersistedArenaGenerationCancel(activeGenerationRequestId);
+                        }
+                        setUnconfirmedCancelPrompt(null);
+                      } else if (effectiveState === 'cancel_unconfirmed') {
+                        setUnconfirmedCancelPrompt((current) => (
+                          current ? { state: 'cancel_unconfirmed', requestId: activeGenerationRequestId } : null
+                        ));
+                      }
+                      useBattleStore.setState({
+                        arenaGenerationConnectionState: effectiveState,
+                        arenaGenerationCancellationRequestId: effectiveState === 'cancelled' ? null : activeGenerationRequestId,
+                      });
                       setError(null);
                       return;
                     }
@@ -1124,6 +1203,12 @@ export const useBattleEngine = () => {
             return;
           }
           if (!response.ok) {
+            if (requestBody) {
+              await clearPersistedArenaGenerationSlot({
+                endpoint,
+                body: requestBody,
+              });
+            }
             const text = await response.text();
             if (!canCommit()) return;
             let json: any = null;
@@ -2061,9 +2146,48 @@ export const useBattleEngine = () => {
 
       startCooldown();
 	    } catch (error) {
+          if (
+            generationMode === 'stream'
+            && !roomAction.inRoom
+            && arenaStreamEndpoint
+            && arenaStreamRequestBody
+            && (
+              generationDispatchedAt === null
+              || error instanceof AuthIdentityChangedError
+              || requestAbortController?.signal.reason === 'auth-identity-changed'
+            )
+            && !(error instanceof Error && error.message === 'ARENA_GENERATION_CANCEL_UNCONFIRMED')
+          ) {
+            await clearPersistedArenaGenerationSlot({
+              endpoint: arenaStreamEndpoint,
+              body: arenaStreamRequestBody,
+            });
+          }
           if (!canCommit()) return;
+          if (error instanceof Error && error.message === 'ARENA_GENERATION_CANCEL_UNCONFIRMED') {
+            setUnconfirmedCancelPrompt({
+              state: 'cancel_unconfirmed',
+              requestId: activeGenerationRequestId,
+            });
+            setError(null);
+            return;
+          }
           if (lastArenaConnectionState === 'cancel_unconfirmed') {
             setError(null);
+            return;
+          }
+          const recoveryError = generationMode === 'stream' && !roomAction.inRoom
+            ? resolveArenaRecoveryErrorMessage(error)
+            : null;
+          if (recoveryError) {
+            if (recoveryError.shouldClearSlot && arenaStreamRequestBody) {
+              await clearPersistedArenaGenerationSlot({
+                endpoint: arenaStreamEndpoint ?? '/api/arena/generate-stream',
+                body: arenaStreamRequestBody,
+              });
+            }
+            setError(recoveryError.message);
+            setNewsReport(null);
             return;
           }
 	      const shouldTreatAsInterrupted = generationMode === 'stream' && isStreamInterruptedError(error);
@@ -2090,6 +2214,9 @@ export const useBattleEngine = () => {
             if ((requestAbortController?.signal.reason !== STREAM_ABORT_REASON_USER
               && lastArenaConnectionState !== 'cancel_unconfirmed') || !isRequestIdentityCurrent()) {
               setArenaGenerationConnectionState(null);
+            }
+            if (!isRequestIdentityCurrent()) {
+              setUnconfirmedCancelPrompt(null);
             }
             setArenaRoomGenerationPreflight(null);
             setIsGenerating(false);
@@ -2159,11 +2286,18 @@ export const useBattleEngine = () => {
 
   const confirmGenerateAfterUnconfirmedCancel = useCallback(() => {
     const state = useBattleStore.getState();
-    if (state.arenaGenerationConnectionState !== 'cancel_unconfirmed' || !state.arenaGenerationCancellationRequestId) return;
-    const requestId = state.arenaGenerationCancellationRequestId;
+    const connectionState = state.arenaGenerationConnectionState;
+    const requestId = state.arenaGenerationCancellationRequestId ?? unconfirmedCancelPrompt?.requestId ?? null;
+    if (
+      (connectionState !== 'cancelling' && connectionState !== 'cancel_unconfirmed' && !unconfirmedCancelPrompt)
+      || !requestId
+    ) {
+      return;
+    }
+    setUnconfirmedCancelPrompt(null);
     setArenaGenerationConnectionState(null);
     return handleGenerate(requestId);
-  }, [handleGenerate, setArenaGenerationConnectionState]);
+  }, [handleGenerate, setArenaGenerationConnectionState, unconfirmedCancelPrompt]);
 
   const handleRetryUpdates = useCallback(async () => {
     const state = useBattleStore.getState();
@@ -2238,6 +2372,8 @@ export const useBattleEngine = () => {
     handleGenerate,
     stopGeneration,
     confirmGenerateAfterUnconfirmedCancel,
+    unconfirmedCancelPrompt,
+    dismissUnconfirmedCancelPrompt,
     handleRetryUpdates,
     isGenerating,
     arenaGenerationConnectionState,

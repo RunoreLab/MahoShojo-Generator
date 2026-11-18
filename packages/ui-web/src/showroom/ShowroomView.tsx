@@ -328,7 +328,7 @@ function AiSelectScrollSample() {
         group: index < 8 ? '内置模型' : '自定义模型',
       }))}
       actions={[{ id: 'reset', label: '重置样板模型' }]} onAction={() => setValue('12')} />
-    <button type="button" className="btn-secondary inline-flex items-center gap-2" aria-pressed={updating} onClick={() => setUpdating(value => !value)}>
+    <button type="button" className={`${generationActionClassNames.secondary} inline-flex items-center gap-2`} aria-pressed={updating} onClick={() => setUpdating(value => !value)}>
       <RefreshCw className="h-4 w-4" aria-hidden="true" />{updating ? '停止模拟更新' : '模拟生成更新'}（{progress}）
     </button>
   </section>;

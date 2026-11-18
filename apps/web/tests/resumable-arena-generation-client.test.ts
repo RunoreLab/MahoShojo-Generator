@@ -6,9 +6,11 @@ import {
   ARENA_GENERATION_ACTOR_TOKEN_KEY,
   ARENA_GENERATION_CLIENT_STATE_KEY,
   arenaGenerationConnectionNotice,
+  clearPersistedArenaGenerationSlot,
   mergeArenaGenerationSnapshotMarkdown,
   openArenaGenerationStream,
   readPersistedArenaGeneration,
+  settlePersistedArenaGenerationCancel,
 } from '@/lib/arena/resumable-generation-client';
 import {
   STREAM_ABORT_REASON_CONTENT_POLICY,
@@ -1571,5 +1573,67 @@ describe('resumable Arena generation client', () => {
       serverStatus: 'finalizing',
       providerStopped: true,
     }]));
+  });
+
+  it('clearPersistedArenaGenerationSlot 仅清理非取消态的遗留恢复槽位并保护取消态门禁', async () => {
+    const storage = new MemoryStorage();
+    const fetcher = vi.fn(async () => new Response(null, { status: 404 }));
+    await expect(openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic', prompt: 'slot-clean' },
+      headers: {},
+      fetcher: vi.fn()
+        .mockRejectedValueOnce(new TypeError('lost'))
+        .mockImplementationOnce(fetcher),
+      storage,
+      generationRequestId: 'request-unknown-slot',
+      maxReconnectAttempts: 0,
+    })).rejects.toThrow('ARENA_GENERATION_STATE_UNKNOWN');
+
+    expect(readPersistedArenaGeneration(storage)?.state).toBe('unknown');
+
+    await clearPersistedArenaGenerationSlot({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic', prompt: 'slot-clean' },
+      storage,
+    });
+    expect(readPersistedArenaGeneration(storage)).toBeNull();
+    expect(
+      Array.from(storage.values.keys()).filter((key) => key.startsWith(ARENA_GENERATION_CLIENT_STATE_KEY)),
+    ).toEqual([]);
+
+    const abort = new AbortController();
+    const pendingStorage = new MemoryStorage();
+    const opened = await openArenaGenerationStream({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic', prompt: 'slot-cancel-protected' },
+      headers: {},
+      fetcher: async (url) => (
+        url.includes('/cancel') ? new Response(null, { status: 503 }) : response(new ReadableStream())
+      ),
+      storage: pendingStorage,
+      generationRequestId: 'request-cancel-protected',
+      signal: abort.signal,
+    });
+    abort.abort(STREAM_ABORT_REASON_USER);
+    await opened.text();
+    await vi.waitFor(() => expect(readPersistedArenaGeneration(pendingStorage)?.state).toBe('cancel_unconfirmed'));
+
+    await clearPersistedArenaGenerationSlot({
+      endpoint: '/api/arena/generate-stream',
+      body: { mode: 'classic', prompt: 'slot-cancel-protected' },
+      storage: pendingStorage,
+    });
+    expect(readPersistedArenaGeneration(pendingStorage)?.state).toBe('cancel_unconfirmed');
+
+    // MemoryStorage 不含 length/key 时不抛出；若实现 Storage.length/key 则可精确清为 cancelled
+    class EnumerableMemoryStorage extends MemoryStorage {
+      get length() { return this.values.size; }
+      key(index: number) { return Array.from(this.values.keys())[index] ?? null; }
+    }
+    const enumerableStorage = new EnumerableMemoryStorage();
+    for (const [k, v] of pendingStorage.values.entries()) enumerableStorage.setItem(k, v);
+    settlePersistedArenaGenerationCancel('request-cancel-protected', enumerableStorage);
+    expect(readPersistedArenaGeneration(enumerableStorage)?.state).toBe('cancelled');
   });
 });

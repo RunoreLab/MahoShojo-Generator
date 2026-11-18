@@ -20,8 +20,10 @@ import { NarrativeHistoryModal } from './NarrativeHistoryModal';
 import { useNarrativeHistoryStore } from '../stores/useNarrativeHistoryStore';
 import { useNarrativeDraftsStore } from '../stores/useNarrativeDraftsStore';
 import { resolveArenaRoomGenerationAction } from '../multiplayer/generation-bridge';
+import { GenerationActionButton } from '@mahoshojo/ui-web/generation-actions';
 import { useArenaRoomContext } from '../multiplayer/useArenaRoom';
 import { ArenaRoomGenerationPreflightDialog } from '../multiplayer/ArenaRoomGenerationPreflightDialog';
+import { ArenaUnconfirmedCancelDialog } from './ArenaUnconfirmedCancelDialog';
 
 const normalizeArenaHistoryReadLimitForEstimate = (value: unknown): number | null => {
   if (value === null) return null;
@@ -98,6 +100,8 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
     handleGenerate,
     stopGeneration,
     confirmGenerateAfterUnconfirmedCancel,
+    unconfirmedCancelPrompt,
+    dismissUnconfirmedCancelPrompt,
     isGenerating,
     isRecoveringArenaGeneration,
     arenaGenerationConnectionState,
@@ -270,8 +274,6 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
     if (roomAction.inRoom && roomAction.reason === 'recovery') return '确认并重试同一次启动';
     if (roomAction.inRoom && roomAction.reason === 'connection') return '等待房间重新连接…';
     if (roomAction.inRoom && roomAction.reason === 'active') return '房间战报生成中…';
-    if (!roomAction.inRoom && arenaGenerationConnectionState === 'cancelling') return '本地已停止，正在确认服务器…';
-    if (!roomAction.inRoom && arenaGenerationConnectionState === 'cancel_unconfirmed') return '停止结果未确认';
     if (isCooldown) return `记者赶稿中...请等待 ${remainingTime} 秒`;
     if (isGenerating) {
       if (isRecoveringArenaGeneration) return '正在恢复上一场战报…';
@@ -303,14 +305,21 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
         busy={arenaRoomGenerationPreflight?.busy ?? false}
         onChoice={resolveArenaRoomGenerationPreflight}
       />
+      <ArenaUnconfirmedCancelDialog
+        isOpen={unconfirmedCancelPrompt !== null && !roomAction.inRoom}
+        connectionState={unconfirmedCancelPrompt?.state ?? null}
+        isCooldown={isCooldown}
+        remainingTime={remainingTime}
+        isGenerating={isGenerating}
+        onConfirm={confirmGenerateAfterUnconfirmedCancel}
+        onClose={dismissUnconfirmedCancelPrompt}
+      />
       <div className="flex items-center justify-center gap-2 flex-wrap">
         <button
           onClick={() => handleGenerate()}
           disabled={
             isGenerating ||
             isCooldown ||
-            (!roomAction.inRoom && (arenaGenerationConnectionState === 'cancelling'
-              || arenaGenerationConnectionState === 'cancel_unconfirmed')) ||
             (roomAction.inRoom && !roomAction.canStart && !roomAction.canRetry) ||
             (!roomAction.inRoom && (battleMode === 'daily' || battleMode === 'scenario'
               ? combatants.length < 1
@@ -323,7 +332,6 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
         {isGenerating && generationMode === 'stream' && !roomAction.inRoom ? (
           <StreamStopButton
             onClick={stopGeneration}
-            compact
             disabled={arenaGenerationConnectionState === 'cancelling'}
             label={
               arenaGenerationConnectionState === 'cancelling'
@@ -350,11 +358,15 @@ export function BattleActions({ showAdvancedUtilities = true }: { showAdvancedUt
           {arenaGenerationConnectionState === 'cancel_unconfirmed' ? (
             <div className="mt-2">
               <div>重新生成会创建新任务，上一场可能仍在运行并产生费用。</div>
-              <button type="button" className="btn-secondary mt-2" disabled={isCooldown || isGenerating}
-                onClick={confirmGenerateAfterUnconfirmedCancel}>
+              <GenerationActionButton
+                variant="secondary"
+                className="mt-2"
+                disabled={isCooldown || isGenerating}
+                onClick={confirmGenerateAfterUnconfirmedCancel}
+              >
                 <RotateCw className="mr-1 inline-block h-4 w-4" aria-hidden="true" />
                 确认风险并重新生成
-              </button>
+              </GenerationActionButton>
             </div>
           ) : null}
           {isRecoveringArenaGeneration ? (

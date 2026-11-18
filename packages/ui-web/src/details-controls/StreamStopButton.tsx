@@ -35,8 +35,7 @@ export function StreamStopButton({
       disabled={disabled}
       aria-label={label}
       title={label}
-      className={`generate-button ${className}`}
-      style={{ backgroundColor: '#ef4444', backgroundImage: 'linear-gradient(to right, #ef4444, #dc2626)' }}
+      className={`ui-web-generation-action ui-web-generation-action--destructive ${className}`.trim()}
     >
       ⏹ {label}
     </button>

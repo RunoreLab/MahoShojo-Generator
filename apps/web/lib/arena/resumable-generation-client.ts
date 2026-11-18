@@ -272,6 +272,42 @@ const settleAbandonedUnconfirmedCancel = (
   }
 };
 
+export const settlePersistedArenaGenerationCancel = (
+  requestId: string,
+  storage: StoragePort | null = defaultStorage(),
+): void => {
+  settleAbandonedUnconfirmedCancel(storage, requestId);
+};
+
+export const clearPersistedArenaGenerationSlot = async (options: {
+  endpoint: string;
+  body: Record<string, unknown>;
+  storage?: StoragePort | null;
+}): Promise<void> => {
+  const storage = options.storage === undefined ? defaultStorage() : options.storage;
+  if (!storage) return;
+  try {
+    const bodyHash = await sha256Hex(canonicalJson(options.body));
+    const stateIdentity = await sha256Hex(`${options.endpoint}\n${bodyHash}`);
+    const scopedStateKey = `${ARENA_GENERATION_CLIENT_STATE_KEY}:${stateIdentity}`;
+    const existing = readPersistedArenaGeneration(storage, scopedStateKey);
+    if (!existing || existing.state === 'cancelling' || existing.state === 'cancel_unconfirmed') {
+      return;
+    }
+    storage.removeItem(scopedStateKey);
+    const latest = readPersistedArenaGeneration(storage);
+    if (
+      latest?.generationRequestId === existing.generationRequestId
+      && latest.state !== 'cancelling'
+      && latest.state !== 'cancel_unconfirmed'
+    ) {
+      storage.removeItem(ARENA_GENERATION_CLIENT_STATE_KEY);
+    }
+  } catch {
+    // Best-effort cleanup only.
+  }
+};
+
 export const openArenaGenerationStream = async (
   options: OpenArenaGenerationStreamOptions,
 ): Promise<Response> => {

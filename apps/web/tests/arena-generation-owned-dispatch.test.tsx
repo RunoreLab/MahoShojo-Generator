@@ -282,10 +282,17 @@ describe('BattleEngine real auth → intent → C0 ownership boundary', () => {
       await current.handleGenerate();
       await settlesSoon(Promise.all([first, firstCancelEntered.promise]).then(() => undefined));
     });
+    expect(current.unconfirmedCancelPrompt).toEqual({
+      state: 'cancelling',
+      requestId: expect.any(String),
+    });
     expect(creates).toBe(1);
     await act(async () => { cancelGate.resolve(new Response(null, { status: 202 })); await settlesSoon(first); });
     await act(async () => {
       await vi.waitFor(() => expect(useBattleStore.getState().arenaGenerationConnectionState).toBe('cancelled'));
+    });
+    expect(current.unconfirmedCancelPrompt).toBeNull();
+    await act(async () => {
       second = current.handleGenerate(); await secondEntered.promise;
     });
     await act(async () => { current.stopGeneration(); await settlesSoon(second); });
@@ -315,15 +322,24 @@ describe('BattleEngine real auth → intent → C0 ownership boundary', () => {
     await act(async () => { await current.handleGenerate(); });
     expect(business).toHaveBeenCalledTimes(2);
     const cancelledRequestId = useBattleStore.getState().arenaGenerationCancellationRequestId;
+    expect(current.unconfirmedCancelPrompt).toEqual({
+      state: 'cancel_unconfirmed',
+      requestId: cancelledRequestId,
+    });
     // Simulate a reload losing transient Zustand state while sessionStorage survives.
     await act(async () => { useBattleStore.getState().setArenaGenerationConnectionState(null);
       await current.handleGenerate(); });
     expect(business).toHaveBeenCalledTimes(2);
     expect(useBattleStore.getState()).toMatchObject({ isGenerating: false,
       arenaGenerationConnectionState: 'cancel_unconfirmed', arenaGenerationCancellationRequestId: cancelledRequestId });
+    expect(current.unconfirmedCancelPrompt).toEqual({
+      state: 'cancel_unconfirmed',
+      requestId: cancelledRequestId,
+    });
     business.mockResolvedValueOnce(completed());
     await act(async () => { await current.confirmGenerateAfterUnconfirmedCancel(); });
     expect(business).toHaveBeenCalledTimes(3);
+    expect(current.unconfirmedCancelPrompt).toBeNull();
     expect(useBattleStore.getState().streamingMarkdown).toBe('安全的完整故事');
   });
 
@@ -405,5 +421,75 @@ describe('BattleEngine real auth → intent → C0 ownership boundary', () => {
     await act(async () => { gate.resolve(); await task; });
     expect(business).not.toHaveBeenCalled();
     expect(mocks.cooldown).not.toHaveBeenCalled();
+  });
+
+  it('409 finalizing 取消响应证明服务端已进入收尾阶段，直接结算为 cancelled 且不阻塞下次生成', async () => {
+    const entered = deferred<void>();
+    business
+      .mockImplementationOnce(async () => {
+        entered.resolve();
+        return stream(new ReadableStream({ start() {} }), 'generation-finalizing-1');
+      })
+      .mockResolvedValueOnce(Response.json({
+        code: 'GENERATION_FINALIZATION_IN_PROGRESS',
+        generationId: 'generation-finalizing-1',
+        status: 'finalizing',
+        cancelled: false,
+      }, { status: 409 }));
+
+    let task!: Promise<void>;
+    await act(async () => {
+      task = current.handleGenerate();
+      await entered.promise;
+      await vi.waitFor(() => expect(useBattleStore.getState().arenaGenerationConnectionState).toBe('generating'));
+      current.stopGeneration();
+      await settlesSoon(task);
+      await vi.waitFor(() => expect(useBattleStore.getState().arenaGenerationConnectionState).toBe('cancelled'));
+    });
+
+    expect(current.unconfirmedCancelPrompt).toBeNull();
+    expect(useBattleStore.getState().arenaGenerationCancellationRequestId).toBeNull();
+
+    business.mockResolvedValueOnce(completed());
+    await act(async () => { await current.handleGenerate(); });
+    expect(business).toHaveBeenCalledTimes(3);
+    expect(current.unconfirmedCancelPrompt).toBeNull();
+    expect(useBattleStore.getState().streamingMarkdown).toBe('安全的完整故事');
+  });
+
+  it('ARENA_GENERATION_STATE_UNKNOWN 展示中文友好提示并清理失效恢复槽位以免下次请求循环卡住', async () => {
+    vi.useFakeTimers();
+    try {
+      business.mockImplementation(async (input) => {
+        if (input.includes('/generation-requests/')) {
+          return new Response(null, { status: 404 });
+        }
+        return new Response('upstream timeout', { status: 504 });
+      });
+
+      const task = current.handleGenerate();
+      for (let i = 0; i < 12; i += 1) {
+        await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+      }
+      await act(async () => { await task; });
+
+      expect(useBattleStore.getState().error).toContain('未能确认上一场战报是否已在服务器启动');
+      expect(useBattleStore.getState().error).not.toContain('ARENA_GENERATION_STATE_UNKNOWN');
+
+      const postAttemptsAfterUnknown = business.mock.calls.filter(
+        ([input, init]) => input.includes('/api/arena/generate-stream') && init?.method === 'POST',
+      ).length;
+      expect(postAttemptsAfterUnknown).toBe(1);
+
+      business.mockReset();
+      business.mockResolvedValueOnce(completed());
+      await act(async () => { await current.handleGenerate(); });
+
+      expect(business.mock.calls.some(([input]) => input.includes('/generation-requests/'))).toBe(false);
+      expect(business).toHaveBeenCalledOnce();
+      expect(useBattleStore.getState().streamingMarkdown).toBe('安全的完整故事');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

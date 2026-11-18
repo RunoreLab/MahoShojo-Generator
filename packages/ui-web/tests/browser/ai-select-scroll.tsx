@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { AiProviderCustomSelect } from '../../src/ai-provider/custom-select';
+import { generationActionClassNames } from '../../src/generation-actions';
 
 /** 只模拟流式内容增长与宿主重渲染，菜单使用生产组件，不请求模型或账户。 */
 function ScrollFixture() {
@@ -30,7 +31,7 @@ function ScrollFixture() {
 
   return <main className="mx-auto max-w-2xl p-4">
     <h1 className="text-xl font-semibold">模型选择器滚动回归夹具</h1>
-    <button className="btn-secondary" data-testid="stream" onClick={() => setRunning(current => !current)}>
+    <button type="button" className={generationActionClassNames.secondary} data-testid="stream" onClick={() => setRunning(current => !current)}>
       {running ? '暂停模拟生成' : '开始模拟生成'}
     </button>
     <output data-testid="revision">{revision}</output>

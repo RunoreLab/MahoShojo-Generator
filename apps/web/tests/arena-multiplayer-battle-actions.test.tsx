@@ -10,6 +10,7 @@ import { useNarrativeHistoryStore } from '@/components/arena/stores/useNarrative
 import { useNarrativeDraftsStore } from '@/components/arena/stores/useNarrativeDraftsStore';
 import type { BattleStoreState } from '@/components/arena/types';
 import type { ArenaGenerationConnectionState } from '@/lib/arena/resumable-generation-client';
+import type { ArenaUnconfirmedCancelPrompt } from '@/components/arena/hooks/useBattleEngine';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -17,6 +18,8 @@ const mocks = vi.hoisted(() => ({
   handleGenerate: vi.fn(async () => {}),
   stopGeneration: vi.fn(),
   confirmGenerateAfterUnconfirmedCancel: vi.fn(),
+  unconfirmedCancelPrompt: null as ArenaUnconfirmedCancelPrompt | null,
+  dismissUnconfirmedCancelPrompt: vi.fn(),
   isCooldown: false,
   isGenerating: false,
   arenaGenerationConnectionState: null as ArenaGenerationConnectionState | null,
@@ -39,6 +42,8 @@ vi.mock('@/components/arena/hooks/useBattleEngine', () => ({
     handleGenerate: mocks.handleGenerate,
     stopGeneration: mocks.stopGeneration,
     confirmGenerateAfterUnconfirmedCancel: mocks.confirmGenerateAfterUnconfirmedCancel,
+    unconfirmedCancelPrompt: mocks.unconfirmedCancelPrompt,
+    dismissUnconfirmedCancelPrompt: mocks.dismissUnconfirmedCancelPrompt,
     isGenerating: mocks.isGenerating,
     arenaGenerationConnectionState: mocks.arenaGenerationConnectionState,
     isRecoveringArenaGeneration: mocks.isRecoveringArenaGeneration,
@@ -151,6 +156,8 @@ beforeEach(() => {
   mocks.handleGenerate.mockClear();
   mocks.stopGeneration.mockClear();
   mocks.confirmGenerateAfterUnconfirmedCancel.mockClear();
+  mocks.unconfirmedCancelPrompt = null;
+  mocks.dismissUnconfirmedCancelPrompt.mockClear();
   mocks.isCooldown = false;
   mocks.isGenerating = false;
   mocks.arenaGenerationConnectionState = null;
@@ -233,33 +240,64 @@ describe('Arena multiplayer BattleActions authority gate', () => {
     expect(mocks.stopGeneration).toHaveBeenCalledOnce();
   });
 
-  it('本地结束后继续显示服务器确认状态，禁用新生成且移除停止按钮', async () => {
+  it('本地结束后立即恢复主按钮并在下方继续显示服务器确认状态且移除停止按钮', async () => {
     mocks.isGenerating = false;
     mocks.arenaGenerationConnectionState = 'cancelling';
     mocks.arenaGenerationStatusNotice = '已停止本地接收，正在请求服务器停止生成。';
 
     const button = await render();
-    expect(button.textContent).toContain('正在确认服务器');
-    expect(button.disabled).toBe(true);
+    expect(button.textContent).toContain('生成独家新闻');
+    expect(button.disabled).toBe(false);
     expect(document.body.querySelector('[data-arena-generation-status]')?.textContent).toContain('已停止本地接收');
 
     const stopButton = document.body.querySelector<HTMLButtonElement>('[aria-label="正在停止…"]');
     expect(stopButton).toBeNull();
   });
 
-  it.each([false, true])('取消未确认时显式提示重复费用风险并遵守冷却（冷却=%s）', async (cooldown) => {
+  it.each([false, true])('取消未确认时主按钮立即可用、下方显式提示重复费用风险并遵守冷却（冷却=%s）', async (cooldown) => {
     mocks.arenaGenerationConnectionState = 'cancel_unconfirmed';
     mocks.arenaGenerationStatusNotice = '生成可能仍在后台继续。';
     mocks.isCooldown = cooldown;
     const button = await render();
-    expect(button.disabled).toBe(true);
+    expect(button.disabled).toBe(cooldown);
+    expect(button.textContent).toContain(cooldown ? '请等待 30 秒' : '生成独家新闻');
     const notice = document.body.querySelector('[data-arena-generation-status]')!;
     expect(notice.textContent).toContain('可能仍在运行并产生费用');
     const riskButton = notice.querySelector('button')!;
+    expect(riskButton.className).toContain('ui-web-generation-action--secondary');
     expect(riskButton.disabled).toBe(cooldown);
     await act(async () => riskButton.click());
     expect(mocks.confirmGenerateAfterUnconfirmedCancel).toHaveBeenCalledTimes(cooldown ? 0 : 1);
     if (cooldown) expect(notice.textContent).toContain('还需 30 秒');
+  });
+
+  it.each([false, true])('点击主按钮触发 unconfirmedCancelPrompt 时打开风险确认弹窗并遵守冷却（冷却=%s）', async (cooldown) => {
+    mocks.arenaGenerationConnectionState = 'cancel_unconfirmed';
+    mocks.unconfirmedCancelPrompt = {
+      state: 'cancel_unconfirmed',
+      requestId: 'request-unconfirmed-modal-1',
+    };
+    mocks.isCooldown = cooldown;
+
+    await render();
+
+    const dialog = document.body.querySelector('[role="dialog"]');
+    expect(dialog).toBeTruthy();
+    expect(dialog?.textContent).toContain('确认是否重新生成');
+    expect(dialog?.textContent).toContain('消耗额度或产生费用');
+
+    const dialogButtons = Array.from(dialog!.querySelectorAll<HTMLButtonElement>('button'));
+    const confirmButton = dialogButtons.find((item) => item.textContent?.includes('确认风险并重新生成'))!;
+    const dismissButton = dialogButtons.find((item) => item.textContent?.trim() === '暂不生成')!;
+    expect(confirmButton).toBeTruthy();
+    expect(dismissButton).toBeTruthy();
+    expect(confirmButton.disabled).toBe(cooldown);
+
+    await act(async () => confirmButton.click());
+    expect(mocks.confirmGenerateAfterUnconfirmedCancel).toHaveBeenCalledTimes(cooldown ? 0 : 1);
+
+    await act(async () => dismissButton.click());
+    expect(mocks.dismissUnconfirmedCancelPrompt).toHaveBeenCalledOnce();
   });
 
   it('成员只显示等待房主且按钮不可提交', async () => {
