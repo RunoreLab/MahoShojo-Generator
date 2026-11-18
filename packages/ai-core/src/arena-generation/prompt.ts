@@ -617,7 +617,8 @@ export const createStreamPromptBuilder = (
     const hasAdjudicationResults = Boolean(adjudicationResults && adjudicationResults.length > 0);
     finalPrompt += `\n\n【输出格式】\n内容为 Markdown 格式，请严格按照格式输出，不要携带任何其他内容：\n` +
         `- 输出第 1 行必须从第 1 个字符开始就是 "# "（不要有任何前置空格、不要多输出额外的 # 号）。\n` +
-        `- 正文部分不要输出 JSON/YAML/代码块，也不要输出任何字段名（例如 winner/impact/currentStateSummary）。\n` +
+        `- 正文部分不要输出 JSON/YAML/代码块，不要输出“【角色更新元数据】”等提示词标题或 "<>" 占位符，也不要输出任何字段名（例如 winner/impact/currentStateSummary）。\n` +
+        `- 严格按以下顺序输出 4 个部分，且不得省略或前置“## 胜利者”和“## 最终结果”：\n` +
         (shouldAllowStreamMeta
             ? `  （仅允许在最后一行的 HTML 注释元数据中出现 JSON 与字段名，供系统解析更新用。）\n\n`
             : `  （请勿在任何位置追加 HTML 注释元数据；也不要输出任何类似 MAHOSHOJO_ARENA_META 的标记。）\n\n`) +
@@ -625,7 +626,7 @@ export const createStreamPromptBuilder = (
         `随后紧跟正文，用段落呈现，保持流畅性和可读性\n` +
         `## 胜利者\n` +
         (isDailyMode
-            ? `核心参与角色名称（标题须保留“## 胜利者”以兼容系统解析；日常模式重在生活互动，默认不分胜负，请直接列出所有核心参与角色的名字并用顿号“、”分隔，切勿仅为填写此栏而强行安排战斗。仅当剧情按引导或判定明确包含小游戏、日常比拼等并分出结果时，才写胜者或“平局”）\n`
+            ? `核心参与角色名称（必须保留“## 胜利者”二级标题且置于正文之后以兼容系统解析；日常模式重在生活互动，默认不分胜负，请直接精确列出各【登场角色】标题中的角色名称并用顿号“、”分隔，不要改成真名或添加括号别名，也切勿仅为填写此栏而强行安排战斗。仅当剧情按引导或判定明确包含小游戏、日常比拼等并分出结果时，才写胜者或“平局”）\n`
             : `胜利者名称（如无胜负，请列出所有核心参与角色的名字，并用顿号“、”分隔；如平局请写“平局”）\n`) +
         `## 最终结果\n` +
         (isDailyMode
@@ -667,9 +668,9 @@ export const createStreamPromptBuilder = (
                 `- JSON 必须是一个对象，包含 version=1 以及 impacts 数组。\n` +
                 `- JSON 中请额外包含 report 对象用于兜底解析：${headlineWinnerRule}。\n` +
                 `- impacts 必须覆盖每一位${roleNoun}；每个元素字段要求：${requiredFields}。\n` +
-                `- characterName 精确使用各【登场角色】标题中的名称，不用正文中的别名替换；对抗平局时 report.winner 写“平局”，非对抗故事才列出所有核心参与者。\n` +
+                `- characterName 精确使用各【登场角色】标题中的名称，不用正文中的别名、真名或括号说明替换（单人双重身份也只保留一位角色条目）；对抗平局时 report.winner 写“平局”，非对抗故事才列出所有核心参与者。\n` +
                 (isDailyMode
-                    ? `- 日常模式下若无明确比拼胜负，report.winner 请列出核心参与角色（顿号分隔）；impact 与 currentStateSummary 如实记录本次日常经历带来的心境、生活状态、关系细节或留待下次的约定（包括战前准备或休整状态），不得仅因字段名而凭空编造未发生的交战。\n`
+                    ? `- 日常模式下若无明确比拼胜负，report.winner 请精确列出各【登场角色】标题中的名称（顿号分隔）；impact 与 currentStateSummary 如实记录本次日常经历带来的心境、生活状态、关系细节或留待下次的约定（包括战前准备或休整状态），不得仅因字段名而凭空编造未发生的交战。\n`
                     : '') +
                 `- 提交前检查 JSON 的引号、数组和最外层对象均正确闭合；最后以 } --> 结束，不增添多余引号。\n` +
                 `- 除注释外不要输出任何额外文本。\n\n` +

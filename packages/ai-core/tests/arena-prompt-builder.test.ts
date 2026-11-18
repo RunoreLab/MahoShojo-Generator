@@ -613,7 +613,7 @@ describe('arena prompt builder', () => {
     expect(prompt).toContain('## 胜利者');
     expect(prompt).toContain('## 最终结果');
     expect(prompt).toContain('日常模式重在生活互动，默认不分胜负');
-    expect(prompt).toContain('日常模式下若无明确比拼胜负，report.winner 请列出核心参与角色');
+    expect(prompt).toContain('日常模式下若无明确比拼胜负，report.winner 请精确列出各【登场角色】标题中的名称');
   });
 
   it('日常模式 structured-report 提示词附带非战斗字段语义与 officialReport.winner 无胜负指引', () => {
