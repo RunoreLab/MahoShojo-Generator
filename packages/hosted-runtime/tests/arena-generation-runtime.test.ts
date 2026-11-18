@@ -1039,8 +1039,12 @@ describe('Arena generation runtime', () => {
   });
 
   it('maps a cancel-first durable claim race to cancelled instead of producer_lost', async () => {
+    const observeArenaGeneration = vi.fn();
     const finalize = vi.fn(async () => ({ resultRef: null, ranking: null }));
-    const dependencies = createDependencies({ finalize });
+    const dependencies = {
+      ...createDependencies({ finalize }),
+      observer: { observeArenaGeneration },
+    } as ArenaGenerationRuntimeDependencies;
     const runtime = createArenaGenerationRuntime(dependencies);
     const prepared = await runtime.prepare!({
       request: new Request('https://example.test/api/arena/generate-stream'),
@@ -1072,6 +1076,16 @@ describe('Arena generation runtime', () => {
     expect(finalize).toHaveBeenCalledWith(expect.objectContaining({
       status: 'cancelled',
       errorCode: 'CONTENT_POLICY_CANCELLED',
+    }));
+    expect(observeArenaGeneration).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'phase',
+      phase: 'finalization',
+      outcome: 'success',
+    }));
+    expect(observeArenaGeneration).not.toHaveBeenCalledWith(expect.objectContaining({
+      event: 'phase',
+      phase: 'finalization',
+      outcome: 'failure',
     }));
   });
 });

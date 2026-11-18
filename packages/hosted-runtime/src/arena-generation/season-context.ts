@@ -34,6 +34,9 @@ export const createArenaSeasonContextReader = (options: {
   accessClientId?: string;
   accessClientSecret?: string;
   cacheTtlMs?: number;
+  timeoutMs?: number;
+  failureCacheTtlMs?: number;
+  staleIfErrorTtlMs?: number;
 }) => {
   const base = new URL(options.baseUrl);
   if (
@@ -43,18 +46,32 @@ export const createArenaSeasonContextReader = (options: {
   ) throw new Error('ARENA_SEASON_CONTEXT_URL_INVALID');
   const fetcher = options.fetch ?? globalThis.fetch;
   const cacheTtlMs = options.cacheTtlMs ?? 60_000;
+  const timeoutMs = options.timeoutMs ?? 3_000;
+  const failureCacheTtlMs = options.failureCacheTtlMs ?? 5_000;
+  const staleIfErrorTtlMs = options.staleIfErrorTtlMs ?? 30 * 60_000;
   let cached: { expiresAt: number; value: ArenaSeasonContext } | null = null;
+  let lastValid: { staleUntil: number; value: ArenaSeasonContext } | null = null;
 
   return async (): Promise<ArenaSeasonContext> => {
-    if (cached && cached.expiresAt > Date.now()) return cached.value;
+    const now = Date.now();
+    if (cached && cached.expiresAt > now) return cached.value;
     const headers = new Headers({ Accept: 'application/json' });
     if (options.accessClientId?.trim() && options.accessClientSecret?.trim()) {
       headers.set('CF-Access-Client-Id', options.accessClientId.trim());
       headers.set('CF-Access-Client-Secret', options.accessClientSecret.trim());
     }
-    let value = defaultContext(false);
+    const timeoutController = new AbortController();
+    const timeoutId = setTimeout(() => {
+      timeoutController.abort('season-context-timeout');
+    }, timeoutMs);
+    (timeoutId as { unref?: () => void }).unref?.();
+    let value: ArenaSeasonContext;
+    let ttlMs = cacheTtlMs;
     try {
-      const response = await fetcher(new URL('/config/seasons.json', base), { headers });
+      const response = await fetcher(new URL('/config/seasons.json', base), {
+        headers,
+        signal: timeoutController.signal,
+      });
       if (!response.ok) throw new Error(`ARENA_SEASON_CONTEXT_HTTP_${response.status}`);
       const payload = await response.json() as { schemaVersion?: unknown; seasons?: unknown };
       if (payload.schemaVersion !== 1 || !Array.isArray(payload.seasons)) {
@@ -91,10 +108,18 @@ export const createArenaSeasonContextReader = (options: {
           questionnaireLorePresetIds: questionnaireIds,
         };
       }
+      lastValid = { staleUntil: Date.now() + staleIfErrorTtlMs, value };
     } catch {
-      value = defaultContext(false);
+      const errorAt = Date.now();
+      // 已预热过赛季权威时优先走 stale-if-error，并用极短负缓存 TTL 避免 60 秒全量雪崩。
+      value = lastValid && lastValid.staleUntil > errorAt
+        ? lastValid.value
+        : defaultContext(false);
+      ttlMs = failureCacheTtlMs;
+    } finally {
+      clearTimeout(timeoutId);
     }
-    cached = { expiresAt: Date.now() + cacheTtlMs, value };
+    cached = { expiresAt: Date.now() + ttlMs, value };
     return value;
   };
 };

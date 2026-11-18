@@ -263,8 +263,26 @@ async function generateWithStreamAIUsing(
                 dependencies.recordAiChannelOutcome,
             );
 	            const runtimeAttempt = createAiUpstreamAttemptRuntime();
+            const attemptAbortController = new AbortController();
+            const parentSignal = options?.abortSignal;
+            const forwardParentAbort = () => {
+                if (!attemptAbortController.signal.aborted) {
+                    attemptAbortController.abort(parentSignal?.reason);
+                }
+            };
+            if (parentSignal) {
+                if (parentSignal.aborted) {
+                    attemptAbortController.abort(parentSignal.reason);
+                } else {
+                    parentSignal.addEventListener('abort', forwardParentAbort, { once: true });
+                }
+            }
+            const cleanupParentAbort = () => {
+                parentSignal?.removeEventListener('abort', forwardParentAbort);
+            };
+            let streamTimedOut = false;
             const finishAttemptFromError = (error: unknown): boolean => {
-                const abortRequested = isAbortRequested(options?.abortSignal, error);
+                const abortRequested = !streamTimedOut && isAbortRequested(options?.abortSignal, error);
                 if (abortRequested) {
                     outcomeRecorder.recordFromCancel('abort');
                     runtimeAttempt.finish('aborted');
@@ -332,7 +350,7 @@ async function generateWithStreamAIUsing(
                     ],
                     maxRetries: 0,
                     ...resolvedSettings.standardOptions,
-                    ...buildStreamTextAbortOptions(options?.abortSignal),
+                    ...buildStreamTextAbortOptions(attemptAbortController.signal),
                     ...(resolvedSettings.providerOptions ? { providerOptions: resolvedSettings.providerOptions } : {}),
                     onError: ({ error }) => {
                         capturedError = error;
@@ -341,10 +359,22 @@ async function generateWithStreamAIUsing(
                         finishAttemptFromError(error);
                     },
                     onAbort: () => {
+                        if (streamTimedOut) return;
                         outcomeRecorder.recordFromCancel('abort');
                         runtimeAttempt.finish('aborted');
                     },
 	                });
+
+                const rawResult = result as unknown as {
+                    usage?: Promise<unknown>;
+                    finishReason?: Promise<unknown>;
+                };
+                const usagePromise = rawResult.usage;
+                const finishReasonPromise = rawResult.finishReason;
+                // AI SDK 6 的 usage / finishReason 会在流失败、拦截或取消时 reject；
+                // 在构建响应前立即附加兜底拒绝处理器，兼容 Promise 与 PromiseLike，避免无人消费触发进程 unhandledRejection 崩溃。
+                usagePromise?.then?.(() => {}, () => {});
+                finishReasonPromise?.then?.(() => {}, () => {});
 
                     const streamStartedAt = performance.now();
                     const streamCompletion: Record<string, unknown> = {
@@ -407,19 +437,48 @@ async function generateWithStreamAIUsing(
 	                const reader = result.fullStream.getReader();
                 const streamReadTimeoutMode: StreamReadTimeoutMode =
                     options?.streamReadTimeoutMode === 'soft' ? 'soft' : 'hard';
+                const configuredIdleTimeoutMs = dependencies.streamReadIdleTimeoutMs ?? STREAM_READ_IDLE_TIMEOUT_MS;
+                const configuredTotalTimeoutMs = dependencies.streamReadTotalTimeoutMs ?? STREAM_READ_TOTAL_TIMEOUT_MS;
+                const isCustomChannel = strategy === LoadBalanceStrategy.CUSTOM || Boolean(options?.providerOverride);
+                const configuredFirstChunkTimeoutMs = dependencies.streamFirstChunkTimeoutMs
+                    ?? (isCustomChannel ? 120_000 : 60_000);
+                const effectiveFirstChunkTimeoutMs = Math.min(configuredFirstChunkTimeoutMs, configuredIdleTimeoutMs);
+                const cancelReaderQuietly = (reason: unknown): void => {
+                    try {
+                        void reader.cancel(reason).catch(() => {});
+                    } catch {
+                        // ignore
+                    }
+                };
+                const handleUpstreamTimeout = (timeoutError: Error): void => {
+                    streamTimedOut = true;
+                    outcomeRecorder.recordFromError(timeoutError);
+                    runtimeAttempt.finish('timeout');
+                    attemptAbortController.abort(timeoutError);
+                    cancelReaderQuietly('timeout');
+                };
+                const firstChunkReadWithTimeout = createStreamReadWithTimeout({
+                    label: `上游首包(${provider.name}/${selectedModel})`,
+                    mode: streamReadTimeoutMode,
+                    idleTimeoutMs: effectiveFirstChunkTimeoutMs,
+                    totalTimeoutMs: configuredTotalTimeoutMs,
+                    onTimeout: handleUpstreamTimeout,
+                    onSoftTimeout: (event) => {
+                        log.warn('上游首包 fullStream 软超时（仅提示，不切断）', {
+                            kind: event.kind,
+                            timeoutMs: event.timeoutMs,
+                            elapsedMs: event.elapsedMs,
+                            provider: provider.name,
+                            model: selectedModel,
+                        });
+                    },
+                });
                 const readWithTimeout = createStreamReadWithTimeout({
                     label: `上游流式(${provider.name}/${selectedModel})`,
                     mode: streamReadTimeoutMode,
-                    idleTimeoutMs: dependencies.streamReadIdleTimeoutMs ?? STREAM_READ_IDLE_TIMEOUT_MS,
-                    totalTimeoutMs: dependencies.streamReadTotalTimeoutMs ?? STREAM_READ_TOTAL_TIMEOUT_MS,
-                    onTimeout: () => {
-                        runtimeAttempt.finish('timeout');
-                        try {
-                            void reader.cancel('timeout').catch(() => {});
-                        } catch {
-                            // ignore
-                        }
-                    },
+                    idleTimeoutMs: configuredIdleTimeoutMs,
+                    totalTimeoutMs: configuredTotalTimeoutMs,
+                    onTimeout: handleUpstreamTimeout,
                     onSoftTimeout: (event) => {
                         log.warn('上游 fullStream 软超时（仅提示，不切断）', {
                             kind: event.kind,
@@ -474,7 +533,7 @@ async function generateWithStreamAIUsing(
                         !definitelyNonTrivial && looksLikeTrivialEmptyOutput(trivialCandidate);
 
 		                for (let i = 0; i < MAX_PREFETCH_PARTS; i++) {
-		                    const part = await readWithTimeout(reader);
+		                    const part = await firstChunkReadWithTimeout(reader);
 		                    if (part.done) {
 	                        prefetchedDone = true;
 	                        break;
@@ -529,10 +588,12 @@ async function generateWithStreamAIUsing(
                             if (prefetchedDone) {
                                 outcomeRecorder.recordSuccess();
                                 runtimeAttempt.finish('success');
+                                cleanupParentAbort();
                             }
                         } catch (reasoningError) {
                             await cancelUpstream(reasoningError);
                             finishAttemptFromError(reasoningError);
+                            cleanupParentAbort();
                             controller.error(reasoningError);
                         }
                     },
@@ -578,11 +639,13 @@ async function generateWithStreamAIUsing(
                                                 : 'empty_output',
                                         });
                                         runtimeAttempt.finish('error');
+                                        cleanupParentAbort();
                                         controller.error(emptyOutputError);
                                         return;
                                     }
                                     outcomeRecorder.recordSuccess();
                                     runtimeAttempt.finish('success');
+                                    cleanupParentAbort();
                                     controller.close();
                                     return;
                                 }
@@ -601,6 +664,7 @@ async function generateWithStreamAIUsing(
                                 } catch (reasoningError) {
                                     await cancelUpstream(reasoningError);
                                     finishAttemptFromError(reasoningError);
+                                    cleanupParentAbort();
                                     controller.error(reasoningError);
                                     return;
                                 }
@@ -611,6 +675,7 @@ async function generateWithStreamAIUsing(
                             streamCompletion.streamError = true;
                             await cancelUpstream(streamError);
                             const interrupted = finishAttemptFromError(streamError);
+                            cleanupParentAbort();
                             const projectedStreamError = enhanceErrorWithUpstreamMessage(
                                 capturedError ?? streamError,
                                 {
@@ -627,6 +692,7 @@ async function generateWithStreamAIUsing(
                         }
                     },
                     cancel(reason) {
+                        cleanupParentAbort();
                         try {
                             void reader.cancel(reason).catch(() => {});
                         } catch {
@@ -661,11 +727,12 @@ async function generateWithStreamAIUsing(
                             'Content-Type': 'text/plain; charset=utf-8',
                         },
                     }),
-                    usagePromise: (result as any).usage,
-                    finishReasonPromise: (result as any).finishReason,
+                    usagePromise,
+                    finishReasonPromise,
                     telemetry: options?.telemetry,
                 };
             } catch (error) {
+                cleanupParentAbort();
                 // 使用工具函数增强错误信息
                 const enhancedError = enhanceErrorWithUpstreamMessage(error, {
                     secrets: [provider.apiKey, provider.baseUrl],

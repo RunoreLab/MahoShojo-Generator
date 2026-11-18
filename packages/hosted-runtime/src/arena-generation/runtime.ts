@@ -734,6 +734,7 @@ export const createArenaGenerationRuntime = (
       if (finalizationStarted) throw new Error('ARENA_GENERATION_FINALIZATION_REENTRY');
       finalizationStarted = true;
       const startedAt = performance.now();
+      let recordedSuccess = false;
       try {
         const terminal: GenerationTerminal = {
           status,
@@ -759,6 +760,14 @@ export const createArenaGenerationRuntime = (
             errorCode: claimedCancellationCode,
             signal: input.signal,
           });
+          observe({
+            event: 'phase',
+            generationId: input.generationId,
+            phase: 'finalization',
+            outcome: 'success',
+            durationMs: performance.now() - startedAt,
+          });
+          recordedSuccess = true;
           throw new Error('ARENA_GENERATION_CANCELLED');
         }
         if (claim.kind !== 'claimed') {
@@ -786,15 +795,18 @@ export const createArenaGenerationRuntime = (
           outcome: 'success',
           durationMs: performance.now() - startedAt,
         });
+        recordedSuccess = true;
         return result;
       } catch (error) {
-        observe({
-          event: 'phase',
-          generationId: input.generationId,
-          phase: 'finalization',
-          outcome: 'failure',
-          durationMs: performance.now() - startedAt,
-        });
+        if (!recordedSuccess) {
+          observe({
+            event: 'phase',
+            generationId: input.generationId,
+            phase: 'finalization',
+            outcome: 'failure',
+            durationMs: performance.now() - startedAt,
+          });
+        }
         throw error;
       }
     };

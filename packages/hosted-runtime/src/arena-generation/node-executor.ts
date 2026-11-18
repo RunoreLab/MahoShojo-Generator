@@ -471,6 +471,9 @@ const wrapTelemetry = (
   usagePromise: Promise<unknown> | undefined,
   finishReasonPromise: Promise<unknown> | undefined,
 ): ReadableStream<Uint8Array> => {
+  // 防止错误抢跑或消费者在 pull 前 cancel 时触发未处理的 Promise 拒绝。
+  usagePromise?.catch(() => {});
+  finishReasonPromise?.catch(() => {});
   const reader = body.getReader();
   return new ReadableStream<Uint8Array>({
     async pull(controller) {

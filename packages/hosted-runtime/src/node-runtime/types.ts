@@ -113,6 +113,7 @@ export type NodeAiRuntimeDependencies = {
   logger?: NodeAiLogger;
   recordAiChannelOutcome?: RecordAiChannelOutcome;
   fetch?: typeof fetch;
+  streamFirstChunkTimeoutMs?: number;
   streamReadIdleTimeoutMs?: number;
   streamReadTotalTimeoutMs?: number;
 };

@@ -248,4 +248,92 @@ describe('raw stream empty-output terminal', () => {
       { type: 'reasoning-end', id: undefined },
     ]);
   });
+
+  it('流在预检与正文后异常时均不触发未消费 usage/finishReason 的进程级 unhandledRejection', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const { createNodeRawStreamAiRuntime } = await import('../src/node-runtime');
+      const runtime = createNodeRawStreamAiRuntime({ providers: [{ ...provider, retryCount: 1 }] });
+
+      // Case 1: 预检阶段即失败
+      mocks.streamText.mockImplementationOnce(() => ({
+        fullStream: new ReadableStream({
+          start(controller) {
+            controller.error(new Error('prefetch failed'));
+          },
+        }),
+        usage: Promise.reject(new Error('usage unavailable')),
+        finishReason: Promise.reject(new Error('finishReason unavailable')),
+      }));
+      await expect(runtime.generateWithStreamAI({ prompt: 'prefetch rejection guard' })).rejects.toThrow();
+
+      // Case 2: 拿到首包后中途失败，消费方只读 response.text() 不读 finishReason
+      mocks.streamText.mockImplementationOnce(() => ({
+        fullStream: new ReadableStream({
+          start(controller) {
+            controller.enqueue({ type: 'text-delta', text: 'partial' });
+            controller.enqueue({ type: 'error', error: new Error('midstream failed') });
+          },
+        }),
+        usage: Promise.reject(new Error('usage unavailable midstream')),
+        finishReason: Promise.reject(new Error('finishReason unavailable midstream')),
+      }));
+      const result = await runtime.generateWithStreamAI({ prompt: 'midstream rejection guard' });
+      await expect(result.response.text()).rejects.toThrow('AI_UPSTREAM_REQUEST_FAILED');
+
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
+  it('首包挂起超过 streamFirstChunkTimeoutMs 时主动中止上游信号并报 timeout', async () => {
+    vi.useFakeTimers();
+    const terminals: unknown[] = [];
+    let attemptSignal: AbortSignal | undefined;
+    registerHostedRuntimeObserver({
+      beginAiUpstream: () => ({
+        recordTtfb: () => undefined,
+        finish: (value) => terminals.push(value),
+      }),
+      observeD1RoundTrip: () => undefined,
+    });
+    try {
+      mocks.streamText.mockImplementationOnce(({ abortSignal }: { abortSignal?: AbortSignal }) => {
+        attemptSignal = abortSignal;
+        return {
+          fullStream: new ReadableStream({
+            start(controller) {
+              abortSignal?.addEventListener('abort', () => {
+                try { controller.error(new DOMException('aborted', 'AbortError')); } catch {}
+              }, { once: true });
+            },
+          }),
+          usage: Promise.reject(new Error('aborted')),
+          finishReason: Promise.reject(new Error('aborted')),
+        };
+      });
+      const { createNodeRawStreamAiRuntime } = await import('../src/node-runtime');
+      const runtime = createNodeRawStreamAiRuntime({
+        providers: [{ ...provider, retryCount: 1 }],
+        streamFirstChunkTimeoutMs: 120,
+        streamReadIdleTimeoutMs: 5_000,
+      });
+
+      const pending = runtime.generateWithStreamAI({ prompt: 'hung first chunk' });
+      const rejection = expect(pending).rejects.toMatchObject({
+        name: 'StreamReadTimeoutError',
+        message: 'AI_UPSTREAM_TIMEOUT',
+      });
+      await vi.advanceTimersByTimeAsync(120);
+      await rejection;
+      expect(attemptSignal?.aborted).toBe(true);
+      expect(terminals).toEqual([expect.objectContaining({ outcome: 'timeout' })]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

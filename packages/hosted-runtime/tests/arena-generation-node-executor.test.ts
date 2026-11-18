@@ -1126,4 +1126,64 @@ describe('Node Arena generation executor', () => {
       },
     });
   });
+
+  it('在流被取消或异常中断时吞掉未消费 usage/finishReason 拒绝而不触发 unhandledRejection', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const controller = new AbortController();
+      const generateWithStreamAI = vi.fn(async () => ({
+        response: new Response(new ReadableStream({
+          pull() {
+            controller.abort('user');
+            throw new DOMException('aborted', 'AbortError');
+          },
+        })),
+        usagePromise: Promise.reject(new Error('No output generated')),
+        finishReasonPromise: Promise.reject(new Error('No output generated')),
+      }));
+      const executor = createNodeArenaGenerationExecutor({
+        env: {},
+        finalizer,
+        signatureService,
+        enforceSafety: vi.fn(async () => null),
+        generateWithStreamAI,
+      });
+      const prepared = await executor.prepare!({
+        request: new Request('https://example.test/api/arena/generate-stream'),
+        actorKey: 'anonymous:test',
+        generationRequestId: 'request-rejected-promises',
+        payload: {
+          ...validPayload,
+          readArenaHistory: false,
+          readCurrentState: false,
+          readNarrativeHistory: false,
+          writeArenaHistory: false,
+          writeCurrentState: false,
+          isDowngrade: true,
+        },
+      });
+      if (prepared instanceof Response || isArenaGenerationAuditableRejection(prepared)) {
+        throw new Error('unexpected response');
+      }
+
+      const terminal = await executor.execute({
+        generationId: 'generation-rejected-promises',
+        generationRequestId: 'request-rejected-promises',
+        actorKey: 'anonymous:test',
+        producerToken: 'producer-token-rejected-promises',
+        payloadHash: 'payload-hash-rejected-promises',
+        payload: prepared.executionPayload,
+        signal: controller.signal,
+        emit: vi.fn(async () => undefined),
+        claimFinalization: vi.fn(async () => ({ kind: 'claimed' as const })),
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(terminal.status).toBe('cancelled');
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
 });
