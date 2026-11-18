@@ -29,9 +29,13 @@ export const ARENA_MAGICAL_GIRL_RULES = `【原作魔法少女体系】
 
 const compose = (...parts: string[]): string => [buildNarrativeSystemRules(), ...parts].join('\n\n');
 const battleTask = '【当前创作任务】\n现在让登场角色实际展开一场战斗，推演战斗过程并给出有依据的结果；不要只复述档案、回顾背景或描写尚未发生的交战。具体输出形态仍遵守宿主契约。';
+const dailyTask = `【当前创作任务】
+围绕登场角色创作一段鲜活、连贯的日常生活章节（单人登场时聚焦其独处闲暇、日常事务或与周围环境的自然交集；多人登场时展现角色间的性格碰撞、同行游历与关系互动；可按需引入店员、路人等不喧宾夺主的轻量环境配角）。具体输出形态遵守宿主契约。
+- 缺省素材切口：当【故事引导】等输入较为简短或未指定明确剧情事件时，严禁为了凑冲突而凭空开战或刷出突发袭击，也严禁原地写空洞的景物或端茶倒水流水账。请在构思时结合角色的身份处境（包括任务/战斗前后的闲暇间隙或日常起居）、问卷细节、当前状态与前情，自然锚定【1件具体的生活或闲暇小事】切入展开——例如闲逛商业街/挑周边与小物件、共同备餐采购、处理学业/工作/值日琐事、轻微生活小窘境（赶车、避雨、料理失手、预算纠结、口味审美分歧）、或习惯战斗的角色在普通游乐与生活设施面前的反差瞬间。根据角色自身处境自然选材，不要套用千篇一律的固定桥段。
+- 连续性与单章留白：若存在【叙事历史】或连续章节上下文，须紧接前文结束的时间线、场景、情绪与未尽话题自然延续，不从头复述档案（若连续章节规则提及“冲突”或“战报”，在日常模式下优先按人际摩擦、心绪波澜与日常篇章处理，不无故硬转为正面交战）。单次生成无需将角色卡的所有特质逐一展露，也无需在单章内强行达成重大转折、事件闭环或情感升华；允许故事停留在余韵自然的日常节点（如大战前夜的平静收尾或一段未完的闲逛），将后续发展留给下一次互动。`;
 
 export const SYSTEM_PROMPTS = {
-  daily: compose(NARRATIVE_MODE_STYLES.daily),
+  daily: compose(dailyTask, NARRATIVE_MODE_STYLES.daily),
   kizuna: compose(battleTask, NARRATIVE_MODE_STYLES.kizuna),
   classic: compose(battleTask, NARRATIVE_MODE_STYLES.classic, ARENA_MAGICAL_GIRL_RULES),
   magicalGirlVsCanshou: compose(battleTask, NARRATIVE_MODE_STYLES.classic, ARENA_MAGICAL_GIRL_RULES, `

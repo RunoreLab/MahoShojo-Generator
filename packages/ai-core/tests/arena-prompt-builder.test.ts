@@ -505,4 +505,114 @@ describe('arena prompt builder', () => {
     expect(prompt).toContain('2345');
     expect(prompt).not.toContain('约2000字以上');
   });
+
+  it('日常模式无 userGuidance 时仍保留带引导/情景标记的历战记录，classic 模式无引导时保持过滤', () => {
+    const combatantsWithHistory = 创建测试角色().map((combatant) => ({
+      ...combatant,
+      data: {
+        ...combatant.data,
+        arena_history: {
+          entries: [
+            {
+              id: 1,
+              title: '周末茶会',
+              participants: ['雪绒', '白玫瑰'],
+              winner: '雪绒、白玫瑰',
+              impact: '一起买了甜品并约好下次再聚',
+              metadata: { user_guidance: '周末去甜品店小聚', scenario_title: null },
+            },
+            {
+              id: 2,
+              title: '常规对决',
+              participants: ['雪绒', '白玫瑰'],
+              winner: '雪绒',
+              impact: '切磋结束',
+              metadata: { user_guidance: null, scenario_title: null },
+            },
+          ],
+        },
+      },
+    }));
+
+    const dailyPrompt = createStreamPromptBuilder(
+      { magicalGirl: ['Q1'], default: ['Q1'] },
+      null,
+      null,
+      false,
+      'zh-CN',
+      'daily',
+      null,
+      null,
+      undefined,
+      undefined,
+      true,
+      null,
+      false,
+      true,
+      true,
+      false,
+      null,
+      undefined,
+      undefined,
+    )({ combatants: combatantsWithHistory });
+
+    expect(dailyPrompt).toContain('周末茶会');
+    expect(dailyPrompt).toContain('常规对决');
+
+    const classicPrompt = createStreamPromptBuilder(
+      { magicalGirl: ['Q1'], default: ['Q1'] },
+      null,
+      null,
+      false,
+      'zh-CN',
+      'classic',
+      null,
+      null,
+      undefined,
+      undefined,
+      true,
+      null,
+      false,
+      true,
+      true,
+      false,
+      null,
+      undefined,
+      undefined,
+    )({ combatants: combatantsWithHistory });
+
+    expect(classicPrompt).not.toContain('周末茶会');
+    expect(classicPrompt).toContain('常规对决');
+  });
+
+  it('日常模式分组、Markdown 模板与元数据说明保持系统兼容标题且不引导战斗', () => {
+    const prompt = createStreamPromptBuilder(
+      { magicalGirl: ['Q1'], default: ['Q1'] },
+      null,
+      null,
+      false,
+      'zh-CN',
+      'daily',
+      null,
+      null,
+      { 1: ['雪绒'] },
+      { 1: '同行组' },
+      false,
+      0,
+      false,
+      true,
+      true,
+      false,
+      null,
+      undefined,
+      undefined,
+    )({ combatants: 创建测试角色() });
+
+    expect(prompt).toContain('## 【分组情况】');
+    expect(prompt).not.toContain('各自为战');
+    expect(prompt).toContain('## 胜利者');
+    expect(prompt).toContain('## 最终结果');
+    expect(prompt).toContain('日常模式重在生活互动，默认不分胜负');
+    expect(prompt).toContain('日常模式下若无明确比拼胜负，report.winner 请列出核心参与角色');
+  });
 });

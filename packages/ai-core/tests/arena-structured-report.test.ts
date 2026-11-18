@@ -19,4 +19,19 @@ describe('Arena structured report compatibility schema', () => {
       reasoning: 'not story', signature: 'not authority',
     }), options)).toEqual({ ...report, impacts: [{ characterName: '雪绒', currentStateSummary: '持伞' }] });
   });
+
+  it('uses non-combat daily field descriptions when mode=daily while keeping schema compatible', () => {
+    const options = { enableImpacts: true, enableImpactText: true, enableCurrentState: true, mode: 'daily' as const };
+    const schema = buildArenaStructuredReportSchema(options);
+    const officialReportShape = (schema.shape.officialReport as unknown as { shape: { winner: { description?: string } } }).shape;
+    expect(schema.shape.headline.description).not.toContain('震惊体');
+    expect(officialReportShape.winner.description).toContain('日常模式默认无胜负');
+    expect(parseArenaStructuredReportJson(JSON.stringify({
+      ...report,
+      impacts: [{ characterName: '雪绒', impact: '一起逛店', currentStateSummary: '心情轻松' }],
+    }), options)).toEqual({
+      ...report,
+      impacts: [{ characterName: '雪绒', impact: '一起逛店', currentStateSummary: '心情轻松' }],
+    });
+  });
 });

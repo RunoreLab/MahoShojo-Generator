@@ -234,6 +234,7 @@ export const executeArenaDirect = async (
     enableImpacts: payload.writeArenaHistory || payload.writeCurrentState,
     enableImpactText: payload.writeArenaHistory,
     enableCurrentState: payload.writeCurrentState,
+    mode: payload.mode,
   };
   const schema = buildArenaStructuredReportSchema(reportOptions);
   const prompt = assembleArenaGenerationPrompt({

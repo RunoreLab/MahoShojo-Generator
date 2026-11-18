@@ -787,6 +787,7 @@ export const createNodeArenaGenerationExecutor = (
           enableImpacts: payload.writeArenaHistory === true || payload.writeCurrentState === true,
           enableImpactText: payload.writeArenaHistory === true,
           enableCurrentState: payload.writeCurrentState === true,
+          mode,
         });
         const structuredInput = { combatants };
         const baseStructuredConfig: GenerationConfig<

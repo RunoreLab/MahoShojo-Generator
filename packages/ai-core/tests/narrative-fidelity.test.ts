@@ -49,6 +49,11 @@ describe('narrative rule boundaries at the assembled request', () => {
       expect(all).not.toContain(obsolete);
     }
     expect(SYSTEM_PROMPTS.daily).toContain('温暖');
+    expect(SYSTEM_PROMPTS.daily).toContain('叙事重心在日常而非交战');
+    expect(SYSTEM_PROMPTS.daily).toContain('战前放松、出征前逛街游玩');
+    expect(SYSTEM_PROMPTS.daily).toContain('自然锚定【1件具体的生活或闲暇小事】切入展开');
+    expect(SYSTEM_PROMPTS.daily).toContain('自然口语');
+    expect(SYSTEM_PROMPTS.daily).toContain('允许故事停留在余韵自然的日常节点');
     expect(SYSTEM_PROMPTS.kizuna).toContain('本场事件支撑');
     expect(SYSTEM_PROMPTS.scenario).toContain('确实不可调和时以主情景为准');
     for (const mode of ['classic', 'kizuna', 'magicalGirlVsCanshou', 'canshouVsCanshou', 'fallback'] as const) {
