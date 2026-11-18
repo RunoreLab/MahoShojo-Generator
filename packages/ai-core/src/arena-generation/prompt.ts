@@ -618,7 +618,7 @@ export const createStreamPromptBuilder = (
     finalPrompt += `\n\n【输出格式】\n内容为 Markdown 格式，请严格按照格式输出，不要携带任何其他内容：\n` +
         `- 输出第 1 行必须从第 1 个字符开始就是 "# "（不要有任何前置空格、不要多输出额外的 # 号）。\n` +
         `- 正文部分不要输出 JSON/YAML/代码块，不要输出“【角色更新元数据】”等提示词标题或 "<>" 占位符，也不要输出任何字段名（例如 winner/impact/currentStateSummary）。\n` +
-        `- 严格按以下顺序输出 4 个部分，且不得省略或前置“## 胜利者”和“## 最终结果”：\n` +
+        `- 严格按以下顺序输出 4 个部分，且不得省略或前置文末的两个二级标题：\n` +
         (shouldAllowStreamMeta
             ? `  （仅允许在最后一行的 HTML 注释元数据中出现 JSON 与字段名，供系统解析更新用。）\n\n`
             : `  （请勿在任何位置追加 HTML 注释元数据；也不要输出任何类似 MAHOSHOJO_ARENA_META 的标记。）\n\n`) +
