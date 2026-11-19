@@ -48,6 +48,7 @@ import { createEnvSignatureService } from '../node-runtime/env-signature';
 import { silentLogger, type NodeAiLogger } from '../node-runtime/logger';
 import { parseAIProvidersFromEnv } from '../node-runtime/providers';
 import { createNodeRawStreamAiRuntime } from '../node-runtime/raw-stream-ai';
+import { STREAM_READ_IDLE_TIMEOUT_MS } from '../node-runtime/stream-timeout';
 import { createNodeStructuredAiRuntime } from '../node-runtime/structured-ai';
 import { quickCheckForServer } from '../node-runtime/sensitive-word-filter';
 import { isAiPreDispatchRetrySafe } from '../node-runtime/retry-safety';
@@ -530,7 +531,11 @@ export const createNodeArenaGenerationExecutor = (
   };
   const rawRuntime = options.generateWithStreamAI
     ? null
-    : createNodeRawStreamAiRuntime(aiDependencies);
+    : createNodeRawStreamAiRuntime({
+      ...aiDependencies,
+      // 可恢复战报的订阅有独立心跳，首包沿用生成流的空闲上限。
+      streamFirstChunkTimeoutMs: STREAM_READ_IDLE_TIMEOUT_MS,
+    });
   const structuredRuntime = options.generateWithStructuredAI
     ? null
     : createNodeStructuredAiRuntime(aiDependencies);

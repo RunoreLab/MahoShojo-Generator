@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isArenaGenerationAuditableRejection } from '@mahoshojo/hosted-api/arena-generation/service';
 
 import { createArenaGenerationFinalizer } from '../src/arena-generation/finalization';
@@ -1124,6 +1124,127 @@ describe('Node Arena generation executor', () => {
         cachedTokens: 8,
         totalTokens: 120,
       },
+    });
+  });
+
+  describe('可恢复战报的上游等待预算', () => {
+    const modelId = 'deepseek-v4-pro';
+    const system = { providerId: 'system', modelId, apiKey: '' };
+    const byok = { providerId: 'deepseek', modelId, apiKey: 'test-byok-key' };
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    const start = async (customProvider = system) => {
+      vi.useFakeTimers();
+      let upstream!: ReadableStreamDefaultController<Uint8Array>;
+      const responseBody = new ReadableStream<Uint8Array>({
+        start(controller) {
+          upstream = controller;
+        },
+      });
+      const fetch = vi.fn<typeof globalThis.fetch>(async (_url, init) => {
+        const signal = init?.signal;
+        signal?.addEventListener('abort', () => upstream.error(signal.reason), { once: true });
+        return new Response(responseBody, { headers: { 'Content-Type': 'text/event-stream' } });
+      });
+      const executor = createNodeArenaGenerationExecutor({
+        env: {
+          AI_PROVIDERS_CONFIG: JSON.stringify([{
+            name: 'test-system',
+            baseUrl: 'https://provider.example.test/v1',
+            apiKey: 'test-system-key',
+            model: modelId,
+            type: 'openai',
+          }]),
+        },
+        finalizer,
+        signatureService,
+        fetch,
+        enforceSafety: async () => null,
+      });
+      const prepared = await executor.prepare!({
+        request: new Request('https://example.test/api/arena/generate-stream'),
+        actorKey: 'anonymous:test',
+        generationRequestId: 'wait-budget-request',
+        payload: { ...validPayload, customProvider, writeArenaHistory: false, writeCurrentState: false },
+      });
+      if (prepared instanceof Response || isArenaGenerationAuditableRejection(prepared)) {
+        throw new Error('unexpected rejection');
+      }
+      const cancellation = new AbortController();
+      const terminal = executor.execute({
+        generationId: 'wait-budget-generation',
+        generationRequestId: 'wait-budget-request',
+        actorKey: 'anonymous:test',
+        producerToken: 'producer',
+        payloadHash: 'hash',
+        payload: prepared.executionPayload,
+        signal: cancellation.signal,
+        emit: async () => undefined,
+        claimFinalization: async () => ({ kind: 'claimed' as const }),
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetch).toHaveBeenCalledOnce();
+      const upstreamSignal = fetch.mock.calls[0]?.[1]?.signal;
+      if (!upstreamSignal) throw new Error('upstream request did not receive a signal');
+
+      const sendText = (content: string, finish = false) => {
+        const part = JSON.stringify({
+          id: 'delayed-stream',
+          object: 'chat.completion.chunk',
+          created: 1,
+          model: modelId,
+          choices: [{ index: 0, delta: { content }, finish_reason: finish ? 'stop' : null }],
+        });
+        upstream.enqueue(new TextEncoder().encode(`data: ${part}\n\n${finish ? 'data: [DONE]\n\n' : ''}`));
+        if (finish) upstream.close();
+      };
+      return { cancellation, fetch, sendText, terminal, upstreamSignal };
+    };
+
+    it.each([system, byok])('$providerId 渠道等待 180 秒仍可完成战报', async (provider) => {
+      const { fetch, sendText, terminal, upstreamSignal } = await start(provider);
+      await vi.advanceTimersByTimeAsync(180_000);
+      expect(upstreamSignal.aborted).toBe(false);
+      sendText('战报生成完成。', true);
+      await expect(terminal).resolves.toMatchObject({ status: 'completed' });
+      expect(fetch).toHaveBeenCalledOnce();
+    });
+
+    it('首包缺失至 300 秒时中止上游并准确记录超时', async () => {
+      const { fetch, terminal, upstreamSignal } = await start();
+      await vi.advanceTimersByTimeAsync(299_999);
+      expect(upstreamSignal.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(terminal).resolves.toMatchObject({ status: 'failed', code: 'AI_UPSTREAM_TIMEOUT' });
+      expect(upstreamSignal.reason).toMatchObject({ kind: 'idle', timeoutMs: 300_000 });
+      expect(fetch).toHaveBeenCalledOnce();
+    });
+
+    it('生成期间持续收到内容仍受 600 秒总上限约束', async () => {
+      const { fetch, sendText, terminal, upstreamSignal } = await start();
+      await vi.advanceTimersByTimeAsync(180_000);
+      sendText('战报开头。');
+      await vi.advanceTimersByTimeAsync(240_000);
+      sendText('战报续写。');
+      await vi.advanceTimersByTimeAsync(179_999);
+      expect(upstreamSignal.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(terminal).resolves.toMatchObject({ status: 'failed', code: 'AI_UPSTREAM_TIMEOUT' });
+      expect(upstreamSignal.reason).toMatchObject({ kind: 'total', timeoutMs: 600_000 });
+      expect(fetch).toHaveBeenCalledOnce();
+    });
+
+    it('等待首包期间取消会立即终止原任务', async () => {
+      const { cancellation, fetch, terminal, upstreamSignal } = await start(byok);
+      await vi.advanceTimersByTimeAsync(180_000);
+      expect(upstreamSignal.aborted).toBe(false);
+      cancellation.abort('user');
+      await expect(terminal).resolves.toMatchObject({ status: 'cancelled', code: 'USER_CANCELLED' });
+      expect(upstreamSignal.aborted).toBe(true);
+      expect(fetch).toHaveBeenCalledOnce();
     });
   });
 
