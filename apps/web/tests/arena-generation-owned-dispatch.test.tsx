@@ -458,38 +458,37 @@ describe('BattleEngine real auth → intent → C0 ownership boundary', () => {
   });
 
   it('ARENA_GENERATION_STATE_UNKNOWN 展示中文友好提示并清理失效恢复槽位以免下次请求循环卡住', async () => {
-    vi.useFakeTimers();
-    try {
-      business.mockImplementation(async (input) => {
-        if (input.includes('/generation-requests/')) {
-          return new Response(null, { status: 404 });
-        }
-        return new Response('upstream timeout', { status: 504 });
-      });
-
-      const task = current.handleGenerate();
-      for (let i = 0; i < 12; i += 1) {
-        await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    const listen = window.addEventListener.bind(window);
+    vi.spyOn(window, 'addEventListener').mockImplementation((type, listener, options) => {
+      listen(type, listener, options);
+      // WebCrypto runs on the real event loop. Signal reconnect after each listener is registered.
+      if (type === 'online') {
+        queueMicrotask(() => { window.dispatchEvent(new Event('online')); });
       }
-      await act(async () => { await task; });
+    });
+    business.mockImplementation(async (input) => {
+      if (input.includes('/generation-requests/')) {
+        return new Response(null, { status: 404 });
+      }
+      return new Response('upstream timeout', { status: 504 });
+    });
 
-      expect(useBattleStore.getState().error).toContain('未能确认上一场战报是否已在服务器启动');
-      expect(useBattleStore.getState().error).not.toContain('ARENA_GENERATION_STATE_UNKNOWN');
+    await act(async () => { await current.handleGenerate(); });
 
-      const postAttemptsAfterUnknown = business.mock.calls.filter(
-        ([input, init]) => input.includes('/api/arena/generate-stream') && init?.method === 'POST',
-      ).length;
-      expect(postAttemptsAfterUnknown).toBe(1);
+    expect(useBattleStore.getState().error).toContain('未能确认上一场战报是否已在服务器启动');
+    expect(useBattleStore.getState().error).not.toContain('ARENA_GENERATION_STATE_UNKNOWN');
 
-      business.mockReset();
-      business.mockResolvedValueOnce(completed());
-      await act(async () => { await current.handleGenerate(); });
+    const postAttemptsAfterUnknown = business.mock.calls.filter(
+      ([input, init]) => input.includes('/api/arena/generate-stream') && init?.method === 'POST',
+    ).length;
+    expect(postAttemptsAfterUnknown).toBe(1);
 
-      expect(business.mock.calls.some(([input]) => input.includes('/generation-requests/'))).toBe(false);
-      expect(business).toHaveBeenCalledOnce();
-      expect(useBattleStore.getState().streamingMarkdown).toBe('安全的完整故事');
-    } finally {
-      vi.useRealTimers();
-    }
+    business.mockReset();
+    business.mockResolvedValueOnce(completed());
+    await act(async () => { await current.handleGenerate(); });
+
+    expect(business.mock.calls.some(([input]) => input.includes('/generation-requests/'))).toBe(false);
+    expect(business).toHaveBeenCalledOnce();
+    expect(useBattleStore.getState().streamingMarkdown).toBe('安全的完整故事');
   });
 });
