@@ -1,10 +1,18 @@
 [
   {
+    "id": "20261119-desktop-v014",
+    "date": "2026-11-19",
+    "title": "🖥️ 桌面版 v0.1.4 · 日常模式与战报稳定性",
+    "publisher": "MahoShojo Generator 管理组",
+    "pinned": true,
+    "content": "桌面版 v0.1.4 已正式发布。\n\n### 本次更新\n\n- 双端竞技场的日常模式更注重生活互动与前情连续性，也能承接战前出游和赛后休整等背景。\n- 修复线上可恢复战报等待模型首段内容时过早超时的问题，适用于系统渠道和自带 Key。\n- 网页版停止生成后可立即返回操作。服务器仍在确认旧任务时，重新生成前会显示提示。\n\n### 如何更新\n\n0.1.0–0.1.3 用户可在“设置 → 高级 → 应用更新”检查更新，或从[官方下载页](https://mahoshojo.colanns.me/download)下载 Windows x64 安装包覆盖安装。升级前请保存作品、备份重要数据并结束在途操作。\n\n[完整发布说明与安装包](https://github.com/RunoreLab/MahoShojo-Generator/releases/tag/desktop-v0.1.4)"
+  },
+  {
     "id": "20261117-desktop-v013",
     "date": "2026-11-17",
     "title": "🖥️ 桌面版 v0.1.3：角色详情修复与稳定性更新",
     "publisher": "MahoShojo Generator 管理组",
-    "pinned": true,
+    "pinned": false,
     "content": "桌面版 v0.1.3 已正式发布。\n\n### 本次修复\n\n- 修复“我的角色”打开部分角色详情时因标签格式不同而崩溃的问题。\n- 修复档案馆用户中心窄屏错位，保持 Web 与 Desktop 的字符串校验兼容，并更新运行依赖。\n- 线上 Arena 严格排位至少需要一名自有参战角色，Web 与桌面端服务器执行均适用；仍可使用自有角色挑战他人公开卡或官方预设。\n\n### 如何更新\n\n0.1.0–0.1.2 用户可在“设置 → 高级 → 应用更新”手动检查，或从[官方下载页](https://mahoshojo.colanns.me/download)获取安装包并覆盖安装。请先保存内容、备份重要作品并结束在途操作，不要先卸载或清理数据。\n\n本次没有新增数据库 schema 迁移或更新公钥变更，继续提供 Windows x64 安装包。Windows 发行者代码签名仍暂缓；请使用官方安装包，无需关闭系统安全防护。\n\n[完整发布说明与安装包](https://github.com/RunoreLab/MahoShojo-Generator/releases/tag/desktop-v0.1.3)"
   },
   {
