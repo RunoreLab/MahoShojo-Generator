@@ -240,7 +240,9 @@ export type HostedDrReadinessPlacement = 'hono-primary' | 'next-dr';
 
 export type HostedDrReadinessService = (_request: Request) => Promise<Response>;
 
-const readinessHeaders = (extra?: HeadersInit): Headers => {
+type RuntimeHeadersInit = ConstructorParameters<typeof Headers>[0];
+
+const readinessHeaders = (extra?: RuntimeHeadersInit): Headers => {
   const headers = new Headers(extra);
   headers.set('Cache-Control', 'no-store');
   headers.set('Content-Type', 'application/json; charset=utf-8');
@@ -251,7 +253,7 @@ const readinessResponse = (
   request: Request,
   payload: Record<string, unknown>,
   status: number,
-  extraHeaders?: HeadersInit,
+  extraHeaders?: RuntimeHeadersInit,
 ): Response => new Response(
   request.method.toUpperCase() === 'HEAD' ? null : JSON.stringify(payload),
   {
