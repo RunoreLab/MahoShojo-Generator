@@ -302,7 +302,7 @@ export default function AuthModal({
         <h2 className="mb-4 pr-8 text-xl font-bold">{authMode === 'login' ? '登录' : '注册'}</h2>
 
         <div className="mb-3 rounded border border-yellow-200 bg-yellow-50 p-2 text-xs text-yellow-800">
-          <span className="font-medium">迁移提示：</span> 新注册账号已强制使用密码登录，旧版密钥登录将逐步下线。
+          <span className="font-medium">迁移提示：</span> 新账号注册时需要设置密码，旧版密钥登录将逐步下线。
         </div>
 
         {authMessage && !passkeyPending && !passkeyError ? (
@@ -503,7 +503,7 @@ export default function AuthModal({
         </div>
         <div className="mt-2 text-center text-sm text-gray-600">
           <Link href="/password-recovery" className="font-medium text-purple-600 hover:text-purple-700">
-            找回密钥
+            通过邮箱找回账号
           </Link>
         </div>
       </div>

@@ -7178,6 +7178,58 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "由 Web 通行密钥浏览器验收启动，需要隔离的本地 Web 服务"]
+    fn passkey_browser_desktop_return() {
+        use std::io::Write;
+
+        let origin =
+            std::env::var("MAHOSHOJO_PASSKEY_TEST_ORIGIN").expect("missing local test origin");
+        let url = url::Url::parse(&origin).expect("invalid test origin");
+        assert_eq!(url.scheme(), "http");
+        assert_eq!(url.host_str(), Some("localhost"));
+        assert!(url.port().is_some());
+        assert_eq!(url.origin().ascii_serialization(), origin);
+        let work = std::env::var_os("MAHOSHOJO_PASSKEY_TEST_DIR").expect("missing test directory");
+        let work = std::path::PathBuf::from(work);
+        assert!(work.is_absolute() && work.is_dir());
+
+        tauri::async_runtime::block_on(async {
+            let state = CloudState::with_origin(&origin);
+            let secrets = MemorySecrets::new();
+            let begin = cloud_login_begin(&state)
+                .await
+                .expect("could not start the native flow");
+            let mut handoff = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(work.join("desktop-authorize-url"))
+                .expect("could not create the browser handoff");
+            writeln!(handoff, "{}", begin.authorize_url)
+                .expect("could not write the browser handoff");
+            drop(handoff);
+
+            let outcome = tokio::time::timeout(
+                Duration::from_secs(90),
+                cloud_login_await(&state, &begin.flow_id, &secrets),
+            )
+            .await
+            .expect("browser did not return to the loopback listener")
+            .expect("could not await the native flow");
+            let CloudLoginOutcome::SignedIn { account, .. } = outcome else {
+                panic!("native grant exchange failed: {outcome:?}");
+            };
+            assert_eq!(account.username, "passkey-fixture");
+            let status = cloud_auth_status(&state, &secrets)
+                .await
+                .expect("could not check the native session");
+            assert!(
+                matches!(status, CloudSessionStatus::Active { account: active, .. }
+                if active.user_id == account.user_id && active.username == account.username)
+            );
+        });
+    }
+
+    #[test]
     fn hosted_stream_end_to_end() {
         rt().block_on(async {
             let server = spawn_mock_server();
