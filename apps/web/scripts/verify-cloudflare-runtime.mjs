@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { get } from 'node:http';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { text } from 'node:stream/consumers';
 import { fileURLToPath } from 'node:url';
 import { assertHealthyCloudflareResponse } from './cloudflare-runtime-response.mjs';
 
@@ -29,7 +31,7 @@ for (const key of Object.keys(process.env)) delete process.env[key];
 Object.assign(process.env, isolatedEnv);
 let worker;
 try {
-  const { Miniflare, convertV4MiniflareOptions } = await import('miniflare');
+  const { CoreHeaders, Miniflare, convertV4MiniflareOptions } = await import('miniflare');
   // Bundle the actual artifact with its production compatibility settings, but never
   // load project .env files, credentials, remote bindings, or production storage.
   const isolatedConfig = {
@@ -99,19 +101,18 @@ try {
   }
   if (passkeyOrigin) {
     const statusUrl = new URL('/api/auth/passkey/status', passkeyOrigin);
-    // dispatchFetch 使用本机 Host。为 OpenNext 模拟代理传给应用的公开地址。
-    const response = await worker.dispatchFetch(statusUrl, {
-      headers: {
-        'x-forwarded-host': statusUrl.host,
-        'x-forwarded-proto': statusUrl.protocol.slice(0, -1),
-      },
-      signal: AbortSignal.timeout(30_000),
-      redirect: 'manual',
+    const localUrl = new URL(statusUrl.pathname, await worker.ready);
+    // 直连 Miniflare 的本地监听器，保留 OpenNext 中间件需要的公网 Host 和 URL。
+    const response = await new Promise((resolve, reject) => {
+      get(localUrl, {
+        headers: { host: statusUrl.host, [CoreHeaders.ORIGINAL_URL]: statusUrl.href },
+        signal: AbortSignal.timeout(30_000),
+      }, resolve).once('error', reject);
     });
-    const body = await response.text();
-    assert.equal(response.status, 200, `Production-origin passkey status: ${body.slice(0, 240)}`);
+    const body = await text(response);
+    assert.equal(response.statusCode, 200, `Production-origin passkey status: ${body.slice(0, 240)}`);
     assert.deepEqual(JSON.parse(body), { enabled: true });
-    assert.match(response.headers.get('cache-control') ?? '', /\bno-store\b/u);
+    assert.match(response.headers['cache-control'] ?? '', /\bno-store\b/u);
     console.log('Cloudflare runtime /api/auth/passkey/status: PASS');
   }
   assert.deepEqual(outboundRequests, [], 'Smoke routes must not access external services');
