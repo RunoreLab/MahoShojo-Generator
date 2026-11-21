@@ -8,7 +8,7 @@ import { getClientIpFromHeaders } from '@/lib/arena/battle-report-log-utils';
  *   （120s TTL + 原子消费 + PKCE verifier），不需要也不应有跨用户的共享
  *   identifier 桶，否则不同桌面用户会互相误限流。
  */
-export type AuthAttemptAction = 'register' | 'login' | 'native-grant' | 'native-exchange';
+export type AuthAttemptAction = 'register' | 'login' | 'native-grant' | 'native-exchange' | 'passkey' | 'passkey-confirm';
 
 export type AcquireAuthAttemptRateLimitInput = {
   req: Request;
@@ -89,6 +89,9 @@ const NATIVE_EXCHANGE_IP_RULE: TokenBucketRule = {
   capacity: 24,
   windowMs: 10 * 60 * 1000,
 };
+
+const PASSKEY_REQUEST_RULE: TokenBucketRule = { capacity: 48, windowMs: 60_000 };
+const PASSKEY_CONFIRM_RULE: TokenBucketRule = { capacity: 16, windowMs: 60_000 };
 
 let acquireCallCount = 0;
 
@@ -218,6 +221,20 @@ export const acquireAuthAttemptRateLimit = (
     checks.push({
       key: `native-exchange:ip:${requestIpKey}`,
       rule: NATIVE_EXCHANGE_IP_RULE,
+      reason: 'ip_burst',
+      scope: 'ip',
+    });
+  } else if (input.actionType === 'passkey-confirm') {
+    checks.push({
+      key: `passkey-confirm:user:${input.identifier ?? 'unknown'}`,
+      rule: PASSKEY_CONFIRM_RULE,
+      reason: 'identifier_burst',
+      scope: 'identifier',
+    });
+  } else if (input.actionType === 'passkey') {
+    checks.push({
+      key: `passkey:ip:${requestIpKey}`,
+      rule: PASSKEY_REQUEST_RULE,
       reason: 'ip_burst',
       scope: 'ip',
     });

@@ -39,6 +39,16 @@
       "name": "HOSTED_DR_TELEMETRY_AGGREGATE_LIMITER",
       "namespace_id": "73005",
       "simple": { "limit": 2048, "period": 60 }
+    },
+    {
+      "name": "PASSKEY_REQUEST_LIMITER",
+      "namespace_id": "73006",
+      "simple": { "limit": 48, "period": 60 }
+    },
+    {
+      "name": "PASSKEY_CONFIRM_LIMITER",
+      "namespace_id": "73007",
+      "simple": { "limit": 16, "period": 60 }
     }
   ],
   "assets": {
@@ -107,6 +117,16 @@
           "name": "HOSTED_DR_TELEMETRY_AGGREGATE_LIMITER",
           "namespace_id": "73005",
           "simple": { "limit": 2048, "period": 60 }
+        },
+        {
+          "name": "PASSKEY_REQUEST_LIMITER",
+          "namespace_id": "73006",
+          "simple": { "limit": 48, "period": 60 }
+        },
+        {
+          "name": "PASSKEY_CONFIRM_LIMITER",
+          "namespace_id": "73007",
+          "simple": { "limit": 16, "period": 60 }
         }
       ],
       "services": [
@@ -168,6 +188,16 @@
           "name": "HOSTED_DR_TELEMETRY_AGGREGATE_LIMITER",
           "namespace_id": "73105",
           "simple": { "limit": 2048, "period": 60 }
+        },
+        {
+          "name": "PASSKEY_REQUEST_LIMITER",
+          "namespace_id": "73106",
+          "simple": { "limit": 48, "period": 60 }
+        },
+        {
+          "name": "PASSKEY_CONFIRM_LIMITER",
+          "namespace_id": "73107",
+          "simple": { "limit": 16, "period": 60 }
         }
       ],
       "services": [

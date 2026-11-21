@@ -71,6 +71,43 @@ export const baVerifications = sqliteTable('ba_verification', {
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(unixEpochNow),
 });
 
+export const baPasskeys = sqliteTable(
+  'ba_passkey',
+  {
+    id: text('id').primaryKey().notNull(),
+    rpId: text('rp_id').notNull(),
+    authUserId: text('auth_user_id').notNull().references(() => baUsers.id, { onDelete: 'cascade' }),
+    credentialId: text('credential_id').notNull(),
+    publicKey: text('public_key').notNull(),
+    counter: integer('counter').notNull(),
+    deviceType: text('device_type', { enum: ['singleDevice', 'multiDevice'] }).notNull(),
+    transports: text('transports', { mode: 'json' }).$type<string[]>().notNull(),
+    name: text('name').notNull(),
+    createdAt: integer('created_at').notNull(),
+    lastUsedAt: integer('last_used_at'),
+  },
+  (table) => ({
+    credential: uniqueIndex('ba_passkey_rp_credential_unique').on(table.rpId, table.credentialId),
+    owner: index('ba_passkey_owner_idx').on(table.authUserId, table.rpId),
+  }),
+);
+
+export const baPasskeyChallenges = sqliteTable(
+  'ba_passkey_challenge',
+  {
+    id: text('id').primaryKey().notNull(),
+    rpId: text('rp_id').notNull(),
+    purpose: text('purpose', { enum: ['login', 'register', 'confirm-register', 'confirm-delete'] }).notNull(),
+    binding: text('binding').notNull(),
+    challenge: text('challenge').notNull(),
+    confirmedByPasskeyId: text('confirmed_by_passkey_id'),
+    expiresAt: integer('expires_at').notNull(),
+  },
+  (table) => ({
+    expires: index('ba_passkey_challenge_expires_idx').on(table.expiresAt),
+  }),
+);
+
 export const userAuthLinks = sqliteTable(
   'user_auth_links',
   {

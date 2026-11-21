@@ -3,6 +3,8 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { toNextJsHandler } from 'better-auth/next-js';
 import { getBetterAuthBootstrapStatus } from '@/lib/auth/better-auth';
 import { desktopNativeAuthPlugin } from '@/lib/auth/native-desktop-plugin';
+import { readPasskeyConfig } from '@/lib/auth/passkey-config';
+import { passkeyAuthPlugin } from '@/lib/auth/passkey-plugin';
 import { ensureAuthUserLink } from '@/lib/auth/user-auth-linking';
 import { getDrizzleDbFromRuntime } from '@/lib/db/drizzle';
 import { baAccounts, baSessions, baUsers, baVerifications } from '@/lib/db/schema/auth';
@@ -149,8 +151,9 @@ export const hasBetterAuthDatabaseBinding = (): boolean => {
   return getDrizzleDbFromRuntime() !== null;
 };
 
-const createBetterAuthInstance = (secret: string) =>
-  betterAuth({
+const createBetterAuthInstance = (secret: string) => {
+  const passkeys = readPasskeyConfig();
+  return betterAuth({
     database: drizzleAdapter(runtimeDbProxy, {
       provider: 'sqlite',
       schema: betterAuthSchema,
@@ -190,8 +193,9 @@ const createBetterAuthInstance = (secret: string) =>
         },
       },
     },
-    plugins: [desktopNativeAuthPlugin()],
+    plugins: [desktopNativeAuthPlugin(), ...(passkeys ? [passkeyAuthPlugin(passkeys)] : [])],
   });
+};
 
 type BetterAuthInstance = ReturnType<typeof createBetterAuthInstance>;
 
