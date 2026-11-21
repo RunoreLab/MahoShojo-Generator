@@ -672,10 +672,12 @@ describe('Web 战报的本地执行许可', () => {
 
     const originalFrame = document.querySelector('iframe');
     expect(originalFrame).toBeTruthy();
+    const framePolicy = "publickey-credentials-create 'none'; publickey-credentials-get 'none'";
+    expect(originalFrame?.getAttribute('allow')).toBe(framePolicy);
     await click('沉浸体验');
     expect(document.querySelector('[data-testid="arena-web-immersive"]')).toBeTruthy();
     expect(document.querySelector('iframe')).toBe(originalFrame);
-    expect(document.querySelector('iframe')?.getAttribute('allow')).toBeNull();
+    expect(originalFrame?.getAttribute('allow')).toBe(framePolicy);
     expect(document.body.style.overflow).toBe('hidden');
     expect(document.documentElement.style.overflow).toBe('hidden');
     expect(container.querySelector('.buttons-container')?.textContent).toBe('');
