@@ -90,7 +90,9 @@
         ]
       },
       "vars": {
-        "HONO_CORS_ORIGINS": "https://mahoshojo.colanns.me"
+        "HONO_CORS_ORIGINS": "https://mahoshojo.colanns.me",
+        "NEXT_PUBLIC_HOSTED_API_ENVIRONMENT": "production",
+        "PASSKEY_ORIGIN": "https://mahoshojo.colanns.me"
       },
       "ratelimits": [
         {

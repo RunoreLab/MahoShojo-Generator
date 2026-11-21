@@ -13,6 +13,7 @@ const wranglerCli = path.resolve(path.dirname(wranglerPackage), require(wrangler
 const webRoot = fileURLToPath(new URL('..', import.meta.url));
 const config = JSON.parse(await readFile(path.join(webRoot, 'wrangler.jsonc'), 'utf8'));
 const production = config.env.production;
+const passkeyOrigin = production.vars?.PASSKEY_ORIGIN;
 const temporary = await mkdtemp(path.join(tmpdir(), 'mahoshojo-worker-smoke-'));
 const isolatedEnv = {
   PATH: process.env.PATH,
@@ -62,7 +63,15 @@ try {
       modulesRoot: bundlePath,
       compatibilityDate: isolatedConfig.compatibility_date,
       compatibilityFlags: isolatedConfig.compatibility_flags,
-      bindings: { NEXTJS_ENV: 'production' },
+      bindings: {
+        NEXTJS_ENV: 'production',
+        ...(passkeyOrigin ? {
+          PASSKEY_ORIGIN: passkeyOrigin,
+          NEXT_PUBLIC_HOSTED_API_ENVIRONMENT: production.vars.NEXT_PUBLIC_HOSTED_API_ENVIRONMENT,
+          BETTER_AUTH_URL: passkeyOrigin,
+          BETTER_AUTH_SECRET: 'synthetic-worker-smoke-passkey-secret',
+        } : {}),
+      },
       d1Databases: ['DB'],
       serviceBindings: { WORKER_SELF_REFERENCE: isolatedConfig.name },
       assets: {
@@ -87,6 +96,17 @@ try {
     const html = await response.text();
     assertHealthyCloudflareResponse(route, response, html);
     console.log(`Cloudflare runtime ${route}: PASS`);
+  }
+  if (passkeyOrigin) {
+    // dispatchFetch 由隔离 Worker 处理此 URL。状态查询只验证运行时绑定和路由。
+    const response = await worker.dispatchFetch(`${passkeyOrigin}/api/auth/passkey/status`, {
+      signal: AbortSignal.timeout(30_000),
+      redirect: 'manual',
+    });
+    assert.equal(response.status, 200, 'Production-origin passkey status must be reachable');
+    assert.deepEqual(await response.json(), { enabled: true });
+    assert.match(response.headers.get('cache-control') ?? '', /\bno-store\b/u);
+    console.log('Cloudflare runtime /api/auth/passkey/status: PASS');
   }
   assert.deepEqual(outboundRequests, [], 'Smoke routes must not access external services');
 } finally {
