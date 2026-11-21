@@ -98,13 +98,19 @@ try {
     console.log(`Cloudflare runtime ${route}: PASS`);
   }
   if (passkeyOrigin) {
-    // dispatchFetch 由隔离 Worker 处理此 URL。状态查询只验证运行时绑定和路由。
-    const response = await worker.dispatchFetch(`${passkeyOrigin}/api/auth/passkey/status`, {
+    const statusUrl = new URL('/api/auth/passkey/status', passkeyOrigin);
+    // dispatchFetch 使用本机 Host。为 OpenNext 模拟代理传给应用的公开地址。
+    const response = await worker.dispatchFetch(statusUrl, {
+      headers: {
+        'x-forwarded-host': statusUrl.host,
+        'x-forwarded-proto': statusUrl.protocol.slice(0, -1),
+      },
       signal: AbortSignal.timeout(30_000),
       redirect: 'manual',
     });
-    assert.equal(response.status, 200, 'Production-origin passkey status must be reachable');
-    assert.deepEqual(await response.json(), { enabled: true });
+    const body = await response.text();
+    assert.equal(response.status, 200, `Production-origin passkey status: ${body.slice(0, 240)}`);
+    assert.deepEqual(JSON.parse(body), { enabled: true });
     assert.match(response.headers.get('cache-control') ?? '', /\bno-store\b/u);
     console.log('Cloudflare runtime /api/auth/passkey/status: PASS');
   }
