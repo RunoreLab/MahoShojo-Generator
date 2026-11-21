@@ -21,10 +21,16 @@ let alice: Fixture;
 let bob: Fixture;
 
 async function post(path: string, body: unknown, cookie = '', origin = ORIGIN) {
-  return auth.handler(new Request(`${ORIGIN}/api/auth/passkey/${path}`, {
+  const request = new Request(`${ORIGIN}/api/auth/passkey/${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', cookie, origin },
     body: JSON.stringify(body),
+  });
+  return auth.handler(new Proxy(request, {
+    get(target, key) {
+      const value = Reflect.get(target, key, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
   }));
 }
 

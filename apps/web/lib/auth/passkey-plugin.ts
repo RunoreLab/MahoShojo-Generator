@@ -88,7 +88,12 @@ async function boundRequest(req: Request) {
     bytes.set(result.value, length);
     length += result.value.length;
   }
-  return { request: new Request(req, { body: bytes.subarray(0, length) }) };
+  // Next 的 Route Handler 可能用 Proxy 封装 Request，构造器需要普通字段。
+  return {
+    request: new Request(req.url, {
+      method: req.method, headers: req.headers, signal: req.signal, body: bytes.subarray(0, length),
+    }),
+  };
 }
 
 type Management = { actor: PasskeyActor; username: string };
