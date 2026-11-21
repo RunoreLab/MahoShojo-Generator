@@ -42,7 +42,6 @@
     "@mahoshojo/web-package": "workspace:*",
     "@next/third-parties": "16.4.6",
     "@opennextjs/cloudflare": "1.20.17",
-    "@simplewebauthn/browser": "14.0.0",
     "@simplewebauthn/server": "14.1.0",
     "@tanstack/react-query": "^5.90.12",
     "@types/mdast": "^4.0.4",

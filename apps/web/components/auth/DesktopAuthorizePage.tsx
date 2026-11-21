@@ -111,8 +111,7 @@ export function DesktopAuthorizePage({ grant, grantPath }: DesktopAuthorizePageP
     );
   }
 
-  // 本页复用的登录弹层只允许密码登录与注册：两者都建立 Better Auth 会话；
-  // 旧版密钥登录不产生 BA 会话，放在这里只会让用户登录后仍无法授权。
+  // 登录弹层只提供能建立 Better Auth 会话的方式，以便继续桌面授权。
   const authModal = (
     <AuthModal
       isOpen={authModalOpen}
@@ -181,14 +180,14 @@ export function DesktopAuthorizePage({ grant, grantPath }: DesktopAuthorizePageP
           正通过旧版密钥登录，尚不能签发桌面端授权。
         </p>
         <p className="mb-6 text-sm text-gray-500">
-          请改用账号密码登录后授权；尚未设置密码的账号请先在网页端完成账号迁移。
+          请使用密码或通行密钥重新登录。仅持有旧密钥时，请先在网页端完成账号迁移。
         </p>
         <button
           type="button"
           className="generate-button w-full"
           onClick={() => setAuthModalOpen(true)}
         >
-          使用账号密码登录
+          重新登录并授权
         </button>
         <button
           type="button"

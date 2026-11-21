@@ -10,7 +10,7 @@ export const WEB_PACKAGE_RUNNER_HEADERS = [
   { key: 'Referrer-Policy', value: 'no-referrer' },
   { key: 'Cache-Control', value: 'no-store' },
   { key: 'X-Robots-Tag', value: 'noindex, nofollow' },
-  { key: 'Permissions-Policy', value: "camera=(), microphone=(), geolocation=(), clipboard-read=(), clipboard-write=(), payment=(), usb=(), serial=(), display-capture=()" },
+  { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), clipboard-read=(), clipboard-write=(), payment=(), usb=(), serial=(), display-capture=(), publickey-credentials-create=(), publickey-credentials-get=()' },
 ] as const;
 
 // 此页没有用户字节、会话/API 能力或可持久执行资源。只接收当前父窗口的一次性、匹配 nonce 的内容投递。

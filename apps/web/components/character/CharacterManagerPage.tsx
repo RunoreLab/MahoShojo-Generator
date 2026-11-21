@@ -2080,6 +2080,12 @@ export const CharacterManagerPage: React.FC = () => {
                     setAuthMessage(null);
                 }}
                 onLogin={handleLogin}
+                onPasskeySuccess={() => {
+                    setMessage({ type: 'success', text: '通行密钥登录成功！' });
+                    void loadUserDataCards();
+                    void loadUserBadges();
+                    void refreshAuthMigrationStatus();
+                }}
                 onRegister={handleRegister}
                 authMessage={authMessage}
             />

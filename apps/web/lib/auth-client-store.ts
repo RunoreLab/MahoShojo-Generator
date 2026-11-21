@@ -1,4 +1,5 @@
 import { authApi, authStorage, type AuthSessionSource } from '@/lib/auth';
+import { completePasskeyLogin, requestPasskeyLoginAssertion } from '@/lib/auth/passkey-client';
 import { getUserBadges } from '@/lib/userBadges';
 import type { UserBadge } from '@/types/badge';
 import { AuthStorageError, beginAuthIdentityTransition, captureAuthIdentity, checkAuthIdentityOwner, subscribeAuthIdentity, type AuthIdentityOwner } from '@/lib/auth-identity';
@@ -269,6 +270,41 @@ export const logoutAndSyncAuthState = async () => {
   } finally {
     if (activeTransition === owner) activeTransition = null;
     if (owner.identity.isCurrent()) await syncVerifiedAuthState({ success: false }, false, owner);
+  }
+};
+
+export const loginWithPasskeyAndSyncAuthState = async (
+  signal: AbortSignal,
+): Promise<{ success: boolean; error?: string }> => {
+  const identity = captureAuthIdentity();
+  // 等本机验证完成后再切换身份，关闭弹窗或取消认证不会清除当前登录。
+  const assertion = await requestPasskeyLoginAssertion(signal);
+  signal.throwIfAborted();
+  if (!identity.isCurrent()) return { success: false, error: '登录身份已变化，请重试。' };
+
+  const owner = beginStoreTransition();
+  const request = new AbortController();
+  const unsubscribe = subscribeAuthIdentity(() => {
+    if (!owner.identity.isCurrent()) request.abort();
+  });
+  try {
+    const { userId } = await completePasskeyLogin(assertion, request.signal);
+    if (!checkAuthIdentityOwner(owner)) return finishAuthResult(owner, { success: false });
+    if (!Number.isSafeInteger(userId) || userId <= 0) throw new Error('未能核对登录账号。');
+    const result = await authApi.verify({ owner, expectedSessionUserId: userId });
+    await syncVerifiedAuthState(result, false, owner);
+    return finishAuthResult(owner, result.success ? { success: true } : {
+      success: false, error: '未能确认登录会话，请重试。',
+    });
+  } catch (error) {
+    if (owner.identity.isCurrent()) await restoreAfterFailedTransition(owner);
+    return finishAuthResult(owner, {
+      success: false, error: error instanceof Error ? error.message : '通行密钥登录失败。',
+    });
+  } finally {
+    unsubscribe();
+    if (activeTransition === owner) activeTransition = null;
+    if (owner.identity.isCurrent()) mergeAuthSnapshot({ loading: false });
   }
 };
 

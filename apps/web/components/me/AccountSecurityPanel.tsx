@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 
 import { loadAuthMigrationStatus } from '@/components/me/authMigrationStatus';
-import { authStorage } from '@/lib/auth';
+import { PasskeySettingsPanel } from '@/components/me/PasskeySettingsPanel';
+import { authStorage, type AuthSessionSource } from '@/lib/auth';
 import {
   PASSWORD_MIN_LENGTH,
   evaluatePasswordStrength,
@@ -40,7 +41,12 @@ const authedJson = async <T,>(path: string, method: 'PUT' | 'POST', body: Record
   return data;
 };
 
-export function AccountSecurityPanel({ userId, username }: { userId: number | null; username: string | null }) {
+export function AccountSecurityPanel({ userId, username, authSource = null, identityEpoch = 0 }: {
+  userId: number | null;
+  username: string | null;
+  authSource?: AuthSessionSource | null;
+  identityEpoch?: number;
+}) {
   const query = useQuery({
     queryKey: ['me-auth-migration', userId],
     enabled: Boolean(userId),
@@ -237,6 +243,8 @@ export function AccountSecurityPanel({ userId, username }: { userId: number | nu
           检测到当前账号尚未设置密码。请先设置登录密码完成迁移，再进行后续安全设置。
         </div>
       ) : null}
+
+      <PasskeySettingsPanel key={`${userId}:${identityEpoch}`} userId={userId} authSource={authSource} identityEpoch={identityEpoch} />
 
       <div className="mt-4 space-y-4">
         {canSetInitialPassword ? (

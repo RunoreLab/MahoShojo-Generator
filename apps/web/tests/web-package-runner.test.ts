@@ -12,6 +12,7 @@ describe('Web 包静态运行页策略',()=>{
     expect(response.headers.get('content-type')).toContain('text/html');
     expect(response.headers.get('cache-control')).toBe('no-store');
     expect(response.headers.get('x-frame-options')).toBe('SAMEORIGIN');
+    expect(response.headers.get('permissions-policy')).toContain('publickey-credentials-create=(), publickey-credentials-get=()');
     expect(await response.text()).toContain('event.source !== parent');
   });
   it('scopes data/blob script permission to the runner and retains normal page policy',()=>{

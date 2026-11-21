@@ -1,6 +1,6 @@
 import { describe, expect, vi, test } from 'vitest';
 
-import { authStorage } from '@/lib/auth';
+import { authApi, authStorage } from '@/lib/auth';
 
 class LocalStorageMock {
   private store = new Map<string, string>();
@@ -23,6 +23,35 @@ class LocalStorageMock {
 }
 
 describe('authStorage session bootstrap', () => {
+  test('通行密钥会话校验拒绝旧 bearer 和与验签结果不一致的账号', async () => {
+    vi.stubGlobal('window', {});
+    vi.stubGlobal('localStorage', new LocalStorageMock());
+    try {
+      await authStorage.setAuth({ username: 'previous', userId: 8, authKey: 'synthetic-stored-key' });
+      const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        expect(new Headers(init?.headers).get('Authorization')).toBeNull();
+        return new Response(JSON.stringify({
+          success: true, authSource: 'better-auth-session', user: { id: 8, username: 'previous' },
+        }));
+      });
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true, authSource: 'legacy-bearer', user: { id: 7, username: 'expected' },
+      })));
+      vi.stubGlobal('fetch', fetchMock);
+
+      expect(await authApi.verify({ expectedSessionUserId: 7 })).toEqual({ success: false });
+      expect(await authApi.verify({ expectedSessionUserId: 7 })).toEqual({ success: false });
+      expect((await authStorage.getAuth())?.userId).toBe(8);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      for (const [, init] of fetchMock.mock.calls) {
+        expect(new Headers(init?.headers).get('Authorization')).toBeNull();
+      }
+    } finally {
+      authStorage.clearAuth();
+      vi.unstubAllGlobals();
+    }
+  });
+
   test('本地 authKey 缺失但会话有效时，应自动从 verify 回填兼容凭证', async () => {
     const previousWindow = (globalThis as typeof globalThis & { window?: unknown }).window;
     const previousLocalStorage = (globalThis as typeof globalThis & { localStorage?: unknown }).localStorage;

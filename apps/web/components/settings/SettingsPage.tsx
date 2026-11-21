@@ -32,7 +32,7 @@ export function WebSettingsPage() {
   const sectionParam = searchParams.get('section');
   const section =
     sectionParam !== null && isSettingsGroupId(sectionParam) ? sectionParam : undefined;
-  const { user, isAuthenticated, loading } = useAuth();
+  const { user, isAuthenticated, loading, authSource, identityEpoch } = useAuth();
   const adapters = useMemo(() => createWebPagePreferenceAdapters(), []);
 
   const accountContent = loading ? (
@@ -43,7 +43,7 @@ export function WebSettingsPage() {
     <>
       <AuthMigrationPanel userId={user.id} />
       <ProfileSettingsPanel userId={user.id} />
-      <AccountSecurityPanel userId={user.id} username={user.username} />
+      <AccountSecurityPanel userId={user.id} username={user.username} authSource={authSource} identityEpoch={identityEpoch} />
     </>
   ) : (
     <SettingsCard title="账号">

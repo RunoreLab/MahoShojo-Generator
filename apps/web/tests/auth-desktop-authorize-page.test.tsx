@@ -92,7 +92,7 @@ describe('DesktopAuthorizePage 认证状态区分', () => {
     const html = renderPage();
     expect(html).not.toContain('授权并返回应用');
     expect(html).toContain('旧版密钥');
-    expect(html).toContain('使用账号密码登录');
+    expect(html).toContain('重新登录并授权');
     expect(authModalPasswordOnly).toContain(true);
   });
 
@@ -107,6 +107,6 @@ describe('DesktopAuthorizePage 认证状态区分', () => {
     const html = renderPage();
     expect(html).toContain('授权并返回应用');
     expect(html).toContain('madoka');
-    expect(html).not.toContain('使用账号密码登录');
+    expect(html).not.toContain('重新登录并授权');
   });
 });

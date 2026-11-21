@@ -324,9 +324,6 @@ importers:
       '@opennextjs/cloudflare':
         specifier: 1.20.17
         version: 1.20.17(next@16.4.6(@babel/core@7.29.7(supports-color@10.2.2))(@opentelemetry/api@1.9.1)(@types/node@20.19.27)(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(supports-color@10.2.2)(wrangler@4.149.0(@types/node@20.19.27))
-      '@simplewebauthn/browser':
-        specifier: 14.0.0
-        version: 14.0.0
       '@simplewebauthn/server':
         specifier: 14.1.0
         version: 14.1.0
@@ -2783,9 +2780,6 @@ packages:
 
   '@rtsao/scc@1.1.0':
     resolution: {integrity: sha512-zt6OdqaDoOnJ1ZYsCYGt9YmWzDXl4vQdKTyJev62gFhRGKdx7mcT54V9KIjg+d2wi9EXsPvAPKe7i7WjfVWB8g==}
-
-  '@simplewebauthn/browser@14.0.0':
-    resolution: {integrity: sha512-1odWVqeEBTl7lJ9zMKLEsmTlnyrDO5iRcTvfMKKk1WThUnp/i8JJdffdj2icP+tty159s4PgwE3BiMoEW9NFow==}
 
   '@simplewebauthn/server@14.1.0':
     resolution: {integrity: sha512-HPRRBR4Vzr45+RVvbmf6JuCfGdYYcSs4Pnnnp9YSY2IABa4JKnG+wxybczoB7rmdLCOMS/mbBa2ZL/Bcz58UlA==}
@@ -8491,8 +8485,6 @@ snapshots:
   '@rolldown/pluginutils@1.0.1': {}
 
   '@rtsao/scc@1.1.0': {}
-
-  '@simplewebauthn/browser@14.0.0': {}
 
   '@simplewebauthn/server@14.1.0':
     dependencies:

@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { WEB_PACKAGE_RUNNER_PATH } from '@/lib/web-package/runner-client';
 
-export const WEB_PACKAGE_FRAME_ALLOW = "camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'; payment 'none'; usb 'none'; serial 'none'; display-capture 'none'";
+export const DENY_WEBAUTHN_IN_FRAME = "publickey-credentials-create 'none'; publickey-credentials-get 'none'";
+export const WEB_PACKAGE_FRAME_ALLOW = "camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'; payment 'none'; usb 'none'; serial 'none'; display-capture 'none'; " + DENY_WEBAUTHN_IN_FRAME;
 
 /** 首次准备消息仅用于投递本地页面，不允许子框架请求宿主 API、文件或升级权限。 */
 export function WebPackageFrame({ html, trusted, className }: {

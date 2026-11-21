@@ -1,8 +1,4 @@
 import { z } from 'zod';
-import type {
-  PublicKeyCredentialCreationOptionsJSON,
-  PublicKeyCredentialRequestOptionsJSON,
-} from '@simplewebauthn/browser';
 
 export const PASSKEY_API_PREFIX = '/api/auth';
 export const PASSKEY_ROUTES = {

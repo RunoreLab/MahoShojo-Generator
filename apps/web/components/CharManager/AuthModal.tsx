@@ -1,5 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { KeyRound } from 'lucide-react';
+import { loginWithPasskeyAndSyncAuthState } from '@/lib/auth-client-store';
+import { supportsPasskeys, usePasskeysEnabled } from '@/lib/auth/passkey-client';
 import { quickCheck } from '@/lib/sensitive-word-filter';
 import {
   PASSWORD_MIN_LENGTH,
@@ -21,9 +24,10 @@ interface AuthModalProps {
   ) => Promise<{ requiresTurnstile?: boolean } | void>;
   onRegister: (username: string, email: string, turnstileToken: string, password: string) => Promise<void>;
   authMessage: { type: 'error' | 'success'; text: string } | null;
+  onPasskeySuccess?: () => void;
   /**
-   * 为 true 时只允许密码登录：隐藏「旧密钥登录」选项。用于必须建立 Better Auth
-   * 会话的入口（旧版密钥登录不产生 BA session，放行会让用户走进死路）。
+   * 隐藏「旧密钥登录」选项，用于必须建立 Better Auth 会话的入口。
+   * 密码和通行密钥都可以建立正式会话。
    */
   passwordLoginOnly?: boolean;
 }
@@ -58,6 +62,7 @@ export default function AuthModal({
   onLogin,
   onRegister,
   authMessage,
+  onPasskeySuccess,
   passwordLoginOnly = false,
 }: AuthModalProps) {
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
@@ -70,6 +75,10 @@ export default function AuthModal({
   const [identifierError, setIdentifierError] = useState<string>('');
   const [passwordError, setPasswordError] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [passkeyPending, setPasskeyPending] = useState(false);
+  const [passkeyError, setPasskeyError] = useState('');
+  const passkeyAttempt = useRef<AbortController | null>(null);
+  const passkeysEnabled = usePasskeysEnabled(isOpen && authMode === 'login' && supportsPasskeys());
   const turnstileRef = useRef<TurnstileRef>(null);
 
   const passwordStrength = evaluatePasswordStrength(authForm.password);
@@ -91,7 +100,10 @@ export default function AuthModal({
       setIdentifierError('');
       setPasswordError('');
       setIsSubmitting(false);
+      setPasskeyPending(false);
+      setPasskeyError('');
     }
+    return () => passkeyAttempt.current?.abort();
   }, [isOpen]);
 
   const validateEmail = (email: string) => {
@@ -181,6 +193,8 @@ export default function AuthModal({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (passkeyAttempt.current) return;
+    setPasskeyError('');
     const requiresTurnstile = authMode === 'register' || loginRequiresTurnstile;
     if (requiresTurnstile && !turnstileToken) return;
 
@@ -229,6 +243,7 @@ export default function AuthModal({
     setUsernameError('');
     setIdentifierError('');
     setPasswordError('');
+    setPasskeyError('');
     resetCaptcha();
   };
 
@@ -237,13 +252,40 @@ export default function AuthModal({
     setLoginRequiresTurnstile(false);
     setIdentifierError('');
     setPasswordError('');
+    setPasskeyError('');
     resetCaptcha();
+  };
+
+  const handlePasskey = async () => {
+    if (passkeyAttempt.current || isSubmitting) return;
+    const attempt = new AbortController();
+    passkeyAttempt.current = attempt;
+    setPasskeyPending(true);
+    setPasskeyError('');
+    try {
+      const result = await loginWithPasskeyAndSyncAuthState(attempt.signal);
+      if (result.success) {
+        onClose();
+        onPasskeySuccess?.();
+      } else if (!attempt.signal.aborted) {
+        setPasskeyError(result.error || '通行密钥登录失败。');
+      }
+    } catch (error) {
+      if (!attempt.signal.aborted) {
+        setPasskeyError(error instanceof Error ? error.message : '通行密钥登录失败。');
+      }
+    } finally {
+      if (passkeyAttempt.current === attempt) {
+        passkeyAttempt.current = null;
+        setPasskeyPending(false);
+      }
+    }
   };
 
   const shouldShowTurnstile = authMode === 'register' || loginRequiresTurnstile;
   const canSubmit =
     (!shouldShowTurnstile || Boolean(turnstileToken)) &&
-    !isSubmitting &&
+    !isSubmitting && !passkeyPending &&
     !(authMode === 'register' && (!authForm.password || Boolean(usernameError) || Boolean(identifierError) || Boolean(passwordError))) &&
     !(authMode === 'login' && effectiveLoginMethod === 'password' && !authForm.identifier.trim());
 
@@ -263,7 +305,7 @@ export default function AuthModal({
           <span className="font-medium">迁移提示：</span> 新注册账号已强制使用密码登录，旧版密钥登录将逐步下线。
         </div>
 
-        {authMessage ? (
+        {authMessage && !passkeyPending && !passkeyError ? (
           <div
             className={`mb-4 rounded-md p-3 text-sm ${
               authMessage.type === 'error' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
@@ -273,11 +315,27 @@ export default function AuthModal({
           </div>
         ) : null}
 
+        {passkeysEnabled ? (
+          <div className="mb-4">
+            <button
+              type="button"
+              className="flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-(--app-border-strong) bg-(--app-surface) px-3 py-2 text-sm font-medium text-(--app-text) focus-visible:outline-2 focus-visible:outline-(--app-accent-strong) disabled:opacity-50"
+              onClick={() => void handlePasskey()}
+              disabled={isSubmitting || passkeyPending}
+            >
+              <KeyRound size={16} aria-hidden="true" />
+              {passkeyPending ? '正在验证通行密钥…' : '使用通行密钥登录'}
+            </button>
+            {passkeyError ? <p role="alert" className="mt-2 text-sm text-(--app-text)">{passkeyError}</p> : null}
+          </div>
+        ) : null}
+
         <form onSubmit={handleSubmit} className="space-y-4">
           {authMode === 'login' && !passwordLoginOnly ? (
             <div className="grid grid-cols-2 gap-2 rounded-md bg-gray-100 p-1">
               <button
                 type="button"
+                disabled={passkeyPending}
                 onClick={() => switchLoginMethod('password')}
                 className={`rounded px-2 py-2 text-sm font-medium ${
                   loginMethod === 'password' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600'
@@ -287,6 +345,7 @@ export default function AuthModal({
               </button>
               <button
                 type="button"
+                disabled={passkeyPending}
                 onClick={() => switchLoginMethod('legacy')}
                 className={`rounded px-2 py-2 text-sm font-medium ${
                   loginMethod === 'legacy' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600'
@@ -438,7 +497,7 @@ export default function AuthModal({
 
         <div className="mt-2 text-center text-sm text-gray-600">
           {authMode === 'login' ? '还没有账号？' : '已有账号？'}
-          <button onClick={switchMode} className="ml-1 font-medium text-purple-600 hover:text-purple-700">
+          <button onClick={switchMode} disabled={passkeyPending} className="ml-1 font-medium text-purple-600 hover:text-purple-700">
             {authMode === 'login' ? '去注册' : '去登录'}
           </button>
         </div>

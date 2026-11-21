@@ -543,14 +543,18 @@ export const authApi = {
   },
 
   // 普通相同凭据校验仅更新内存，不因 activityToken 刷新打断其他标签页。
-  async verify(options: { owner?: AuthIdentityOwner } = {}): Promise<VerifyAuthResponse> {
+  async verify(options: { owner?: AuthIdentityOwner; expectedSessionUserId?: number } = {}): Promise<VerifyAuthResponse> {
     const owner = options.owner ?? { identity: captureAuthIdentity() };
     const auth = await authStorage.getAuth();
     if (!owner.identity.isCurrent()) return { success: false };
-    const authHeader = readStoredAuthHeader(auth);
+    const expected = options.expectedSessionUserId;
+    const authHeader = expected === undefined ? readStoredAuthHeader(auth) : null;
     try {
       const data = await fetchVerifyAuthState(authHeader);
       if (!owner.identity.isCurrent()) return { success: false };
+      if (expected !== undefined && (data.authSource !== 'better-auth-session' || data.user?.id !== expected)) {
+        return { success: false };
+      }
       if (data?.success && data?.user?.id) {
         const persisted = await persistVerifyAuthState(data, auth, owner);
         if (!persisted) return { success: false };

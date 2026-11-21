@@ -12,7 +12,7 @@ import { buildSafeFileName } from '@/lib/client/fileName';
 import { importLocalWebPackageArchive } from '@/lib/web-package/cache';
 import { hydrateExactWebPackageFromLibrary } from '@/lib/local-library/web-package-library';
 import { useWebPackageTrust } from '@/lib/web-package/trust';
-import { WebPackageFrame } from './WebPackageFrame';
+import { DENY_WEBAUTHN_IN_FRAME, WebPackageFrame } from './WebPackageFrame';
 import { WebPackageRiskSummary, WebPackageTrustDialog } from './WebPackageSafety';
 import { scanWebPackageInstance, type WebPackageRiskProfile } from '@mahoshojo/web-package/security';
 import type { WebPackageArtifact, WebPackageRef } from '@mahoshojo/contracts/web-package';
@@ -126,7 +126,7 @@ function ArenaWebDocument({ location, prelude, epilogue, reload, immersive, aiMo
     <ArenaWebViewer immersive={immersive} onToggleImmersive={onToggleImmersive} contentIdentity={location} reload={reload} aiModel={aiModel} aiUsage={aiUsage}>
       {packageMode && location.kind === 'srcdoc' ? <WebPackageFrame
         key={`${reload}:${packageMode}:${packageIdentity}`} html={previewDocument} trusted={packageMode === 'trusted'} className={ARENA_WEB_FRAME_CLASS_NAME}
-      /> : <iframe key={reload} title="AI Web 战报" sandbox="allow-scripts" referrerPolicy="no-referrer"
+      /> : <iframe key={reload} title="AI Web 战报" sandbox="allow-scripts" allow={DENY_WEBAUTHN_IN_FRAME} referrerPolicy="no-referrer"
         {...(location.kind === 'url' ? { src: location.url } : { srcDoc: previewDocument })}
         data-testid="arena-web-document" className={ARENA_WEB_FRAME_CLASS_NAME} />}
     </ArenaWebViewer>
