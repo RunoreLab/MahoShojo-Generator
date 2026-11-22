@@ -1,7 +1,7 @@
 import type { AutoReviewProviderEntry } from './config';
 import { createAutoReviewBackend, DEFAULT_BACKEND_TIMEOUT_MS, type AutoReviewBackendDeps } from './backends';
 import { extractAutoReviewContent } from './state';
-import { AutoReviewInputCapacityError } from './input-capacity';
+import { AutoReviewInputCapacityError, isInputCapacityErrorResponse } from './input-capacity';
 import type {
   AutoReviewBackend,
   AutoReviewRoutingStrategy,
@@ -166,7 +166,9 @@ export const createAutoReviewEngine = (
           };
         } catch (error) {
           lastError = error;
-          if (error instanceof AutoReviewInputCapacityError) inputExceedsCapacity = true;
+          if (error instanceof AutoReviewInputCapacityError || isInputCapacityErrorResponse(400, { error })) {
+            inputExceedsCapacity = true;
+          }
           deps.onBackendError?.(entry.id, error);
         }
       }

@@ -77,7 +77,7 @@ export const isInputCapacityErrorResponse = (status: number, body: unknown): boo
     }
     if (!value || typeof value !== 'object' || depth === 0) return false;
     const nested = value as Record<string, unknown>;
-    return ['code', 'message', 'type', 'error_type', 'metadata', 'error']
+    return ['code', 'message', 'type', 'error_type', 'metadata', 'error', 'cause']
       .some((key) => matches(nested[key], depth - 1));
   };
   return matches(record.error, 3) || matches(result.error, 3);

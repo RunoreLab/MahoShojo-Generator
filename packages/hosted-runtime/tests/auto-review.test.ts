@@ -493,6 +493,16 @@ describe('engine routing', () => {
     expect(result.inputCoverage.truncated).toBe(true);
   });
 
+  it('结构化 LLM 生成器抛出上下文长度错误时标记覆盖不完整', async () => {
+    const generate = vi.fn(async () => {
+      throw new Error('generation failed', { cause: new Error('maximum context length exceeded') });
+    });
+    const engine = createAutoReviewEngine([{ id: 'llm', kind: 'llm' }], { generate });
+    const result = await engine.review(target);
+    expect(result.outcome.verdict).toBe('uncertain');
+    expect(result.inputCoverage).toEqual({ truncated: true, parseError: false });
+  });
+
   it('weighted-random：权重决定首个后端', () => {
     const entries = [jevEntry({ id: 'a', weight: 1 }), jevEntry({ id: 'b', weight: 9 })];
     const rngHigh = orderBackendEntries(entries, 'weighted-random', () => 0.99);
