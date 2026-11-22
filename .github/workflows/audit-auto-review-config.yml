@@ -1,0 +1,31 @@
+name: 核查生产自动审核配置
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    if: github.ref == 'refs/heads/feature/v0.2.0_Battle_Growth_MahoShojo'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      deployment: false
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.22.1
+          package-manager-cache: false
+
+      - name: 读取审核配置并输出脱敏摘要
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/audit-auto-review-config.mjs
