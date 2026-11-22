@@ -113,6 +113,13 @@ describe('resolveAutoReviewThresholds', () => {
     const t = resolveAutoReviewThresholds(jevEntry({ model: 'respan/span-01-lite' }));
     expect(t).toMatchObject({ usePassVeto: true, passRejectAt: 0.25, catVetoAt: 0.7 });
   });
+  it.each([
+    ['respan/span-01-lite', 'respan/span-01-lite:free'],
+    ['inception/mercury-decide', 'inception/mercury-decide:free'],
+  ])('确认的免费别名 %s / %s 使用相同阈值', (base, alias) => {
+    expect(resolveAutoReviewThresholds(jevEntry({ model: alias })))
+      .toEqual(resolveAutoReviewThresholds(jevEntry({ model: base })));
+  });
 });
 
 describe('resolveUncertainAction', () => {
@@ -203,24 +210,39 @@ describe('jev-decisions backend', () => {
     expect((await engine.review(target)).outcome.verdict).toBe('reject');
   });
 
-  it('span-01-lite：截断输入禁用 pass-veto——低 should_pass 不再硬拒', async () => {
-    const bigTarget = { ...target, data: JSON.stringify({ f: 'x'.repeat(500) }) };
+  it('span-01-lite：输入超出数据卡上限时不调用模型', async () => {
+    const bigTarget = { ...target, data: JSON.stringify({ f: 'x'.repeat(1024 * 1024) }) };
+    const fetchImpl = vi.fn(async () => jevResponse(fullAnswers({ should_pass: 0.05 })));
     const engine = createAutoReviewEngine([jevEntry({ model: 'respan/span-01-lite' })], {
-      fetch: vi.fn(async () => jevResponse(fullAnswers({ should_pass: 0.05 }))),
+      fetch: fetchImpl,
     });
     const r = await engine.review(bigTarget);
     expect(r.inputCoverage.truncated).toBe(true);
     expect(r.outcome.verdict).toBe('uncertain');
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('span-01-lite：截断输入下类目否决（正向证据）仍可 reject', async () => {
-    const bigTarget = { ...target, data: JSON.stringify({ f: 'x'.repeat(500) }) };
-    const engine = createAutoReviewEngine([jevEntry({ model: 'respan/span-01-lite' })], {
-      fetch: vi.fn(async () => jevResponse(fullAnswers({ v_gore: 0.95, should_pass: 0.05 }))),
-    });
-    const r = await engine.review(bigTarget);
-    expect(r.inputCoverage.truncated).toBe(true);
-    expect(r.outcome.verdict).toBe('reject');
+  it('后端工厂直接调用时也不发送不完整输入', async () => {
+    const fetchImpl = vi.fn(async () => jevResponse(fullAnswers()));
+    const backend = createAutoReviewBackend(jevEntry(), { fetch: fetchImpl });
+    const bigTarget = { ...target, data: JSON.stringify({ f: 'x'.repeat(1024 * 1024) }) };
+    await expect(backend.review(bigTarget)).rejects.toThrow('auto-review input incomplete');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('完整发送长字段和数组尾部，而不按旧摘要限制截断', async () => {
+    const fetchImpl = vi.fn(async () => jevResponse(fullAnswers()));
+    const backend = createAutoReviewBackend(jevEntry({
+      endpoint: 'https://openrouter.ai/api/alpha/decisions', model: 'perplexity/pplx-decider-v1.3:free',
+    }), { fetch: fetchImpl });
+    const longText = '角色设定'.repeat(5000) + '长字段尾部';
+    const data = JSON.stringify({ f: longText, items: Array.from({ length: 50 }, (_, i) => `第${i}项`) });
+    const out = await backend.review({ ...target, data });
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    const body = JSON.parse(String(init.body)) as { state: string };
+    expect(body.state).toContain(longText);
+    expect(body.state).toContain('第49项');
+    expect(out.inputCoverage).toEqual({ truncated: false, parseError: false });
   });
 
   it('span-01-lite：should_pass 高于收窄阈值且类目干净 → approve', async () => {
@@ -373,6 +395,104 @@ describe('engine routing', () => {
     expect(r.outcome.verdict).toBe('uncertain');
   });
 
+  it('已知会静默截断的 Clef 不接收过长正文，转交长上下文后端完整审核', async () => {
+    const fetchImpl = vi.fn(async () => jevResponse(fullAnswers()));
+    const engine = createAutoReviewEngine([
+      jevEntry({ id: 'clef' }),
+      jevEntry({ id: 'long', endpoint: 'https://openrouter.ai/api/alpha/decisions', model: 'perplexity/pplx-decider-v1.3:free' }),
+    ], { fetch: fetchImpl, strategy: 'priority' });
+    const data = JSON.stringify({ text: '很长的设定'.repeat(500) + '尾部内容' });
+    const result = await engine.review({ ...target, data });
+    expect(result.backendId).toBe('long');
+    expect(result.attempted).toEqual(['clef', 'long']);
+    expect(result.inputCoverage.truncated).toBe(false);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toContain('openrouter.ai');
+    expect((JSON.parse(String(init.body)) as { state: string }).state).toContain('尾部内容');
+  });
+
+  it('没有能够覆盖完整正文的后端时，标记覆盖不完整并保持 uncertain', async () => {
+    const fetchImpl = vi.fn(async () => jevResponse(fullAnswers()));
+    const engine = createAutoReviewEngine([jevEntry()], { fetch: fetchImpl });
+    const result = await engine.review({ ...target, data: JSON.stringify({ text: '正文'.repeat(800) }) });
+    expect(result.outcome.verdict).toBe('uncertain');
+    expect(result.inputCoverage.truncated).toBe(true);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('Clef 容量检查覆盖原始和 NFC 形式，不能因字符归一化低估发送长度', async () => {
+    const fetchImpl = vi.fn(async () => jevResponse(fullAnswers()));
+    const engine = createAutoReviewEngine([jevEntry()], { fetch: fetchImpl });
+    const text = 'e\u0301'.repeat(600);
+    expect(new TextEncoder().encode(text.normalize('NFC')).byteLength).toBeLessThan(1536);
+    expect(new TextEncoder().encode(text).byteLength).toBeGreaterThan(1536);
+    const result = await engine.review({ ...target, data: JSON.stringify({ text }) });
+    expect(result.inputCoverage.truncated).toBe(true);
+    expect(result.outcome.verdict).toBe('uncertain');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('容量不明的旧渠道不接收超出旧范围的长输入，并回退到已验证长上下文渠道', async () => {
+    const fetchImpl = vi.fn(async () => jevResponse(fullAnswers()));
+    const engine = createAutoReviewEngine([
+      jevEntry({ id: 'unknown', endpoint: 'https://example.test/decisions', model: 'unknown-model' }),
+      jevEntry({ id: 'long', endpoint: 'https://openrouter.ai/api/alpha/decisions', model: 'perplexity/pplx-decider-v1.3:free' }),
+    ], { fetch: fetchImpl });
+    const result = await engine.review({ ...target, data: JSON.stringify({ text: 'x'.repeat(13_000) }) });
+    expect(result.backendId).toBe('long');
+    expect(result.inputCoverage.truncated).toBe(false);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    'http://openrouter.ai/api/alpha/decisions',
+    'https://openrouter.ai/api/v1/decisions',
+    'https://openrouter.ai/api/alpha/decisions?mode=other',
+    'https://openrouter.ai:8443/api/alpha/decisions',
+  ])('未验证的 Perplexity 访问路径 %s 不直接放行长输入', async (endpoint) => {
+    const fetchImpl = vi.fn(async () => jevResponse(fullAnswers()));
+    const engine = createAutoReviewEngine([
+      jevEntry({ endpoint, model: 'perplexity/pplx-decider-v1.3:free' }),
+    ], { fetch: fetchImpl });
+    const result = await engine.review({ ...target, data: JSON.stringify({ text: 'x'.repeat(13_000) }) });
+    expect(result.outcome.verdict).toBe('uncertain');
+    expect(result.inputCoverage.truncated).toBe(true);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { id: 'jev', kind: 'jev-decisions', endpoint: 'https://example.test/decisions', model: 'unknown' },
+    { id: 'omni', kind: 'omni-moderation', baseUrl: 'https://example.test/v1', model: 'unknown' },
+    { id: 'nemo', kind: 'nemotron', baseUrl: 'https://example.test/v1', model: 'unknown' },
+    { id: 'llm', kind: 'llm', modelOverride: 'unknown' },
+  ])('容量不明的 $kind 后端不发送超出旧范围的部分输入', async (entry) => {
+    const fetchImpl = vi.fn();
+    const generate = vi.fn();
+    const engine = createAutoReviewEngine([entry as AutoReviewProviderEntry], { fetch: fetchImpl, generate });
+    const result = await engine.review({ ...target, data: JSON.stringify({ text: 'x'.repeat(13_000) }) });
+    expect(result.outcome.verdict).toBe('uncertain');
+    expect(result.inputCoverage.truncated).toBe(true);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(generate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [413, {}],
+    [400, { error: { code: 'context_length_exceeded' } }],
+    [400, { error: 'Input too long' }],
+    [422, { result: { error: { metadata: { error_type: 'context_window_exceeded' } } } }],
+    [200, { success: false, error: 'context exceeded' }],
+    [200, { answers: fullAnswers(), input_truncated: true }],
+  ])('上游报告输入长度或截断（HTTP %s）时不采纳结果', async (status, body) => {
+    const engine = createAutoReviewEngine([
+      jevEntry({ endpoint: 'https://openrouter.ai/api/alpha/decisions', model: 'perplexity/pplx-decider-v1.3:free' }),
+    ], { fetch: vi.fn(async () => new Response(JSON.stringify(body), { status })) });
+    const result = await engine.review(target);
+    expect(result.outcome.verdict).toBe('uncertain');
+    expect(result.inputCoverage.truncated).toBe(true);
+  });
+
   it('weighted-random：权重决定首个后端', () => {
     const entries = [jevEntry({ id: 'a', weight: 1 }), jevEntry({ id: 'b', weight: 9 })];
     const rngHigh = orderBackendEntries(entries, 'weighted-random', () => 0.99);
@@ -392,21 +512,14 @@ describe('engine 输入覆盖门禁', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('输入被截断 → approve 降级 uncertain；reject 仍可落地', async () => {
-    const bigTarget = { ...target, data: JSON.stringify({ f: 'x'.repeat(500) }) };
-    const approveEngine = createAutoReviewEngine([jevEntry()], {
-      fetch: vi.fn(async () => jevResponse(fullAnswers())),
-    });
-    const r1 = await approveEngine.review(bigTarget);
-    expect(r1.inputCoverage.truncated).toBe(true);
-    expect(r1.outcome.verdict).toBe('uncertain');
-
-    const rejectEngine = createAutoReviewEngine([jevEntry()], {
-      fetch: vi.fn(async () => jevResponse(fullAnswers({ v_gore: 0.95, should_pass: 0.05 }))),
-    });
-    const r2 = await rejectEngine.review(bigTarget);
-    expect(r2.inputCoverage.truncated).toBe(true);
-    expect(r2.outcome.verdict).toBe('reject');
+  it('输入无法完整提取 → 直接 uncertain，既不通过也不拒绝', async () => {
+    const bigTarget = { ...target, data: JSON.stringify({ f: 'x'.repeat(1024 * 1024) }) };
+    const fetchImpl = vi.fn(async () => jevResponse(fullAnswers({ v_gore: 0.95 })));
+    const engine = createAutoReviewEngine([jevEntry()], { fetch: fetchImpl });
+    const result = await engine.review(bigTarget);
+    expect(result.inputCoverage.truncated).toBe(true);
+    expect(result.outcome.verdict).toBe('uncertain');
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('超时中止底层请求（AbortSignal 传递）', async () => {

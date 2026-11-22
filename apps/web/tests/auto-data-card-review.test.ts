@@ -115,6 +115,39 @@ const stubEngine = (
 const basePolicy: AutoReviewPolicy = { onUncertain: 'normal', exemptUserPolicy: 'skip', notifyOnAutoReject: true };
 
 describe('auto-data-card-review（引擎通路）', () => {
+  it('覆盖不完整的普通卡保持 pending，即使不确定策略配置为通过', async () => {
+    const { sqlite, db } = setup();
+    seedCard(sqlite, 'card-incomplete', 1);
+    const r = await autoReviewLatestPendingPublicDataCardsForUser(1, {
+      db: db as never,
+      engine: stubEngine({ 'card-incomplete': {
+        verdict: 'uncertain', score: 0.05, inputCoverage: { truncated: true, parseError: false },
+      } }),
+      policy: { ...basePolicy, onUncertain: 'approve' },
+    });
+    expect(r.heldCount).toBe(1);
+    expect(sqlite.prepare("SELECT review_status v FROM data_cards WHERE id='card-incomplete'").get()!.v).toBe('pending');
+    expect(sqlite.prepare("SELECT action, input_truncated FROM auto_review_decisions WHERE data_card_id='card-incomplete'").get())
+      .toMatchObject({ action: 'pending', input_truncated: 1 });
+  });
+
+  it('覆盖不完整的待审更新保持原样，即使不确定策略配置为拒绝', async () => {
+    const { sqlite, db } = setup();
+    seedCard(sqlite, 'card-incomplete-update', 1, 'approved');
+    seedUpdate(sqlite, 'update-incomplete', 'card-incomplete-update', 1, '新名称', '{"text":"更新"}');
+    const r = await autoReviewLatestPendingPublicDataCardUpdatesForUser(1, {
+      db: db as never,
+      engine: stubEngine({ 'card-incomplete-update': {
+        verdict: 'uncertain', score: 0.9, inputCoverage: { truncated: true, parseError: false },
+      } }),
+      policy: { ...basePolicy, onUncertain: 'reject' },
+    });
+    expect(r.heldCount).toBe(1);
+    expect(sqlite.prepare("SELECT COUNT(*) c FROM data_card_updates WHERE id='update-incomplete'").get()!.c).toBe(1);
+    expect(sqlite.prepare("SELECT action, input_truncated FROM auto_review_decisions WHERE update_id='update-incomplete'").get())
+      .toMatchObject({ action: 'pending', input_truncated: 1 });
+  });
+
   it('approve → review_status 置 approved + 审计行 applied=1', async () => {
     const { sqlite, db } = setup();
     seedCard(sqlite, 'card-a', 1);

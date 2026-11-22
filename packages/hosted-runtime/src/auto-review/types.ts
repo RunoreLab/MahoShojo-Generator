@@ -42,7 +42,7 @@ export type ReviewVerdict = 'approve' | 'reject' | 'uncertain';
 
 /**
  * 审核输入覆盖信息：parseError 表示正文不是合法 JSON（抽取完全失败）；
- * truncated 表示抽取被深度/条数/长度上限截断，模型并未看到全部内容。
+ * truncated 表示正文未能完整提取或没有后端能够完整接收，不能自动裁决。
  */
 export type ReviewInputCoverage = {
   truncated: boolean;

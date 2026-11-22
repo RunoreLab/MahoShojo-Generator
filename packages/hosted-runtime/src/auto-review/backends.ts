@@ -2,6 +2,12 @@ import { z } from 'zod/v3';
 
 import { JEV_CATEGORY_QUESTIONS, AUTO_REVIEW_JEV_QUESTIONS_V2 } from './question-set';
 import { buildAutoReviewState, extractAutoReviewContent } from './state';
+import {
+  AutoReviewInputCapacityError,
+  ensureKnownInputCapacity,
+  isInputCapacityErrorResponse,
+  upstreamReportsTruncation,
+} from './input-capacity';
 import type { AutoReviewProviderEntry, AutoReviewThresholds } from './config';
 import { resolveAutoReviewThresholds, resolveEntryApiKey } from './config';
 import type {
@@ -58,6 +64,10 @@ const categoryFromLabel = (value: unknown): AutoReviewCategory | undefined =>
     ? (value as AutoReviewCategory)
     : undefined;
 
+const requireCompleteInput = (coverage: ReviewInputCoverage): void => {
+  if (coverage.parseError || coverage.truncated) throw new Error('auto-review input incomplete');
+};
+
 /* ── jev-decisions ─────────────────────────────────────────────────────── */
 
 type JevAnswers = Record<string, number>;
@@ -110,9 +120,8 @@ const deriveJevVerdict = (
       category = cat;
     }
   }
-  // pass-veto 是"模型没把握放行"的负证据：截断输入下模型未看全内容，
-  // 信心不足不构成拒绝依据（与覆盖门禁"截断禁止 approve"对称——证据不足只产出 uncertain）。
-  // 类目/整体否决是正向证据，截断输入下仍然有效。
+  // pass-veto 是"模型没把握放行"的负证据，输入不完整时不据此拒绝。
+  // 引擎与应用层覆盖门禁会将任何不完整输入的结果统一留待人工。
   const passVetoApplies = th.usePassVeto === true && coverage?.truncated !== true;
   const reject =
     (th.rejectAt !== undefined && score >= th.rejectAt) ||
@@ -143,6 +152,8 @@ const createJevBackend = (
     kind: 'jev-decisions',
     review: async (target, options) => {
       const state = buildAutoReviewState(target);
+      requireCompleteInput(state.coverage);
+      ensureKnownInputCapacity(entry, state.text);
       const res = await fetchImpl(url, {
         method: 'POST',
         signal: options?.signal ?? null,
@@ -157,6 +168,9 @@ const createJevBackend = (
         }),
       });
       const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+      if (isInputCapacityErrorResponse(res.status, json) || upstreamReportsTruncation(json)) {
+        throw new AutoReviewInputCapacityError();
+      }
       if (!res.ok) throw new Error(`jev-decisions ${res.status}: ${JSON.stringify(json ?? {}).slice(0, 200)}`);
       const p = parseJevAnswers(json);
       const { verdict, score, category } = deriveJevVerdict(p, thresholds, state.coverage);
@@ -218,6 +232,8 @@ const createOmniBackend = (
     kind: 'omni-moderation',
     review: async (target, options) => {
       const state = buildAutoReviewState(target);
+      requireCompleteInput(state.coverage);
+      ensureKnownInputCapacity(entry, state.text);
       const res = await fetchImpl(url, {
         method: 'POST',
         signal: options?.signal ?? null,
@@ -228,6 +244,9 @@ const createOmniBackend = (
         body: JSON.stringify({ model: entry.model, input: [state.text] }),
       });
       const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+      if (isInputCapacityErrorResponse(res.status, json) || upstreamReportsTruncation(json)) {
+        throw new AutoReviewInputCapacityError();
+      }
       if (!res.ok) throw new Error(`omni-moderation ${res.status}: ${JSON.stringify(json ?? {}).slice(0, 200)}`);
       const parsed = omniResponseSchema.safeParse(json);
       if (!parsed.success) throw new Error(`omni-moderation: invalid response shape`);
@@ -342,6 +361,8 @@ const createNemotronBackend = (
     kind: 'nemotron',
     review: async (target, options) => {
       const state = buildAutoReviewState(target);
+      requireCompleteInput(state.coverage);
+      ensureKnownInputCapacity(entry, state.text);
       const messages: Array<{ role: string; content: string }> = [];
       if (customPolicy) messages.push({ role: 'system', content: customPolicy });
       messages.push({ role: 'user', content: state.text });
@@ -355,6 +376,9 @@ const createNemotronBackend = (
         body: JSON.stringify({ model: entry.model, messages, max_tokens: 128, temperature: 0 }),
       });
       const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+      if (isInputCapacityErrorResponse(res.status, json) || upstreamReportsTruncation(json)) {
+        throw new AutoReviewInputCapacityError();
+      }
       if (!res.ok) throw new Error(`nemotron ${res.status}: ${JSON.stringify(json ?? {}).slice(0, 200)}`);
       const text =
         (((json?.choices as Array<Record<string, unknown>> | undefined)?.[0]?.message as Record<string, unknown> | undefined)
@@ -421,7 +445,7 @@ export const buildAutoReviewLlmPrompt = (targets: Array<ReviewTarget & { content
   `- 每个输入项都必须输出一条对应 review；id 必须与输入完全一致。\n` +
   `- verdict 取 uncertain 当且仅当你无法确定（内容截断、语义含糊、边界案例）；reason 不超过 50 字中文。\n` +
   `待审查列表（JSON）：\n` +
-  `${JSON.stringify(targets.map((t) => ({ id: t.id, name: t.name, description: t.description, content: t.content })), null, 2)}\n`;
+  `${JSON.stringify(targets.map((t) => ({ id: t.id, name: t.name, description: t.description, type: t.type, content: t.content })), null, 2)}\n`;
 
 const createLlmBackend = (
   entry: Extract<AutoReviewProviderEntry, { kind: 'llm' }>,
@@ -434,6 +458,8 @@ const createLlmBackend = (
     kind: 'llm',
     review: async (target, options) => {
       const { text: content, coverage } = extractAutoReviewContent(target);
+      requireCompleteInput(coverage);
+      ensureKnownInputCapacity(entry, buildAutoReviewLlmPrompt([{ ...target, content }]));
       const out = (await generate(
         [{ ...target, content }],
         {

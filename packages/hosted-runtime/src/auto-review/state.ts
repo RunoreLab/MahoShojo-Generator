@@ -1,12 +1,8 @@
-import { extractModerationTextFromJsonString } from '../admin/ai-review-prompt';
+import { exceedsUtf8ByteLimit, MAX_DATA_CARD_BYTES } from '@mahoshojo/domain/data-card-size';
 import type { ReviewInputCoverage, ReviewTarget } from './types';
 
-/**
- * 把待审卡压平成审查 state 文本：名称 + 简介 + data 全部字符串叶子。
- * 决策模型上下文 64k，这里放宽到 12k 字符；覆盖信息（截断/解析失败）
- * 随文本一并返回，供引擎裁决门禁使用——truncate 的输入禁止 approve。
- */
-export const AUTO_REVIEW_STATE_MAX = 12_000;
+/** 自动审核正文的 UTF-8 字节上限，与数据卡上传上限一致。 */
+export const AUTO_REVIEW_STATE_MAX = MAX_DATA_CARD_BYTES;
 
 export type AutoReviewState = {
   text: string;
@@ -15,10 +11,23 @@ export type AutoReviewState = {
 
 /** 仅提取正文内容与覆盖信息（llm 后端按自有格式组织输入时使用）。 */
 export const extractAutoReviewContent = (target: ReviewTarget): AutoReviewState => {
-  const extract = extractModerationTextFromJsonString(target.data, {
-    maxTotalLength: AUTO_REVIEW_STATE_MAX,
-  });
-  return { text: extract.text, coverage: { truncated: extract.truncated, parseError: extract.parseError } };
+  if (exceedsUtf8ByteLimit(target.data, AUTO_REVIEW_STATE_MAX)) {
+    return { text: '', coverage: { truncated: true, parseError: false } };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(target.data);
+  } catch {
+    return { text: '', coverage: { truncated: true, parseError: true } };
+  }
+
+  try {
+    return { text: JSON.stringify(parsed), coverage: { truncated: false, parseError: false } };
+  } catch {
+    // 例如正文的嵌套超过运行时 JSON.stringify 能处理的深度。
+    return { text: '', coverage: { truncated: true, parseError: false } };
+  }
 };
 
 export const buildAutoReviewState = (target: ReviewTarget): AutoReviewState => {
@@ -31,8 +40,5 @@ export const buildAutoReviewState = (target: ReviewTarget): AutoReviewState => {
   ]
     .filter(Boolean)
     .join('\n');
-  const combined = `${header}\n${text}`;
-  const limit = AUTO_REVIEW_STATE_MAX + header.length;
-  if (combined.length <= limit) return { text: combined, coverage };
-  return { text: combined.slice(0, limit), coverage: { ...coverage, truncated: true } };
+  return { text: `${header}\n${text}`, coverage };
 };

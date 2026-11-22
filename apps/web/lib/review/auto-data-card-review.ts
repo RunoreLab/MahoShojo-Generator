@@ -28,6 +28,7 @@ import {
   type AutoReviewPolicy,
   type AutoReviewRunResult,
   type AutoReviewUncertainPolicy,
+  type ReviewInputCoverage,
   type ReviewTarget,
   type ReviewVerdict,
 } from '@mahoshojo/hosted-runtime/auto-review';
@@ -105,8 +106,11 @@ const actionForOutcome = (
   verdict: ReviewVerdict,
   onUncertain: AutoReviewUncertainPolicy,
   isReviewExempt: boolean,
+  coverage: ReviewInputCoverage,
 ): CardAction =>
-  verdict === 'approve'
+  coverage.truncated || coverage.parseError
+    ? 'pending'
+    : verdict === 'approve'
     ? 'approve'
     : verdict === 'reject'
       ? 'reject'
@@ -313,8 +317,8 @@ export async function autoReviewLatestPendingPublicDataCardsForUser(
       continue;
     }
     result.usedBackend = run.backendId;
-    const action = actionForOutcome(run.outcome.verdict, policy.onUncertain, isReviewExempt);
     const coverage = run.inputCoverage;
+    const action = actionForOutcome(run.outcome.verdict, policy.onUncertain, isReviewExempt, coverage);
     let applied = false;
     if (action === 'approve') {
       applied = await approvePendingPublicCardIfUnchanged(db, userId, row);
@@ -460,8 +464,8 @@ export async function autoReviewLatestPendingPublicDataCardUpdatesForUser(
       continue;
     }
     result.usedBackend = run.backendId;
-    const action = actionForOutcome(run.outcome.verdict, policy.onUncertain, isReviewExempt);
     const coverage = run.inputCoverage;
+    const action = actionForOutcome(run.outcome.verdict, policy.onUncertain, isReviewExempt, coverage);
     let applied = false;
     if (action === 'approve') {
       applied = await applyApprovedPublicCardUpdate(db, userId, row);

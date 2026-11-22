@@ -105,10 +105,18 @@ const TUNED_DEFAULTS: Record<string, AutoReviewThresholds> = {
   'llm:*': {},
 };
 
-const modelKeyOf = (entry: AutoReviewProviderEntry): string =>
-  entry.kind === 'jev-decisions' || entry.kind === 'omni-moderation' || entry.kind === 'nemotron'
-    ? `${entry.kind}:${entry.model}`
-    : `${entry.kind}:*`;
+// 只登记已确认是同一模型的 OpenRouter 免费别名；其他模型名保持精确匹配。
+const MODEL_ALIASES: Readonly<Record<string, string>> = {
+  'respan/span-01-lite:free': 'respan/span-01-lite',
+  'inception/mercury-decide:free': 'inception/mercury-decide',
+};
+
+const modelKeyOf = (entry: AutoReviewProviderEntry): string => {
+  if (entry.kind !== 'jev-decisions' && entry.kind !== 'omni-moderation' && entry.kind !== 'nemotron') {
+    return `${entry.kind}:*`;
+  }
+  return `${entry.kind}:${MODEL_ALIASES[entry.model] ?? entry.model}`;
+};
 
 export const resolveAutoReviewThresholds = (
   entry: AutoReviewProviderEntry,

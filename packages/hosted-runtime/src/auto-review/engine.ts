@@ -1,6 +1,7 @@
 import type { AutoReviewProviderEntry } from './config';
 import { createAutoReviewBackend, DEFAULT_BACKEND_TIMEOUT_MS, type AutoReviewBackendDeps } from './backends';
 import { extractAutoReviewContent } from './state';
+import { AutoReviewInputCapacityError } from './input-capacity';
 import type {
   AutoReviewBackend,
   AutoReviewRoutingStrategy,
@@ -65,12 +66,9 @@ const runBackendWithTimeout = async <T>(
   }
 };
 
-/** 审核输入覆盖门禁：approve 仅在输入完整时成立；reject 允许落在截断输入上。 */
+/** 审核输入覆盖门禁：不完整输入的任何模型裁决都交给人工处理。 */
 const enforceInputCoverage = (outcome: ReviewOutcome, coverage: ReviewInputCoverage): ReviewOutcome => {
-  if (coverage.parseError) {
-    return { ...outcome, verdict: 'uncertain', inputCoverage: coverage };
-  }
-  if (coverage.truncated && outcome.verdict === 'approve') {
+  if (coverage.parseError || coverage.truncated) {
     return { ...outcome, verdict: 'uncertain', inputCoverage: coverage };
   }
   return { ...outcome, inputCoverage: coverage };
@@ -128,13 +126,13 @@ export const createAutoReviewEngine = (
     },
     review: async (target, strategyOverride) => {
       const baseCoverage = extractAutoReviewContent(target).coverage;
-      // 输入本身解析失败时没有任何可审内容，直接 uncertain，不消耗后端额度。
-      if (baseCoverage.parseError) {
+      // 无法完整提取时不发送局部内容，也不让任何后端对局部快照作裁决。
+      if (baseCoverage.parseError || baseCoverage.truncated) {
         return {
           outcome: {
             verdict: 'uncertain',
             score: 0.5,
-            reason: 'auto-review input parse error',
+            reason: baseCoverage.parseError ? 'auto-review input parse error' : 'auto-review input incomplete',
             inputCoverage: baseCoverage,
           },
           backendId: 'none',
@@ -148,6 +146,7 @@ export const createAutoReviewEngine = (
       const ordered = orderBackendEntries(entries, strategyOverride ?? strategy, rng);
       const attempted: string[] = [];
       let lastError: unknown = null;
+      let inputExceedsCapacity = false;
       for (const entry of ordered) {
         attempted.push(entry.id);
         const started = Date.now();
@@ -167,22 +166,24 @@ export const createAutoReviewEngine = (
           };
         } catch (error) {
           lastError = error;
+          if (error instanceof AutoReviewInputCapacityError) inputExceedsCapacity = true;
           deps.onBackendError?.(entry.id, error);
         }
       }
-      // fail-closed：全部后端失败按 uncertain 交给策略层裁决，不误放行。
+      // 所有可用后端失败时，如果存在输入容量限制，不完整覆盖必须留待人工。
+      const failedCoverage = inputExceedsCapacity ? { ...baseCoverage, truncated: true } : baseCoverage;
       return {
         outcome: {
           verdict: 'uncertain',
           score: 0.5,
           reason: `auto-review unavailable: ${lastError instanceof Error ? lastError.message.slice(0, 120) : 'unknown'}`,
-          inputCoverage: baseCoverage,
+          inputCoverage: failedCoverage,
         },
         backendId: ordered[0]?.id ?? 'none',
         kind: ordered[0]?.kind ?? 'llm',
         latencyMs: 0,
         attempted,
-        inputCoverage: baseCoverage,
+        inputCoverage: failedCoverage,
       };
     },
   };
