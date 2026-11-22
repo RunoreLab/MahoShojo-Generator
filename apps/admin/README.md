@@ -66,6 +66,39 @@ node apps/admin/scripts/principals.mjs restore --local
 
 remote 模式提供受保护 gateway 的 `ADMIN_CONTROL_GATEWAY_URL`、`ADMIN_CONTROL_GATEWAY_HMAC_SECRET`，需要时提供 Access service credentials。除只读 `status` 外，变更必须显式 `--remote --confirm-remote`，属于仓库高风险边界，需在具体目标和操作可审阅后单独授权。本地 Miniflare 存储工具使用其 workerd 已支持的兼容日期；产品 Worker 的兼容日期独立维护。
 
+## 本地公开卡审核控制工具
+
+仅在维护者明确授权对应远程数据写入、并逐张看过完整卡片后使用。该工具只通过公开待审新卡，不处理拒绝、封禁或待审更新。安全与审计契约见 [Admin 安全规格 §6.3](../../docs/specs/2026-08-29_Admin回归安全与迁移规格.md)。
+
+在不提交的本地 JSON 计划中填写 `version: 1`、目标 `accountId`、`databaseId`、本次稳定 `requestId`（UUID）、`createdAt`（UTC ISO 时间）、单行 `reason` 和 `items` 数组。每个 item 仅包含 `id` 和 `reviewedHash`；指纹是所审核快照 `[id, name, description, data, type, updated_at]` 的 JSON UTF-8 SHA-256，NULL 必须保留。计划最多 20 张、七天有效，不存正文或凭据。实际账号、库和令牌通过 `CLOUDFLARE_ACCOUNT_ID`、`D1_DATABASE_ID`、`CLOUDFLARE_API_TOKEN` 环境变量提供；计划与环境目标不一致时停止。
+
+可先用只读命令逐张查看完整数据并取得指纹，将看过的卡片 ID 和指纹填入计划；输出可能含用户提交的敏感信息，不要复制到公开日志或仓库。
+
+```sh
+node --env-file=.env apps/admin/scripts/review-public-control-cli.mjs inspect --id <card-id>
+```
+
+计划结构示例（将占位值替换为实际目标和上述检查得到的指纹）：
+
+```json
+{
+  "version": 1,
+  "accountId": "<32位账号ID>",
+  "databaseId": "<数据库UUID>",
+  "requestId": "<本次操作UUID>",
+  "createdAt": "<UTC ISO时间，例如2026-11-22T00:00:00.000Z>",
+  "reason": "已逐张检查完整内容，符合公开规则",
+  "items": [{ "id": "<卡片ID>", "reviewedHash": "<64位SHA-256>" }]
+}
+```
+
+```sh
+node --env-file=.env apps/admin/scripts/review-public-control-cli.mjs preview --plan .tmp/review-plan.json
+node --env-file=.env apps/admin/scripts/review-public-control-cli.mjs apply --plan .tmp/review-plan.json --confirm-remote
+```
+
+先核对预览中的每个目标与状态；只有内容、状态和可见性仍匹配才会通过。执行时先在审计中冻结整份有序计划，再逐卡独立提交，冲突时停止后续项；重复使用同一计划会查回原审计，不能用同一请求 ID 改范围、顺序、理由或指纹。若返回 `CONTROL_OUTCOME_UNCERTAIN`，保持原计划与请求 ID，先核对审计与卡片现状，不能换 ID 盲目重试。审计记录验证过的 Cloudflare 令牌安全引用，不声称识别了真人；它与 Admin principal 及 Admin Worker 操作分开。
+
 ## 独立部署与验证
 
 `wrangler.jsonc` 保持 `.invalid` issuer、deny-all audience、零 D1 ID 和本地资源名称。私有生产配置通过 `ADMIN_DEPLOY_CONFIG` 指向受审阅 JSON，部署工具只接受固定 hostname、Worker-first ASSETS、一个 D1、两个私有 R2、一个有界 Queue consumer 与补偿 cron；拒绝额外入口、环境覆盖和 build hook。真实邮箱名单在 Cloudflare Access 中配置，秘密通过受控配置提供，不写入仓库。
