@@ -27,5 +27,5 @@ export type OpenAiModelId = keyof typeof OPENAI_MODEL_INFO;
 
 export function getOpenAiModelInfo(modelId: string): { readonly label: string; readonly description: string } | undefined {
   const id = modelId.toLowerCase();
-  return Object.hasOwn(OPENAI_MODEL_INFO, id) ? OPENAI_MODEL_INFO[id as OpenAiModelId] : undefined;
+  return Object.prototype.hasOwnProperty.call(OPENAI_MODEL_INFO, id) ? OPENAI_MODEL_INFO[id as OpenAiModelId] : undefined;
 }
