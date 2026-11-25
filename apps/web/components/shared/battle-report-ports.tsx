@@ -1,5 +1,6 @@
 import type { BattleReportHostPorts } from '@mahoshojo/ui-web/arena-report';
 import { GeneratedByUserBadge } from './GeneratedByUserBadge';
+import { downloadBattleReportFile } from '@/lib/arena/download-battle-report';
 import { webExternalMediaPolicy } from '@/lib/markdown/externalMedia';
 import { extractHeuristicReasoningFromMarkdown } from '@/lib/ai/reasoning-normalizer';
 import { capturePngBlob } from '@/lib/client/snapdomCapture';
@@ -11,7 +12,10 @@ export function createWebBattleReportPorts(onSaveImage?: (imageUrl: string) => v
     mediaPolicy: webExternalMediaPolicy,
     extractReasoning: extractHeuristicReasoningFromMarkdown,
     generatedBy: <GeneratedByUserBadge variant="dark" className="mt-3" />,
-    downloadMarkdown: (content, filename) => downloadBlob(new Blob([content], { type: 'text/markdown;charset=utf-8;' }), filename),
+    downloadMarkdown: (content, filename) => {
+      const blob = new Blob([content], { type: 'text/markdown;charset=utf-8;' });
+      void downloadBattleReportFile(blob, filename).catch(() => window.alert('下载战斗记录失败，请重试。'));
+    },
     onImageSaveError: (error) => { alert('生成图片失败，请重试'); console.error('Image generation failed:', error); },
     saveImage: async (element, { filename, title, kind }) => {
       const blob = await capturePngBlob(element, { scale: 1, dprMax: 2, fast: false, exclude: ['audio', 'video'], excludeMode: 'remove' });

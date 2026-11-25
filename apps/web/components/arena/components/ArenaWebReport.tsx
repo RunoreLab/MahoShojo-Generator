@@ -6,8 +6,8 @@ import type { NewsReport } from '@/components/BattleReportCard';
 import { MarkdownBlock } from './DeferredArenaRenderers';
 import { ArenaWebDisplayModeSelectorView, ArenaWebViewer, ARENA_WEB_FRAME_CLASS_NAME, useArenaWebImmersive, type ArenaWebDisplayMode, ArenaReportFormatSelectorView, ArenaWebNotes, ArenaWebSourceView, ArenaWebReportActions, ArenaWebReplayControlsView, WebReportConsentDialogView, type ArenaWebReportAction } from '@mahoshojo/ui-web/arena-report-views';
 import { resolveWebDisplayTitle } from '@/lib/arena/battle-report-display-title';
+import { downloadBattleReportFile } from '@/lib/arena/download-battle-report';
 import { normalizeArenaWebOutput } from '@/lib/arena/web-output';
-import { downloadBlob } from '@/lib/client/blobUrl';
 import { buildSafeFileName } from '@/lib/client/fileName';
 import { importLocalWebPackageArchive } from '@/lib/web-package/cache';
 import { hydrateExactWebPackageFromLibrary } from '@/lib/local-library/web-package-library';
@@ -352,6 +352,12 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
     if (!webDocument) return;
     setConfirming(true);
   };
+  const exportReportFile = (source: Blob | (() => Promise<Blob>), filename: string, errorMessage: string) => {
+    setDownloadError(null);
+    void downloadBattleReportFile(source, filename).catch(() => {
+      if (mounted.current && currentScope.current === resultScope) setDownloadError(errorMessage);
+    });
+  };
   const downloadHtml = () => {
     if (!ready || !webDocument) return;
     const source = packageLocation?.kind === 'srcdoc'
@@ -360,16 +366,15 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
     if (!source) return;
     // BOM 确保缺少 charset 声明的生成文档在本地打开时仍按 UTF-8 解码。
     const blob = new Blob(['﻿', source], { type: 'text/html;charset=utf-8' });
-    downloadBlob(blob, buildSafeFileName(`魔法少女速报_${resolvedDisplayTitle}`, 'html', '魔法少女速报'));
+    exportReportFile(blob, buildSafeFileName(`魔法少女速报_${resolvedDisplayTitle}`, 'html', '魔法少女速报'), 'HTML 导出失败，请重试。');
   };
-  const downloadPackage = async () => {
+  const downloadPackage = () => {
     const base = matchingResolution?.base;
-    if (!base) return;
-    setDownloadError(null);
-    try {
+    if (!ready || !base) return;
+    exportReportFile(async () => {
       const archive = await packWebPackageZip(base);
-      downloadBlob(new Blob([new Uint8Array(archive).buffer], { type: 'application/zip' }), buildSafeFileName(`${base.ref.id}@${base.ref.version}`, 'zip', 'web-package'));
-    } catch { setDownloadError('Web 包 ZIP 导出失败；原目标文件仍可下载。'); }
+      return new Blob([new Uint8Array(archive).buffer], { type: 'application/zip' });
+    }, buildSafeFileName(`${base.ref.id}@${base.ref.version}`, 'zip', 'web-package'), 'Web 包 ZIP 导出失败，请重试。');
   };
   const downloadTarget = () => {
     if (!ready || !webPackage) return;
@@ -377,11 +382,11 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
     const leaf = webPackage.targetPath.split('/').pop() || `魔法少女速报_${resolvedDisplayTitle}`;
     const stem = leaf.replace(/\.[^.]+$/u, '') || leaf;
     const blob = new Blob([content], { type: `${webPackage.targetMediaType};charset=utf-8` });
-    downloadBlob(blob, buildSafeFileName(stem, extension, '魔法少女速报'));
+    exportReportFile(blob, buildSafeFileName(stem, extension, '魔法少女速报'), '生成目标导出失败，请重试。');
   };
   const reportActions: ArenaWebReportAction[] = immersive ? [] : [
     ...(showingWeb ? [{ id: 'reload', label: '重新加载', icon: <RotateCw />, onClick: () => setReload((value) => value + 1), ariaLabel: '重新加载 Web 战报', title: '重新加载 Web 战报' }] : []),
-    ...(matchingResolution?.base ? [{ id: 'package', label: '下载 Web 包 ZIP', icon: <Download />, disabled: !ready, onClick: () => { void downloadPackage(); } }] : []),
+    ...(matchingResolution?.base ? [{ id: 'package', label: '下载 Web 包 ZIP', icon: <Download />, disabled: !ready, onClick: downloadPackage }] : []),
     ...(webPackage ? [{ id: 'target', label: '下载生成目标', icon: <Download />, disabled: !ready, onClick: downloadTarget }] : []),
     { id: 'html', label: '下载 HTML', icon: <Download />, disabled: !ready || !webDocument || Boolean(webPackage) && packageLocation?.kind !== 'srcdoc', onClick: downloadHtml },
   ];

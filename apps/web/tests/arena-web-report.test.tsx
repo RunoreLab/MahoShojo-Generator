@@ -9,11 +9,13 @@ import { downloadBlob } from '@/lib/client/blobUrl';
 import * as webPackageCache from '@/lib/web-package/cache';
 import { BattleResultPresentation } from '@/components/arena/components/BattleResultPresentation';
 import { BaseModal } from '@/components/shared/BaseModal';
+import type { WebPackageArtifact } from '@mahoshojo/contracts/web-package';
 import {
   BUILTIN_ARENA_NEWS_PACKAGE_REF,
   BUILTIN_WEB_PACKAGE_PRESETS,
   clearLocalWebPackageSessionStaging,
   createWebPackageOverlay,
+  importWebPackageArchive,
   resolveWebPackage,
   stageLocalWebPackage,
   verifyWebPackage,
@@ -78,6 +80,7 @@ afterEach(async () => {
   container.remove();
   vi.restoreAllMocks();
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
   useBattleStore.setState(useBattleStore.getInitialState(), true);
 });
 
@@ -563,6 +566,65 @@ describe('Web 战报的本地执行许可', () => {
     expect(toolbar.textContent).toContain('下载记录');
     expect(toolbar.textContent).toContain('下载 HTML');
     expect(toolbar.textContent).not.toContain('重新加载');
+  });
+
+  it('Android Edge 取消保存后可重试记录、HTML、生成目标和 Web 包 ZIP', async () => {
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(
+      'Mozilla/5.0 (Linux; Android 10; K) Chrome/151.0.0.0 Mobile Safari/537.36 EdgA/151.0.0.0',
+    );
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    const write = vi.fn<(blob: Blob) => Promise<void>>().mockResolvedValue(undefined);
+    const close = vi.fn().mockResolvedValue(undefined);
+    const createWritable = vi.fn().mockResolvedValue({ write, close });
+    const showSaveFilePicker = vi.fn().mockResolvedValue({ createWritable });
+    vi.stubGlobal('showSaveFilePicker', showSaveFilePicker);
+
+    const exportAfterCancel = async (label: string, filename: string | RegExp) => {
+      const writesBefore = write.mock.calls.length;
+      showSaveFilePicker.mockRejectedValueOnce(new DOMException('Picker closed', 'AbortError'));
+      await click(label);
+      expect(write).toHaveBeenCalledTimes(writesBefore);
+      expect(alert).not.toHaveBeenCalled();
+      expect(container.textContent).not.toContain('导出失败');
+      await click(label);
+      const suggestedName = showSaveFilePicker.mock.lastCall?.[0].suggestedName;
+      if (typeof filename === 'string') expect(suggestedName).toBe(filename);
+      else expect(suggestedName).toMatch(filename);
+      expect(write).toHaveBeenCalledTimes(writesBefore + 1);
+      return write.mock.calls[writesBefore]![0];
+    };
+
+    const content = '<!doctype html><html><head><title>月下试演</title></head><body>完整战报</body></html>';
+    window.localStorage.setItem('arena.web-report-consent.v1.room.mobile-download', 'accepted');
+    const renderReport = async (webPackage?: WebPackageArtifact) => {
+      await act(async () => root.render(<BattleResultPresentation report={{
+        format: 'stream-web', content, webReady: true, webConsentScope: 'mobile-download', webPackage,
+      }} />));
+      await act(async () => { await vi.dynamicImportSettled(); });
+    };
+    await renderReport();
+    await click('普通显示');
+    const markdown = await exportAfterCancel('📄 下载记录', /\.md$/u);
+    expect(await markdown.text()).toContain('完整战报');
+    const html = await exportAfterCancel('下载 HTML', '魔法少女速报_月下试演.html');
+    expect(await html.text()).toBe(content);
+
+    const { generatedContent, ...artifact } = await createWebPackageOverlay(BUILTIN_ARENA_NEWS_PACKAGE_REF, content);
+    expect(generatedContent).toBe(content);
+    await renderReport(artifact);
+    await waitForReact(() => {
+      const button = [...container.querySelectorAll('button')].find((item) => item.textContent === '下载 Web 包 ZIP');
+      expect(button?.disabled).toBe(false);
+    });
+    const target = await exportAfterCancel('下载生成目标', 'index.html');
+    expect(await target.text()).toBe(content);
+    const zip = await exportAfterCancel('下载 Web 包 ZIP', 'mahoshojo.arena-news@1.0.0.zip');
+    const { pkg } = await importWebPackageArchive(new Uint8Array(await zip.arrayBuffer()));
+    expect(pkg.ref).toEqual(BUILTIN_ARENA_NEWS_PACKAGE_REF);
+    expect(showSaveFilePicker).toHaveBeenCalledTimes(8);
+    expect(createWritable).toHaveBeenCalledTimes(4);
+    expect(close).toHaveBeenCalledTimes(4);
+    expect(downloadBlob).not.toHaveBeenCalled();
   });
 
   it('仅完整战报可下载 HTML；取消执行后仍可下载，保留脚本并移除机器 meta', async () => {
