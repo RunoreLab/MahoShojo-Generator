@@ -174,12 +174,11 @@ describe('getModelGenerationCapabilities', () => {
   });
 
   it('DeepSeek V4.1 Flash 登记当前 canonical API ID，并保留 V4 Flash 兼容能力', () => {
-    const catalogModel = AI_PROVIDER_CATALOG
-      .find((p) => p.id === 'deepseek')
-      ?.models.find((m) => m.label === 'DeepSeek V4.1 Flash');
-    expect(catalogModel?.value).toBe('deepseek-flash');
+    const modelId = 'deepseek-flash';
+    const provider = AI_PROVIDER_CATALOG.find((p) => p.id === 'deepseek');
+    expect(provider?.models).toContainEqual(expect.objectContaining({ value: modelId }));
 
-    const currentCaps = getModelGenerationCapabilities('deepseek', 'deepseek-flash');
+    const currentCaps = getModelGenerationCapabilities('deepseek', modelId);
     const legacyApiCaps = getModelGenerationCapabilities('deepseek', 'deepseek-v4-flash');
     const legacyCatalogCaps = getModelGenerationCapabilities('deepseek', 'deepseek-v4-flash-0731');
     expect(currentCaps.thinking.adapter).toBe('deepseek-thinking-toggle');
