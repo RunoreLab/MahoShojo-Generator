@@ -1,4 +1,4 @@
-import { ProviderTargetSchema, type ProviderTarget } from '@mahoshojo/contracts/provider-target';
+import { DesktopProviderTargetSchema, type DesktopProviderTarget } from '@mahoshojo/contracts/provider-target';
 import { Channel } from '@tauri-apps/api/core';
 import { AiExecutionRequestSchema, type AiExecutionRequest } from '@mahoshojo/contracts/ai-execution';
 
@@ -50,7 +50,7 @@ export interface DirectAiChannel {
 export interface DesktopAiExecutionOptions {
   invoke: InvokeFn;
   profileId: string;
-  providerTarget?: ProviderTarget;
+  providerTarget?: DesktopProviderTarget;
   /**
    * Channel 工厂，默认使用 Tauri 的 `Channel`。
    *
@@ -94,7 +94,7 @@ export const openDirectAiStream = (
   channel.onmessage = onEvent;
 
   const command = options.providerTarget ? STREAM_TARGET_AI_COMMAND : STREAM_DIRECT_AI_COMMAND;
-  const selection = options.providerTarget ? { target: ProviderTargetSchema.parse(options.providerTarget) } : { profileId: options.profileId };
+  const selection = options.providerTarget ? { target: DesktopProviderTargetSchema.parse(options.providerTarget) } : { profileId: options.profileId };
   return invokeWithChannelDelivery(options.invoke, command, {
       ...selection,
       request: parsedRequest,

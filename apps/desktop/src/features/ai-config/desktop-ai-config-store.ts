@@ -10,7 +10,7 @@
 // 模块级单例），两处消费的就是同一份 `resolveDesktopAiTarget` 结果——不允许
 // 再长出一套平行的「详情页自己选 Profile」状态。
 
-import { ProviderModelIdSchema, presetApiKeyRef, type ProviderTarget } from '@mahoshojo/contracts/provider-target';
+import { DesktopChatGptStatusSchema, ProviderModelIdSchema, presetApiKeyRef, type DesktopChatGptStatus, type DesktopProviderTarget } from '@mahoshojo/contracts/provider-target';
 import { AI_PROVIDER_PRESETS } from '@mahoshojo/ai-core/provider-catalog';
 import type { DirectProviderProfileV1 } from '@mahoshojo/contracts/provider-profile';
 import type { UserGenerationOverrides } from '@mahoshojo/ai-core/generation-settings';
@@ -40,7 +40,7 @@ import {
   isDesktopSystemModelId,
   parseDesktopAiConfigOverlay,
   serializeDesktopAiConfigOverlay,
-  resolveDesktopAiTarget,
+  resolveDesktopAiTargetForState,
   selectedProviderTarget,
   type DesktopPresetSelection,
   type ResolvedDesktopAiTarget,
@@ -97,6 +97,9 @@ export interface DesktopAiConfigState {
   generationActive: boolean;
   savingCredential: boolean;
   modelInputError: string | null;
+  chatgptPlan: DesktopChatGptStatus | null;
+  chatgptOperation: 'load' | 'connect' | 'disconnect' | null;
+  chatgptError: string | null;
 }
 
 /**
@@ -169,6 +172,7 @@ const INITIAL_STATE: DesktopAiConfigState = {
   savingConnection: false,
   deletingConnection: false,
   presetsByProviderId: {}, presetSecretStatus: {}, credentialDraftRevision: 0, generationActive: false, savingCredential: false, modelInputError: null,
+  chatgptPlan: null, chatgptOperation: null, chatgptError: null,
 };
 
 export class DesktopAiConfigStore {
@@ -267,6 +271,7 @@ export class DesktopAiConfigStore {
     }
 
     void this.refreshProfiles();
+    void this.refreshChatgptPlan();
   };
 
   /** 损坏 overlay 的显式逃生门：清空后回到默认并允许重新写入。 */
@@ -444,12 +449,89 @@ export class DesktopAiConfigStore {
     }));
   };
 
-  selectProviderTarget = (target: ProviderTarget): void => {
+  selectProviderTarget = (target: DesktopProviderTarget): void => {
     const location = this.state.selection.executionPreference;
-    if ((location === 'client' && target.kind === 'system') || (location === 'server' && target.kind === 'custom')) throw new Error('该供应商目标不支持当前执行位置');
-    this.commitOverlay((overlay) => ({ ...overlay, selection: { ...overlay.selection, ...(location === 'client' ? { clientTarget: target as Exclude<ProviderTarget, { kind: 'system' }> } : { serverTarget: target as Exclude<ProviderTarget, { kind: 'custom' }> }) } }));
+    if (location === 'client' && target.kind !== 'system') {
+      this.commitOverlay((overlay) => ({ ...overlay, selection: { ...overlay.selection, clientTarget: target } }));
+    } else if (location === 'server' && (target.kind === 'system' || target.kind === 'preset')) {
+      this.commitOverlay((overlay) => ({ ...overlay, selection: { ...overlay.selection, serverTarget: target } }));
+    } else {
+      throw new Error('该供应商目标不支持当前执行位置');
+    }
     this.publish({ modelInputError: null });
     if (target.kind === 'preset') void this.refreshPresetSecret(target.providerId);
+  };
+
+  private publishChatgptPlan(plan: DesktopChatGptStatus): void {
+    const current = this.state.chatgptPlan;
+    const changed = current ? current.connectionId !== plan.connectionId || current.connected !== plan.connected : plan.connected;
+    this.publish({ chatgptPlan: plan, credentialDraftRevision: this.state.credentialDraftRevision +
+      (changed ? 1 : 0) });
+  }
+
+  private chatgptAction = async (operation: NonNullable<DesktopAiConfigState['chatgptOperation']>, work: () => Promise<void>): Promise<void> => {
+    if (this.state.chatgptOperation !== null) return;
+    this.publish({ chatgptOperation: operation, chatgptError: null });
+    try { await work(); }
+    catch (cause) {
+      this.publish({ chatgptError: typeof cause === 'object' && cause !== null && 'message' in cause && typeof cause.message === 'string'
+        ? cause.message : '无法更新 ChatGPT 订阅连接。' });
+    } finally { this.publish({ chatgptOperation: null }); }
+  };
+
+  private readChatgptPlan = async (command: string, args?: Record<string, unknown>): Promise<DesktopChatGptStatus> =>
+    DesktopChatGptStatusSchema.parse(await this.deps.invoke(command, args));
+
+  private loadChatgptModels = async (): Promise<void> => {
+    if (!this.state.chatgptPlan?.connected) return;
+    try { this.publishChatgptPlan(await this.readChatgptPlan('chatgpt_plan_models')); }
+    catch (cause) {
+      // A terminal refresh error can clear the Native grant before the directory call returns.
+      const status = await this.readChatgptPlan('chatgpt_plan_status').catch(() => null);
+      if (status) this.publishChatgptPlan(status);
+      throw cause;
+    }
+  };
+
+  refreshChatgptPlan = (): Promise<void> => this.chatgptAction('load', async () => {
+    this.publishChatgptPlan(await this.readChatgptPlan('chatgpt_plan_status'));
+    await this.loadChatgptModels();
+  });
+
+  connectChatgptPlan = (differentAccount = false): Promise<void> => this.chatgptAction('connect', async () => {
+    const plan = await this.readChatgptPlan('chatgpt_plan_connect', { differentAccount });
+    this.publishChatgptPlan(plan);
+    if (plan.connected) this.publish({ chatgptOperation: 'load' });
+    await this.loadChatgptModels();
+  });
+
+  cancelChatgptPlanConnect = async (): Promise<void> => {
+    if (this.state.chatgptOperation !== 'connect') return;
+    try { await this.deps.invoke('chatgpt_plan_cancel_connect'); }
+    catch { this.publish({ chatgptError: '无法取消 ChatGPT 授权。' }); }
+  };
+
+  disconnectChatgptPlan = (): Promise<void> => this.chatgptAction('disconnect', async () => {
+    const connectionId = this.state.chatgptPlan?.connectionId;
+    if (!connectionId) return;
+    this.publishChatgptPlan(await this.readChatgptPlan('chatgpt_plan_disconnect', { connectionId }));
+  });
+
+  activateChatgptPlan = (): void => {
+    const plan = this.state.chatgptPlan;
+    if (!plan?.connected || !plan.connectionId || !plan.models.length) throw new Error('请先连接 ChatGPT 订阅并加载模型。');
+    const connectionId = plan.connectionId;
+    this.commitOverlay((overlay) => ({ ...overlay, selection: { ...overlay.selection,
+      executionPreference: 'client', clientConnectionId: null, clientTarget: { kind: 'chatgpt-plan', connectionId } } }));
+    this.publish({ modelInputError: null });
+  };
+
+  selectChatgptPlanModel = (modelId: string): void => {
+    const plan = this.state.chatgptPlan;
+    if (!plan?.connected || !plan.connectionId || !plan.models.some((model) => model.id === modelId)) throw new Error('请选择该订阅可用的模型。');
+    const chatgptModel = { connectionId: plan.connectionId, modelId };
+    this.commitOverlay((overlay) => ({ ...overlay, selection: { ...overlay.selection, chatgptModel } }));
+    this.publish({ modelInputError: null });
   };
 
   selectPresetModel = (providerId: string, modelId: string): void => {
@@ -578,7 +660,7 @@ export class DesktopAiConfigStore {
     const selection = constraint?.executionLocation ? { ...this.state.selection, executionPreference: constraint.executionLocation } : this.state.selection;
     const fixedServer = constraint?.serverPolicy === 'fixed-default' && selection.executionPreference === 'server';
     if (!fixedServer && this.state.modelInputError && (!constraint?.executionLocation || this.state.selection.executionPreference === 'server')) throw new Error(this.state.modelInputError);
-    const target = resolveDesktopAiTarget(selection, this.state.profiles, this.state.generationOverrides, this.state.modelsByProfileId, this.state.presetsByProviderId, constraint?.serverPolicy);
+    const target = resolveDesktopAiTargetForState(this.state, selection, constraint?.serverPolicy);
     if (target.unavailableReason || !target.providerTarget) throw new Error(target.unavailableReason ?? '请选择供应商');
     const epoch = ++this.generationEpoch;
     this.preparing = true;

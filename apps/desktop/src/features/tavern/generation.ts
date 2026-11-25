@@ -150,7 +150,7 @@ async function executeTavernHostedStreamGeneration(
   let snapshot: TavernGenerationInput;
   let request: ReturnType<typeof DesktopHostedGenerateRequestSchema.parse>;
   try {
-    if (intent.generationMode !== 'stream' || options.providerTarget?.kind === 'custom') throw new Error('当前执行模式或供应商不支持酒馆服务器流式通道。');
+    if (intent.generationMode !== 'stream' || options.providerTarget?.kind === 'custom' || options.providerTarget?.kind === 'chatgpt-plan') throw new Error('当前执行模式或供应商不支持酒馆服务器流式通道。');
     snapshot = JSON.parse(JSON.stringify(input)) as TavernGenerationInput;
     const body = buildTavernHostedBody(snapshot);
     const oversize = hostedBodyOversizeMessage(body, 'tavern-convert-stream');

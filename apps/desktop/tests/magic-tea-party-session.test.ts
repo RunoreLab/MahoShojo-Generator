@@ -68,9 +68,38 @@ const harness = (session = baseSession()) => {
     if (command === 'cancel_direct_ai') return;
     throw new Error('unexpected command');
   }));
-  const owner = new DesktopTeaSession(createIpcTeaNativePort(invoke), () => `id-${++sequence}`, () => 10);
+  const consent = new Map<string, string>();
+  const owner = new DesktopTeaSession(createIpcTeaNativePort(invoke), () => `id-${++sequence}`, () => 10, () => ({
+    getItem: key => consent.get(key) ?? null, setItem: (key, value) => { consent.set(key, value); }, removeItem: key => { consent.delete(key); },
+  }));
   return { owner, invoke, get record() { return record; }, get messages() { return messages; }, count: () => count, output: (text: string) => { output = text; }, drop: (action: string) => { drop = action; }, fail: (action: string) => { fail = action; }, options: { invoke, profileId: 'tea-loopback', createChannel: () => ({}) } };
 };
+
+it('asks once when enabling plan auto-summary and disregards a different connection', async () => {
+  const connection = { kind: 'chatgpt-plan' as const, connectionId: 'c'.repeat(32) };
+  const plan: ResolvedDesktopAiTarget = { ...target, providerTarget: connection, mode: 'direct-remote' };
+  const sequence = baseSession();
+  sequence.settings = { ...sequence.settings, autoSummaryEnabled: true, outputFormat: 'markdown', maxContextMessages: 2, summaryMinGapMessages: 8 };
+  const h = harness(sequence);
+  h.messages.push(...Array.from({ length: 8 }, (_, index) => ({ id: `past-${index}`, sessionId: 's', content: `剧情 ${index}`, role: 'user' as const, status: 'done' as const, createdAt: index })));
+  const options = { ...h.options, providerTarget: connection };
+  await h.owner.select('s');
+  h.output('本轮剧情与摘要');
+  expect(h.owner.autoSummaryEnabled(plan)).toBe(false);
+  await h.owner.start(plan, options, () => true, { kind: 'continue' });
+  expect(h.count()).toBe(1);
+  const confirm = vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true);
+  expect(await h.owner.setAutoSummaryEnabled(true, plan, confirm)).toBe(false);
+  expect(await h.owner.setAutoSummaryEnabled(true, plan, confirm)).toBe(true);
+  expect(h.owner.autoSummaryEnabled(plan)).toBe(true);
+  expect(h.owner.autoSummaryEnabled({ ...plan, providerTarget: { ...connection, connectionId: 'd'.repeat(32) } })).toBe(false);
+  await h.owner.start(plan, options, () => true, { kind: 'continue' });
+  expect(h.count()).toBe(3);
+  expect(confirm).toHaveBeenCalledTimes(2);
+  await h.owner.setAutoSummaryEnabled(false, plan, confirm);
+  expect(h.owner.autoSummaryEnabled(plan)).toBe(false);
+  expect(confirm).toHaveBeenCalledTimes(2);
+});
 
 describe('text Tea owner save and generation identity', () => {
   it.each(['provider', 'stopped', 'failed'] as const)('publishes accepted reasoning live and persists the %s terminal without replay', async completion => {

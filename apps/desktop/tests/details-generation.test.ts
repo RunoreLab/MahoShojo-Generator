@@ -6,7 +6,7 @@ import type { AiExecutionRequest, AiExecutionResult } from '@mahoshojo/contracts
 import type { AiStreamEvent } from '@mahoshojo/ai-core/stream-events';
 import type { HostedGenerationEvent } from '@mahoshojo/contracts/desktop-cloud';
 import { executeDetailsGeneration, type DetailsGenerationInput } from '../src/features/details/generation';
-import { CANCEL_DIRECT_AI_COMMAND, STREAM_DIRECT_AI_COMMAND } from '../src/platform/direct-ai-bridge';
+import { CANCEL_DIRECT_AI_COMMAND, STREAM_DIRECT_AI_COMMAND, STREAM_TARGET_AI_COMMAND } from '../src/platform/direct-ai-bridge';
 import { CANCEL_HOSTED_AI_COMMAND, HOSTED_AI_REQUEST_COMMAND, STREAM_HOSTED_AI_COMMAND } from '../src/platform/cloud-bridge';
 
 const legacy = JSON.parse(readFileSync(new URL('../../../packages/ai-core/fixtures/magical-girl-details-legacy.json', import.meta.url), 'utf8'));
@@ -21,11 +21,11 @@ const generated = {
   analysis: { personalityAnalysis: '坚韧', abilityReasoning: '守护', coreTraits: ['坚定'], predictionBasis: '问卷', background: { belief: '守护', bonds: '同伴' } },
 };
 
-const harness = (text = JSON.stringify(generated), finishReason: 'stop' | 'length' = 'stop', status: 'completed' | 'failed' = 'completed') => {
+const harness = (text = JSON.stringify(generated), finishReason: 'stop' | 'length' = 'stop', status: 'completed' | 'failed' = 'completed', expectedCommand: string = STREAM_DIRECT_AI_COMMAND) => {
   let sent: AiExecutionRequest | undefined;
   let deliver: (() => void) | undefined;
   const invoke = vi.fn(withFixtureStreamReceipt(async (command: string, args?: Record<string, unknown>) => {
-    if (command !== STREAM_DIRECT_AI_COMMAND) throw new Error('unexpected command');
+    if (command !== expectedCommand) throw new Error('unexpected command');
     sent = args!.request as AiExecutionRequest;
     const channel = args!.onEvent as { onmessage: (event: AiStreamEvent) => void };
     const identity = { requestId: sent.requestId, contractVersion: 1 as const, mode: sent.mode };
@@ -44,6 +44,18 @@ const harness = (text = JSON.stringify(generated), finishReason: 'stop' | 'lengt
 };
 
 describe('Desktop Details generation seam', () => {
+  it('validates a structured card from the ChatGPT plan stream with the existing schema', async () => {
+    const native = harness(JSON.stringify(generated), 'stop', 'completed', STREAM_TARGET_AI_COMMAND);
+    const providerTarget = { kind: 'chatgpt-plan' as const, connectionId: 'a'.repeat(32) };
+    const pending = executeDetailsGeneration({ ...native.options, providerTarget }, input,
+      { ...intent, mode: 'direct-remote', modelId: 'plan-model' }, new AbortController().signal);
+    expect(native.invoke.mock.calls[0]?.[1]).toMatchObject({ target: providerTarget, request: { modelId: 'plan-model', responseFormat: 'text' } });
+    expect(native.request!.messages[0]?.role).toBe('system');
+    native.finish();
+    await expect(pending).resolves.toMatchObject({ status: 'completed', card: generated });
+    expect(native.invoke).toHaveBeenCalledTimes(1);
+  });
+
   it('uses the Hosted fixture and shared Prompt, freezes answers, and produces an unsigned card', async () => {
     const native = harness(JSON.stringify({ ...generated, signature: 'untrusted-signature' }));
     const mutableInput = structuredClone(input);

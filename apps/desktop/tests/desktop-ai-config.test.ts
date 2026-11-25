@@ -185,7 +185,8 @@ describe('parseDesktopAiConfigOverlay', () => {
 
   it('fails closed on unsupported version, corrupt selection and non-schema overrides', () => {
     expect(() => parseDesktopAiConfigOverlay('{"version":1}')).toThrow('版本');
-    expect(() => parseDesktopAiConfigOverlay('{"version":6}')).toThrow('版本');
+    expect(() => parseDesktopAiConfigOverlay('{"version":7}')).toThrow('版本');
+    expect(() => parseDesktopAiConfigOverlay('{"version":6}')).toThrow('选择');
     expect(() => parseDesktopAiConfigOverlay('{"version":5}')).toThrow('选择');
     expect(() =>
       parseDesktopAiConfigOverlay(

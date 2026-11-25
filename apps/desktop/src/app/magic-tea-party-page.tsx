@@ -18,6 +18,7 @@ import { createIpcTeaNativePort } from '../platform/magic-tea-party-native';
 import { downloadTextFile } from '../platform/download-text-file';
 import { useDesktopCardLibraryHost } from '../platform/card-library-host';
 import { useDesktopAiConfig } from '../features/ai-config/use-desktop-ai-config';
+import { resolveDesktopAiTargetForState } from '../features/ai-config/desktop-ai-config';
 import { DesktopAiProviderPanel } from '../features/ai-config/desktop-ai-provider-panel';
 import { useExternalLinks } from '../features/external-links/external-links-provider';
 import { useLeaveGuard } from './useLeaveGuard';
@@ -25,7 +26,8 @@ import { useLeaveGuard } from './useLeaveGuard';
 export default function MagicTeaPartyPage() {
   const [owner] = useState(() => new DesktopTeaSession(createIpcTeaNativePort()));
   const state = useSyncExternalStore(owner.subscribe, owner.getSnapshot);
-  const { store: aiStore } = useDesktopAiConfig();
+  const { state: aiState, store: aiStore } = useDesktopAiConfig();
+  const selectedAi = resolveDesktopAiTargetForState(aiState);
   const libraryHost = useDesktopCardLibraryHost(); const { openContent } = useExternalLinks();
   const [library, setLibrary] = useState<'character' | 'scenario' | null>(null);
   const [summaryCollapsed, setSummaryCollapsed] = useState(false);
@@ -237,8 +239,13 @@ export default function MagicTeaPartyPage() {
         description="用于长对话压缩（保存在本机）。生成摘要会消耗额外 Token。后续剧情最多读取摘要前 10000 字，保存正文不截断。"
         collapsed={summaryCollapsed} onCollapsedChange={setSummaryCollapsed} onGenerate={() => start({ kind: 'summary' })}
         onStopSummary={owner.stop}
-        autoSummaryEnabled={session?.settings.autoSummaryEnabled === true}
-        onAutoSummaryEnabledChange={value => { if (!disabled && currentScope() === renderScope) run(() => owner.updateSettings({ autoSummaryEnabled: value })); }}
+        autoSummaryEnabled={owner.autoSummaryEnabled(selectedAi)}
+        onAutoSummaryEnabledChange={value => {
+          if (disabled || currentScope() !== renderScope) return;
+          run(() => owner.setAutoSummaryEnabled(value, resolveDesktopAiTargetForState(aiStore.getSnapshot()), () => window.confirm(
+            '启用后，这个茶会会按需发起额外的摘要请求，并消耗当前账户的 ChatGPT 订阅用量。确认开启自动摘要？',
+          )));
+        }}
         onClear={() => { if (!disabled && currentScope() === renderScope) run(owner.clearSummary); }}
         onChange={value => { if ((!disabled || state.isAutoSummarizing) && (!preparing.current || state.isAutoSummarizing) && currentScope() === renderScope) owner.stageSummary(value); }}
         onSave={() => { if (!disabled && currentScope() === renderScope) run(owner.saveDraft); }} dirty={state.summaryDraft !== null}>

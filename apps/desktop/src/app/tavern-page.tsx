@@ -18,7 +18,7 @@ import { TavernAiSession } from '../features/tavern/session';
 import { buildTavernHostedBody, prepareTavernGenerationInput, validateTavernGeneratedCard, type TavernGenerationInput } from '../features/tavern/generation';
 import { DesktopAiProviderPanel } from '../features/ai-config/desktop-ai-provider-panel';
 import { useDesktopAiConfig } from '../features/ai-config/use-desktop-ai-config';
-import { resolveDesktopAiTarget } from '../features/ai-config/desktop-ai-config';
+import { resolveDesktopAiTargetForState } from '../features/ai-config/desktop-ai-config';
 import { useCooldown } from '@mahoshojo/ui-web/cooldown';
 import { useDesktopCloudSession } from '../features/account/use-desktop-cloud-session';
 import { GenerationMarkdownPreview } from './generation-markdown-preview';
@@ -32,7 +32,7 @@ const PRESET_COOLDOWN_MS = 3_000;
 function TavernPage({ session }: { session: TavernAiSession }) {
   const ai = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const { state: aiState, store: aiStore } = useDesktopAiConfig();
-  const target = resolveDesktopAiTarget(aiState.selection, aiState.profiles, aiState.generationOverrides, aiState.modelsByProfileId, aiState.presetsByProviderId);
+  const target = resolveDesktopAiTargetForState(aiState);
   const { state: cloudState, store: cloudStore } = useDesktopCloudSession();
   const preset = target.providerTarget?.kind === 'preset';
   const cooldownMs = preset ? PRESET_COOLDOWN_MS : SYSTEM_COOLDOWN_MS;

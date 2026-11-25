@@ -37,6 +37,7 @@ const canonical = (value: unknown): string => {
   return JSON.stringify(value);
 };
 const cloneWrite = (write: TeaWriteRequest): TeaWriteRequest => TeaWriteRequestSchema.parse(JSON.parse(JSON.stringify(write)));
+const planSummaryConsentKey = (record: TeaRecord) => `mahoshojo.desktop.tea.chatgpt-auto-summary.v1.${record.instance}`;
 
 /** One page owner. SQLite revisions fence writes; begin receipts never authorize a replacement owner to dispatch. */
 export class DesktopTeaSession {
@@ -44,7 +45,8 @@ export class DesktopTeaSession {
   private live = true; private incarnation = 0; private pending: Pending | null = null; private generation: Generation | null = null;
   private mergePreparation: object | null = null;
   private preparation: { cancelled: boolean; automatic: boolean } | null = null; private consecutiveDroppedTurns = 0;
-  constructor(private readonly port: TeaNativePort, private readonly id: () => string = () => crypto.randomUUID(), private readonly now: () => number = Date.now) {}
+  constructor(private readonly port: TeaNativePort, private readonly id: () => string = () => crypto.randomUUID(), private readonly now: () => number = Date.now,
+    private readonly consentStorage: () => Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> = () => window.localStorage) {}
   activate = () => { if (!this.live) { this.live = true; this.pending = null; this.generation = null; this.state = { ...initial(), incarnation: ++this.incarnation }; } };
   getSnapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener); };
@@ -246,6 +248,33 @@ export class DesktopTeaSession {
     const choices = patch.enableChoices === false ? 'off' : plan.choices === 'on' ? 'on' : 'auto';
     return this.update({ settings: { ...original, ...patch,
       ...(typeof patch.enableChoices === 'boolean' ? { outputPlan: { ...plan, choices } as MagicTeaPartySession['settings']['outputPlan'] } : {}) } });
+  };
+  autoSummaryEnabled = (target: ResolvedDesktopAiTarget): boolean => {
+    const record = this.state.record;
+    if (!record || record.session.settings.autoSummaryEnabled !== true) return false;
+    const provider = target.providerTarget;
+    if (provider?.kind !== 'chatgpt-plan') return true;
+    try { return this.consentStorage().getItem(planSummaryConsentKey(record)) === provider.connectionId; }
+    catch { return false; }
+  };
+
+  setAutoSummaryEnabled = async (enabled: boolean, target: ResolvedDesktopAiTarget, confirmPlanUsage: () => boolean): Promise<boolean> => {
+    const record = this.state.record;
+    if (!record || !this.allowed()) return false;
+    const key = planSummaryConsentKey(record);
+    const provider = target.providerTarget;
+    if (enabled && provider?.kind === 'chatgpt-plan' && (!target.mode || !confirmPlanUsage())) return false;
+    if (!enabled) {
+      try { this.consentStorage().removeItem(key); }
+      catch { /* The persisted off switch also stops automatic requests. */ }
+    }
+    const updated = await this.updateSettings({ autoSummaryEnabled: enabled });
+    if (updated && enabled && provider?.kind === 'chatgpt-plan' && this.state.record?.instance === record.instance) {
+      try { this.consentStorage().setItem(key, provider.connectionId); }
+      catch { throw new Error('无法保存 ChatGPT 自动摘要授权。请检查本机存储后重新开启。'); }
+      this.publish({});
+    }
+    return updated;
   };
   saveDraft = async (): Promise<boolean> => {
     if (!this.state.record || this.state.input === (this.state.record.session.draft ?? '') && this.state.titleDraft === null && this.state.nameDraft === null && this.state.summaryDraft === null) return true;
@@ -516,7 +545,7 @@ export class DesktopTeaSession {
       || !this.allowed() || this.state.summaryDraft !== null || this.state.record?.instance !== record.instance || this.state.record.revision !== record.revision + 1
       || this.state.record.session.id !== record.session.id) return;
     this.consecutiveDroppedTurns = generation.droppedRatio > 0.3 ? Math.min(2, this.consecutiveDroppedTurns + 1) : 0;
-    if (this.state.record.session.settings.autoSummaryEnabled === true) {
+    if (this.autoSummaryEnabled(generation.target)) {
       await this.startGeneration(generation.target, generation.options, generation.credentialCurrent, { kind: 'summary' }, true);
     }
   }

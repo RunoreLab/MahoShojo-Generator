@@ -356,7 +356,8 @@ const buildHostedSystemConfig = (
   };
 };
 
-export const buildHostedProviderConfig = (target: DesktopAiExecutionOptions['providerTarget'], intent: DesktopGenerationIntent): HostedProviderConfig =>
+type HostedProviderTarget = Extract<DesktopAiExecutionOptions['providerTarget'], { kind: 'system' | 'preset' }>;
+export const buildHostedProviderConfig = (target: HostedProviderTarget | undefined, intent: DesktopGenerationIntent): HostedProviderConfig =>
   target?.kind === 'preset'
     ? { presetConfig: { providerId: target.providerId, modelId: intent.modelId?.trim() ?? '', ...(intent.overrides ? { generationOverrides: intent.overrides } : {}) } }
     : { systemConfig: buildHostedSystemConfig(intent) };
@@ -672,6 +673,9 @@ export const executeDesktopGeneration = async <
     if (target?.kind === 'custom') {
       return { status: 'failed', mode: intent.mode, rawText: '', message: '自定义连接仅支持客户端执行', code: 'invalid-request' };
     }
+    if (target?.kind === 'chatgpt-plan') {
+      return { status: 'failed', mode: intent.mode, rawText: '', message: 'ChatGPT 订阅仅支持客户端执行', code: 'invalid-request' };
+    }
     const providerConfig = buildHostedProviderConfig(target, intent);
     return intent.mode === 'hosted-stream'
       ? executeHostedStreamGeneration(family, options, input, intent, signal, body, providerConfig, onPartialText)
@@ -689,7 +693,7 @@ export const executeDesktopHostedJsonGeneration = async <TInput, TIntent extends
   signal: AbortSignal,
 ): Promise<DesktopGenerationOutcome<TCardKind>> => {
   if (signal.aborted) return { status: 'cancelled', mode: intent.mode, rawText: '', reason: 'aborted' };
-  if (intent.mode !== 'hosted-json' || intent.generationMode === 'stream' || options.providerTarget?.kind === 'custom') {
+  if (intent.mode !== 'hosted-json' || intent.generationMode === 'stream' || options.providerTarget?.kind === 'custom' || options.providerTarget?.kind === 'chatgpt-plan') {
     return { status: 'failed', mode: intent.mode, rawText: '', code: 'invalid-request', message: '当前执行模式或供应商不支持该服务器 JSON 通道。' };
   }
   const snapshot = clone(input);

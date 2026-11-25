@@ -114,9 +114,9 @@ import type { HomeAssetSource } from '@mahoshojo/ui-web/home';
 import { CREATOR_DRAFT_DEFAULT_RULE_IDS, createInitialCreatorDraft, CreatorSession } from '../features/creator/session';
 import type { CreatorExecutionMode } from '../features/creator/generation';
 import { parseCreatorQuestionnaireCardSelection, toQuestionnaireSelection } from '../features/creator/questionnaire';
-import { resolveDesktopAiTarget } from '../features/ai-config/desktop-ai-config';
 import { DesktopAiProviderPanel } from '../features/ai-config/desktop-ai-provider-panel';
 import { useDesktopAiConfig } from '../features/ai-config/use-desktop-ai-config';
+import { resolveDesktopAiTargetForState } from '../features/ai-config/desktop-ai-config';
 import { useDesktopCloudSession } from '../features/account/use-desktop-cloud-session';
 import { useDesktopCardLibraryHost } from '../platform/card-library-host';
 import { IpcLocalCardRepository } from '../platform/local-card-bridge';
@@ -187,13 +187,7 @@ function CreatorForm({ session, restored }: { session: CreatorSession; restored:
   const router = useRouter();
   const { openFixed } = useExternalLinks();
   const { state: aiState, store: aiStore } = useDesktopAiConfig();
-  const target = resolveDesktopAiTarget(
-    aiState.selection,
-    aiState.profiles,
-    aiState.generationOverrides,
-    aiState.modelsByProfileId,
-    aiState.presetsByProviderId,
-  );
+  const target = resolveDesktopAiTargetForState(aiState);
   const profilesLoading = aiState.profilesState === 'idle' || aiState.profilesState === 'loading';
   const profilesError = aiState.profilesState === 'failed' ? aiState.profilesError : null;
   const cardLibraryHost = useDesktopCardLibraryHost();

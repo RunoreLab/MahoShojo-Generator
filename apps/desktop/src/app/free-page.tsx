@@ -55,9 +55,9 @@ import { BackHomeLink, ProductFooter } from '@mahoshojo/ui-web/shell';
 import type { HomeAssetSource } from '@mahoshojo/ui-web/home';
 import { FreeSession, createEmptyFreeDraftDocument, type FreeDraft } from '../features/free/session';
 import type { FreeExecutionMode } from '../features/free/generation';
-import { resolveDesktopAiTarget } from '../features/ai-config/desktop-ai-config';
 import { DesktopAiProviderPanel } from '../features/ai-config/desktop-ai-provider-panel';
 import { useDesktopAiConfig } from '../features/ai-config/use-desktop-ai-config';
+import { resolveDesktopAiTargetForState } from '../features/ai-config/desktop-ai-config';
 import { downloadTextFile } from '../platform/download-text-file';
 import { IpcLocalCardRepository } from '../platform/local-card-bridge';
 import { useExternalLinks } from '../features/external-links/external-links-provider';
@@ -105,13 +105,7 @@ function FreeForm({ session }: { session: FreeSession }) {
   const { openFixed } = useExternalLinks();
   // AI 连接与执行位置与设置页共用同一份 overlay/profiles 状态（D5.0b）。
   const { state: aiState, store: aiStore } = useDesktopAiConfig();
-  const target = resolveDesktopAiTarget(
-    aiState.selection,
-    aiState.profiles,
-    aiState.generationOverrides,
-    aiState.modelsByProfileId,
-    aiState.presetsByProviderId,
-  );
+  const target = resolveDesktopAiTargetForState(aiState);
   const profilesLoading = aiState.profilesState === 'idle' || aiState.profilesState === 'loading';
   const profilesError = aiState.profilesState === 'failed' ? aiState.profilesError : null;
   const [languages, setLanguages] = useState<{ code: string; name: string }[]>([]);

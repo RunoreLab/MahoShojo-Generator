@@ -88,9 +88,9 @@ import {
   toQuestionnaireSelection,
   type DetailsQuestionnaire,
 } from '../features/details/questionnaire';
-import { resolveDesktopAiTarget } from '../features/ai-config/desktop-ai-config';
 import { DesktopAiProviderPanel } from '../features/ai-config/desktop-ai-provider-panel';
 import { useDesktopAiConfig } from '../features/ai-config/use-desktop-ai-config';
+import { resolveDesktopAiTargetForState } from '../features/ai-config/desktop-ai-config';
 import { useDesktopCloudSession } from '../features/account/use-desktop-cloud-session';
 import { useDesktopCardLibraryHost } from '../platform/card-library-host';
 import { downloadTextFile } from '../platform/download-text-file';
@@ -155,13 +155,7 @@ function DetailsForm({ session, restored }: { session: DetailsSession; restored:
   const { openFixed } = useExternalLinks();
   // AI 连接与执行位置与设置页共用同一份 overlay/profiles 状态（D5.0b）。
   const { state: aiState, store: aiStore } = useDesktopAiConfig();
-  const target = resolveDesktopAiTarget(
-    aiState.selection,
-    aiState.profiles,
-    aiState.generationOverrides,
-    aiState.modelsByProfileId,
-    aiState.presetsByProviderId,
-  );
+  const target = resolveDesktopAiTargetForState(aiState);
   const profilesLoading = aiState.profilesState === 'idle' || aiState.profilesState === 'loading';
   const profilesError = aiState.profilesState === 'failed' ? aiState.profilesError : null;
   const cardLibraryHost = useDesktopCardLibraryHost();

@@ -9,7 +9,7 @@
 // - 预设由稳定 providerId 绑定安全存储；只有用户主动新建/复制才产生 Profile。
 //   两种身份按执行位置独立选择，native 从受检目录或既有 Profile 解析真实目标。
 
-import { ProviderModelIdSchema, type ProviderTarget } from '@mahoshojo/contracts/provider-target';
+import { ChatGptPlanTargetSchema, ProviderModelIdSchema, type DesktopChatGptStatus, type DesktopProviderTarget, type ProviderTarget } from '@mahoshojo/contracts/provider-target';
 import {
   AI_PROVIDER_PRESETS,
   SYSTEM_PROVIDER_OPTION,
@@ -45,8 +45,10 @@ export interface DesktopAiSelection {
   /** 客户端连接选择；null = 尚未选择。 */
   /** 旧调用方的派生投影；v5 不再持久化或以此作为预设身份。 */
   clientConnectionId: string | null;
-  clientTarget?: Exclude<ProviderTarget, { kind: 'system' }> | null;
+  clientTarget?: Exclude<DesktopProviderTarget, { kind: 'system' }> | null;
   serverTarget?: Exclude<ProviderTarget, { kind: 'custom' }>;
+  /** Non-secret model preference, tied to one authorized connection. */
+  chatgptModel?: { connectionId: string; modelId: string };
   /**
    * 「使用系统默认配置」通道的模型选择（overlay v4 起）。
    * 取值为 `SYSTEM_PROVIDER_OPTION.models` 中的模型 ID（`'default'` 表示服务器
@@ -121,7 +123,7 @@ export interface DesktopPresetSelection {
   generationOverrides: Record<string, UserGenerationOverrides>;
 }
 
-export const selectedProviderTarget = (selection: DesktopAiSelection): ProviderTarget | null =>
+export const selectedProviderTarget = (selection: DesktopAiSelection): DesktopProviderTarget | null =>
   selection.executionPreference === 'server'
     ? (selection.serverTarget ?? { kind: 'system' })
     : selection.clientTarget !== undefined
@@ -153,6 +155,7 @@ const DESKTOP_SELECTION_KEYS = new Set([
   'systemModelId',
   'clientTarget',
   'serverTarget',
+  'chatgptModel',
 ]);
 
 const isValidSelection = (value: unknown): value is DesktopAiSelection =>
@@ -161,7 +164,10 @@ const isValidSelection = (value: unknown): value is DesktopAiSelection =>
   (value.executionPreference === 'client' || value.executionPreference === 'server') &&
   (value.clientConnectionId === undefined || value.clientConnectionId === null ||
     (typeof value.clientConnectionId === 'string' && value.clientConnectionId.trim().length > 0)) &&
-  (value.systemModelId === undefined || isValidDesktopModelId(value.systemModelId));
+  (value.systemModelId === undefined || isValidDesktopModelId(value.systemModelId)) &&
+  (value.chatgptModel === undefined || (isObject(value.chatgptModel) && Object.keys(value.chatgptModel).length === 2 &&
+    ChatGptPlanTargetSchema.safeParse({ kind: 'chatgpt-plan', connectionId: value.chatgptModel.connectionId }).success &&
+    ProviderModelIdSchema.safeParse(value.chatgptModel.modelId).success));
 
 /**
  * fail-closed 解析持久化 overlay。
@@ -173,12 +179,13 @@ export const parseDesktopAiConfigOverlay = (raw: string): DesktopAiConfigOverlay
   // v2 → v4 迁移：v2 缺省 `modelsByProfileId`，v3 缺省 `selection.systemModelId`；
   // 解析后各自初始化为空，下一次落盘即以 v4 写回（受检、幂等——只在整体解析
   // 成功后写）。未知版本继续 fail-closed。
-  if (!isObject(value) || (value.version !== 2 && value.version !== 3 && value.version !== 4 && value.version !== 5)) {
+  if (!isObject(value) || ![2, 3, 4, 5, 6].some((version) => version === value.version)) {
     throw new Error('AI 配置版本不受支持');
   }
   if (!isValidSelection(value.selection) ||
-      (value.version !== 5 && value.selection.clientConnectionId === undefined) ||
-      (value.version === 5 && (value.selection.clientTarget === undefined || value.selection.serverTarget === undefined))) {
+      (value.version !== 5 && value.version !== 6 && value.selection.clientConnectionId === undefined) ||
+      ((value.version === 5 || value.version === 6) && (value.selection.clientTarget === undefined || value.selection.serverTarget === undefined)) ||
+      (value.version !== 6 && value.selection.chatgptModel !== undefined)) {
     throw new Error('AI 配置的连接选择损坏');
   }
   if (
@@ -247,6 +254,7 @@ export const parseDesktopAiConfigOverlay = (raw: string): DesktopAiConfigOverlay
   const validTarget = (target: unknown, location: 'client' | 'server'): boolean => {
     if (target === null) return location === 'client';
     if (!isObject(target)) return false;
+    if (target.kind === 'chatgpt-plan') return value.version === 6 && location === 'client' && ChatGptPlanTargetSchema.safeParse(target).success;
     const id = target.kind === 'preset' ? target.providerId : target.profileId;
     return target.kind === 'system'
       ? location === 'server' && Object.keys(target).length === 1
@@ -276,7 +284,11 @@ export const parseDesktopAiConfigOverlay = (raw: string): DesktopAiConfigOverlay
 };
 
 export const serializeDesktopAiConfigOverlay = (overlay: DesktopAiConfigOverlay): string =>
-  JSON.stringify({ version: 5, ...overlay, selection: { ...overlay.selection, clientConnectionId: undefined, clientTarget: overlay.selection.clientTarget !== undefined ? overlay.selection.clientTarget : overlay.selection.clientConnectionId ? { kind: 'custom', profileId: overlay.selection.clientConnectionId } : null, serverTarget: overlay.selection.serverTarget ?? { kind: 'system' } } });
+  JSON.stringify({
+    version: overlay.selection.clientTarget?.kind === 'chatgpt-plan' || overlay.selection.chatgptModel ? 6 : 5,
+    ...overlay,
+    selection: { ...overlay.selection, clientConnectionId: undefined, clientTarget: overlay.selection.clientTarget !== undefined ? overlay.selection.clientTarget : overlay.selection.clientConnectionId ? { kind: 'custom', profileId: overlay.selection.clientConnectionId } : null, serverTarget: overlay.selection.serverTarget ?? { kind: 'system' } },
+  });
 
 /** 预设展示行：整条支持度 + 该宿主上已核验可直连的模型清单。 */
 export interface DesktopPresetEntry {
@@ -312,7 +324,7 @@ export const describeDesktopPresetModelSupport = (
 export interface ResolvedDesktopAiTarget {
   /** 'server' = 服务器策略；'client' = 某个已保存连接。 */
   location: 'client' | 'server';
-  providerTarget?: ProviderTarget;
+  providerTarget?: DesktopProviderTarget;
   preset?: AiProviderPreset;
   profile: DirectProviderProfileV1 | null;
   /** 客户端连接的执行模式；server/不可用时为 null。 */
@@ -326,6 +338,24 @@ export interface ResolvedDesktopAiTarget {
   unavailableReason: string | null;
 }
 
+interface DesktopAiTargetSnapshot {
+  selection: DesktopAiSelection;
+  profiles: readonly DirectProviderProfileV1[];
+  generationOverrides: Readonly<Record<string, Readonly<Record<string, UserGenerationOverrides>>>>;
+  modelsByProfileId: Readonly<Record<string, DesktopProfileModelSelection>>;
+  presetsByProviderId: Readonly<Record<string, DesktopPresetSelection>>;
+  chatgptPlan: DesktopChatGptStatus | null;
+}
+
+export const resolveDesktopAiTargetForState = (
+  state: DesktopAiTargetSnapshot,
+  selection = state.selection,
+  serverPolicy?: 'fixed-default',
+): ResolvedDesktopAiTarget => resolveDesktopAiTarget(
+  selection, state.profiles, state.generationOverrides, state.modelsByProfileId,
+  state.presetsByProviderId, serverPolicy, state.chatgptPlan,
+);
+
 const ownEntry = <T,>(record: Readonly<Record<string, T>> | undefined, key: string): T | undefined =>
   record && Object.hasOwn(record, key) ? record[key] : undefined;
 
@@ -336,6 +366,7 @@ export const resolveDesktopAiTarget = (
   modelsByProfileId: Readonly<Record<string, DesktopProfileModelSelection>>,
   presetsByProviderId: Readonly<Record<string, DesktopPresetSelection>> = {},
   serverPolicy?: 'fixed-default',
+  chatgpt?: DesktopChatGptStatus | null,
 ): ResolvedDesktopAiTarget => {
   // 页面能力投影不改持久偏好，也不解析此通道不使用的悬空连接/预设。
   if (serverPolicy === 'fixed-default' && selection.executionPreference === 'server') {
@@ -343,6 +374,17 @@ export const resolveDesktopAiTarget = (
       modelId: 'default', availableModelIds: ['default'], generationOverrides: undefined, unavailableReason: null };
   }
   const providerTarget = selectedProviderTarget(selection);
+  if (providerTarget?.kind === 'chatgpt-plan') {
+    const connected = selection.executionPreference === 'client' && chatgpt?.connected === true && chatgpt.connectionId === providerTarget.connectionId;
+    const models = connected ? chatgpt.models.map((model) => model.id) : [];
+    const modelId = selection.chatgptModel?.connectionId === providerTarget.connectionId ? selection.chatgptModel.modelId : models[0] ?? null;
+    const unavailableReason = !connected ? '请在 AI 连接设置中连接或重新选择 ChatGPT 订阅。'
+      : models.length === 0 ? '尚未取得 ChatGPT 订阅可用的模型，请在设置中刷新目录。'
+      : modelId === null || !models.includes(modelId) ? '请选择当前 ChatGPT 订阅可用的模型。' : null;
+    return { location: selection.executionPreference, providerTarget, profile: null,
+      mode: unavailableReason === null ? 'direct-remote' : null, modelId, availableModelIds: models,
+      generationOverrides: undefined, unavailableReason };
+  }
   if (providerTarget?.kind === 'preset') {
     const preset = AI_PROVIDER_PRESETS.find((entry) => entry.id === providerTarget.providerId);
     const preference = ownEntry(presetsByProviderId, providerTarget.providerId);

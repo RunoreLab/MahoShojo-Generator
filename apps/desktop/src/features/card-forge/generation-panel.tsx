@@ -8,9 +8,9 @@ import { MAX_DATA_CARD_BYTES } from '@mahoshojo/domain/data-card-size';
 import { stripLocalCardTransportMeta } from '@mahoshojo/local-library/digest';
 import { IpcLocalCardRepository } from '../../platform/local-card-bridge';
 import { useDesktopCardLibraryHost } from '../../platform/card-library-host';
-import { resolveDesktopAiTarget } from '../ai-config/desktop-ai-config';
 import { DesktopAiProviderPanel } from '../ai-config/desktop-ai-provider-panel';
 import { useDesktopAiConfig } from '../ai-config/use-desktop-ai-config';
+import { resolveDesktopAiTargetForState } from '../ai-config/desktop-ai-config';
 import { ForgeGenerationSession } from './session';
 import { normalizeForgeGenerationInput } from './generation';
 
@@ -27,7 +27,7 @@ function ForgeGenerationForm({ session, disabled, onBusyChange, onInputDirty, on
   const output = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const { state: ai, store } = useDesktopAiConfig();
   const host = useDesktopCardLibraryHost();
-  const target = resolveDesktopAiTarget(ai.selection, ai.profiles, ai.generationOverrides, ai.modelsByProfileId, ai.presetsByProviderId);
+  const target = resolveDesktopAiTargetForState(ai);
   const [sourceCardJson, setSource] = useState('');
   const [customInstructions, setInstructions] = useState('');
   const [picker, setPicker] = useState(false);

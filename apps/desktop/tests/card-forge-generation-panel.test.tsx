@@ -10,7 +10,7 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 vi.mock('../src/platform/card-library-host', () => ({ useDesktopCardLibraryHost: () => ({}) }));
 vi.mock('@mahoshojo/ui-web/card-library', () => ({ CardLibraryModal: () => null }));
 vi.mock('../src/features/ai-config/desktop-ai-provider-panel', () => ({ DesktopAiProviderPanel: (props: DesktopAiProviderPanelProps) => { mocks.provider = props; return null; } }));
-vi.mock('../src/features/ai-config/desktop-ai-config', () => ({ resolveDesktopAiTarget: () => mocks.target }));
+vi.mock('../src/features/ai-config/desktop-ai-config', () => ({ resolveDesktopAiTargetForState: () => mocks.target }));
 vi.mock('../src/features/ai-config/use-desktop-ai-config', () => ({ useDesktopAiConfig: () => ({ state: { profilesState: 'ready', generationActive: false }, store }) }));
 vi.mock('../src/features/card-forge/generation', async importOriginal => ({ ...await importOriginal<typeof import('../src/features/card-forge/generation')>(), executeForgeGeneration: mocks.execute }));
 const store = { withPreparedGeneration: mocks.prepared, cancelPreparingGeneration: mocks.cancel };

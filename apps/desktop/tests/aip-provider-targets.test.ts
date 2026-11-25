@@ -1,7 +1,7 @@
 import { withFixtureStreamReceipt } from './helpers/stream-receipt-fixture';
 import { describe, expect, it, vi } from 'vitest';
 import { DesktopAiConfigStore, DESKTOP_AI_CONFIG_STORAGE_KEY } from '../src/features/ai-config/desktop-ai-config-store';
-import { parseDesktopAiConfigOverlay, serializeDesktopAiConfigOverlay, resolveDesktopAiTarget } from '../src/features/ai-config/desktop-ai-config';
+import { parseDesktopAiConfigOverlay, serializeDesktopAiConfigOverlay, resolveDesktopAiTarget, resolveDesktopAiTargetForState } from '../src/features/ai-config/desktop-ai-config';
 import { buildProfile } from '../src/features/providers/profile-draft';
 import { openDirectAiStream } from '../src/platform/direct-ai-bridge';
 import type { DirectProviderProfileV1 } from '@mahoshojo/contracts/provider-profile';
@@ -41,6 +41,42 @@ const resolved = (store: DesktopAiConfigStore) => { const s = store.getSnapshot(
 const oldProfile = (): DirectProviderProfileV1 => ({ version: 1, id: 'legacy', name: 'legacy', adapter: 'openai-compatible', baseUrl: 'http://127.0.0.1:11434/v1', modelId: 'x'.repeat(256), createdAt: '2026-10-09T00:00:00Z', updatedAt: '2026-10-09T00:00:00Z' });
 
 describe('AIP target identity and migration', () => {
+  it('selects the account-specific model for common Direct dispatch and fences Hosted execution', async () => {
+    const data = new Map<string, string>();
+    const connectionId = 'a'.repeat(32);
+    const disconnected = { supported: true, connected: false, consentRequired: false, connectionId: null, accountLabel: null, models: [], revocationUnconfirmed: false };
+    const connected = { ...disconnected, connected: true, connectionId, accountLabel: '测试账户' };
+    const invoke = vi.fn(async (command: string): Promise<unknown> => {
+      if (command === 'chatgpt_plan_status') return disconnected;
+      if (command === 'chatgpt_plan_connect') return connected;
+      if (command === 'chatgpt_plan_models') return { ...connected, models: [{ id: 'model-a', label: 'A' }, { id: 'model-b', label: 'B' }] };
+      if (command === 'chatgpt_plan_disconnect') return { ...disconnected, connectionId, revocationUnconfirmed: true };
+      return undefined;
+    });
+    const store = new DesktopAiConfigStore({ invoke, storage: { getItem: key => data.get(key) ?? null, setItem: (key, value) => { data.set(key, value); }, removeItem: key => { data.delete(key); } } });
+    store.init();
+    await vi.waitFor(() => expect(store.getSnapshot().chatgptPlan?.supported).toBe(true));
+    await vi.waitFor(() => expect(store.getSnapshot().chatgptOperation).toBeNull());
+    await store.connectChatgptPlan();
+    expect(resolveDesktopAiTargetForState(store.getSnapshot()).providerTarget).toBeUndefined();
+    store.activateChatgptPlan();
+    store.selectChatgptPlanModel('model-b');
+    const run = vi.fn();
+    await store.withPreparedGeneration(run);
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ location: 'client', mode: 'direct-remote',
+      modelId: 'model-b', providerTarget: { kind: 'chatgpt-plan', connectionId }, profile: null, generationOverrides: undefined }));
+    const saved = data.get(DESKTOP_AI_CONFIG_STORAGE_KEY)!;
+    expect(JSON.parse(saved).version).toBe(6);
+    expect(saved).not.toContain('测试账户');
+    expect(parseDesktopAiConfigOverlay(saved).selection.chatgptModel?.modelId).toBe('model-b');
+    await store.withPreparedGeneration(run, { executionLocation: 'server', serverPolicy: 'fixed-default' });
+    expect(run).toHaveBeenLastCalledWith(expect.objectContaining({ location: 'server', providerTarget: { kind: 'system' } }));
+    await store.disconnectChatgptPlan();
+    expect(store.getSnapshot().chatgptPlan?.revocationUnconfirmed).toBe(true);
+    await expect(store.withPreparedGeneration(run)).rejects.toThrow('ChatGPT 订阅');
+    expect(invoke.mock.calls.map(([command]) => command)).not.toContain('set_provider_secret');
+  });
+
   it.each([2, 3, 4])('migrates v%s without rewriting old models, keys or custom Profiles', (version) => {
     const raw = JSON.stringify({ version, selection: { executionPreference: 'server', clientConnectionId: 'legacy' }, hiddenPresetIds: [], generationOverrides: { legacy: { [oldProfile().modelId]: { temperature: 0.2 } } }, ...(version > 2 ? { modelsByProfileId: { legacy: { selectedModelId: oldProfile().modelId, customModelIds: [oldProfile().modelId] } } } : {}) });
     const parsed = parseDesktopAiConfigOverlay(raw);

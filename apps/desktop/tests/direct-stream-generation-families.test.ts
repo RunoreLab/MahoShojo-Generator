@@ -19,7 +19,7 @@ import { executeCreatorGeneration, type CreatorGenerationInput } from '../src/fe
 import { executeScenarioGeneration } from '../src/features/scenario/generation';
 import type { DesktopGenerationOutcome } from '../src/features/generation/executor';
 import type { DesktopAiExecutionOptions } from '../src/platform/desktop-ai-execution';
-import { STREAM_DIRECT_AI_COMMAND } from '../src/platform/direct-ai-bridge';
+import { STREAM_DIRECT_AI_COMMAND, STREAM_TARGET_AI_COMMAND } from '../src/platform/direct-ai-bridge';
 
 const markdown = '# 雨后档案\n\n名字：青禾\n代号：青铃\n标题：雨后车站\n\n## 正文\n守护雾中同行者';
 const flowers = '风铃草：温柔的爱';
@@ -127,12 +127,12 @@ const cases: StreamCase[] = [
   },
 ];
 
-const harness = () => {
+const harness = (expectedCommand: string = STREAM_DIRECT_AI_COMMAND) => {
   let request: AiExecutionRequest | undefined;
   let emit: ((event: AiStreamEvent) => void) | undefined;
   let release: (() => void) | undefined;
   const invoke = vi.fn(withFixtureStreamReceipt(async (command: string, args?: Record<string, unknown>) => {
-    expect(command).toBe(STREAM_DIRECT_AI_COMMAND);
+    expect(command).toBe(expectedCommand);
     request = AiExecutionRequestSchema.parse(args!.request);
     emit = (args!.onEvent as { onmessage(event: AiStreamEvent): void }).onmessage;
     emit({ ...identity(), type: 'started', sequence: 0 });
@@ -153,6 +153,18 @@ const harness = () => {
     },
   };
 };
+
+it('streams and projects a free-generation card through the same ChatGPT plan target', async () => {
+  const native = harness(STREAM_TARGET_AI_COMMAND);
+  const providerTarget = { kind: 'chatgpt-plan' as const, connectionId: 'a'.repeat(32) };
+  const pending = executeFreeGeneration({ ...native.options, providerTarget }, freeInput,
+    { ...createIntent('direct-remote'), modelId: 'plan-model' }, new AbortController().signal);
+  expect(native.invoke.mock.calls[0]?.[1]).toMatchObject({ target: providerTarget, request: { modelId: 'plan-model', mode: 'direct-remote' } });
+  native.delta('# 雨后档案');
+  native.finish();
+  await expect(pending).resolves.toMatchObject({ status: 'completed', cardKind: 'general', card: { content: markdown } });
+  expect(native.invoke).toHaveBeenCalledTimes(1);
+});
 
 describe.each(['direct-local', 'direct-remote'] as const)('Desktop %s Markdown generation families', (mode) => {
   it.each(cases)('$name 逐字复用 Web stream prompt，增量正文落成同源无签名卡', async (testCase) => {

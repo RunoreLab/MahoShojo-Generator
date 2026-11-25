@@ -13,9 +13,10 @@ import {
 } from '@mahoshojo/ui-web/ai-provider';
 import { navigateByProductHref } from '../../app/hash-history-fragment';
 import { useDesktopAiConfig } from './use-desktop-ai-config';
-import { DESKTOP_SYSTEM_OVERRIDES_SCOPE, listDesktopPresetEntries, resolveDesktopAiTarget, selectedProviderTarget } from './desktop-ai-config';
+import { DESKTOP_SYSTEM_OVERRIDES_SCOPE, listDesktopPresetEntries, resolveDesktopAiTargetForState, selectedProviderTarget } from './desktop-ai-config';
 import { ConnectionEditor, draftFromProfile, newConnectionId, saveConnectionDraft, type EditingState } from './connection-editor';
 import { ConnectionTestSection } from './connection-test';
+import { useExternalLinks } from '../external-links/external-links-provider';
 
 export interface DesktopAiProviderPanelCopy {
   serverOutput: { stream: string; nonStream: string };
@@ -43,17 +44,20 @@ export interface DesktopAiProviderPanelProps {
 export const DesktopAiProviderPanel = ({ controlsSlot, management = false, onDirtyChange, showConnectionTest = true, executionConstraint, serverPolicy, serverUnavailableReason }: DesktopAiProviderPanelProps) => {
   const { state, store } = useDesktopAiConfig();
   const router = useRouter();
+  const { openFixed } = useExternalLinks();
   const [editing, setEditing] = useState<EditingState | null>(null);
   const [editorDirty, setEditorDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [customModel, setCustomModel] = useState(false);
   const selection = executionConstraint ? { ...state.selection, executionPreference: executionConstraint.location } : state.selection;
-  const target = resolveDesktopAiTarget(selection, state.profiles, state.generationOverrides, state.modelsByProfileId, state.presetsByProviderId, serverPolicy);
+  const target = resolveDesktopAiTargetForState(state, selection, serverPolicy);
   const fixedServer = serverPolicy === 'fixed-default' && target.location === 'server';
   const identity = fixedServer ? target.providerTarget : selectedProviderTarget(selection);
   const preset = target.preset;
   const profile = target.profile;
   const isSystem = identity?.kind === 'system';
+  const isChatgptPlan = identity?.kind === 'chatgpt-plan';
+  const chatgpt = state.chatgptPlan;
   const disabled = !!executionConstraint || state.overlayState !== 'ready' || state.generationActive || state.savingCredential || state.savingConnection || state.deletingConnection;
   const presetId = identity?.kind === 'preset' ? identity.providerId : null;
   const keyDraft = presetId ? store.getPresetKeyDraft(presetId) : '';
@@ -75,6 +79,10 @@ export const DesktopAiProviderPanel = ({ controlsSlot, management = false, onDir
 
   const providerOptions: AiProviderSelectOption[] = [
     ...(target.location === 'server' ? [{ value: 'system', label: SYSTEM_PROVIDER_OPTION.name, description: SYSTEM_PROVIDER_OPTION.description, kind: 'builtin' }] : []),
+    ...(target.location === 'client' && (chatgpt?.supported || isChatgptPlan) ? [{
+      value: 'chatgpt-plan', label: 'ChatGPT 订阅', group: '我的连接', kind: 'connection',
+      disabled: !chatgpt?.connected, disabledReason: '在 AI 连接设置中连接 ChatGPT 订阅。',
+    }] : []),
     // 候选只展示当前执行位置可用的预设：服务器 BYOK 列出全部（含项目转发端点），
     // 客户端只留已核验可直连项——不可用选项不再显示一个「不能点」的占位。
     // 例外：当前已选中的旧预设即使现已不可用也保留条目，交由下方诊断层说明，
@@ -88,15 +96,17 @@ export const DesktopAiProviderPanel = ({ controlsSlot, management = false, onDir
       }),
     ...(target.location === 'client' ? state.profiles.map((item) => ({ value: `custom:${item.id}`, label: item.name, description: `默认模型 ${item.modelId}`, group: '我的连接', kind: 'connection' })) : []),
   ];
-  const providerValue = identity?.kind === 'system' ? 'system' : identity?.kind === 'preset' ? `preset:${identity.providerId}` : identity?.kind === 'custom' ? `custom:${identity.profileId}` : '';
+  const providerValue = identity?.kind === 'system' ? 'system' : identity?.kind === 'preset' ? `preset:${identity.providerId}` : identity?.kind === 'custom' ? `custom:${identity.profileId}` : isChatgptPlan ? 'chatgpt-plan' : '';
   const modelOptions: AiProviderSelectOption[] = target.availableModelIds.map((id) => {
+    if (isChatgptPlan) return { value: id, label: chatgpt?.models.find((model) => model.id === id)?.label ?? id, kind: 'model' };
     const model = (isSystem ? SYSTEM_PROVIDER_OPTION.models : preset?.models)?.find((entry) => entry.value === id);
     return { value: id, label: model?.label ?? id, description: model?.description ?? (id === profile?.modelId ? '默认模型' : '自定义模型'), kind: 'model' };
   });
   if (target.modelId && !target.availableModelIds.includes(target.modelId)) modelOptions.unshift({ value: target.modelId, label: target.modelId, disabled: true, disabledReason: isSystem ? '该系统模型已不在支持列表中，请重新选择' : '模型已从列表移除，请重新选择' });
   const changeModel = (id: string) => act(() => {
     if (fixedServer) return;
-    if (presetId) store.selectPresetModel(presetId, id);
+    if (isChatgptPlan) store.selectChatgptPlanModel(id);
+    else if (presetId) store.selectPresetModel(presetId, id);
     else if (profile) store.selectModel(profile.id, id);
     else store.selectSystemModel(id);
     setCustomModel(false);
@@ -123,6 +133,7 @@ export const DesktopAiProviderPanel = ({ controlsSlot, management = false, onDir
         onChange={(value) => act(() => {
           if (fixedServer || !confirmDiscardEditing()) return;
           if (value === 'system') store.selectProviderTarget({ kind: 'system' });
+          else if (value === 'chatgpt-plan') store.activateChatgptPlan();
           else if (value.startsWith('preset:')) store.selectProviderTarget({ kind: 'preset', providerId: value.slice(7) });
           else if (value.startsWith('custom:')) store.selectProviderTarget({ kind: 'custom', profileId: value.slice(7) });
           else return;
@@ -141,11 +152,14 @@ export const DesktopAiProviderPanel = ({ controlsSlot, management = false, onDir
           if (id === 'copy') copyPreset();
           if (id === 'manage' && confirmDiscardEditing()) navigateByProductHref(router, '/settings?section=generation');
         }} />}
-      providerExtra={profile ? <p className="break-all text-xs">接收方：{profile.baseUrl} · 模型：{target.modelId ?? profile.modelId}</p> : undefined}
+      providerExtra={isChatgptPlan ? <p className="flex flex-wrap items-center gap-2 text-xs">
+        <span>{target.unavailableReason ? 'ChatGPT 订阅' : '正在使用 ChatGPT 订阅'}</span>
+        <button type="button" className="battle-lite-link underline" onClick={() => openFixed('https://chatgpt.com/settings/usage')}>管理用量</button>
+      </p> : profile ? <p className="break-all text-xs">接收方：{profile.baseUrl} · 模型：{target.modelId ?? profile.modelId}</p> : undefined}
       modelSelect={<AiProviderCustomSelect options={modelOptions} value={target.modelId ?? ''} onChange={changeModel} placeholder="选择模型" disabled={disabled || fixedServer || !identity || (!!serverUnavailableReason && target.location === 'server')}
-        actions={!isSystem && identity ? [{ id: 'custom-model', label: '自定义模型 ID' }, ...(profile && target.modelId && (state.modelsByProfileId[profile.id]?.customModelIds.includes(target.modelId) || state.modelsByProfileId[profile.id]?.inlineModelId === target.modelId) ? [{ id: 'remove-model', label: `移除模型「${target.modelId}」` }] : [])] : []}
+        actions={!isSystem && !isChatgptPlan && identity ? [{ id: 'custom-model', label: '自定义模型 ID' }, ...(profile && target.modelId && (state.modelsByProfileId[profile.id]?.customModelIds.includes(target.modelId) || state.modelsByProfileId[profile.id]?.inlineModelId === target.modelId) ? [{ id: 'remove-model', label: `移除模型「${target.modelId}」` }] : [])] : []}
         onAction={(id) => { if (id === 'remove-model' && profile && target.modelId) act(() => store.removeCustomModel(profile.id, target.modelId!)); else setCustomModel(true); }} />}
-      customModelId={!isSystem && identity && customModel ? {
+      customModelId={!isSystem && !isChatgptPlan && identity && customModel ? {
         label: '自定义模型 ID',
         input: <AiProviderModelIdInput defaultValue={target.modelId ?? ''} key={identityKey} disabled={disabled}
           onValueChange={(value) => act(() => store.useInlineModel(value))} />,
@@ -165,7 +179,7 @@ export const DesktopAiProviderPanel = ({ controlsSlot, management = false, onDir
           ? 'API Key 安全保存在本机；生成时由项目服务器转交给所选内置供应商。未保存的输入仅保留在本次会话。'
           : 'API Key 保存在本机安全存储中，生成时直接发送给所选供应商。未保存的输入仅保留在本次会话。',
       } : profile ? { content: <div className="flex items-center gap-2 text-xs"><span>{statusLabel}</span><button type="button" className="battle-lite-link underline" disabled={disabled} onClick={openEdit}>更新凭据</button></div> } : undefined}
-      advancedSettings={!fixedServer && identity && (target.location === 'server' || target.mode !== null) && <AdvancedGenerationSettings value={target.generationOverrides} onChange={(next) => act(() => {
+      advancedSettings={!fixedServer && !isChatgptPlan && identity && (target.location === 'server' || target.mode !== null) && <AdvancedGenerationSettings value={target.generationOverrides} onChange={(next) => act(() => {
         if (!target.modelId) return;
         if (presetId) store.setPresetGenerationOverrides(presetId, target.modelId, next);
         else if (scope) store.setGenerationOverrides(scope, target.modelId, next);

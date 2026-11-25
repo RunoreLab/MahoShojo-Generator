@@ -28,7 +28,7 @@ import { AiExecutionRequestSchema, validateArenaAiInputJson, type AiExecutionFin
 import { WebPackageRefSchema, type WebPackageRef } from '@mahoshojo/contracts/web-package';
 import type { BattleReportRenderSnapshotV1 } from '@mahoshojo/contracts';
 import { buildWebPackagePromptProjection, buildWebPackagePromptFromProjection, createWebPackageOverlayFromBase, type ResolvedWebPackage } from '@mahoshojo/web-package';
-import { ProviderTargetSchema } from '@mahoshojo/contracts/provider-target';
+import { DesktopProviderTargetSchema } from '@mahoshojo/contracts/provider-target';
 import type { AdjudicationResult } from '@mahoshojo/domain/arena-types';
 import type { BattleStoryArenaRequestInput } from '@mahoshojo/domain/arena-battle-story-request';
 import { countBattleStoryCommitJsonBytes } from '@mahoshojo/domain/arena-story-commit';
@@ -150,7 +150,7 @@ export const executeArenaDirect = async (
   } });
   const { intent: task } = frozen;
   const host = { ...frozen.context, adjudicationResults: context.adjudicationResults };
-  const target = options.providerTarget === undefined ? undefined : ProviderTargetSchema.parse(options.providerTarget);
+  const target = options.providerTarget === undefined ? undefined : DesktopProviderTargetSchema.parse(options.providerTarget);
   const executionOptions = { ...options, providerTarget: target };
   let rawText = '';
   let reasoning = '';

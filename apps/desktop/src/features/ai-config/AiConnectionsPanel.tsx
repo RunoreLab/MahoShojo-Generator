@@ -1,5 +1,6 @@
 import { LocalAiDiscoverySection } from './LocalAiDiscoverySection';
 import { DesktopAiProviderPanel } from './desktop-ai-provider-panel';
+import { ChatGptPlanPanel } from './ChatGptPlanPanel';
 // 产品化 AI 连接面板（D5.0b，取代 D1 的 ProviderProfilesPanel 调试面板）。
 //
 // 布局分四块：执行位置（客户端｜服务器）、当前连接与高级生成设置、项目预设
@@ -305,6 +306,7 @@ const ConnectionsPanelBody = ({ aiConfig }: { aiConfig: UseDesktopAiConfigResult
       )}
 
       <DesktopAiProviderPanel management generationMode="non-stream" copy={{ serverOutput: { stream: '', nonStream: '' }, emptyProfilesHint: '', serverFootnote: '', payloadNoun: '' }} />
+      <ChatGptPlanPanel {...aiConfig} />
 
       <div className="flex flex-col gap-2 border-t border-(--app-border) pt-3">
         <h3 className="battle-lite-muted-text text-xs font-semibold">预设供应商</h3>

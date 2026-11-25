@@ -43,6 +43,11 @@ import { captureDesktopStorySeed, completeDesktopStoryRecords, completeDesktopBr
 export type StoryExecutionTarget = { mode?: never; options: DesktopAiExecutionOptions; intent: Omit<ArenaDirectIntent, 'requestId' | 'generationMode'> } | HostedStoryExecutionTarget;
 /** Host resolves the CURRENT selected target and credentials. Stored source is display only. */
 export type PrepareStoryExecution = (run: (target: StoryExecutionTarget) => Promise<void>) => Promise<void>;
+const storyDirectProviderId = (options: DesktopAiExecutionOptions) => {
+  const target = options.providerTarget;
+  if (target?.kind === 'chatgpt-plan') return 'chatgpt-plan';
+  return target?.kind === 'preset' ? target.providerId : options.profileId;
+};
 export type StoryChapterSelection =
   | { status: 'unloaded' }
   | { status: 'loading'; sessionId: string; chapterId: string }
@@ -452,7 +457,7 @@ export class DesktopArenaStorySession {
       dispatched = true;
       if (intent.mode !== 'direct-local' && intent.mode !== 'direct-remote') throw new Error('客户端生成目标无效。');
       const source = StorySourceSchema.parse({ ...session.source, providerMode: intent.mode,
-        providerId: options.providerTarget?.kind === 'preset' ? options.providerTarget.providerId : options.profileId, modelId: intent.modelId });
+        providerId: storyDirectProviderId(options), modelId: intent.modelId });
       const events = AdjudicatorEventSchema.array().parse(story.seed.adjudicationEvents ?? []);
       const adjudicationResults = resolveAdjudicationEvents(events, this.dependencies.random ?? (() => crypto.getRandomValues(new Uint32Array(1))[0]! / 0x1_0000_0000)) as unknown as AdjudicationResult[];
       this.publish({ resultSource: 'direct', phase: 'generating', resultChapterIndex: chapterIndex, result: { rawText: '', markdown: '', reasoning: '' } });
@@ -515,7 +520,7 @@ export class DesktopArenaStorySession {
         const { options, intent } = target;
         if (intent.mode !== 'direct-local' && intent.mode !== 'direct-remote') throw new Error('客户端生成目标无效');
         const source = StorySourceSchema.parse({ ...originalSource, providerMode: intent.mode,
-          providerId: options.providerTarget?.kind === 'preset' ? options.providerTarget.providerId : options.profileId, modelId: intent.modelId });
+          providerId: storyDirectProviderId(options), modelId: intent.modelId });
         const events = AdjudicatorEventSchema.array().parse(seed.adjudicationEvents ?? []);
         const adjudicationResults = resolveAdjudicationEvents(events, this.dependencies.random ?? (() => crypto.getRandomValues(new Uint32Array(1))[0]! / 0x1_0000_0000)) as unknown as AdjudicationResult[];
         dispatched = true;
@@ -578,7 +583,7 @@ export class DesktopArenaStorySession {
         const { options, intent } = target;
         if (intent.mode !== 'direct-local' && intent.mode !== 'direct-remote') throw new Error('客户端生成目标无效');
         const source = StorySourceSchema.parse({ ...originalSource, providerMode: intent.mode,
-          providerId: options.providerTarget?.kind === 'preset' ? options.providerTarget.providerId : options.profileId, modelId: intent.modelId });
+          providerId: storyDirectProviderId(options), modelId: intent.modelId });
         const events = AdjudicatorEventSchema.array().parse(seed.adjudicationEvents ?? []);
         const adjudicationResults = resolveAdjudicationEvents(events, this.dependencies.random ?? (() => crypto.getRandomValues(new Uint32Array(1))[0]! / 0x1_0000_0000)) as unknown as AdjudicationResult[];
         dispatched = true;

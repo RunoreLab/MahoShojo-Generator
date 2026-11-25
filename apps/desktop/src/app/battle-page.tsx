@@ -54,7 +54,7 @@ import { useArenaPresetDownload } from '../features/arena/use-preset-download';
 import { DesktopArenaRankingModal } from '../features/ranking/arena-ranking-modal';
 import { readSublimationHistorySource, type SublimationHistorySource } from '../features/sublimation/history-source';
 import { useDesktopAiConfig } from '../features/ai-config/use-desktop-ai-config';
-import { resolveDesktopAiTarget, type ResolvedDesktopAiTarget } from '../features/ai-config/desktop-ai-config';
+import { resolveDesktopAiTargetForState, type ResolvedDesktopAiTarget } from '../features/ai-config/desktop-ai-config';
 import { DesktopAiProviderPanel } from '../features/ai-config/desktop-ai-provider-panel';
 import { useDesktopCloudSession } from '../features/account/use-desktop-cloud-session';
 import { useExternalLinks } from '../features/external-links/external-links-provider';
@@ -128,8 +128,11 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
   const strictPreparation = useRef<{ token: symbol; controller: AbortController } | null>(null);
   const roomHostPreview = roomState.constrained && roomState.session?.self.role === 'host';
   const effectiveSelection = (strictActive || roomHostPreview) ? { ...aiState.selection, executionPreference: 'server' as const } : aiState.selection;
-  const target = resolveDesktopAiTarget(effectiveSelection, aiState.profiles, aiState.generationOverrides, aiState.modelsByProfileId, aiState.presetsByProviderId, roomHostPreview ? 'fixed-default' : undefined);
-  const readStrictTargetIdentity = () => { const state = aiStore.getSnapshot(); return strictTargetIdentity(resolveDesktopAiTarget({ ...state.selection, executionPreference: 'server' }, state.profiles, state.generationOverrides, state.modelsByProfileId, state.presetsByProviderId)); };
+  const target = resolveDesktopAiTargetForState(aiState, effectiveSelection, roomHostPreview ? 'fixed-default' : undefined);
+  const readStrictTargetIdentity = () => {
+    const current = aiStore.getSnapshot();
+    return strictTargetIdentity(resolveDesktopAiTargetForState(current, { ...current.selection, executionPreference: 'server' }));
+  };
   const hostedTarget = target.location === 'server';
   const hostedUnavailable = hostedTarget && !cloudState.bootstrapped ? '正在确认本机账号身份，请稍后。' : null;
   const router = useRouter(); const { openFixed, openContent } = useExternalLinks(); const libraryHost = useDesktopCardLibraryHost();
@@ -551,6 +554,7 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
       preparing.current = false;
       if (prepared.location === 'server') {
         if (prepared.providerTarget.kind === 'custom') throw new Error('自定义连接仅支持客户端。');
+        if (prepared.providerTarget.kind === 'chatgpt-plan') throw new Error('ChatGPT 订阅仅支持客户端。');
         const config = prepared.providerTarget.kind === 'preset'
           ? { presetConfig: { providerId: prepared.providerTarget.providerId, modelId: prepared.modelId, generationOverrides: prepared.generationOverrides } }
           : { systemConfig: { ...(prepared.modelId !== 'default' ? { modelId: prepared.modelId } : {}), generationOverrides: prepared.generationOverrides } };
@@ -571,7 +575,7 @@ export function DesktopBattleForm({ session, repository, product = 'battle', web
       if (roomOwner.isConstrained() || epoch !== ownerEpoch.current) return;
       if (!prepared.modelId || !prepared.providerTarget) throw new Error('请选择可用的模型。');
       if (prepared.location === 'server') {
-        if (!cloudState.bootstrapped || prepared.providerTarget.kind === 'custom') throw new Error('服务器故事目标或账号身份尚未就绪。');
+        if (!cloudState.bootstrapped || prepared.providerTarget.kind === 'custom' || prepared.providerTarget.kind === 'chatgpt-plan') throw new Error('服务器故事目标或账号身份尚未就绪。');
         const funding = prepared.providerTarget.kind === 'preset'
           ? { presetConfig: { providerId: prepared.providerTarget.providerId, modelId: prepared.modelId, generationOverrides: prepared.generationOverrides } }
           : { systemConfig: { ...(prepared.modelId !== 'default' ? { modelId: prepared.modelId } : {}), generationOverrides: prepared.generationOverrides } };
