@@ -3,7 +3,7 @@ import { forwardRef, type ButtonHTMLAttributes, type ElementType } from 'react';
 import clsx from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost' | 'link';
+export type ButtonVariant = 'primary' | 'secondary' | 'neutral' | 'danger' | 'ghost' | 'link';
 export type ButtonSize = 'sm' | 'md' | 'icon';
 
 const baseClass = 'inline-flex items-center justify-center gap-1.5 rounded-lg border font-medium transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-fuchsia-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
@@ -11,6 +11,7 @@ const baseClass = 'inline-flex items-center justify-center gap-1.5 rounded-lg bo
 const variantClass: Record<ButtonVariant, string> = {
   primary: 'border-fuchsia-600 bg-fuchsia-600 text-white hover:bg-fuchsia-700',
   secondary: 'border-gray-300 bg-white text-gray-800 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800',
+  neutral: 'border-(--app-text-subtle) bg-(--app-button-neutral-bg) text-(--app-button-neutral-text) enabled:hover:bg-(--app-button-neutral-hover-bg) forced-colors:focus-visible:outline-solid forced-colors:focus-visible:outline-2 forced-colors:focus-visible:outline-offset-2',
   danger: 'border-red-300 bg-white text-red-700 hover:bg-red-50 dark:border-red-800 dark:bg-gray-900 dark:text-red-300 dark:hover:bg-red-950/40',
   ghost: 'border-transparent bg-transparent text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800',
   link: 'border-transparent bg-transparent px-1 text-fuchsia-700 underline-offset-4 hover:underline dark:text-fuchsia-300',

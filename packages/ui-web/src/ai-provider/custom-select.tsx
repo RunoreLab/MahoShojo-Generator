@@ -326,15 +326,18 @@ export const AiProviderCustomSelect = ({
     }
   };
 
+  const selectedBadge = selectedOption?.availability && renderAvailabilityBadge?.(selectedOption.availability);
   const renderSelected = () => (
     <div className="flex flex-1 flex-col text-left leading-tight">
       <span className="battle-lite-strong-text text-sm font-semibold">
         {selectedOption?.label ?? placeholder}
       </span>
-      <span className="battle-lite-subtle-text flex items-center gap-1 text-xs">
-        <span>{selectedOption?.description ?? '请选择'}</span>
-        {selectedOption?.availability && renderAvailabilityBadge?.(selectedOption.availability)}
-      </span>
+      {(selectedOption?.description || selectedBadge) && (
+        <span className="battle-lite-subtle-text flex items-center gap-1 text-xs">
+          {selectedOption?.description && <span>{selectedOption.description}</span>}
+          {selectedBadge}
+        </span>
+      )}
     </div>
   );
 

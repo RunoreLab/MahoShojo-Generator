@@ -47,7 +47,7 @@ export function ChatGptPlanPanel({ state, store }: UseDesktopAiConfigResult) {
             <LogOut size={16} aria-hidden="true" />断开连接
           </Button>
         </> : plan ? <>
-          <Button className="ui-web-settings-motion" variant="primary" disabled={busy} onClick={() => void store.connectChatgptPlan()}>
+          <Button className="ui-web-settings-motion" variant="neutral" disabled={busy} onClick={() => void store.connectChatgptPlan()}>
             <LogIn size={16} aria-hidden="true" />Continue with ChatGPT
           </Button>
           {plan.connectionId && <Button className="ui-web-settings-motion" disabled={busy} onClick={() => void store.connectChatgptPlan(true)}>

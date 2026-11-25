@@ -8,6 +8,8 @@ import { ProviderModelIdSchema, PROVIDER_MODEL_ID_MAX_LENGTH } from '@mahoshojo/
 
 import type { DirectProviderAdapter } from '@mahoshojo/contracts/provider-profile';
 
+export { getOpenAiModelInfo } from './openai-model-info';
+
 export interface AIModelOption {
     readonly value: string;
     readonly label: string;

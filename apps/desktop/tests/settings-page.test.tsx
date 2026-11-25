@@ -65,6 +65,7 @@ import { DESKTOP_CANSHOU_PREFERENCES, DESKTOP_DETAILS_PREFERENCES } from '../src
 import { DETAILS_DRAFT_KEY } from '../src/features/details/session';
 import { resetDesktopCloudSessionStoreForTests } from '../src/features/account/use-desktop-cloud-session';
 import { resetDesktopAiConfigStoreForTests } from '../src/features/ai-config/use-desktop-ai-config';
+import { DESKTOP_AI_CONFIG_STORAGE_KEY } from '../src/features/ai-config/desktop-ai-config-store';
 import { resetTopbarAvatarForTests } from '../src/features/account/use-topbar-avatar';
 import { resetDesktopAnnouncementsStoreForTests } from '../src/features/announcements/use-desktop-announcements';
 import { resetDesktopConfigStoreForTests } from '../src/features/config/use-desktop-config';
@@ -217,7 +218,7 @@ describe('desktop settings shell', () => {
     const settingsButton = { className: 'ui-web-settings-motion' };
 
     const connect = action('Continue with ChatGPT');
-    expect(connect?.className).toBe(buttonClassName({ ...settingsButton, variant: 'primary' }));
+    expect(connect?.className).toBe(buttonClassName({ ...settingsButton, variant: 'neutral' }));
     await click(connect);
     expect(invokeMock).toHaveBeenCalledWith('chatgpt_plan_connect', { differentAccount: false });
 
@@ -231,6 +232,45 @@ describe('desktop settings shell', () => {
     await click(cancel);
     expect(invokeMock).toHaveBeenCalledWith('chatgpt_plan_cancel_connect');
     expect(action('Continue with ChatGPT')).not.toBeNull();
+  });
+
+  it('enriches the live ChatGPT picker while preserving upstream order, unknown labels, and model IDs', async () => {
+    const model = { id: 'GPT-6.1-Terra', label: 'GPT-6.1 Terra' };
+    const future = { id: 'gpt-preview', label: 'GPT Preview' };
+    let models = [{ id: 'gpt-6.2-sol', label: 'GPT-6.2-Sol' }, model];
+    const status = {
+      supported: true, connected: true, consentRequired: false, connectionId: 'a'.repeat(32),
+      accountLabel: '测试账户', models: [], revocationUnconfirmed: false,
+    };
+    invokeMock.mockImplementation(async (command) => {
+      if (command === 'chatgpt_plan_status') return status;
+      if (command === 'chatgpt_plan_models') return { ...status, models };
+      return defaultInvokeImpl(command);
+    });
+    await mountAt('/settings?section=generation');
+    const action = (label: string) => [...container.querySelectorAll('button')]
+      .find((button) => button.textContent?.trim() === label) ?? null;
+    await click(action('使用此连接'));
+    const [provider, modelSelect] = [...container.querySelectorAll('button[role="combobox"]')];
+    expect(provider.textContent).toContain('使用已授权账户的 ChatGPT 订阅用量');
+    expect(modelSelect.textContent).toContain('GPT-6.2 Sol');
+    expect(modelSelect.textContent).toContain('长文本写作');
+    await click(modelSelect);
+    const options = () => [...container.querySelectorAll('[role="listbox"] [role="option"]')];
+    expect(options().map(option => option.firstElementChild?.firstElementChild?.textContent)).toEqual(['GPT-6.2 Sol', 'GPT-6.1 Terra']);
+    await click(options()[1]);
+    const modelId = () => JSON.parse(window.localStorage.getItem(DESKTOP_AI_CONFIG_STORAGE_KEY)!).selection.chatgptModel.modelId;
+    expect(modelId()).toBe(model.id);
+
+    models = [future];
+    await click(action('刷新模型'));
+    await click(modelSelect);
+    expect(options()[0].getAttribute('aria-disabled')).toBe('true');
+    expect(options()[0].textContent).toContain('GPT-6.1 Terra');
+    await click(options()[1]);
+    expect(modelSelect.textContent).toContain('GPT Preview');
+    expect(modelSelect.textContent).not.toContain('请选择');
+    expect(modelId()).toBe(future.id);
   });
 
   it('online group reads and writes config.json through the narrow commands only', async () => {

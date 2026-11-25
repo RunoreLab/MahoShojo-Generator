@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useRouter } from '@tanstack/react-router';
 import { getDesktopGenerationCapabilities } from '../providers/protocol-capabilities';
 import {
+  getOpenAiModelInfo,
   resolveAiPresetModelDirectBaseUrl,
   SYSTEM_PROVIDER_OPTION,
 } from '@mahoshojo/ai-core/provider-catalog';
@@ -80,7 +81,7 @@ export const DesktopAiProviderPanel = ({ controlsSlot, management = false, onDir
   const providerOptions: AiProviderSelectOption[] = [
     ...(target.location === 'server' ? [{ value: 'system', label: SYSTEM_PROVIDER_OPTION.name, description: SYSTEM_PROVIDER_OPTION.description, kind: 'builtin' }] : []),
     ...(target.location === 'client' && (chatgpt?.supported || isChatgptPlan) ? [{
-      value: 'chatgpt-plan', label: 'ChatGPT 订阅', group: '我的连接', kind: 'connection',
+      value: 'chatgpt-plan', label: 'ChatGPT 订阅', description: '使用已授权账户的 ChatGPT 订阅用量，直接向 OpenAI 发送生成请求。', group: '我的连接', kind: 'connection',
       disabled: !chatgpt?.connected, disabledReason: '在 AI 连接设置中连接 ChatGPT 订阅。',
     }] : []),
     // 候选只展示当前执行位置可用的预设：服务器 BYOK 列出全部（含项目转发端点），
@@ -98,11 +99,26 @@ export const DesktopAiProviderPanel = ({ controlsSlot, management = false, onDir
   ];
   const providerValue = identity?.kind === 'system' ? 'system' : identity?.kind === 'preset' ? `preset:${identity.providerId}` : identity?.kind === 'custom' ? `custom:${identity.profileId}` : isChatgptPlan ? 'chatgpt-plan' : '';
   const modelOptions: AiProviderSelectOption[] = target.availableModelIds.map((id) => {
-    if (isChatgptPlan) return { value: id, label: chatgpt?.models.find((model) => model.id === id)?.label ?? id, kind: 'model' };
+    if (isChatgptPlan) {
+      const info = getOpenAiModelInfo(id);
+      return {
+        value: id,
+        label: info?.label ?? chatgpt?.models.find((model) => model.id === id)?.label ?? id,
+        description: info?.description,
+        kind: 'model',
+      };
+    }
     const model = (isSystem ? SYSTEM_PROVIDER_OPTION.models : preset?.models)?.find((entry) => entry.value === id);
     return { value: id, label: model?.label ?? id, description: model?.description ?? (id === profile?.modelId ? '默认模型' : '自定义模型'), kind: 'model' };
   });
-  if (target.modelId && !target.availableModelIds.includes(target.modelId)) modelOptions.unshift({ value: target.modelId, label: target.modelId, disabled: true, disabledReason: isSystem ? '该系统模型已不在支持列表中，请重新选择' : '模型已从列表移除，请重新选择' });
+  if (target.modelId && !target.availableModelIds.includes(target.modelId)) {
+    modelOptions.unshift({
+      value: target.modelId,
+      label: (isChatgptPlan ? getOpenAiModelInfo(target.modelId)?.label : undefined) ?? target.modelId,
+      disabled: true,
+      disabledReason: isSystem ? '该系统模型已不在支持列表中，请重新选择' : '模型已从列表移除，请重新选择',
+    });
+  }
   const changeModel = (id: string) => act(() => {
     if (fixedServer) return;
     if (isChatgptPlan) store.selectChatgptPlanModel(id);

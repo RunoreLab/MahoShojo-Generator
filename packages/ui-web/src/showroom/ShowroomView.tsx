@@ -1,10 +1,11 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { DEFAULT_MODELSCOPE_SIZE, DEFAULT_MODELSCOPE_MODEL, type ModelScopePresetSize } from '@mahoshojo/ai-core/modelscope';
 import { DEFAULT_NOVELAI_SETTINGS } from '@mahoshojo/ai-core/novelai';
-import { Download, ExternalLink, RefreshCw, RotateCw, X } from 'lucide-react';
+import { Download, ExternalLink, LogIn, RefreshCw, RotateCw, X } from 'lucide-react';
 
 import { CHARACTER_CARD_EXPORTER_LABEL, MAGICAL_GIRL_CARD_GRADIENT, MagicalGirlCard } from '../character-card';
 import { AiProviderCustomSelect } from '../ai-provider';
+import { Button } from '../card-library/Button';
 import { CardForgeThemeEditor, CardForgeSourceFields } from '../card-forge';
 import { BattleReportCardWidthSettings } from '../arena/BattleReportCardWidthSettings';
 import { resolveBattleReportCardManualWidthPx, type BattleReportCardWidthSettingsValue } from '../arena/battle-report-card-width';
@@ -261,6 +262,8 @@ function ControlsSection() {
       <button type="button" className={generationActionClassNames.destructive}>危险操作</button>
       <button type="button" className={generationActionClassNames.primary} disabled>禁用主操作</button>
       <button type="button" className={generationActionClassNames.secondary} disabled>禁用次要操作</button>
+      <Button variant="neutral"><LogIn size={16} aria-hidden="true" />Continue with ChatGPT</Button>
+      <Button variant="neutral" disabled><LogIn size={16} aria-hidden="true" />Continue with ChatGPT</Button>
     </div>
     <QuestionnaireNavigationSample />
     <PageJumpSample />
@@ -324,7 +327,8 @@ function AiSelectScrollSample() {
     <p className="text-sm text-(--app-text-muted)">展开后滚动页面或悬停不应拉回位置；方向键、Home、End 只定位菜单内选项。</p>
     <AiProviderCustomSelect value={value} onChange={setValue} placeholder="样板模型"
       options={Array.from({ length: 16 }, (_, index) => ({
-        value: String(index), label: `样板模型 ${index + 1}`, description: '用于检查长列表滚动与键盘导航',
+        value: String(index), label: `样板模型 ${index + 1}`,
+        description: index === 15 ? undefined : '用于检查长列表滚动与键盘导航',
         group: index < 8 ? '内置模型' : '自定义模型',
       }))}
       actions={[{ id: 'reset', label: '重置样板模型' }]} onAction={() => setValue('12')} />

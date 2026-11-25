@@ -41,12 +41,12 @@ export const SHOWROOM_SECTIONS: readonly ShowroomSectionMeta[] = [
   {
     id: 'controls',
     title: '操作控件',
-    summary: '生成操作三档（primary/secondary/destructive）与禁用态；问卷生产导航的上一题/下一题、必答、提交中及蓝色主题；直接页码跳转的确认、范围校验与加载禁用态。',
+    summary: '生成操作三档（primary/secondary/destructive）、ChatGPT 登录的中性色按钮与禁用态；问卷生产导航的上一题/下一题、必答、提交中及蓝色主题；直接页码跳转的确认、范围校验与加载禁用态。',
   },
   {
     id: 'forms',
     title: '表单底座',
-    summary: '.input-group/.input-label/.input-field、生成方式默认/宿主说明、卡牌工坊源卡/附加要求输入与主题色选中/自定义态、NovelAI 简单/自定义/禁用设置与优化器插槽、ModelScope 尺寸/可选模型/禁用参数、模型选择器长列表的局部滚动/状态更新/键盘导航及 battle-lite 文本/盒面共享类。',
+    summary: '.input-group/.input-label/.input-field、生成方式默认/宿主说明、卡牌工坊源卡/附加要求输入与主题色选中/自定义态、NovelAI 简单/自定义/禁用设置与优化器插槽、ModelScope 尺寸/可选模型/禁用参数、模型选择器长列表滚动/状态更新/键盘导航/无描述选项及 battle-lite 文本/盒面共享类。',
   },
   {
     id: 'overlay',

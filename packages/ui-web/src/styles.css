@@ -698,6 +698,10 @@
   --app-z-overlay: 60;
   --app-z-modal: 80;
   --app-z-toast: 100;
+  /* 中性色主按钮在亮暗主题中均使用黑底白字。 */
+  --app-button-neutral-bg: #000000;
+  --app-button-neutral-hover-bg: #222222;
+  --app-button-neutral-text: #ffffff;
   /* 错误面保留红/蓝渐变与白字；普通正文及 95% 帮助文字均由对比度契约守卫。
    * 背景色独立于图片：不支持显式 sRGB 插值的旧 WebView 保留可读纯色底。 */
   --app-error-text: #ffffff;
