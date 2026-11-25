@@ -29,7 +29,19 @@
         "adapter": null
       },
       {
+        "id": "gpt-6.2-astra",
+        "adapter": null
+      },
+      {
+        "id": "gpt-6.2-sol",
+        "adapter": null
+      },
+      {
         "id": "gpt-6.1-sol",
+        "adapter": null
+      },
+      {
+        "id": "gpt-6.1-terra",
         "adapter": null
       },
       {
@@ -50,6 +62,10 @@
       },
       {
         "id": "gpt-5.4-mini",
+        "adapter": null
+      },
+      {
+        "id": "gpt-5.4-nano",
         "adapter": null
       },
       {
@@ -124,7 +140,39 @@
         "adapter": null
       },
       {
+        "id": "gpt-6.2-astra",
+        "adapter": null
+      },
+      {
+        "id": "gpt-6.2-sol",
+        "adapter": null
+      },
+      {
+        "id": "gpt-6.1-sol",
+        "adapter": null
+      },
+      {
+        "id": "gpt-6.1-terra",
+        "adapter": null
+      },
+      {
+        "id": "gpt-6-astra",
+        "adapter": null
+      },
+      {
+        "id": "gpt-6-sol",
+        "adapter": null
+      },
+      {
+        "id": "gpt-6-luna",
+        "adapter": null
+      },
+      {
         "id": "gpt-5.6-sol",
+        "adapter": null
+      },
+      {
+        "id": "gpt-5.6-terra",
         "adapter": null
       },
       {
@@ -515,15 +563,27 @@
         "adapter": null
       },
       {
-        "id": "gpt-5.5",
+        "id": "gpt-6.2-astra",
         "adapter": null
       },
       {
-        "id": "gpt-5.6-luna",
+        "id": "gpt-6.2-sol",
         "adapter": null
       },
       {
-        "id": "gpt-5.6-terra",
+        "id": "gpt-6.1-sol",
+        "adapter": null
+      },
+      {
+        "id": "gpt-6.1-terra",
+        "adapter": null
+      },
+      {
+        "id": "gpt-6-astra",
+        "adapter": null
+      },
+      {
+        "id": "gpt-6-sol",
         "adapter": null
       },
       {
@@ -531,7 +591,15 @@
         "adapter": null
       },
       {
-        "id": "gpt-6-astra",
+        "id": "gpt-5.6-terra",
+        "adapter": null
+      },
+      {
+        "id": "gpt-5.6-luna",
+        "adapter": null
+      },
+      {
+        "id": "gpt-5.5",
         "adapter": null
       },
       {
@@ -734,6 +802,30 @@
       },
       {
         "id": "[鹿鹿3]claude-opus-4-6",
+        "adapter": null
+      },
+      {
+        "id": "[ruru2]gpt-6.1-sol",
+        "adapter": null
+      },
+      {
+        "id": "[ruru2]gpt-6-astra",
+        "adapter": null
+      },
+      {
+        "id": "[ruru2]gpt-6-sol",
+        "adapter": null
+      },
+      {
+        "id": "[ruru2]gpt-5.6-sol",
+        "adapter": null
+      },
+      {
+        "id": "[ruru2]gpt-5.6-terra",
+        "adapter": null
+      },
+      {
+        "id": "[ruru2]gpt-5.6-luna",
         "adapter": null
       },
       {
@@ -1058,12 +1150,87 @@
         "adapter": null
       },
       {
+        "id": "openai/gpt-6.2-astra",
+        "omitTemperature": true,
+        "adapter": null
+      },
+      {
+        "id": "openai/gpt-6.2-astra-pro",
+        "omitTemperature": true,
+        "adapter": null
+      },
+      {
+        "id": "openai/gpt-6.2-sol",
+        "omitTemperature": true,
+        "adapter": null
+      },
+      {
+        "id": "openai/gpt-6.2-sol-pro",
+        "omitTemperature": true,
+        "adapter": null
+      },
+      {
         "id": "openai/gpt-6.1-sol",
         "omitTemperature": true,
         "adapter": null
       },
       {
+        "id": "openai/gpt-6.1-sol-pro",
+        "omitTemperature": true,
+        "adapter": null
+      },
+      {
+        "id": "openai/gpt-6.1-terra",
+        "omitTemperature": true,
+        "adapter": null
+      },
+      {
+        "id": "openai/gpt-6.1-terra-pro",
+        "omitTemperature": true,
+        "adapter": null
+      },
+      {
+        "id": "openai/gpt-6-astra",
+        "omitTemperature": true,
+        "adapter": null
+      },
+      {
+        "id": "openai/gpt-6-astra-pro",
+        "omitTemperature": true,
+        "adapter": null
+      },
+      {
+        "id": "openai/gpt-6-sol",
+        "omitTemperature": true,
+        "adapter": null
+      },
+      {
+        "id": "openai/gpt-6-sol-pro",
+        "omitTemperature": true,
+        "adapter": null
+      },
+      {
         "id": "openai/gpt-6-luna",
+        "omitTemperature": true,
+        "adapter": null
+      },
+      {
+        "id": "openai/gpt-6-luna-pro",
+        "omitTemperature": true,
+        "adapter": null
+      },
+      {
+        "id": "openai/gpt-5.6-sol",
+        "omitTemperature": true,
+        "adapter": null
+      },
+      {
+        "id": "openai/gpt-5.6-terra",
+        "omitTemperature": true,
+        "adapter": null
+      },
+      {
+        "id": "openai/gpt-5.6-luna",
         "omitTemperature": true,
         "adapter": null
       },
@@ -1075,29 +1242,6 @@
       {
         "id": "openai/gpt-5.4",
         "omitTemperature": true,
-        "adapter": null
-      },
-      {
-        "id": "openai/gpt-5.6-luna",
-        "omitTemperature": true,
-        "adapter": null
-      },
-      {
-        "id": "openai/gpt-5.6-terra",
-        "omitTemperature": true,
-        "adapter": null
-      },
-      {
-        "id": "openai/gpt-5.6-sol",
-        "omitTemperature": true,
-        "adapter": null
-      },
-      {
-        "id": "openai/gpt-6-astra",
-        "adapter": null
-      },
-      {
-        "id": "openai/gpt-6-astra-pro",
         "adapter": null
       },
       {
@@ -1231,19 +1375,19 @@
         "adapter": null
       },
       {
+        "id": "GPT-6.2-Astra",
+        "adapter": null
+      },
+      {
+        "id": "GPT-6.2-Sol",
+        "adapter": null
+      },
+      {
         "id": "GPT-6.1-Sol",
         "adapter": null
       },
       {
-        "id": "GPT-6-Luna",
-        "adapter": null
-      },
-      {
-        "id": "GPT-6-Sol",
-        "adapter": null
-      },
-      {
-        "id": "GPT-5.5",
+        "id": "GPT-6.1-Terra",
         "adapter": null
       },
       {
@@ -1251,7 +1395,15 @@
         "adapter": null
       },
       {
-        "id": "GPT-5.6-Luna",
+        "id": "GPT-6-Sol",
+        "adapter": null
+      },
+      {
+        "id": "GPT-6-Luna",
+        "adapter": null
+      },
+      {
+        "id": "GPT-5.6-Sol",
         "adapter": null
       },
       {
@@ -1259,7 +1411,11 @@
         "adapter": null
       },
       {
-        "id": "GPT-5.6-Sol",
+        "id": "GPT-5.6-Luna",
+        "adapter": null
+      },
+      {
+        "id": "GPT-5.5",
         "adapter": null
       },
       {

@@ -334,6 +334,21 @@ describe('Direct 支持度判定（wire 核验 ∩ 宿主注入的已实现 adap
 });
 
 
+describe('2026-11 GPT 目录增量', () => {
+  it.each([
+    ['kourichat', 'gpt-6.2-sol', 'GPT-6.2 Sol'],
+    ['chatbox', 'gpt-6.2-sol', 'GPT-6.2 Sol'],
+    ['yiye', 'gpt-6.2-sol', 'GPT-6.2 Sol'],
+    ['openrouter', 'openai/gpt-6.2-sol', 'GPT-6.2 Sol'],
+    ['poe', 'GPT-6.2-Sol', 'GPT-6.2 Sol'],
+    ['nova-cervus', '[ruru2]gpt-6.1-sol', 'GPT-6.1 Sol（ruru2）'],
+  ])('%s 采用共用展示名并保留供应商模型 ID', (providerId, modelId, label) => {
+    const preset = findAiProviderPreset(providerId)!;
+    expect(preset.models.find((model) => model.value === modelId)).toMatchObject({ label, description: expect.any(String) });
+    expect(resolveAIProviderModel(preset, modelId)).toEqual({ modelId, isCustom: false });
+  });
+});
+
 describe('2026-10 已核验目录增量', () => {
   const expectedModels: Record<string, string[]> = {
     kourichat: ['gpt-6.1-sol', 'gpt-6-luna', 'gpt-6-sol'],

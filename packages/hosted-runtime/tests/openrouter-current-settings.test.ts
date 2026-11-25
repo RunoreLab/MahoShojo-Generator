@@ -3,9 +3,18 @@ import { createNodeStructuredAiRuntime } from '../src/node-runtime';
 import { resolveGenerationSettings } from '../src/node-runtime/generation-settings/resolve';
 import { z } from 'zod/v3';
 
-const noTemperatureModels = ['openai/gpt-6.1-sol', 'openai/gpt-6-luna', 'anthropic/claude-opus-5.5', 'anthropic/claude-sonnet-5.5', 'anthropic/claude-haiku-5.5'];
+const noTemperatureModels = [
+  ['openai/gpt-6.2-astra', false],
+  ['openai/gpt-6.2-sol', false],
+  ['openai/gpt-6.1-sol', false],
+  ['openai/gpt-6.1-terra', true],
+  ['openai/gpt-6-luna', true],
+  ['anthropic/claude-opus-5.5', false],
+  ['anthropic/claude-sonnet-5.5', false],
+  ['anthropic/claude-haiku-5.5', false],
+] as const;
 
-describe.each(noTemperatureModels)('OpenRouter %s 精确能力', (modelId) => {
+describe.each(noTemperatureModels)('OpenRouter %s 精确能力', (modelId, canDisable) => {
   it.each([undefined, 0.7])('任务默认和旧存用户 temperature=%s 均省略', (temperature) => {
     const result = resolveGenerationSettings({
       providerId: 'openrouter', modelId,
@@ -17,7 +26,7 @@ describe.each(noTemperatureModels)('OpenRouter %s 精确能力', (modelId) => {
     expect(getModelGenerationCapabilities('openrouter', modelId).thinking.efforts).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
   });
 
-  it('真实 Chat SDK payload 不发 temperature，Luna 之外不推导 none 档位', async () => {
+  it('Chat SDK payload 省略 temperature，并按网关支持程度发送 none 档位', async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
       id: 'temperature-test', object: 'chat.completion', created: 1, model: modelId,
       choices: [{ index: 0, message: { role: 'assistant', content: '{"ok":true}' }, finish_reason: 'stop' }],
@@ -37,7 +46,7 @@ describe.each(noTemperatureModels)('OpenRouter %s 精确能力', (modelId) => {
     const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     const body = JSON.parse(String(init.body));
     expect(body).not.toHaveProperty('temperature');
-    if (modelId === 'openai/gpt-6-luna') expect(body.reasoning_effort).toBe('none');
+    if (canDisable) expect(body.reasoning_effort).toBe('none');
     else expect(body).not.toHaveProperty('reasoning_effort');
   });
 });

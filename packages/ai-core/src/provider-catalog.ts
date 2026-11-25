@@ -7,6 +7,7 @@ import { ProviderModelIdSchema, PROVIDER_MODEL_ID_MAX_LENGTH } from '@mahoshojo/
 // 拼回旧选择器/wire 形状的派生视图，不是「可配置连接」的枚举。
 
 import type { DirectProviderAdapter } from '@mahoshojo/contracts/provider-profile';
+import { OPENAI_MODEL_INFO, type OpenAiModelId } from './openai-model-info';
 
 export { getOpenAiModelInfo } from './openai-model-info';
 
@@ -22,6 +23,11 @@ export interface AIModelOption {
      */
     readonly direct?: AiDirectWireEvidence | 'none';
 }
+
+const openAiModelOption = (id: OpenAiModelId, value: string = id): AIModelOption => ({
+    value,
+    ...OPENAI_MODEL_INFO[id],
+});
 
 export interface AIProviderOption {
     readonly id: string;
@@ -589,44 +595,21 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
                 label: 'Gemini 2.5 Pro',
                 description: 'Google 前代旗舰模型系列，综合性能均衡，适合复杂创作与推理。'
             },
-            { value: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', description: 'OpenAI 新一代 Sol 模型，适合复杂指令与内容生成。' },
-            { value: 'gpt-6-luna', label: 'GPT-6 Luna', description: 'OpenAI Luna 模型，适合快速交互与日常生成。' },
-            { value: 'gpt-6-sol', label: 'GPT-6 Sol', description: 'OpenAI Sol 模型，适合通用创作与复杂任务。' },
-            {
-                value: 'gpt-5.5',
-                label: 'GPT-5.5',
-                description: 'OpenAI 旗舰模型，适合高质量内容生成与复杂任务。'
-            },
-            {
-                value: 'gpt-5.4',
-                label: 'GPT-5.4',
-                description: 'OpenAI 通用模型，适合高质量内容生成与复杂任务。'
-            },
-            {
-                value: 'gpt-5.4-mini',
-                label: 'GPT-5.4 Mini',
-                description: 'OpenAI 轻量模型，适合高频交互与快速生成。'
-            },
-            {
-                value: 'gpt-5.6-luna',
-                label: 'GPT-5.6 Luna',
-                description: 'GPT-5.6 系列高性价比模型，主打极致速度与成本效益，适合高频调用、低延迟的高吞吐量任务。'
-            },
-            {
-                value: 'gpt-5.6-terra',
-                label: 'GPT-5.6 Terra',
-                description: 'GPT-5.6 系列均衡主力模型，性能对标 GPT-5.5 但成本仅为其一半，适合日常生产工作负载与通用任务。'
-            },
-            {
-                value: 'gpt-5.6-sol',
-                label: 'GPT-5.6 Sol',
-                description: 'GPT-5.6 系列旗舰模型，专为复杂编程、科研与多步推理等高端任务设计，支持深度推理与多智能体协作。'
-            },
-            {
-                value: 'gpt-6-astra',
-                label: 'GPT-6 Astra',
-                description: 'GPT-6 系列旗舰模型，专为复杂编程、科研与多步推理等高端任务设计，支持深度推理与多智能体协作。'
-            },
+            // 2026-11-25：KouriChat 模型广场 https://api.kourichat.com/model。
+            openAiModelOption('gpt-6.2-astra'),
+            openAiModelOption('gpt-6.2-sol'),
+            openAiModelOption('gpt-6.1-sol'),
+            openAiModelOption('gpt-6.1-terra'),
+            openAiModelOption('gpt-6-luna'),
+            openAiModelOption('gpt-6-sol'),
+            openAiModelOption('gpt-5.5'),
+            openAiModelOption('gpt-5.4'),
+            openAiModelOption('gpt-5.4-mini'),
+            openAiModelOption('gpt-5.4-nano'),
+            openAiModelOption('gpt-5.6-luna'),
+            openAiModelOption('gpt-5.6-terra'),
+            openAiModelOption('gpt-5.6-sol'),
+            openAiModelOption('gpt-6-astra'),
             {
                 value: 'claude-opus-4-8',
                 label: 'Claude Opus 4.8',
@@ -690,21 +673,17 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
         endpointKind: 'provider-public',
         direct: OPENAI_COMPATIBLE_DIRECT_WIRE,
         models: [
-            {
-                value: 'gpt-5.5',
-                label: 'GPT 5.5（高级）',
-                description: '高级模型（Pro/Pro+）。OpenAI 旗舰模型，适合高质量生成与复杂任务。'
-            },
-            {
-                value: 'gpt-5.6-sol',
-                label: 'GPT 5.6 Sol（高级）',
-                description: '高级模型（Pro/Pro+）。GPT-5.6 系列最高能力档，适合高质量生成与复杂任务。'
-            },
-            {
-                value: 'gpt-5.6-luna',
-                label: 'GPT 5.6 Luna（标准）',
-                description: '标准模型（所有付费方案）。更快更省，适合高频交互。'
-            },
+            openAiModelOption('gpt-5.5'),
+            openAiModelOption('gpt-6.2-astra'),
+            openAiModelOption('gpt-6.2-sol'),
+            openAiModelOption('gpt-6.1-sol'),
+            openAiModelOption('gpt-6.1-terra'),
+            openAiModelOption('gpt-6-astra'),
+            openAiModelOption('gpt-6-sol'),
+            openAiModelOption('gpt-6-luna'),
+            openAiModelOption('gpt-5.6-sol'),
+            openAiModelOption('gpt-5.6-terra'),
+            openAiModelOption('gpt-5.6-luna'),
             {
                 value: 'claude-opus-5',
                 label: 'Claude Opus 5（高级）',
@@ -1162,31 +1141,16 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
                 label: 'Gemini 2.5 Flash Lite',
                 description: 'Google 前代旗舰模型系列，性能略逊但速度很快，是魔法少女生成器默认使用的轻量模型。'
             },
-            {
-                value: 'gpt-5.5',
-                label: 'GPT-5.5',
-                description: 'OpenAI 旗舰模型，适合高质量内容生成与复杂任务。'
-            },
-            {
-                value: 'gpt-5.6-luna',
-                label: 'GPT-5.6 Luna',
-                description: 'GPT-5.6 系列高性价比模型，主打极致速度与成本效益，适合高频调用、低延迟的高吞吐量任务。'
-            },
-            {
-                value: 'gpt-5.6-terra',
-                label: 'GPT-5.6 Terra',
-                description: 'GPT-5.6 系列均衡主力模型，性能对标 GPT-5.5 但成本仅为其一半，适合日常生产工作负载与通用任务。'
-            },
-            {
-                value: 'gpt-5.6-sol',
-                label: 'GPT-5.6 Sol',
-                description: 'GPT-5.6 系列旗舰模型，专为复杂编程、科研与多步推理等高端任务设计，支持深度推理与多智能体协作。'
-            },
-            {
-                value: 'gpt-6-astra',
-                label: 'GPT-6 Astra',
-                description: 'GPT-6 系列旗舰模型，专为复杂编程、科研与多步推理等高端任务设计，支持深度推理与多智能体协作。'
-            },
+            openAiModelOption('gpt-6.2-astra'),
+            openAiModelOption('gpt-6.2-sol'),
+            openAiModelOption('gpt-6.1-sol'),
+            openAiModelOption('gpt-6.1-terra'),
+            openAiModelOption('gpt-6-astra'),
+            openAiModelOption('gpt-6-sol'),
+            openAiModelOption('gpt-5.6-sol'),
+            openAiModelOption('gpt-5.6-terra'),
+            openAiModelOption('gpt-5.6-luna'),
+            openAiModelOption('gpt-5.5'),
             {
                 value: 'claude-opus-5',
                 label: 'Claude Opus 5',
@@ -1438,11 +1402,11 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
                 label: 'Claude Opus 4.6（按次）',
                 description: '虽然价格略高，但近期及长期可用性明显优于多个低价 Opus 4.6 通道，适合稳定性优先的任务。'
             },
-            {
-                value: '[鹿鹿2]gpt-5.5',
-                label: 'GPT-5.5（按次）',
-                description: 'GPT-5.5 的按次通道。'
-            },
+            ...(['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-sol', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna'] as const).map((id) => ({
+                ...openAiModelOption(id, `[ruru2]${id}`),
+                label: `${OPENAI_MODEL_INFO[id].label}（ruru2）`,
+            })),
+            { ...openAiModelOption('gpt-5.5', '[鹿鹿2]gpt-5.5'), label: 'GPT-5.5（按次）' },
             {
                 value: '[限时2]deepseek-v4-pro-0813',
                 label: 'DeepSeek V4 Pro（免费）',
@@ -1801,15 +1765,12 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
             { value: 'google/gemini-2.5-pro', label: 'Gemini 2.5 Pro', description: 'Google 前代旗舰模型系列，综合性能均衡，适合复杂创作与推理。' },
             { value: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash', description: 'Google 前代旗舰模型系列，在性能和价格上十分均衡，也是魔法少女生成器默认使用的模型。' },
             { value: 'google/gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite', description: 'Google 前代旗舰模型系列，性能略逊但速度很快，是魔法少女生成器默认使用的轻量模型。' },
-            { value: 'openai/gpt-6.1-sol', label: 'GPT-6.1 Sol', description: 'OpenAI 新一代 Sol 模型，适合复杂指令与内容生成。' },
-            { value: 'openai/gpt-6-luna', label: 'GPT-6 Luna', description: 'OpenAI Luna 模型，适合快速交互与日常生成。' },
-            { value: 'openai/gpt-5.5', label: 'GPT-5.5', description: 'OpenAI 旗舰模型，适合高质量内容生成与复杂任务。' },
-            { value: 'openai/gpt-5.4', label: 'GPT-5.4', description: 'OpenAI 通用模型，适合高质量内容生成与复杂任务。' },
-            { value: 'openai/gpt-5.6-luna', label: 'GPT-5.6 Luna', description: 'GPT-5.6 系列高性价比模型，主打极致速度与成本效益，适合高频调用、低延迟的高吞吐量任务。' },
-            { value: 'openai/gpt-5.6-terra', label: 'GPT-5.6 Terra', description: 'GPT-5.6 系列均衡主力模型，性能对标 GPT-5.5 但成本仅为其一半，适合日常生产工作负载与通用任务。' },
-            { value: 'openai/gpt-5.6-sol', label: 'GPT-5.6 Sol', description: 'GPT-5.6 系列旗舰模型，专为复杂编程、科研与多步推理等高端任务设计，支持深度推理与多智能体协作。' },
-            { value: 'openai/gpt-6-astra', label: 'GPT-6 Astra', description: 'GPT-6 系列旗舰模型，专为复杂编程、科研与多步推理等高端任务设计，支持深度推理与多智能体协作。' },
-            { value: 'openai/gpt-6-astra-pro', label: 'GPT-6 Astra Pro', description: 'GPT-6 Astra 的 Pro 推理档，适合质量优先的高难度任务。' },
+            ...([
+                'gpt-6.2-astra', 'gpt-6.2-astra-pro', 'gpt-6.2-sol', 'gpt-6.2-sol-pro',
+                'gpt-6.1-sol', 'gpt-6.1-sol-pro', 'gpt-6.1-terra', 'gpt-6.1-terra-pro',
+                'gpt-6-astra', 'gpt-6-astra-pro', 'gpt-6-sol', 'gpt-6-sol-pro', 'gpt-6-luna', 'gpt-6-luna-pro',
+                'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4',
+            ] as const).map((id) => openAiModelOption(id, `openai/${id}`)),
             { value: 'anthropic/claude-opus-5.5', label: 'Claude Opus 5.5', description: 'Anthropic Opus 模型，适合复杂任务与高质量创作。' },
             { value: 'anthropic/claude-sonnet-5.5', label: 'Claude Sonnet 5.5', description: 'Anthropic Sonnet 模型，适合日常写作与推理。' },
             { value: 'anthropic/claude-haiku-5.5', label: 'Claude Haiku 5.5', description: 'Anthropic Haiku 模型，适合快速交互与轻量生成。' },
@@ -1891,34 +1852,17 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
                 label: 'Gemini 3.6 Flash',
                 description: 'Google 的新模型，据用户评测说很喜欢一惊一乍，还挺中二的。'
             },
-            { value: 'GPT-6.1-Sol', label: 'GPT-6.1 Sol', description: 'OpenAI 新一代 Sol 模型，适合复杂指令与内容生成。' },
-            { value: 'GPT-6-Luna', label: 'GPT-6 Luna', description: 'OpenAI Luna 模型，适合快速交互与日常生成。' },
-            { value: 'GPT-6-Sol', label: 'GPT-6 Sol', description: 'OpenAI Sol 模型，适合通用创作与复杂任务。' },
-            {
-                value: 'GPT-5.5',
-                label: 'GPT-5.5',
-                description: 'OpenAI 旗舰模型，综合能力均衡，适合高质量生成与复杂任务。'
-            },
-            {
-                value: 'GPT-6-Astra',
-                label: 'GPT-6 Astra',
-                description: 'OpenAI 最新旗舰模型。'
-            },
-            {
-                value: 'GPT-5.6-Luna',
-                label: 'GPT-5.6 Luna',
-                description: 'GPT-5.6 系列高性价比模型，主打极致速度与成本效益，适合高频调用、低延迟的高吞吐量任务。'
-            },
-            {
-                value: 'GPT-5.6-Terra',
-                label: 'GPT-5.6 Terra',
-                description: 'GPT-5.6 系列均衡主力模型，性能对标 GPT-5.5 但成本仅为其一半，适合日常生产工作负载与通用任务。'
-            },
-            {
-                value: 'GPT-5.6-Sol',
-                label: 'GPT-5.6 Sol',
-                description: 'GPT-5.6 系列旗舰模型，专为复杂编程、科研与多步推理等高端任务设计，支持深度推理与多智能体协作。'
-            },
+            openAiModelOption('gpt-6.2-astra', 'GPT-6.2-Astra'),
+            openAiModelOption('gpt-6.2-sol', 'GPT-6.2-Sol'),
+            openAiModelOption('gpt-6.1-sol', 'GPT-6.1-Sol'),
+            openAiModelOption('gpt-6.1-terra', 'GPT-6.1-Terra'),
+            openAiModelOption('gpt-6-astra', 'GPT-6-Astra'),
+            openAiModelOption('gpt-6-sol', 'GPT-6-Sol'),
+            openAiModelOption('gpt-6-luna', 'GPT-6-Luna'),
+            openAiModelOption('gpt-5.6-sol', 'GPT-5.6-Sol'),
+            openAiModelOption('gpt-5.6-terra', 'GPT-5.6-Terra'),
+            openAiModelOption('gpt-5.6-luna', 'GPT-5.6-Luna'),
+            openAiModelOption('gpt-5.5', 'GPT-5.5'),
             { value: 'Claude-Opus-5.5', label: 'Claude Opus 5.5', description: 'Poe 官方 Claude Opus Bot，适合复杂任务与高质量创作。' },
             { value: 'Claude-Sonnet-5.5', label: 'Claude Sonnet 5.5', description: 'Poe 官方 Claude Sonnet Bot，适合写作与推理。' },
             { value: 'Claude-Fable-5.1', label: 'Claude Fable 5.1', description: 'Poe 官方 Claude Fable Bot，适合长文本创作与复杂任务。' },

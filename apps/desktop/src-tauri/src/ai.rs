@@ -2507,6 +2507,9 @@ mod request_body_tests {
     fn trusted_preset_omits_only_explicitly_unsupported_temperature() {
         for temperature in [0.8, 1.2] {
             for (provider, model, omitted) in [
+                ("openrouter", "openai/gpt-6.2-astra", true),
+                ("openrouter", "openai/gpt-6.2-sol", true),
+                ("openrouter", "openai/gpt-6.1-terra", true),
                 ("openrouter", "openai/gpt-6.1-sol", true),
                 ("openrouter", "openai/gpt-6-luna", true),
                 ("openrouter", "anthropic/claude-opus-5.5", true),
@@ -2516,6 +2519,7 @@ mod request_body_tests {
                 ("openrouter", "google/gemini-3.1-pro-preview", false),
                 ("openrouter", "custom-model", false),
                 ("kourichat", "gpt-6.1-sol", false),
+                ("kourichat", "gpt-6.2-sol", false),
                 ("poe", "GPT-6.1-Sol", false),
             ] {
                 let profile =

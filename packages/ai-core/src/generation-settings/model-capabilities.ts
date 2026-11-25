@@ -64,7 +64,7 @@ const GEMMA_4_THINKING_LEVELS: ThinkingEffort[] = ['high'];
 // OpenRouter /api/v1/models（2026-08-09 快照）明确给出的 reasoning_effort 档位。
 // `none` 由统一的 disabled 模式表达，不放入 efforts 列表。
 const OPENROUTER_GPT_5_4_5_5_EFFORTS: ThinkingEffort[] = ['low', 'medium', 'high', 'xhigh'];
-const OPENROUTER_GPT_5_6_EFFORTS: ThinkingEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+const OPENROUTER_GPT_MAX_EFFORTS: ThinkingEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 const OPENROUTER_CLAUDE_OPUS_4_8_EFFORTS: ThinkingEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 const OPENROUTER_CLAUDE_SONNET_4_6_EFFORTS: ThinkingEffort[] = ['low', 'medium', 'high', 'max'];
 const OPENROUTER_QWEN_3_8_MAX_EFFORTS: ThinkingEffort[] = ['minimal', 'low', 'medium', 'high', 'xhigh'];
@@ -251,18 +251,31 @@ const CAPABILITIES = new Map<string, ModelGenerationCapabilities>([
     maxOutputTokens: buildMaxOutputTokens(65_535),
   })],
 
-  // OpenRouter /api/v1/models（2026-10-11）：这两个型号均未列 temperature；
-  // max_completion_tokens=128000。Sol mandatory reasoning，Luna 额外支持 none。
-  [buildKey('openrouter', 'openai/gpt-6.1-sol'), buildCapabilities({
-    temperature: { support: 'unsupported' },
-    maxOutputTokens: buildMaxOutputTokens(128_000),
-    thinking: buildThinking('openai-reasoning-effort', OPENROUTER_GPT_5_6_EFFORTS, false),
-  })],
-  [buildKey('openrouter', 'openai/gpt-6-luna'), buildCapabilities({
-    temperature: { support: 'unsupported' },
-    maxOutputTokens: buildMaxOutputTokens(128_000),
-    thinking: buildThinking('openai-reasoning-effort', OPENROUTER_GPT_5_6_EFFORTS),
-  })],
+  // https://openrouter.ai/api/v1/models（2026-11-25）：以下型号均未列 temperature，
+  // 最大输出为 128000；只有 supported_efforts 含 none 的型号可关闭推理。
+  ...([
+    ['openai/gpt-6.2-astra', false],
+    ['openai/gpt-6.2-astra-pro', false],
+    ['openai/gpt-6.2-sol', false],
+    ['openai/gpt-6.2-sol-pro', false],
+    ['openai/gpt-6.1-sol', false],
+    ['openai/gpt-6.1-sol-pro', false],
+    ['openai/gpt-6.1-terra', true],
+    ['openai/gpt-6.1-terra-pro', false],
+    ['openai/gpt-6-astra', false],
+    ['openai/gpt-6-astra-pro', false],
+    ['openai/gpt-6-sol', true],
+    ['openai/gpt-6-sol-pro', true],
+    ['openai/gpt-6-luna', true],
+    ['openai/gpt-6-luna-pro', true],
+  ] as const).map(([modelId, canDisable]): [string, ModelGenerationCapabilities] => [
+    buildKey('openrouter', modelId),
+    buildCapabilities({
+      temperature: { support: 'unsupported' },
+      maxOutputTokens: buildMaxOutputTokens(128_000),
+      thinking: buildThinking('openai-reasoning-effort', OPENROUTER_GPT_MAX_EFFORTS, canDisable),
+    }),
+  ]),
 
   // 同一 OpenRouter 快照：Claude 5.5 三档均未列 temperature，最大输出 128000。
   // Haiku 虽非 mandatory，但档位仍未列 none；不推导 reasoning_effort:none 的支持。
@@ -314,17 +327,17 @@ const CAPABILITIES = new Map<string, ModelGenerationCapabilities>([
   [buildKey('openrouter', 'openai/gpt-5.6-luna'), buildCapabilities({
     temperature: { support: 'unsupported' },
     maxOutputTokens: buildMaxOutputTokens(128_000),
-    thinking: buildThinking('openai-reasoning-effort', OPENROUTER_GPT_5_6_EFFORTS),
+    thinking: buildThinking('openai-reasoning-effort', OPENROUTER_GPT_MAX_EFFORTS),
   })],
   [buildKey('openrouter', 'openai/gpt-5.6-terra'), buildCapabilities({
     temperature: { support: 'unsupported' },
     maxOutputTokens: buildMaxOutputTokens(128_000),
-    thinking: buildThinking('openai-reasoning-effort', OPENROUTER_GPT_5_6_EFFORTS),
+    thinking: buildThinking('openai-reasoning-effort', OPENROUTER_GPT_MAX_EFFORTS),
   })],
   [buildKey('openrouter', 'openai/gpt-5.6-sol'), buildCapabilities({
     temperature: { support: 'unsupported' },
     maxOutputTokens: buildMaxOutputTokens(128_000),
-    thinking: buildThinking('openai-reasoning-effort', OPENROUTER_GPT_5_6_EFFORTS),
+    thinking: buildThinking('openai-reasoning-effort', OPENROUTER_GPT_MAX_EFFORTS),
   })],
 
   // Claude：网关同时声明 temperature、128K 输出与 reasoning_effort；supported_efforts 不含 none，
