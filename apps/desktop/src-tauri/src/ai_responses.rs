@@ -114,6 +114,8 @@ enum Event {
         alias = "response.queued"
     )]
     Lifecycle { response: Response },
+    #[serde(rename = "response.metadata")]
+    Metadata,
     #[serde(rename = "response.output_item.added")]
     ItemAdded { output_index: usize, item: Item },
     #[serde(rename = "response.output_item.done")]
@@ -497,6 +499,8 @@ impl ResponsesStreamState {
                     return Err(invalid("invalid Responses lifecycle event"));
                 }
             }
+            // ChatGPT can send metadata between the last output item and the terminal event.
+            Event::Metadata => {}
             Event::ItemAdded { output_index, item } => {
                 if output_index != self.items.len()
                     || self.items.last().is_some_and(|item| !item.done)

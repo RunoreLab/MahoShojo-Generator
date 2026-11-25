@@ -318,6 +318,58 @@ async fn responses_utf8_every_byte_and_multiline_data_preserve_content() {
 }
 
 #[tokio::test]
+async fn responses_metadata_preserves_text_and_leaves_the_outcome_to_the_terminal() {
+    let cases = fixture_cases();
+    let upstream = cases[0]["upstreamEvents"].as_array().unwrap();
+    let (terminal, before_terminal) = upstream.split_last().unwrap();
+    let sequence = terminal["sequence_number"].as_u64().unwrap();
+    let mut prefix = wire_events(before_terminal, false);
+    prefix.extend(wire_events(
+        &[json!({
+            "type": "response.metadata",
+            "sequence_number": sequence,
+            "metadata": {"sample": "synthetic-responses-metadata"},
+        })],
+        false,
+    ));
+
+    let mut completed = terminal.clone();
+    completed["sequence_number"] = json!(sequence + 1);
+    let filtered = json!({
+        "type": "response.incomplete",
+        "sequence_number": sequence + 1,
+        "response": {"status": "incomplete", "incomplete_details": {"reason": "content_filter"}},
+    });
+
+    for ending in [completed, filtered] {
+        let expect_completed = ending["type"] == "response.completed";
+        let mut bytes = prefix.clone();
+        bytes.extend(wire_events(&[ending], false));
+        let (events, _, _) = execute(
+            Wire {
+                bytes,
+                hold_open: true,
+                ..Wire::default()
+            },
+            request("responses-metadata"),
+        )
+        .await;
+        let result = terminals(&events)[0];
+        if expect_completed {
+            assert!(matches!(result, AiExecutionResult::Completed(result)
+                if result.output.text.as_deref() == Some("魔法少女・かなé🪄")));
+        } else {
+            assert!(matches!(result, AiExecutionResult::Failed(result)
+                if result.error.code == "content-filtered"));
+        }
+        assert_eq!(text_delta(&events), "魔法少女・かなé🪄");
+        assert!(!serde_json::to_string(&events)
+            .unwrap()
+            .contains("synthetic-responses-metadata"));
+    }
+}
+
+#[tokio::test]
 async fn responses_failures_keep_partial_text_and_do_not_accept_chat_done_as_terminal() {
     let case = &fixture_cases()[0];
     let all = case["upstreamEvents"].as_array().unwrap();
