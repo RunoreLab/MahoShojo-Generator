@@ -15,6 +15,7 @@ import { act } from 'react';
 import { RouterProvider } from '@tanstack/react-router';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { buttonClassName } from '@mahoshojo/ui-web/card-library';
 
 const { invokeMock, defaultInvokeImpl } = vi.hoisted(() => {
   const impl = async (command: string, _args?: Record<string, unknown>): Promise<unknown> => {
@@ -191,6 +192,45 @@ describe('desktop settings shell', () => {
     expect(container.textContent).toContain('结果自动定位');
     // S2 交付的「在线与通知」组：公告策略与外链确认都接 config.json。
     expect(container.querySelector('#settings-online')).not.toBeNull();
+  });
+
+  it('uses shared buttons to start and cancel ChatGPT subscription authorization', async () => {
+    const disconnected = {
+      supported: true, connected: false, consentRequired: false,
+      connectionId: null, accountLabel: null, models: [], revocationUnconfirmed: false,
+    };
+    let finishConnect!: (status: typeof disconnected) => void;
+    const pendingConnect = new Promise<typeof disconnected>((resolve) => { finishConnect = resolve; });
+    invokeMock.mockImplementation(async (command) => {
+      if (command === 'chatgpt_plan_status') return disconnected;
+      if (command === 'chatgpt_plan_connect') return pendingConnect;
+      if (command === 'chatgpt_plan_cancel_connect') {
+        finishConnect(disconnected);
+        return;
+      }
+      return defaultInvokeImpl(command);
+    });
+    await mountAt('/settings?section=generation');
+    const panel = container.querySelector('section[aria-label="ChatGPT 订阅连接"]');
+    const action = (label: string) => [...(panel?.querySelectorAll('button') ?? [])]
+      .find((button) => button.textContent?.trim() === label) ?? null;
+    const settingsButton = { className: 'ui-web-settings-motion' };
+
+    const connect = action('Continue with ChatGPT');
+    expect(connect?.className).toBe(buttonClassName({ ...settingsButton, variant: 'primary' }));
+    await click(connect);
+    expect(invokeMock).toHaveBeenCalledWith('chatgpt_plan_connect', { differentAccount: false });
+
+    const cancel = action('取消连接');
+    expect(cancel?.className).toBe(buttonClassName(settingsButton));
+    const usage = action('管理用量');
+    expect(usage?.className).toBe(buttonClassName(settingsButton));
+    expect(usage?.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+    await click(usage);
+    expect(invokeMock).toHaveBeenCalledWith('open_external_url', { url: 'https://chatgpt.com/settings/usage' });
+    await click(cancel);
+    expect(invokeMock).toHaveBeenCalledWith('chatgpt_plan_cancel_connect');
+    expect(action('Continue with ChatGPT')).not.toBeNull();
   });
 
   it('online group reads and writes config.json through the narrow commands only', async () => {

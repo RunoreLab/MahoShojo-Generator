@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { ArrowUpRight, LogOut, RefreshCw } from 'lucide-react';
+import { ArrowUpRight, Check, LogIn, LogOut, RefreshCw, UsersRound, X } from 'lucide-react';
+import { Button } from '@mahoshojo/ui-web/card-library';
 import { useExternalLinks } from '../external-links/external-links-provider';
 import type { UseDesktopAiConfigResult } from './use-desktop-ai-config';
 
@@ -26,17 +27,41 @@ export function ChatGptPlanPanel({ state, store }: UseDesktopAiConfigResult) {
     {(state.chatgptError || selectionError) && <p role="alert" className="text-sm">{state.chatgptError ?? selectionError}</p>}
     {plan?.revocationUnconfirmed && <p role="status" className="text-xs">本机授权已清除。可在 ChatGPT 的安全设置中检查并解除应用连接。</p>}
     <div className="flex flex-wrap items-center gap-2">
-      {state.chatgptOperation === 'connect' ? <button type="button" className="btn-secondary" onClick={() => void store.cancelChatgptPlanConnect()}>取消连接</button>
+      {state.chatgptOperation === 'connect'
+        ? <Button className="ui-web-settings-motion" onClick={() => void store.cancelChatgptPlanConnect()}>
+          <X size={16} aria-hidden="true" />取消连接
+        </Button>
         : plan?.connected ? <>
-          {!selected && <button type="button" className="btn-primary" disabled={busy || !plan.models.length || state.overlayState !== 'ready'} onClick={activate}>使用此连接</button>}
-          <button type="button" className="btn-secondary" disabled={busy} onClick={() => void store.refreshChatgptPlan()}><RefreshCw size={16} aria-hidden="true" />刷新模型</button>
-          <button type="button" className="btn-secondary" disabled={busy} onClick={() => void store.disconnectChatgptPlan()}><LogOut size={16} aria-hidden="true" />断开连接</button>
+          {!selected && <Button
+            className="ui-web-settings-motion"
+            variant="primary"
+            disabled={busy || !plan.models.length || state.overlayState !== 'ready'}
+            onClick={activate}
+          >
+            <Check size={16} aria-hidden="true" />使用此连接
+          </Button>}
+          <Button className="ui-web-settings-motion" disabled={busy} onClick={() => void store.refreshChatgptPlan()}>
+            <RefreshCw size={16} aria-hidden="true" />刷新模型
+          </Button>
+          <Button className="ui-web-settings-motion" disabled={busy} onClick={() => void store.disconnectChatgptPlan()}>
+            <LogOut size={16} aria-hidden="true" />断开连接
+          </Button>
         </> : plan ? <>
-          <button type="button" className="btn-primary" disabled={busy} onClick={() => void store.connectChatgptPlan()}>Continue with ChatGPT</button>
-          {plan.connectionId && <button type="button" className="btn-secondary" disabled={busy} onClick={() => void store.connectChatgptPlan(true)}>连接其他账户或工作区</button>}
-        </> : <button type="button" className="btn-secondary" disabled={busy} onClick={() => void store.refreshChatgptPlan()}>重新读取连接</button>}
-      <button type="button" className="btn-secondary" onClick={() => openFixed('https://chatgpt.com/settings/usage')}><ArrowUpRight size={16} aria-hidden="true" />管理用量</button>
-      {plan?.revocationUnconfirmed && <button type="button" className="btn-secondary" onClick={() => openFixed('https://chatgpt.com/settings/security')}>打开安全设置</button>}
+          <Button className="ui-web-settings-motion" variant="primary" disabled={busy} onClick={() => void store.connectChatgptPlan()}>
+            <LogIn size={16} aria-hidden="true" />Continue with ChatGPT
+          </Button>
+          {plan.connectionId && <Button className="ui-web-settings-motion" disabled={busy} onClick={() => void store.connectChatgptPlan(true)}>
+            <UsersRound size={16} aria-hidden="true" />连接其他账户或工作区
+          </Button>}
+        </> : <Button className="ui-web-settings-motion" disabled={busy} onClick={() => void store.refreshChatgptPlan()}>
+          <RefreshCw size={16} aria-hidden="true" />重新读取连接
+        </Button>}
+      <Button className="ui-web-settings-motion" onClick={() => openFixed('https://chatgpt.com/settings/usage')}>
+        <ArrowUpRight size={16} aria-hidden="true" />管理用量
+      </Button>
+      {plan?.revocationUnconfirmed && <Button className="ui-web-settings-motion" onClick={() => openFixed('https://chatgpt.com/settings/security')}>
+        <ArrowUpRight size={16} aria-hidden="true" />打开安全设置
+      </Button>}
     </div>
   </section>;
 }
