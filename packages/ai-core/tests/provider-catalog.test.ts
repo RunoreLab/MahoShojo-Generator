@@ -398,6 +398,22 @@ describe('2026-10 已核验目录增量', () => {
   });
 });
 
+describe('Gemini 4 目录', () => {
+  it.each([
+    ['google-cloudflare', 'gemini-4-hydrogen'],
+    ['kourichat', 'gemini-4-hydrogen'],
+    ['chatbox', 'gemini-4-hydrogen'],
+    ['openrouter', 'google/gemini-4-hydrogen'],
+    ['poe', 'Gemini-4-Hydrogen'],
+    ['nova-cervus', '[ruru6]gemini-4-hydrogen'],
+  ])('%s 用该通道的模型 ID 配置 Gemini 4 Hydrogen', (providerId, modelId) => {
+    const preset = findAiProviderPreset(providerId)!;
+    expect(preset.models.find((model) => model.value === modelId)?.label).toMatch(/^Gemini 4 Hydrogen/);
+    expect(resolveAIProviderModel(preset, modelId)).toEqual({ modelId, isCustom: false });
+    expect(describeAiPresetModelDirectWire(preset, modelId)).toMatchObject({ status: 'verified', adapter: 'openai-compatible' });
+  });
+});
+
 
 describe('Google 官方端点双面：原生 baseUrl 与 OpenAI-compat Direct 面', () => {
   it('google-cloudflare 是 provider-public，Direct wire 走官方 openai 面', () => {

@@ -13,6 +13,22 @@
         "adapter": null
       },
       {
+        "id": "gemini-4-hydrogen",
+        "adapter": null
+      },
+      {
+        "id": "gemini-4-neon",
+        "adapter": null
+      },
+      {
+        "id": "gemini-4-argon",
+        "adapter": null
+      },
+      {
+        "id": "gemini-4-carbon",
+        "adapter": null
+      },
+      {
         "id": "gemini-3.6-flash",
         "adapter": null
       },
@@ -85,6 +101,10 @@
         "adapter": null
       },
       {
+        "id": "claude-fable-5-2",
+        "adapter": null
+      },
+      {
         "id": "claude-opus-4-8",
         "adapter": null
       },
@@ -94,6 +114,10 @@
       },
       {
         "id": "glm-5",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-v4.1-flash-1017",
         "adapter": null
       },
       {
@@ -114,6 +138,18 @@
       },
       {
         "id": "kourichat-v3",
+        "adapter": null
+      },
+      {
+        "id": "kimi-k3.1-pro",
+        "adapter": null
+      },
+      {
+        "id": "qwen4-max",
+        "adapter": null
+      },
+      {
+        "id": "minimax-m3.1-flash",
         "adapter": null
       },
       {
@@ -180,11 +216,31 @@
         "adapter": null
       },
       {
+        "id": "claude-fable-5-2",
+        "adapter": null
+      },
+      {
         "id": "claude-opus-5",
         "adapter": null
       },
       {
         "id": "claude-fable-5",
+        "adapter": null
+      },
+      {
+        "id": "gemini-4-hydrogen",
+        "adapter": null
+      },
+      {
+        "id": "gemini-4-neon",
+        "adapter": null
+      },
+      {
+        "id": "gemini-4-argon",
+        "adapter": null
+      },
+      {
+        "id": "gemini-4-carbon",
         "adapter": null
       },
       {
@@ -222,6 +278,18 @@
       {
         "id": "kimi-k2.6",
         "adapter": null
+      },
+      {
+        "id": "kimi-k3.1-pro",
+        "adapter": null
+      },
+      {
+        "id": "qwen4-max",
+        "adapter": null
+      },
+      {
+        "id": "minimax-m3.1-flash",
+        "adapter": null
       }
     ]
   },
@@ -236,6 +304,22 @@
     "models": [
       {
         "id": "minimax-m3",
+        "adapter": null
+      },
+      {
+        "id": "minimax-m3.1-flash",
+        "adapter": null
+      },
+      {
+        "id": "kimi-k3.1-pro",
+        "adapter": null
+      },
+      {
+        "id": "qwen4-max",
+        "adapter": null
+      },
+      {
+        "id": "deepseek-v4.1-flash-1017",
         "adapter": null
       },
       {
@@ -453,6 +537,22 @@
     "models": [
       {
         "id": "deepseek/deepseek-v4-flash-20260731",
+        "adapter": null
+      },
+      {
+        "id": "deepseek/deepseek-v4.1-flash-1017",
+        "adapter": null
+      },
+      {
+        "id": "moonshotai/kimi-k3.1-pro",
+        "adapter": null
+      },
+      {
+        "id": "qwen/qwen4-max",
+        "adapter": null
+      },
+      {
+        "id": "minimax/minimax-m3.1-flash",
         "adapter": null
       },
       {
@@ -733,6 +833,26 @@
         "adapter": null
       },
       {
+        "id": "[ruru6]gemini-4-hydrogen",
+        "adapter": null
+      },
+      {
+        "id": "[ruru6]gemini-4-neon",
+        "adapter": null
+      },
+      {
+        "id": "[ruru6]gemini-4-argon",
+        "adapter": null
+      },
+      {
+        "id": "[ruru6]gemini-4-carbon",
+        "adapter": null
+      },
+      {
+        "id": "[ruru9]kimi-k3.1-pro",
+        "adapter": null
+      },
+      {
         "id": "[ruru10]gemini-3.7-flash",
         "adapter": null
       },
@@ -973,6 +1093,26 @@
         "adapter": null
       },
       {
+        "id": "gemini-4-hydrogen",
+        "omitTemperature": true,
+        "adapter": null
+      },
+      {
+        "id": "gemini-4-neon",
+        "omitTemperature": true,
+        "adapter": null
+      },
+      {
+        "id": "gemini-4-argon",
+        "omitTemperature": true,
+        "adapter": null
+      },
+      {
+        "id": "gemini-4-carbon",
+        "omitTemperature": true,
+        "adapter": null
+      },
+      {
         "id": "gemini-3.6-flash",
         "omitTemperature": true,
         "adapter": null
@@ -1071,6 +1211,10 @@
         "adapter": null
       },
       {
+        "id": "deepseek-ai/DeepSeek-V4.1-Flash",
+        "adapter": null
+      },
+      {
         "id": "deepseek-ai/DeepSeek-R1",
         "adapter": null
       },
@@ -1123,6 +1267,22 @@
     "models": [
       {
         "id": "google/gemini-3.8-flash",
+        "adapter": null
+      },
+      {
+        "id": "google/gemini-4-hydrogen",
+        "adapter": null
+      },
+      {
+        "id": "google/gemini-4-neon",
+        "adapter": null
+      },
+      {
+        "id": "google/gemini-4-argon",
+        "adapter": null
+      },
+      {
+        "id": "google/gemini-4-carbon",
         "adapter": null
       },
       {
@@ -1245,6 +1405,11 @@
         "adapter": null
       },
       {
+        "id": "anthropic/claude-fable-5.2",
+        "omitTemperature": true,
+        "adapter": null
+      },
+      {
         "id": "anthropic/claude-opus-5.5",
         "omitTemperature": true,
         "adapter": null
@@ -1280,6 +1445,10 @@
         "adapter": null
       },
       {
+        "id": "deepseek/deepseek-v4.1-flash-1017",
+        "adapter": null
+      },
+      {
         "id": "deepseek/deepseek-v4.1-flash",
         "adapter": null
       },
@@ -1297,6 +1466,10 @@
       },
       {
         "id": "qwen/qwen3.8-flash",
+        "adapter": null
+      },
+      {
+        "id": "qwen/qwen4-max",
         "adapter": null
       },
       {
@@ -1320,7 +1493,15 @@
         "adapter": null
       },
       {
+        "id": "moonshotai/kimi-k3.1-pro",
+        "adapter": null
+      },
+      {
         "id": "moonshotai/kimi-k3",
+        "adapter": null
+      },
+      {
+        "id": "minimax/minimax-m3.1-flash",
         "adapter": null
       },
       {
@@ -1340,6 +1521,22 @@
     "models": [
       {
         "id": "gemini-2.5-pro",
+        "adapter": null
+      },
+      {
+        "id": "Gemini-4-Hydrogen",
+        "adapter": null
+      },
+      {
+        "id": "Gemini-4-Neon",
+        "adapter": null
+      },
+      {
+        "id": "Gemini-4-Argon",
+        "adapter": null
+      },
+      {
+        "id": "Gemini-4-Carbon",
         "adapter": null
       },
       {
@@ -1416,6 +1613,10 @@
       },
       {
         "id": "GPT-5.5",
+        "adapter": null
+      },
+      {
+        "id": "Claude-Fable-5.2",
         "adapter": null
       },
       {

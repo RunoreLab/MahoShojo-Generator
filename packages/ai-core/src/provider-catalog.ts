@@ -29,6 +29,28 @@ const openAiModelOption = (id: OpenAiModelId, value: string = id): AIModelOption
     ...OPENAI_MODEL_INFO[id],
 });
 
+const GEMINI_4 = {
+    hydrogen: { value: 'gemini-4-hydrogen', label: 'Gemini 4 Hydrogen', description: '快速、高效，适合日常创作、内容改写与高频交互。' },
+    neon: { value: 'gemini-4-neon', label: 'Gemini 4 Neon', description: '兼顾复杂任务的质量和速度，适合设定整理与长文本创作。' },
+    argon: { value: 'gemini-4-argon', label: 'Gemini 4 Argon', description: '高效推理模型，适合复杂指令、长文档分析与多步生成。' },
+    carbon: { value: 'gemini-4-carbon', label: 'Gemini 4 Carbon', description: '旗舰推理模型，适合高难度推理、长篇创作与复杂设定。' },
+};
+const CLAUDE_FABLE_5_2: AIModelOption = {
+    value: 'claude-fable-5-2', label: 'Claude Fable 5.2', description: '适合高难度推理、多步指令与需要保持一致性的长篇创作。',
+};
+const KIMI_K3_1_PRO: AIModelOption = {
+    value: 'kimi-k3.1-pro', label: 'Kimi K3.1 Pro', description: 'Kimi K3 的后续型号，适合中文长文、复杂指令与多步推理。',
+};
+const QWEN_4_MAX: AIModelOption = {
+    value: 'qwen4-max', label: 'Qwen 4 Max', description: '通义千问旗舰模型，适合中文创作、复杂推理与长任务规划。',
+};
+const MINIMAX_M3_1_FLASH: AIModelOption = {
+    value: 'minimax-m3.1-flash', label: 'MiniMax M3.1 Flash', description: '高速推理模型，适合快速生成、多轮互动与批量文本处理。',
+};
+const DEEPSEEK_V4_1_FLASH_1017: AIModelOption = {
+    value: 'deepseek-v4.1-flash-1017', label: 'DeepSeek V4.1 Flash 1017', description: 'V4.1 Flash 的 1017 更新版，适合高频生成、多步推理与内容改写。',
+};
+
 export interface AIProviderOption {
     readonly id: string;
     readonly name: string;
@@ -573,8 +595,9 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
             {
                 value: 'gemini-3.8-flash',
                 label: 'Gemini 3.8 Flash',
-                description: 'Google 的新模型，Benchmark 分数超级高，但代价是 Tokens 消耗也高。'
+                description: 'Gemini 3 系列 Flash 模型，适合日常创作与快速推理。'
             },
+            ...Object.values(GEMINI_4),
             {
                 value: 'gemini-3.6-flash',
                 label: 'Gemini 3.6 Flash',
@@ -610,6 +633,7 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
             openAiModelOption('gpt-5.6-terra'),
             openAiModelOption('gpt-5.6-sol'),
             openAiModelOption('gpt-6-astra'),
+            CLAUDE_FABLE_5_2,
             {
                 value: 'claude-opus-4-8',
                 label: 'Claude Opus 4.8',
@@ -625,6 +649,7 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
                 label: 'GLM-5',
                 description: '智谱通用模型，综合能力均衡，适合复杂指令、多轮对话与高质量创作。'
             },
+            DEEPSEEK_V4_1_FLASH_1017,
             {
                 value: 'deepseek-v4-flash-0731',
                 label: 'DeepSeek V4 Flash',
@@ -650,6 +675,9 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
                 label: 'Kourichat V3',
                 description: 'Kouri Ai 提供的 DeepAnima 模型，适合意图识别轻量任务。'
             },
+            KIMI_K3_1_PRO,
+            QWEN_4_MAX,
+            MINIMAX_M3_1_FLASH,
             {
                 value: 'kimi-k3',
                 label: 'Kimi K3',
@@ -684,6 +712,7 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
             openAiModelOption('gpt-5.6-sol'),
             openAiModelOption('gpt-5.6-terra'),
             openAiModelOption('gpt-5.6-luna'),
+            CLAUDE_FABLE_5_2,
             {
                 value: 'claude-opus-5',
                 label: 'Claude Opus 5（高级）',
@@ -694,6 +723,7 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
                 label: 'Claude Fable 5（高级）',
                 description: '高级模型（Pro/Pro+）。擅长长文本写作与稳健推理。'
             },
+            ...Object.values(GEMINI_4),
             {
                 value: 'gemini-3.1-pro-preview',
                 label: 'Gemini 3.1 Pro（高级）',
@@ -739,6 +769,9 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
                 label: 'Kimi K2.6（标准）',
                 description: '标准模型（所有付费方案）。中文内容生成与角色创作表现稳定。'
             },
+            KIMI_K3_1_PRO,
+            QWEN_4_MAX,
+            MINIMAX_M3_1_FLASH,
         ]
     },
     {
@@ -760,6 +793,10 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
                 label: 'MiniMax M3',
                 description: 'MiniMax 多模态旗舰模型，支持文本、图像与视频输入，100 万 Token 上下文，适合长程 Agent 工作与工具调用。'
             },
+            MINIMAX_M3_1_FLASH,
+            KIMI_K3_1_PRO,
+            QWEN_4_MAX,
+            DEEPSEEK_V4_1_FLASH_1017,
             {
                 value: 'minimax-m2.7',
                 label: 'MiniMax M2.7',
@@ -1008,6 +1045,10 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
                 label: 'DeepSeek V4 Flash',
                 description: 'DeepSeek V4 高速轻量模型，适合高频生成、剧情推进与草稿输出。'
             },
+            { ...DEEPSEEK_V4_1_FLASH_1017, value: 'deepseek/deepseek-v4.1-flash-1017' },
+            { ...KIMI_K3_1_PRO, value: 'moonshotai/kimi-k3.1-pro' },
+            { ...QWEN_4_MAX, value: 'qwen/qwen4-max' },
+            { ...MINIMAX_M3_1_FLASH, value: 'minimax/minimax-m3.1-flash' },
             {
                 value: 'deepseek/deepseek-v4-pro',
                 label: 'DeepSeek V4 Pro',
@@ -1312,6 +1353,10 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
                 label: 'Gemini 3.8 Flash（按次）',
                 description: '新一代 Gemini Flash 通道，速度、质量和价格较均衡，近期可用性较好。'
             },
+            ...Object.values(GEMINI_4).map((model) => ({
+                ...model, value: `[ruru6]${model.value}`, label: `${model.label}（ruru6）`,
+            })),
+            { ...KIMI_K3_1_PRO, value: '[ruru9]kimi-k3.1-pro', label: 'Kimi K3.1 Pro（ruru9）' },
             {
                 value: '[ruru10]gemini-3.7-flash',
                 label: 'Gemini 3.7 Flash（按次）',
@@ -1569,7 +1614,7 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
         // 与 BYOK wire 的稳定身份，重命名会让以上全部悬空，保持原值。
         id: 'google-cloudflare',
         name: 'Google',
-        description: '咕咕噜噜官方渠道直连。',
+        description: 'Google 官方 Gemini API，提供 Gemini 4、Gemini Flash 与 Gemma 等模型。',
         docsUrl: 'https://aistudio.google.com/',
         // baseUrl 走 Gemini 原生协议面（服务器 BYOK 经 createGoogleGenerativeAI
         // 访问 `…/v1beta/models/{model}:*`）；Direct wire 是同一供应商公开的
@@ -1581,14 +1626,15 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
             adapter: 'openai-compatible',
             baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
             sourceUrl: 'https://ai.google.dev/gemini-api/docs/openai',
-            reviewedAt: '2026-10-19',
+            reviewedAt: '2026-11-25',
         },
         models: [
             {
                 value: 'gemini-3.8-flash',
                 label: 'Gemini 3.8 Flash',
-                description: 'Google 的新模型，Benchmark 分数超级高，但代价是 Tokens 消耗也高。'
+                description: 'Gemini 3 系列 Flash 模型，适合日常创作与快速推理。'
             },
+            ...Object.values(GEMINI_4),
             {
                 value: 'gemini-3.6-flash',
                 label: 'Gemini 3.6 Flash',
@@ -1660,7 +1706,8 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
             sourceUrl: 'https://api-docs.deepseek.com/',
         },
         models: [
-            { value: 'deepseek-flash', label: 'DeepSeek V4.1 Flash', description: 'DeepSeek V4.1 Flash 官方 API 模型，原生支持多模态，适合高吞吐 Agent、推理与通用生成。' },
+            // 官方别名 deepseek-flash 已指向 1017：https://api-docs.deepseek.com/updates/
+            { ...DEEPSEEK_V4_1_FLASH_1017, value: 'deepseek-flash' },
             { value: 'deepseek-v4-flash-0731', label: 'DeepSeek V4 Flash（兼容 ID）', description: '保留旧 V4 Flash catalog ID 以兼容既有配置；请求仍按现有兼容解析逻辑发送。' },
             { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro', description: 'DeepSeek V4 的完全体，适合复杂分析、长文本写作与更高要求的生成任务。' },
             { value: 'deepseek-chat', label: 'DeepSeek-V3.2', description: '通用对话与分析模型，适合日常问答、写作与总结。' },
@@ -1684,6 +1731,7 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
                 label: 'DeepSeek V3.2',
                 description: '通用对话与推理兼顾，适合剧情推进、设定整理与中文写作。'
             },
+            { value: 'deepseek-ai/DeepSeek-V4.1-Flash', label: 'DeepSeek V4.1 Flash', description: '适合高频生成、多步推理与内容改写。' },
             {
                 value: 'deepseek-ai/DeepSeek-R1',
                 label: 'DeepSeek R1',
@@ -1753,8 +1801,9 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
             {
                 value: 'google/gemini-3.8-flash',
                 label: 'Gemini 3.8 Flash',
-                description: 'Google 的新模型，Benchmark 分数超级高，但代价是 Tokens 消耗也高。'
+                description: 'Gemini 3 系列 Flash 模型，适合日常创作与快速推理。'
             },
+            ...Object.values(GEMINI_4).map((model) => ({ ...model, value: `google/${model.value}` })),
             {
                 value: 'google/gemini-3.6-flash',
                 label: 'Gemini 3.6 Flash',
@@ -1771,25 +1820,30 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
                 'gpt-6-astra', 'gpt-6-astra-pro', 'gpt-6-sol', 'gpt-6-sol-pro', 'gpt-6-luna', 'gpt-6-luna-pro',
                 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4',
             ] as const).map((id) => openAiModelOption(id, `openai/${id}`)),
+            { ...CLAUDE_FABLE_5_2, value: 'anthropic/claude-fable-5.2' },
             { value: 'anthropic/claude-opus-5.5', label: 'Claude Opus 5.5', description: 'Anthropic Opus 模型，适合复杂任务与高质量创作。' },
             { value: 'anthropic/claude-sonnet-5.5', label: 'Claude Sonnet 5.5', description: 'Anthropic Sonnet 模型，适合日常写作与推理。' },
             { value: 'anthropic/claude-haiku-5.5', label: 'Claude Haiku 5.5', description: 'Anthropic Haiku 模型，适合快速交互与轻量生成。' },
-            { value: 'anthropic/claude-fable-5.1', label: 'Claude Fable 5.1', description: 'Anthropic 最新高端模型之一，适合高难度推理、长程 Agent 编码、研究与知识工作。' },
+            { value: 'anthropic/claude-fable-5.1', label: 'Claude Fable 5.1', description: '适合多步推理、复杂知识工作与长篇创作。' },
             { value: 'anthropic/claude-opus-4.8', label: 'Claude Opus 4.8', description: 'Anthropic 旗下旗舰模型，非常适合复杂的专业任务和高级代理。' },
             { value: 'anthropic/claude-sonnet-4.6', label: 'Claude Sonnet 4.6', description: 'Anthropic 旗下主力模型之一，写作、推理与长文本表现稳定。' },
             { value: 'x-ai/grok-4.7', label: 'Grok 4.7', description: 'xAI 通用模型，适合创作与问答。' },
             { value: 'x-ai/grok-4.5', label: 'Grok 4.5', description: 'xAI 通用模型，适合头脑风暴、创意发散与快速问答。' },
+            { ...DEEPSEEK_V4_1_FLASH_1017, value: 'deepseek/deepseek-v4.1-flash-1017' },
             { value: 'deepseek/deepseek-v4.1-flash', label: 'DeepSeek V4.1 Flash', description: 'DeepSeek 新版 Flash 模型，适合日常生成与复杂指令。' },
             { value: 'deepseek/deepseek-v4-flash', label: 'DeepSeek V4 Flash Preview', description: 'DeepSeek V4 Flash 预览版，百万级上下文，兼顾质量与成本。' },
             { value: 'deepseek/deepseek-v4-flash-0731', label: 'DeepSeek V4 Flash', description: 'DeepSeek V4 Flash 正式版，Agent 能力大幅增强，百万级上下文，兼顾质量与成本。' },
             { value: 'deepseek/deepseek-v4-pro', label: 'DeepSeek V4 Pro', description: 'DeepSeek V4 的高性能版本，适合需要高精度和复杂推理的任务。' },
             { value: 'qwen/qwen3.8-flash', label: 'Qwen 3.8 Flash', description: '通义千问 Flash 模型，适合快速生成与交互。' },
+            { ...QWEN_4_MAX, value: 'qwen/qwen4-max' },
             { value: 'qwen/qwen3.8-max', label: 'Qwen 3.8 Max', description: '通义千问 3.8 旗舰模型，2.4 万亿参数 MoE，编程与办公能力全面跃升，原生视觉理解，适合长周期自主任务。' },
             { value: 'qwen/qwen3.7-max', label: 'Qwen 3.7 Max', description: '通义千问 3.7 旗舰模型，面向智能体工作负载，编码与长周期自主任务能力强，支持提示缓存。' },
             { value: 'qwen/qwen3.6-plus', label: 'Qwen 3.6 Plus', description: '通义千问 3.6 Plus，混合架构结合线性注意力与 MoE，智能体编码与推理能力突出。' },
             { value: 'moonshotai/kimi-k2.7-code', label: 'Kimi K2.7 Code', description: 'Moonshot 面向编程场景的模型，长上下文指令遵循更可靠，支持文本、图片与视频输入。' },
             { value: 'moonshotai/kimi-k2.6', label: 'Kimi K2.6', description: 'Moonshot AI 多模态模型，在多模态和智能体能力方面表现出色。' },
+            { ...KIMI_K3_1_PRO, value: 'moonshotai/kimi-k3.1-pro' },
             { value: 'moonshotai/kimi-k3', label: 'Kimi K3', description: 'Moonshot 旗舰模型，2.8 万亿参数，原生视觉理解，100 万 Token 上下文，适合软件工程、知识工作与深度推理。' },
+            { ...MINIMAX_M3_1_FLASH, value: 'minimax/minimax-m3.1-flash' },
             { value: 'minimax/minimax-m3', label: 'MiniMax M3', description: 'MiniMax 多模态旗舰模型，支持文本、图像与视频输入，100 万 Token 上下文，适合长程 Agent 工作与工具调用。' },
         ]
     },
@@ -1812,6 +1866,10 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
                 label: 'Gemini 2.5 Pro',
                 description: 'Google 旗下前代的最先进模型系列，性能很棒棒。'
             },
+            { ...GEMINI_4.hydrogen, value: 'Gemini-4-Hydrogen' },
+            { ...GEMINI_4.neon, value: 'Gemini-4-Neon' },
+            { ...GEMINI_4.argon, value: 'Gemini-4-Argon' },
+            { ...GEMINI_4.carbon, value: 'Gemini-4-Carbon' },
             {
                 value: 'gemini-2.5-flash',
                 label: 'Gemini 2.5 Flash',
@@ -1863,6 +1921,7 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
             openAiModelOption('gpt-5.6-terra', 'GPT-5.6-Terra'),
             openAiModelOption('gpt-5.6-luna', 'GPT-5.6-Luna'),
             openAiModelOption('gpt-5.5', 'GPT-5.5'),
+            { ...CLAUDE_FABLE_5_2, value: 'Claude-Fable-5.2' },
             { value: 'Claude-Opus-5.5', label: 'Claude Opus 5.5', description: 'Poe 官方 Claude Opus Bot，适合复杂任务与高质量创作。' },
             { value: 'Claude-Sonnet-5.5', label: 'Claude Sonnet 5.5', description: 'Poe 官方 Claude Sonnet Bot，适合写作与推理。' },
             { value: 'Claude-Fable-5.1', label: 'Claude Fable 5.1', description: 'Poe 官方 Claude Fable Bot，适合长文本创作与复杂任务。' },
