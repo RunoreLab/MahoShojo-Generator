@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { downloadBattleReportFile } from '@/lib/arena/download-battle-report';
+import { downloadFile } from '@/lib/client/downloadFile';
 import { downloadBlob } from '@/lib/client/blobUrl';
 
 vi.mock('@/lib/client/blobUrl', () => ({ downloadBlob: vi.fn() }));
@@ -15,7 +15,7 @@ it('Android Edge 在点击时打开选择器，取消时跳过 ZIP 打包和下�
   vi.stubGlobal('showSaveFilePicker', showSaveFilePicker);
   const packZip = vi.fn();
 
-  const attempt = downloadBattleReportFile(packZip, 'package.zip');
+  const attempt = downloadFile(packZip, 'package.zip');
   expect(showSaveFilePicker).toHaveBeenCalledWith({ suggestedName: 'package.zip' });
   await attempt;
   expect(packZip).not.toHaveBeenCalled();
@@ -30,7 +30,7 @@ it.each([
   vi.stubGlobal('showSaveFilePicker', picker);
   const blob = new Blob(['战报']);
 
-  await downloadBattleReportFile(blob, '战报.md');
+  await downloadFile(blob, '战报.md');
   if (picker) expect(picker).not.toHaveBeenCalled();
   expect(downloadBlob).toHaveBeenCalledWith(blob, '战报.md');
 });
@@ -47,10 +47,10 @@ it('写入失败会放弃未提交的写入，下一次仍可保存', async () =
   vi.stubGlobal('showSaveFilePicker', showSaveFilePicker);
   const blob = new Blob(['战报']);
 
-  await expect(downloadBattleReportFile(blob, '战报.md')).rejects.toBe(error);
+  await expect(downloadFile(blob, '战报.md')).rejects.toBe(error);
   expect(abort).toHaveBeenCalledOnce();
   expect(close).not.toHaveBeenCalled();
-  await downloadBattleReportFile(blob, '战报.md');
+  await downloadFile(blob, '战报.md');
   expect(showSaveFilePicker).toHaveBeenCalledTimes(2);
   expect(write).toHaveBeenLastCalledWith(blob);
   expect(close).toHaveBeenCalledOnce();

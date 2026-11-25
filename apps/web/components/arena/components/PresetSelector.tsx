@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 
 import type { Preset } from '@/lib/presets';
+import { handleCharacterPresetDownloadClick } from '@/lib/client/character-preset-download';
 import { CharacterPresetPicker } from '@mahoshojo/ui-web/arena';
 
 import { useBattleStore } from '../stores/useBattleStore';
@@ -99,6 +100,7 @@ export function PresetSelector() {
       loadingFilename={loadingPreset}
       onToggle={handleSelect}
       getDownloadHref={(filename) => `/presets/${encodeURIComponent(filename)}`}
+      onDownloadLinkClick={handleCharacterPresetDownloadClick}
     />
   );
 }

@@ -174,6 +174,7 @@ export function RoomMemberProposalWorkspace({ model, scopeIdentity, room, host, 
                   selectedFilenames={selectedCharacterPresetFilenames}
                   onToggle={preset => safeActions.togglePreset('character', preset.filename)}
                   getDownloadHref={id => host.presetDownloadHref('character', id)}
+                  onDownloadLinkClick={host.onCharacterPresetDownloadLinkClick}
                 />
                 <PresetGridPicker
                   title="选择预设残兽"
@@ -186,6 +187,7 @@ export function RoomMemberProposalWorkspace({ model, scopeIdentity, room, host, 
                   selectedFilenames={selectedCharacterPresetFilenames}
                   onToggle={preset => safeActions.togglePreset('character', preset.filename)}
                   getDownloadHref={id => host.presetDownloadHref('character', id)}
+                  onDownloadLinkClick={host.onCharacterPresetDownloadLinkClick}
                 />
               </>
             ),

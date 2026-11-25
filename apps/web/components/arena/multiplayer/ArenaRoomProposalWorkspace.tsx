@@ -7,6 +7,7 @@ import { RoomMemberProposalWorkspace, collectArenaMemberReferenceRequests, mapSh
 import type { RoomProposalArenaEditorSession } from '../editor';
 import { useLanguagesQuery } from '../hooks/useArenaData';
 import type { ArenaRoomController, ArenaRoomControllerState } from '@/lib/arena-room/controller';
+import { handleCharacterPresetDownloadClick } from '@/lib/client/character-preset-download';
 import { randomUUID } from '@/lib/crypto';
 import { config } from '@/lib/config';
 import { useArenaRoomContext } from './useArenaRoom';
@@ -73,6 +74,7 @@ export function ArenaRoomProposalWorkspaceView({ editor, state, controller, onSy
       resolveReferenceName: request => resolveArenaRoomReferenceName(request, names) ?? undefined,
       languages, languageLabel: arenaLanguageCopy, enableUserGuidance: config.ENABLE_ARENA_USER_GUIDANCE, createId: randomUUID,
       presetDownloadHref: (kind, id) => `/${kind === 'character' ? 'presets' : 'scenario-presets'}/${encodeURIComponent(id)}`,
+      onCharacterPresetDownloadLinkClick: handleCharacterPresetDownloadClick,
       downloadBuiltinWebPackage: downloadBuiltinWebPackageArchive, webPackageViewHost,
       webConsent: { accepted: consent.accepted, onAccept: consent.accept } }}
     actions={{ submit: controller.submitProposal, withdraw: controller.withdrawProposal, read: controller.reconnect,

@@ -6,8 +6,8 @@ import type { NewsReport } from '@/components/BattleReportCard';
 import { MarkdownBlock } from './DeferredArenaRenderers';
 import { ArenaWebDisplayModeSelectorView, ArenaWebViewer, ARENA_WEB_FRAME_CLASS_NAME, useArenaWebImmersive, type ArenaWebDisplayMode, ArenaReportFormatSelectorView, ArenaWebNotes, ArenaWebSourceView, ArenaWebReportActions, ArenaWebReplayControlsView, WebReportConsentDialogView, type ArenaWebReportAction } from '@mahoshojo/ui-web/arena-report-views';
 import { resolveWebDisplayTitle } from '@/lib/arena/battle-report-display-title';
-import { downloadBattleReportFile } from '@/lib/arena/download-battle-report';
 import { normalizeArenaWebOutput } from '@/lib/arena/web-output';
+import { downloadFile } from '@/lib/client/downloadFile';
 import { buildSafeFileName } from '@/lib/client/fileName';
 import { importLocalWebPackageArchive } from '@/lib/web-package/cache';
 import { hydrateExactWebPackageFromLibrary } from '@/lib/local-library/web-package-library';
@@ -354,7 +354,7 @@ export function ArenaWebReport({ content, ready, roomId, aiModel, aiUsage, displ
   };
   const exportReportFile = (source: Blob | (() => Promise<Blob>), filename: string, errorMessage: string) => {
     setDownloadError(null);
-    void downloadBattleReportFile(source, filename).catch(() => {
+    void downloadFile(source, filename).catch(() => {
       if (mounted.current && currentScope.current === resultScope) setDownloadError(errorMessage);
     });
   };

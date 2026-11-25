@@ -117,6 +117,27 @@ afterEach(async () => {
 });
 
 describe('Arena room Proposal workspace', () => {
+  it('Android Edge 取消预设角色保存后可再打开，提案配置保持原值', async () => {
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Linux; Android 10; K) EdgA/151.0.0.0');
+    const showSaveFilePicker = vi.fn().mockRejectedValue(new DOMException('Picker closed', 'AbortError'));
+    vi.stubGlobal('showSaveFilePicker', showSaveFilePicker);
+    const editor = createRoomProposalArenaEditorSession({
+      roomId: 'room-1', roomEpoch: 'epoch-1', revision: 7, sharedConfig,
+    });
+    const original = editor.memberModel.exportSharedConfig();
+    const controller = { submitProposal: vi.fn(), withdrawProposal: vi.fn(), endProposalTracking: vi.fn(), reconnect: vi.fn() };
+
+    await act(async () => root.render(<ArenaRoomProposalWorkspaceView editor={editor} state={state} controller={controller} />));
+    const link = container.querySelector<HTMLAnchorElement>('a[aria-label="下载预设：翠雀"]')!;
+    const clickDownload = () => link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await act(async () => { expect(clickDownload()).toBe(false); });
+    await act(async () => { expect(clickDownload()).toBe(false); });
+    expect(showSaveFilePicker).toHaveBeenCalledTimes(2);
+    expect(showSaveFilePicker).toHaveBeenNthCalledWith(1, { suggestedName: 'M01_centaurea.json' });
+    expect(showSaveFilePicker).toHaveBeenLastCalledWith({ suggestedName: 'M01_centaurea.json' });
+    expect(editor.memberModel.exportSharedConfig()).toEqual(original);
+  });
+
   it('复用 Arena 编辑控件产生完整 typed diff，且公开数据卡不携带正文', async () => {
     const editor = createRoomProposalArenaEditorSession({
       roomId: 'room-1',

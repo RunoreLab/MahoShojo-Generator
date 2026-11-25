@@ -6,7 +6,7 @@ import type { BattleReportCardProps } from '@/components/BattleReportCard';
 import type { StreamingBattleReportCardProps } from '@/components/stream/StreamingBattleReportCard';
 import type { BattleIllustrationPanel as IllustrationPanel } from './BattleIllustrationPanel';
 import { createDeferredRenderer } from '@/components/shared/createDeferredRenderer';
-import { downloadBattleReportFile } from '@/lib/arena/download-battle-report';
+import { downloadFile } from '@/lib/client/downloadFile';
 
 function PlainReport({ content, children, exportable = true }: {
   content: string;
@@ -18,7 +18,7 @@ function PlainReport({ content, children, exportable = true }: {
     <div className="flex flex-wrap gap-2">
       {content && exportable ? <button type="button" className="rounded border px-3 py-1" onClick={() => {
         const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-        void downloadBattleReportFile(blob, '战报正文.txt').catch(() => window.alert('导出战报正文失败，请重试。'));
+        void downloadFile(blob, '战报正文.txt').catch(() => window.alert('导出战报正文失败，请重试。'));
       }}>导出正文</button> : null}
       {children}
     </div>

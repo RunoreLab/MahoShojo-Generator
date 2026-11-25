@@ -1,4 +1,4 @@
-import type { ComponentType } from 'react';
+import type { ComponentType, MouseEventHandler } from 'react';
 import type { ArenaRoomSessionResponse, DataCardRef } from '@mahoshojo/contracts/arena-room';
 import type { ArenaMemberProposalModel, ArenaMemberProposalSourceKind } from '@mahoshojo/multiplayer-core/member-proposal';
 import type { LanguageOption } from '../../arena/StoryOptionsPanel';
@@ -32,6 +32,7 @@ export type ArenaMemberProposalHost = Readonly<{
   enableUserGuidance: boolean;
   createId(): string;
   presetDownloadHref(kind: 'character' | 'scenario', id: string): string;
+  onCharacterPresetDownloadLinkClick?: MouseEventHandler<HTMLAnchorElement>;
   downloadBuiltinWebPackage(digest: string): Promise<void>;
   webPackageViewHost?: import('../../arena/features/web-package/web-package-host').ArenaWebPackageViewHost;
   webConsent: Readonly<{ accepted: boolean; onAccept(remember: boolean): void }>;

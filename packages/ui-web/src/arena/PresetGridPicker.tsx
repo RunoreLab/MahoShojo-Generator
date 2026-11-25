@@ -2,7 +2,7 @@
 
 import { PageJump } from '../pagination';
 
-import { useMemo } from 'react';
+import { useMemo, type MouseEventHandler } from 'react';
 import { Download } from 'lucide-react';
 
 import type { Preset } from '@mahoshojo/domain/presets';
@@ -15,6 +15,7 @@ export interface PresetGridPickerProps<T extends GridPreset = Preset> {
   title: string;
   presets: T[];
   getDownloadHref?: (filename: string) => string;
+  onDownloadLinkClick?: MouseEventHandler<HTMLAnchorElement>;
   currentPage: number;
   onPageChange: (page: number) => void;
   disabled?: boolean;
@@ -34,6 +35,7 @@ export function PresetGridPicker<T extends GridPreset>({
   title,
   presets,
   getDownloadHref,
+  onDownloadLinkClick,
   currentPage,
   onPageChange,
   disabled = false,
@@ -113,6 +115,7 @@ export function PresetGridPicker<T extends GridPreset>({
                 <a
                   href={getDownloadHref(preset.filename)}
                   download={preset.filename}
+                  onClick={onDownloadLinkClick}
                   title="下载预设 JSON"
                   aria-label={`下载预设：${preset.name}`}
                   className="absolute right-2 top-2 z-20 inline-flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white/80 text-gray-600 shadow-sm backdrop-blur transition-colors hover:bg-white hover:text-blue-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 after:absolute after:-inset-2 after:rounded-full after:content-['']"
