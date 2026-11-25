@@ -72,6 +72,9 @@ http-range = "0.1.5"
 image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "webp"] }
 open = "5"
 getrandom = "0.3"
+jsonwebtoken = { version = "12", default-features = false, features = ["aws_lc_rs"] }
+uuid = { version = "1", features = ["v4"] }
+zeroize = "1"
 
 [target.'cfg(windows)'.dependencies]
 # Wry 0.57 already locks this MIT crate. Direct access installs the native page-close
@@ -103,6 +106,7 @@ windows-sys = { version = "=0.61.2", features = [
 incremental = true
 
 [dev-dependencies]
+aws-lc-rs = "1"
 # The test feature only exposes Tauri's in-process IPC harness; no new dependency.
 tauri = { version = "2.11.6", features = ["test"] }
 # test-util 提供 time::advance / #[tokio::test(start_paused)]，仅限测试构建。

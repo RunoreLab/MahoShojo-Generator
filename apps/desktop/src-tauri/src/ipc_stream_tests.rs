@@ -96,6 +96,7 @@ impl Transport {
             .manage(library)
             .manage(secrets)
             .manage(ai::RequestRegistry::default())
+            .manage(siwc::State::new(root.path()))
             .manage(arena)
             .manage(cloud::CloudState::new().unwrap())
             .channel_interceptor(move |webview, callback, index, body| {
@@ -264,6 +265,30 @@ fn preset_command_resolves_trusted_model_before_missing_secret_terminal() {
         events[1].body["result"]["error"]["code"],
         "authentication-failed"
     );
+}
+
+#[test]
+fn chatgpt_target_requires_its_own_session_before_dispatch() {
+    let transport = Transport::new("http://127.0.0.1:1");
+    let request_id = "chatgpt-missing-grant";
+    let mut args = direct_args("stream_target_ai", request_id, "unused");
+    args["target"] = json!({"kind": "chatgpt-plan", "connectionId": "a".repeat(32)});
+    args["request"]["modelId"] = json!("plan-model");
+    args["request"]["mode"] = json!("direct-remote");
+    let receipt = transport
+        .call("stream_target_ai", args.clone(), true, false)
+        .unwrap();
+    assert!(transport
+        .call("stream_target_ai", args, false, false)
+        .is_err());
+    let events = transport.events.lock().unwrap();
+    assert_receipt(receipt, &events, request_id);
+    assert_eq!(events.len(), 2);
+    assert_eq!(
+        events[1].body["result"]["error"]["code"],
+        "authentication-failed"
+    );
+    assert!(transport.resolved_refs.lock().unwrap().is_empty());
 }
 
 #[test]

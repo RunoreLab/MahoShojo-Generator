@@ -252,11 +252,26 @@ fn rejected(code: &str) -> DirectAiError {
 }
 fn error_code(code: Option<&str>) -> &str {
     match code {
-        Some("rate_limit_exceeded") | Some("rate_limit_error") => "rate-limited",
-        Some("invalid_api_key") | Some("authentication_error") | Some("unauthorized") => {
-            "authentication-failed"
-        }
-        Some("permission_denied") => "permission-denied",
+        Some(
+            "rate_limit_exceeded"
+            | "rate_limit_error"
+            | "subscription_sharing_usage_limit_exceeded",
+        ) => "rate-limited",
+        Some(
+            "invalid_api_key"
+            | "authentication_error"
+            | "unauthorized"
+            | "subscription_sharing_invalid_user",
+        ) => "authentication-failed",
+        Some(
+            "permission_denied"
+            | "subscription_sharing_user_not_eligible"
+            | "chatpass_v2_scope_not_authorized",
+        ) => "permission-denied",
+        Some(
+            "subscription_sharing_usage_unavailable" | "subscription_sharing_user_unavailable",
+        ) => "service-unavailable",
+        Some("subscription_sharing_unsupported_capability") => "invalid-request",
         Some("content_filter") | Some("content_policy_violation") => "content-filtered",
         Some("context_length_exceeded") | Some("max_output_tokens") => "output-too-large",
         _ => "internal-error",

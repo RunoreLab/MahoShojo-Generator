@@ -12,8 +12,34 @@ use serde::{Deserialize, Serialize};
 )]
 pub enum ProviderTarget {
     System {},
-    Preset { provider_id: String },
-    Custom { profile_id: String },
+    Preset {
+        provider_id: String,
+    },
+    Custom {
+        profile_id: String,
+    },
+    #[serde(rename = "chatgpt-plan")]
+    ChatgptPlan {
+        #[serde(deserialize_with = "deserialize_plan_connection_id")]
+        connection_id: String,
+    },
+}
+
+fn deserialize_plan_connection_id<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<String, D::Error> {
+    let id = String::deserialize(deserializer)?;
+    if id.len() == 32
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        Ok(id)
+    } else {
+        Err(serde::de::Error::custom(
+            "invalid ChatGPT connection identifier",
+        ))
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -377,6 +403,13 @@ mod tests {
         }
         for value in fixture["invalidTargets"].as_array().unwrap() {
             assert!(serde_json::from_value::<ProviderTarget>(value.clone()).is_err());
+        }
+        for value in fixture["desktopPlanTargets"].as_array().unwrap() {
+            let parsed = serde_json::from_value::<ProviderTarget>(value["target"].clone());
+            assert_eq!(parsed.is_ok(), value["valid"].as_bool().unwrap());
+            if let Ok(parsed) = parsed {
+                assert_eq!(serde_json::to_value(parsed).unwrap(), value["target"]);
+            }
         }
         for value in fixture["models"].as_array().unwrap() {
             assert_eq!(

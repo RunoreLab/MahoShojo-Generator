@@ -959,7 +959,7 @@ fn random_base64url(byte_count: usize) -> Result<String, CloudError> {
     Ok(URL_SAFE_NO_PAD.encode(bytes))
 }
 
-fn pkce_challenge(verifier: &str) -> String {
+pub(crate) fn pkce_challenge(verifier: &str) -> String {
     URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()))
 }
 

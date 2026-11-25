@@ -1897,6 +1897,10 @@ pub async fn stream_target_ai(
             DirectAiErrorCode::UnsupportedRequest,
             "system target requires server execution",
         )),
+        ProviderTarget::ChatgptPlan { .. } => Err(DirectAiError::new(
+            DirectAiErrorCode::UnsupportedRequest,
+            "ChatGPT plan target requires a local authorized session",
+        )),
         ProviderTarget::Preset { provider_id } => {
             if !matches!(
                 request.mode,
@@ -1931,6 +1935,143 @@ pub async fn stream_target_ai(
             .await
         }
     }
+}
+
+fn chatgpt_plan_body(request: &AiExecutionRequest, model: &str) -> serde_json::Value {
+    serde_json::json!({
+        "model": model,
+        "store": false,
+        "stream": true,
+        "input": request.messages.iter().map(|message| serde_json::json!({
+            "role": if message.role == "system" { "developer" } else { message.role.as_str() },
+            "content": message.content,
+        })).collect::<Vec<_>>(),
+    })
+}
+
+fn chatgpt_plan_error(failure: crate::siwc::Error) -> DirectAiError {
+    use crate::siwc::ErrorCode;
+    let contract_code = match failure.code {
+        ErrorCode::ReauthorizationRequired | ErrorCode::InvalidIdentity => "authentication-failed",
+        ErrorCode::Ineligible | ErrorCode::ConsentRequired => "permission-denied",
+        ErrorCode::RateLimited => "rate-limited",
+        ErrorCode::ModelUnavailable => "invalid-request",
+        ErrorCode::Unavailable => "service-unavailable",
+        _ => "invalid-response",
+    };
+    DirectAiError {
+        code: DirectAiErrorCode::UpstreamRejected,
+        message: failure.message.to_owned(),
+        contract_code: Some(contract_code.to_owned()),
+    }
+}
+
+pub(crate) async fn stream_chatgpt_plan_ai(
+    connection_id: &str,
+    request: AiExecutionRequest,
+    chatgpt: &crate::siwc::State,
+    registry: &RequestRegistry,
+    on_event: &dyn EventSink,
+) -> Result<(), DirectAiError> {
+    let invalid = || {
+        DirectAiError::new(
+            DirectAiErrorCode::UnsupportedRequest,
+            "invalid local ChatGPT plan request",
+        )
+    };
+    if request.mode != AiExecutionMode::DirectRemote
+        || request.contract_version != 1
+        || request.messages.is_empty()
+        || request
+            .response_format
+            .as_deref()
+            .is_some_and(|format| format != "text")
+        || request
+            .messages
+            .iter()
+            .any(|message| !matches!(message.role.as_str(), "system" | "user" | "assistant"))
+        || connection_id.len() != 32
+        || !connection_id
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(invalid());
+    }
+    let model = request.model_id.as_deref().ok_or_else(invalid)?;
+    let model = crate::provider_target::normalize_model_id(model).map_err(|_| invalid())?;
+    validate_request_resources(&request)?;
+    let token = registry.register(&request.request_id)?;
+    let result = async {
+        emit_event(on_event, AiStreamEvent::Started {
+            request_id: request.request_id.clone(), contract_version: request.contract_version,
+            mode: request.mode, sequence: 0,
+        })?;
+        let cancelled = || DirectAiError::new(DirectAiErrorCode::Cancelled, "cancelled before dispatch");
+        if token.is_cancelled() { return emit_pre_stream_error_terminal(&request, cancelled(), on_event); }
+        // Rotation must finish its atomic write even when the generation waiting for it is cancelled.
+        let lease = chatgpt.lease(connection_id, &model).await;
+        if token.is_cancelled() { return emit_pre_stream_error_terminal(&request, cancelled(), on_event); }
+        let lease = match lease {
+            Ok(value) => value,
+            Err(failure) => return emit_pre_stream_error_terminal(&request, chatgpt_plan_error(failure), on_event),
+        };
+        let execute = async {
+            let client = match build_http_client(0) {
+                Ok(value) => value,
+                Err(failure) => return emit_pre_stream_error_terminal(&request, failure, on_event),
+            };
+            let upstream = tokio::select! {
+                biased;
+                _ = token.cancelled() => return emit_pre_stream_error_terminal(&request, cancelled(), on_event),
+                result = client.post(crate::siwc::RESPONSES).bearer_auth(lease.token.as_str())
+                    .json(&chatgpt_plan_body(&request, &model)).send() => result,
+            };
+            let upstream = match upstream {
+                Ok(value) => value,
+                Err(_) => return emit_pre_stream_error_terminal(&request, chatgpt_plan_error(crate::siwc::error(crate::siwc::ErrorCode::Unavailable)), on_event),
+            };
+            if !upstream.status().is_success() {
+                use crate::siwc::ErrorCode;
+                let code = match upstream.status().as_u16() {
+                    401 => ErrorCode::ReauthorizationRequired,
+                    403 => ErrorCode::Ineligible,
+                    429 => ErrorCode::RateLimited,
+                    500..=599 => ErrorCode::Unavailable,
+                    _ => ErrorCode::InvalidResponse,
+                };
+                return emit_pre_stream_error_terminal(&request, chatgpt_plan_error(crate::siwc::error(code)), on_event);
+            }
+            run_stream_with_protocol(upstream, &request, &model, token.clone(), on_event, StreamProtocol::Responses).await
+        };
+        tokio::pin!(execute);
+        tokio::select! {
+            biased;
+            _ = lease.cancelled.cancelled() => { token.cancel(); execute.await },
+            result = &mut execute => result,
+        }
+    }.await;
+    registry.finish(&request.request_id);
+    result
+}
+
+#[cfg(test)]
+#[test]
+fn chatgpt_plan_uses_stateless_responses_and_omits_api_key_only_parameters() {
+    let request = serde_json::from_value(serde_json::json!({
+        "requestId":"chatgpt-wire", "contractVersion":1, "mode":"direct-remote",
+        "modelId":"plan-model", "maxOutputTokens":400, "temperature":0.7, "responseFormat":"text",
+        "messages":[{"role":"system","content":"规则"},{"role":"user","content":"你好"},
+            {"role":"assistant","content":"已有故事"},{"role":"user","content":"继续"}]
+    }))
+    .unwrap();
+    assert_eq!(
+        chatgpt_plan_body(&request, "plan-model"),
+        serde_json::json!({
+            "model":"plan-model", "stream":true, "store":false,
+            "input":[{"role":"developer","content":"规则"},{"role":"user","content":"你好"},
+                {"role":"assistant","content":"已有故事"},{"role":"user","content":"继续"}]
+        })
+    );
 }
 
 async fn stream_resolved_direct_ai(

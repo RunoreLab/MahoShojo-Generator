@@ -64,6 +64,7 @@ mod provider_target;
 mod public_cache;
 mod restore;
 mod secret;
+mod siwc;
 mod sse;
 mod store;
 #[cfg(test)]
@@ -332,22 +333,62 @@ async fn stream_target_ai(
     library: State<'_, LocalLibrary>,
     secrets: State<'_, SharedSecretStore>,
     registry: State<'_, ai::RequestRegistry>,
+    chatgpt: State<'_, siwc::State>,
     target: provider_target::ProviderTarget,
     request: ai::AiExecutionRequest,
     on_event: tauri::ipc::Channel<ai::AiStreamEvent>,
 ) -> Result<ipc_stream::StreamCompletionReceipt, ai::DirectAiError> {
     let request_id = request.request_id.clone();
     let on_event = ipc_stream::CountingEventSink::new(on_event);
-    ai::stream_target_ai(
-        target,
-        request,
-        library.profiles(),
-        secrets.inner().as_ref(),
-        &registry,
-        &on_event,
-    )
-    .await?;
+    match target {
+        provider_target::ProviderTarget::ChatgptPlan { connection_id } => {
+            ai::stream_chatgpt_plan_ai(&connection_id, request, &chatgpt, &registry, &on_event)
+                .await?;
+        }
+        target => {
+            ai::stream_target_ai(
+                target,
+                request,
+                library.profiles(),
+                secrets.inner().as_ref(),
+                &registry,
+                &on_event,
+            )
+            .await?
+        }
+    }
     Ok(on_event.receipt(request_id))
+}
+
+#[tauri::command]
+async fn chatgpt_plan_status(chatgpt: State<'_, siwc::State>) -> Result<siwc::Status, siwc::Error> {
+    chatgpt.status().await
+}
+
+#[tauri::command]
+async fn chatgpt_plan_connect(
+    chatgpt: State<'_, siwc::State>,
+    different_account: bool,
+) -> Result<siwc::Status, siwc::Error> {
+    chatgpt.connect(different_account).await
+}
+
+#[tauri::command]
+fn chatgpt_plan_cancel_connect(chatgpt: State<'_, siwc::State>) {
+    chatgpt.cancel_connect();
+}
+
+#[tauri::command]
+async fn chatgpt_plan_models(chatgpt: State<'_, siwc::State>) -> Result<siwc::Status, siwc::Error> {
+    chatgpt.models().await
+}
+
+#[tauri::command]
+async fn chatgpt_plan_disconnect(
+    chatgpt: State<'_, siwc::State>,
+    connection_id: String,
+) -> Result<siwc::Status, siwc::Error> {
+    chatgpt.disconnect(&connection_id).await
 }
 
 /// 取消一次在途的 Direct 生成。
@@ -2344,6 +2385,7 @@ pub fn run() {
                 .map_err(|error| std::io::Error::other(error.message))?;
             app.manage(arena);
             app.manage(public_cache::PublicReadCache::at(&data_root));
+            app.manage(siwc::State::new(&data_root));
 
             app.manage(instance);
             app.manage(library);
@@ -2374,6 +2416,11 @@ pub fn run() {
             stop_local_ai,
             stream_direct_ai,
             stream_target_ai,
+            chatgpt_plan_status,
+            chatgpt_plan_connect,
+            chatgpt_plan_cancel_connect,
+            chatgpt_plan_models,
+            chatgpt_plan_disconnect,
             cancel_direct_ai,
             save_local_card,
             get_local_card,

@@ -1,6 +1,6 @@
 import fixture from '../fixtures/provider-targets.json';
 import { describe, expect, it } from 'vitest';
-import { ProviderTargetSchema, ProviderModelIdSchema, presetApiKeyRef, providerTargetKey } from '../src/provider-target';
+import { DesktopProviderTargetSchema, ProviderTargetSchema, ProviderModelIdSchema, presetApiKeyRef, providerTargetKey } from '../src/provider-target';
 
 describe('provider target identity', () => {
   it('keeps preset and custom identities independent', () => {
@@ -25,6 +25,10 @@ describe('provider target identity', () => {
  it('matches the same identity and normalization fixtures as Rust', () => {
   for (const target of fixture.validTargets) expect(ProviderTargetSchema.parse(target)).toEqual(target);
   for (const target of fixture.invalidTargets) expect(ProviderTargetSchema.safeParse(target).success).toBe(false);
+  for (const { target, valid } of fixture.desktopPlanTargets) {
+    expect(ProviderTargetSchema.safeParse(target).success).toBe(false);
+    expect(DesktopProviderTargetSchema.safeParse(target).success).toBe(valid);
+  }
   for (const model of fixture.models) {
     const parsed = ProviderModelIdSchema.safeParse(model.input);
     expect(parsed.success ? parsed.data : null).toBe(model.output);

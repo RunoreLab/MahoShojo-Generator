@@ -11,6 +11,12 @@
     {"kind":"custom","providerId":"deepseek"},
     {"kind":"unknown"}
   ],
+  "desktopPlanTargets": [
+    {"target":{"kind":"chatgpt-plan","connectionId":"a0000000000000000000000000000001"},"valid":true},
+    {"target":{"kind":"chatgpt-plan","connectionId":"../connection"},"valid":false},
+    {"target":{"kind":"chatgpt-plan","connectionId":"a0000000000000000000000000000001","endpoint":"https://example.invalid"},"valid":false},
+    {"target":{"kind":"chatgpt-plan","connectionId":"a0000000000000000000000000000001","accessToken":"synthetic"},"valid":false}
+  ],
   "models": [
     {"input":" model ","output":"model"},
     {"input":"\ufeffmodel\ufeff","output":"model"},
