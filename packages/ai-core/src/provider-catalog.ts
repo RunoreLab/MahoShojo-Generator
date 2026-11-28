@@ -1486,15 +1486,39 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
         direct: OPENAI_COMPATIBLE_DIRECT_WIRE,
         models: [
             {
-                value: 'deepseek-ai/DeepSeek-V4-Flash-0731',
-                label: 'DeepSeek V4 Flash',
-                description:
-                    'DeepSeek V4 Flash 正式版，Agent 能力大幅增强，百万级上下文，兼顾质量与成本。'
+                value: 'deepseek-ai/DeepSeek-V4.1-Flash-1017',
+                label: 'DeepSeek V4.1 Flash 1017',
+                description: 'DeepSeek V4.1 Flash 的 1017 更新版，适合复杂指令、文本创作与分析。'
             },
             {
-                value: 'deepseek-ai/DeepSeek-V4-Pro',
-                label: 'DeepSeek V4 Pro',
-                description: 'DeepSeek V4 的完全体，适合复杂分析、长文本写作与更高要求的生成任务。'
+                value: 'deepseek-ai/DeepSeek-V4-Pro-0813',
+                label: 'DeepSeek V4 Pro 0813',
+                description: 'DeepSeek V4 Pro 的 0813 更新版，适合复杂分析与长篇内容生成。'
+            },
+            {
+                value: 'Qwen/Qwen3.8-Flash-Next',
+                label: '通义千问 3.8 Flash Next',
+                description: 'Qwen3.8 系列的实验预览模型，适合多步指令与文本生成。'
+            },
+            {
+                value: 'Qwen/Qwen3.8-27B',
+                label: '通义千问 3.8 27B',
+                description: 'Qwen3.8 的 27B 模型，适合中文创作、指令跟随与日常对话。'
+            },
+            {
+                value: 'ZhipuAI/GLM-5.3-Flash',
+                label: 'GLM-5.3 Flash',
+                description: '【推荐】智谱超强性价比模型，适用于高并发、低延迟的日常对话与文本生成。'
+            },
+            {
+                value: 'ZhipuAI/GLM-5.2',
+                label: 'GLM-5.2',
+                description: '智谱通用模型，适合复杂指令、分析与长篇创作。'
+            },
+            {
+                value: 'MiniMax/MiniMax-M3.1-Flash',
+                label: 'MiniMax M3.1 Flash',
+                description: 'MiniMax 的新一代 Flash 模型，适合复杂指令、文本创作与多步任务。'
             },
             {
                 value: 'Qwen/Qwen3.5-397B-A17B',
@@ -1517,89 +1541,9 @@ export const AI_PROVIDER_PRESETS: readonly AiProviderPreset[] = Object.freeze([
                 description: '通义千问 3.5 的 27B 参数版本。'
             },
             {
-                value: 'Qwen/Qwen3-235B-A22B-Instruct-2507',
-                label: '通义千问 3 235B（指令）',
-                description: '旗舰级指令模型，擅长中文对话、写作与复杂指令，适合长文本与结构化任务。'
-            },
-            {
-                value: 'Qwen/Qwen3-235B-A22B-Thinking-2507',
-                label: '通义千问 3 235B（思考）',
-                description: '通义千问 3 的思考版本，更擅长推理。'
-            },
-            {
-                value: 'ZhipuAI/glm-5.3-flash',
-                label: 'GLM-5.3 Flash',
-                description: '【推荐】智谱超强性价比模型，适用于高并发、低延迟的日常对话与文本生成。'
-            },
-            {
-                value: 'ZhipuAI/GLM-5.3',
-                label: 'GLM-5.3',
-                description: '智谱开源旗舰模型，支持 1M 无损上下文，编程能力领先，适合复杂长程任务。'
-            },
-            {
-                value: 'ZhipuAI/GLM-5',
-                label: 'GLM-5',
-                description: '面向中文场景的通用模型，适合复杂对话、改写与信息整理。'
-            },
-            {
-                value: 'ZhipuAI/GLM-5.1',
-                label: 'GLM-5.1',
-                description: '智谱通用模型，综合能力均衡，适合复杂指令、多轮对话与高质量创作。'
-            },
-            {
                 value: 'ZhipuAI/GLM-4.7-Flash',
                 label: 'GLM-4.7 Flash',
                 description: '智谱旗下 GLM 4.7 快速版，适合复杂指令、多轮对话与较快响应场景。'
-            },
-            {
-                value: 'deepseek-ai/DeepSeek-V3.2',
-                label: 'DeepSeek V3.2',
-                description: '通用对话与推理模型，适合分析、总结与多轮交互。'
-            },
-            {
-                value: 'deepseek-ai/DeepSeek-R1-0528',
-                label: 'DeepSeek R1',
-                description: '推理强项模型，适合需要多步思考的分析、规划与推导场景。'
-            },
-            {
-                value: 'LLM-Research/Llama-4-Maverick-17B-128E-Instruct',
-                label: 'Llama 4 Maverick 17B（指令）',
-                description: 'Meta 在 2025 年 4 月发布的开源多模态人工智能模型。'
-            },
-            {
-                value: 'MiniMax/MiniMax-M3',
-                label: 'MiniMax-M3',
-                description: 'MiniMax 多模态旗舰模型，支持交错思维链与工具调用，适合复杂 Agent 工作流与长程任务。'
-            },
-            {
-                value: 'MiniMax/MiniMax-M2.7',
-                label: 'MiniMax-M2.7',
-                description: '稀宇科技 MiniMax 旗下开源模型，专为编码与智能体任务进行优化。'
-            },
-            {
-                value: 'MiniMax/MiniMax-M2.5',
-                label: 'MiniMax-M2.5',
-                description: '稀宇科技 MiniMax 旗下开源模型，专为编码与智能体任务进行优化。'
-            },
-            {
-                value: 'moonshotai/Kimi-K2.5',
-                label: 'Kimi K2.5',
-                description: 'Moonshot 当前在魔搭可用的 Kimi 系列模型，适合中文创作、摘要与多轮指令跟随。'
-            },
-            {
-                value: 'stepfun-ai/Step-3.7-Flash',
-                label: 'Step 3.7 Flash',
-                description: '阶跃星辰高效多模态模型，196B 参数语言主干加视觉编码器，支持 256K 上下文与多档推理强度。'
-            },
-            {
-                value: 'stepfun-ai/Step-3.5-Flash',
-                label: 'Step 3.5 Flash',
-                description: '阶跃星辰开源基础模型，MoE 架构，侧重推理速度与效率，超长上下文下保持高速。'
-            },
-            {
-                value: 'Tencent-Hunyuan/Hy3',
-                label: '混元 Hy3',
-                description: '腾讯混元通用模型，295B/21B 激活 MoE，256K 上下文，提供多档思考模式，适合复杂任务执行。'
             },
             {
                 value: 'meituan-longcat/LongCat-Flash-Lite',

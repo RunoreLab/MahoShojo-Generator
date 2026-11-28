@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { AIProviderOption } from '@mahoshojo/ai-core/provider-catalog';
-import { CUSTOM_AI_MODEL_OPTION_VALUE } from '@mahoshojo/ai-core/provider-catalog';
+import { CUSTOM_AI_MODEL_OPTION_VALUE, findAiProviderPreset } from '@mahoshojo/ai-core/provider-catalog';
 
 import {
   createAiProviderStorageKeys,
@@ -78,6 +78,14 @@ describe('resolveModelSelection', () => {
       selectedModel: CUSTOM_AI_MODEL_OPTION_VALUE,
       customModelId: 'unknown-model',
     });
+  });
+
+  it('ModelScope 已移除的历史选择保留为自定义模型', () => {
+    const modelscope = findAiProviderPreset('modelscope')!;
+    const oldModel = 'moonshotai/Kimi-K2.5';
+    const restored = resolveModelSelection(modelscope, oldModel, '');
+    expect(restored).toEqual({ selectedModel: CUSTOM_AI_MODEL_OPTION_VALUE, customModelId: oldModel });
+    expect(resolveEffectiveModelId(modelscope, restored.selectedModel, restored.customModelId)).toBe(oldModel);
   });
 
   it('不支持自定义时未收录 modelId 回退 provider 默认', () => {

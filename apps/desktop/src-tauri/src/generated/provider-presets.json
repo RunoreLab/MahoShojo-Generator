@@ -980,11 +980,31 @@
     "adapter": "openai-compatible",
     "models": [
       {
-        "id": "deepseek-ai/DeepSeek-V4-Flash-0731",
+        "id": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
         "adapter": null
       },
       {
-        "id": "deepseek-ai/DeepSeek-V4-Pro",
+        "id": "deepseek-ai/DeepSeek-V4-Pro-0813",
+        "adapter": null
+      },
+      {
+        "id": "Qwen/Qwen3.8-Flash-Next",
+        "adapter": null
+      },
+      {
+        "id": "Qwen/Qwen3.8-27B",
+        "adapter": null
+      },
+      {
+        "id": "ZhipuAI/GLM-5.3-Flash",
+        "adapter": null
+      },
+      {
+        "id": "ZhipuAI/GLM-5.2",
+        "adapter": null
+      },
+      {
+        "id": "MiniMax/MiniMax-M3.1-Flash",
         "adapter": null
       },
       {
@@ -1004,71 +1024,7 @@
         "adapter": null
       },
       {
-        "id": "Qwen/Qwen3-235B-A22B-Instruct-2507",
-        "adapter": null
-      },
-      {
-        "id": "Qwen/Qwen3-235B-A22B-Thinking-2507",
-        "adapter": null
-      },
-      {
-        "id": "ZhipuAI/glm-5.3-flash",
-        "adapter": null
-      },
-      {
-        "id": "ZhipuAI/GLM-5.3",
-        "adapter": null
-      },
-      {
-        "id": "ZhipuAI/GLM-5",
-        "adapter": null
-      },
-      {
-        "id": "ZhipuAI/GLM-5.1",
-        "adapter": null
-      },
-      {
         "id": "ZhipuAI/GLM-4.7-Flash",
-        "adapter": null
-      },
-      {
-        "id": "deepseek-ai/DeepSeek-V3.2",
-        "adapter": null
-      },
-      {
-        "id": "deepseek-ai/DeepSeek-R1-0528",
-        "adapter": null
-      },
-      {
-        "id": "LLM-Research/Llama-4-Maverick-17B-128E-Instruct",
-        "adapter": null
-      },
-      {
-        "id": "MiniMax/MiniMax-M3",
-        "adapter": null
-      },
-      {
-        "id": "MiniMax/MiniMax-M2.7",
-        "adapter": null
-      },
-      {
-        "id": "MiniMax/MiniMax-M2.5",
-        "adapter": null
-      },
-      {
-        "id": "moonshotai/Kimi-K2.5",
-        "adapter": null
-      },
-      {
-        "id": "stepfun-ai/Step-3.7-Flash",
-        "adapter": null
-      },
-      {
-        "id": "stepfun-ai/Step-3.5-Flash",
-        "adapter": null
-      },
-      {
-        "id": "Tencent-Hunyuan/Hy3",
         "adapter": null
       },
       {

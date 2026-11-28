@@ -173,6 +173,19 @@ describe('AIP target identity and migration', () => {
     expect(target.unavailableReason).toContain('供应商已不在');
     expect(target.profile).toBeNull();
   });
+
+  it('retains a removed ModelScope preset model when restoring a saved selection', () => {
+    const modelId = 'moonshotai/Kimi-K2.5';
+    const overlay = parseDesktopAiConfigOverlay(JSON.stringify({
+      version: 5,
+      selection: { executionPreference: 'client', clientTarget: { kind: 'preset', providerId: 'modelscope' }, serverTarget: { kind: 'system' } },
+      hiddenPresetIds: [], generationOverrides: {}, modelsByProfileId: {},
+      presetsByProviderId: { modelscope: { selectedModelId: modelId, generationOverrides: {} } },
+    }));
+    const target = resolveDesktopAiTarget(overlay.selection, [], {}, {}, overlay.presetsByProviderId);
+    expect(target).toMatchObject({ modelId, mode: 'direct-remote', unavailableReason: null });
+    expect(target.availableModelIds).toContain(modelId);
+  });
 });
 
 describe('AIP credential preparation', () => {

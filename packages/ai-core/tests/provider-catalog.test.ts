@@ -349,6 +349,26 @@ describe('2026-11 GPT 目录增量', () => {
   });
 });
 
+describe('ModelScope 推理模型目录', () => {
+  it('使用已核对的精确模型 ID，并保留旧 ID 的自定义解析', () => {
+    const preset = findAiProviderPreset('modelscope')!;
+    expect(preset.models[0].value).toBe('deepseek-ai/DeepSeek-V4.1-Flash-1017');
+    for (const modelId of [
+      'deepseek-ai/DeepSeek-V4-Pro-0813',
+      'Qwen/Qwen3.8-Flash-Next',
+      'Qwen/Qwen3.8-27B',
+      'ZhipuAI/GLM-5.3-Flash',
+      'ZhipuAI/GLM-5.2',
+      'MiniMax/MiniMax-M3.1-Flash',
+    ]) {
+      expect(resolveAIProviderModel(preset, modelId)).toEqual({ modelId, isCustom: false });
+    }
+    for (const modelId of ['deepseek-ai/DeepSeek-V4-Flash-0731', 'moonshotai/Kimi-K2.5']) {
+      expect(resolveAIProviderModel(preset, modelId)).toEqual({ modelId, isCustom: true });
+    }
+  });
+});
+
 describe('2026-10 已核验目录增量', () => {
   const expectedModels: Record<string, string[]> = {
     kourichat: ['gpt-6.1-sol', 'gpt-6-luna', 'gpt-6-sol'],
